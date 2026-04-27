@@ -15,7 +15,7 @@ Modbus telemetry collector for Huawei SmartLogger + dashboard stack.
 - `GET /api/v1/current?organization_id=demo-org`
 - `GET /api/v1/timeseries?organization_id=demo-org&metric_keys=active_pv_power_kw,load_power_kw&from=2026-04-26T00:00:00Z&to=2026-04-26T23:59:59Z&bucket=15 minutes`
 
-## Run with Docker Compose (DB + collector + API)
+## Run with Docker Compose (DB + collector + API + web)
 
 ```bash
 cd deploy
@@ -23,8 +23,9 @@ docker compose up --build
 ```
 
 API will be available at `http://localhost:8080`.
+Web dashboard will be available at `http://localhost:5173/?organization_id=docker-demo`.
 
-## Run web dashboard
+## Run web dashboard separately
 
 ```bash
 cd web
