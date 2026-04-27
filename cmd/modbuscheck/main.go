@@ -2,28 +2,34 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
+	"github.com/nesh/sestelemetry/internal/bootstrap"
 	"github.com/nesh/sestelemetry/internal/config"
 	"github.com/nesh/sestelemetry/internal/decode"
 	"github.com/nesh/sestelemetry/internal/modbusclient"
-	"github.com/nesh/sestelemetry/internal/registers"
 )
 
 func main() {
 	configPath := flag.String("config", "config.yaml", "path to YAML config")
 	orgID := flag.String("org", "", "organization id to check (default: first organization)")
 	delay := flag.Duration("delay", 150*time.Millisecond, "delay between register reads")
+	timeout := flag.Duration("timeout", 0, "optional overall timeout, e.g. 2m")
 	flag.Parse()
 
-	cfg, err := config.Load(*configPath)
+	runtime, err := bootstrap.Load(*configPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "config error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "bootstrap error: %v\n", err)
 		os.Exit(1)
 	}
+	cfg := runtime.Config
+	resolved := runtime.Resolved
 
 	org, err := pickOrganization(cfg.Organizations, *orgID)
 	if err != nil {
@@ -31,23 +37,21 @@ func main() {
 		os.Exit(1)
 	}
 
-	cat, err := registers.Load(cfg.RegisterCatalog)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "register catalog error: %v\n", err)
-		os.Exit(1)
-	}
-	base := cat.Addressing.HoldingAddressBase
-	if cfg.RegisterAddressing.HoldingAddressBase != 0 {
-		base = cfg.RegisterAddressing.HoldingAddressBase
-	}
-	resolved, err := cat.Resolve(base)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "resolve registers error: %v\n", err)
-		os.Exit(1)
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	if *timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, *timeout)
+		defer cancel()
 	}
 
-	ctx := context.Background()
-	sess, err := modbusclient.Dial(ctx, org)
+	sess, err := modbusclient.Dial(ctx, modbusclient.DialTarget{
+		Host:           org.Modbus.Host,
+		Port:           org.Modbus.Port,
+		UnitID:         org.Modbus.UnitID,
+		ConnectTimeout: org.Modbus.ConnectTimeout,
+		RequestTimeout: org.Modbus.RequestTimeout,
+	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "modbus dial error: %v\n", err)
 		os.Exit(1)
@@ -71,7 +75,9 @@ func main() {
 		if err != nil {
 			failCount++
 			fmt.Printf("FAIL metric=%s addr=%d type=%s qty=%d err=%v\n", e.MetricKey, e.Address, e.DataType, e.WordCount, err)
-			sleepBetween(*delay)
+			if !sleepBetween(ctx, *delay) {
+				break
+			}
 			continue
 		}
 
@@ -79,16 +85,26 @@ func main() {
 		if derr != nil {
 			failCount++
 			fmt.Printf("FAIL metric=%s addr=%d type=%s qty=%d decode_err=%v\n", e.MetricKey, e.Address, e.DataType, e.WordCount, derr)
-			sleepBetween(*delay)
+			if !sleepBetween(ctx, *delay) {
+				break
+			}
 			continue
 		}
 
 		okCount++
 		fmt.Printf("OK   metric=%s addr=%d type=%s qty=%d value=%v\n", e.MetricKey, e.Address, e.DataType, e.WordCount, v)
-		sleepBetween(*delay)
+		if !sleepBetween(ctx, *delay) {
+			break
+		}
 	}
 
 	fmt.Printf("Done. ok=%d fail=%d\n", okCount, failCount)
+	if errors.Is(ctx.Err(), context.Canceled) {
+		os.Exit(130)
+	}
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		os.Exit(124)
+	}
 	if failCount > 0 {
 		os.Exit(2)
 	}
@@ -109,8 +125,16 @@ func pickOrganization(orgs []config.Organization, id string) (config.Organizatio
 	return config.Organization{}, fmt.Errorf("config: organization %q not found", id)
 }
 
-func sleepBetween(delay time.Duration) {
-	if delay > 0 {
-		time.Sleep(delay)
+func sleepBetween(ctx context.Context, delay time.Duration) bool {
+	if delay <= 0 {
+		return true
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
 	}
 }

@@ -3,8 +3,10 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -76,5 +78,41 @@ func TestDashboardConfigEndpoint(t *testing.T) {
 	h.Router().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("want 200 got %d", rec.Code)
+	}
+}
+
+func TestCurrentHidesInternalError(t *testing.T) {
+	store := &mockStore{currentErr: errors.New("sql: no rows in result set")}
+	h := NewHandlers(store, "*")
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/current?organization_id=org-a", nil)
+	rec := httptest.NewRecorder()
+	h.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("want 500 got %d", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "internal server error") {
+		t.Fatalf("expected generic error body, got %q", body)
+	}
+	if strings.Contains(body, "sql: no rows") {
+		t.Fatalf("expected internal error to be hidden, got %q", body)
+	}
+}
+
+func TestTimeseriesHidesInternalError(t *testing.T) {
+	store := &mockStore{seriesErr: errors.New("db timeout")}
+	h := NewHandlers(store, "*")
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/timeseries?organization_id=org-a&metric_key=soc_percent", nil)
+	rec := httptest.NewRecorder()
+	h.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("want 500 got %d", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "internal server error") {
+		t.Fatalf("expected generic error body, got %q", body)
+	}
+	if strings.Contains(body, "db timeout") {
+		t.Fatalf("expected internal error to be hidden, got %q", body)
 	}
 }

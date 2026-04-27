@@ -7,13 +7,13 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/nesh/sestelemetry/internal/bootstrap"
 	"github.com/nesh/sestelemetry/internal/config"
 	"github.com/nesh/sestelemetry/internal/decode"
 	"github.com/nesh/sestelemetry/internal/modbusclient"
@@ -34,32 +34,16 @@ func main() {
 
 	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
-	cfg, err := config.Load(*configPath)
+	runtime, err := bootstrap.Load(*configPath)
 	if err != nil {
-		log.Error("config", "err", err)
+		log.Error("bootstrap", "err", err)
 		os.Exit(1)
 	}
-	if v := os.Getenv("DATABASE_URL"); v != "" {
-		cfg.DatabaseURL = strings.TrimSpace(v)
-	}
+	cfg := runtime.Config
+	resolved := runtime.Resolved
+	bootstrap.ApplyDatabaseURLEnv(cfg)
 	if cfg.DatabaseURL == "" {
 		log.Error("database_url missing", "hint", "set in config YAML or DATABASE_URL")
-		os.Exit(1)
-	}
-
-	cat, err := registers.Load(cfg.RegisterCatalog)
-	if err != nil {
-		log.Error("register_catalog", "path", cfg.RegisterCatalog, "err", err)
-		os.Exit(1)
-	}
-
-	base := cat.Addressing.HoldingAddressBase
-	if cfg.RegisterAddressing.HoldingAddressBase != 0 {
-		base = cfg.RegisterAddressing.HoldingAddressBase
-	}
-	resolved, err := cat.Resolve(base)
-	if err != nil {
-		log.Error("resolve_registers", "err", err)
 		os.Exit(1)
 	}
 
@@ -108,6 +92,7 @@ func runOrg(
 	defer t.Stop()
 
 	var sess *modbusclient.Session
+	dialFailures := 0
 	defer func() {
 		if sess != nil {
 			_ = sess.Close()
@@ -116,20 +101,23 @@ func runOrg(
 
 	for {
 		if sess == nil {
-			s, err := modbusclient.Dial(ctx, org)
+			s, err := modbusclient.Dial(ctx, dialTargetForOrg(org))
 			if err != nil {
 				if errors.Is(err, context.Canceled) {
 					return
 				}
-				log.Error("modbus_dial", "err", err)
+				dialFailures++
+				wait := reconnectWait(org, dialFailures)
+				log.Error("modbus_dial", "err", err, "retry_in", wait.String())
 				select {
 				case <-ctx.Done():
 					return
-				case <-time.After(org.PollInterval):
+				case <-time.After(wait):
 				}
 				continue
 			}
 			sess = s
+			dialFailures = 0
 		}
 
 		if err := pollAndStore(ctx, log, cfg, org, sess, resolved, chunks, pool); err != nil {
@@ -159,62 +147,17 @@ func pollAndStore(
 	chunks []modbusclient.ReadChunk,
 	pool *pgxpool.Pool,
 ) error {
-	readBudget := org.Modbus.RequestTimeout * time.Duration(max(1, len(chunks)+1))
-	readCtx, cancel := context.WithTimeout(ctx, readBudget)
+	readCtx, cancel := context.WithTimeout(ctx, readBudgetForPoll(org.Modbus.RequestTimeout, len(chunks)))
 	defer cancel()
 
-	data := make(map[uint16][]byte, len(chunks))
-	for _, ch := range chunks {
-		var b []byte
-		var err error
-		switch cfg.ModbusRegisterMap {
-		case config.MapInput:
-			b, err = sess.ReadInput(readCtx, ch.Start, ch.Quantity)
-		default:
-			b, err = sess.ReadHolding(readCtx, ch.Start, ch.Quantity)
-		}
-		if err != nil {
-			return err
-		}
-		data[ch.Start] = b
+	data, err := readChunkData(readCtx, cfg.ModbusRegisterMap, sess, chunks)
+	if err != nil {
+		return err
 	}
-
 	ts := time.Now().UTC()
-	samples := make([]storage.Sample, 0, len(resolved))
-	for _, e := range resolved {
-		var payload []byte
-		for _, ch := range chunks {
-			last := ch.Start + ch.Quantity - 1
-			if e.PDUStart >= ch.Start && e.PDUEnd <= last {
-				raw, ok := data[ch.Start]
-				if !ok {
-					continue
-				}
-				payload = modbusclient.SliceForEntry(ch.Start, raw, e)
-				break
-			}
-		}
-		if payload == nil {
-			return errors.New("internal: missing modbus slice for " + e.MetricKey)
-		}
-		v, err := decode.Scaled(e.DataType, payload, e.Gain, e.Offset)
-		if err != nil {
-			return err
-		}
-		labels := map[string]string{}
-		if org.SiteID != "" {
-			labels["site_id"] = org.SiteID
-		}
-		if org.DeviceID != "" {
-			labels["device_id"] = org.DeviceID
-		}
-		samples = append(samples, storage.Sample{
-			Time:           ts,
-			OrganizationID: org.ID,
-			MetricKey:      e.MetricKey,
-			Value:          v,
-			Labels:         labels,
-		})
+	samples, err := buildSamples(org, resolved, chunks, data, ts)
+	if err != nil {
+		return err
 	}
 
 	if err := insertSamples(ctx, pool, samples); err != nil {
@@ -222,6 +165,119 @@ func pollAndStore(
 	}
 	log.Info("poll_ok", "samples", len(samples))
 	return nil
+}
+
+func readChunkData(ctx context.Context, registerMap config.ModbusRegisterMap, sess modbusReader, chunks []modbusclient.ReadChunk) (map[uint16][]byte, error) {
+	data := make(map[uint16][]byte, len(chunks))
+	for _, ch := range chunks {
+		var b []byte
+		var err error
+		switch registerMap {
+		case config.MapInput:
+			b, err = sess.ReadInput(ctx, ch.Start, ch.Quantity)
+		default:
+			b, err = sess.ReadHolding(ctx, ch.Start, ch.Quantity)
+		}
+		if err != nil {
+			return nil, err
+		}
+		data[ch.Start] = b
+	}
+	return data, nil
+}
+
+func buildSamples(
+	org config.Organization,
+	resolved []registers.ResolvedEntry,
+	chunks []modbusclient.ReadChunk,
+	data map[uint16][]byte,
+	ts time.Time,
+) ([]storage.Sample, error) {
+	samples := make([]storage.Sample, 0, len(resolved))
+	for _, e := range resolved {
+		payload := payloadForEntry(e, chunks, data)
+		if payload == nil {
+			return nil, errors.New("internal: missing modbus slice for " + e.MetricKey)
+		}
+		v, err := decode.Scaled(e.DataType, payload, e.Gain, e.Offset)
+		if err != nil {
+			return nil, err
+		}
+		samples = append(samples, storage.Sample{
+			Time:           ts,
+			OrganizationID: org.ID,
+			MetricKey:      e.MetricKey,
+			Value:          v,
+			Labels:         labelsForOrg(org),
+		})
+	}
+	return samples, nil
+}
+
+func payloadForEntry(e registers.ResolvedEntry, chunks []modbusclient.ReadChunk, data map[uint16][]byte) []byte {
+	for _, ch := range chunks {
+		last := ch.Start + ch.Quantity - 1
+		if e.PDUStart < ch.Start || e.PDUEnd > last {
+			continue
+		}
+		raw, ok := data[ch.Start]
+		if !ok {
+			continue
+		}
+		return modbusclient.SliceForEntry(ch.Start, raw, e)
+	}
+	return nil
+}
+
+func labelsForOrg(org config.Organization) map[string]string {
+	labels := map[string]string{}
+	if org.SiteID != "" {
+		labels["site_id"] = org.SiteID
+	}
+	if org.DeviceID != "" {
+		labels["device_id"] = org.DeviceID
+	}
+	return labels
+}
+
+func dialTargetForOrg(org config.Organization) modbusclient.DialTarget {
+	return modbusclient.DialTarget{
+		Host:           org.Modbus.Host,
+		Port:           org.Modbus.Port,
+		UnitID:         org.Modbus.UnitID,
+		ConnectTimeout: org.Modbus.ConnectTimeout,
+		RequestTimeout: org.Modbus.RequestTimeout,
+	}
+}
+
+func reconnectWait(org config.Organization, attempt int) time.Duration {
+	wait := org.PollInterval
+	if wait <= 0 {
+		wait = time.Second
+	}
+	if !org.Modbus.ReconnectBackoff || attempt <= 1 {
+		return wait
+	}
+	maxWait := org.Modbus.MaxReconnectBackoff
+	if maxWait <= 0 {
+		maxWait = 2 * time.Minute
+	}
+	for i := 1; i < attempt; i++ {
+		if wait >= maxWait/2 {
+			return maxWait
+		}
+		wait *= 2
+	}
+	if wait > maxWait {
+		return maxWait
+	}
+	return wait
+}
+
+// readBudgetForPoll gives one request timeout window per planned read, plus one extra
+// timeout to account for session and scheduler jitter in the poll cycle.
+func readBudgetForPoll(requestTimeout time.Duration, chunkCount int) time.Duration {
+	return requestTimeout * time.Duration(max(1, chunkCount+1))
 }
 
 func max(a, b int) int {

@@ -149,3 +149,29 @@ func TestPollAndStoreMissingSlice(t *testing.T) {
 		t.Fatal("expected error, got nil")
 	}
 }
+
+func TestReadBudgetForPoll(t *testing.T) {
+	got := readBudgetForPoll(2*time.Second, 3)
+	if got != 8*time.Second {
+		t.Fatalf("expected 8s read budget, got %s", got)
+	}
+}
+
+func TestReconnectWaitWithBackoff(t *testing.T) {
+	org := config.Organization{
+		PollInterval: 5 * time.Second,
+		Modbus: config.Modbus{
+			ReconnectBackoff:    true,
+			MaxReconnectBackoff: 20 * time.Second,
+		},
+	}
+	if got := reconnectWait(org, 1); got != 5*time.Second {
+		t.Fatalf("attempt 1 wait mismatch: %s", got)
+	}
+	if got := reconnectWait(org, 2); got != 10*time.Second {
+		t.Fatalf("attempt 2 wait mismatch: %s", got)
+	}
+	if got := reconnectWait(org, 4); got != 20*time.Second {
+		t.Fatalf("attempt 4 should cap at max, got %s", got)
+	}
+}

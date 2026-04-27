@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -11,6 +12,7 @@ import (
 type Handlers struct {
 	store       storeReader
 	allowOrigin string
+	log         *slog.Logger
 }
 
 type storeReader interface {
@@ -22,6 +24,7 @@ func NewHandlers(store storeReader, allowOrigin string) *Handlers {
 	return &Handlers{
 		store:       store,
 		allowOrigin: allowOrigin,
+		log:         slog.Default(),
 	}
 }
 
@@ -59,7 +62,8 @@ func (h *Handlers) current(w http.ResponseWriter, r *http.Request) {
 	metricKeys := ParseCSV(r.URL.Query().Get("metric_keys"))
 	resp, err := h.store.Current(r.Context(), orgID, metricKeys)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		h.log.Error("api_current", "organization_id", orgID, "err", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, http.StatusOK, resp)
@@ -91,7 +95,8 @@ func (h *Handlers) timeseries(w http.ResponseWriter, r *http.Request) {
 	}
 	resp, err := h.store.Timeseries(r.Context(), orgID, metricKeys, from, to, bucket)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		h.log.Error("api_timeseries", "organization_id", orgID, "metric_keys", metricKeys, "err", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, http.StatusOK, resp)

@@ -17,20 +17,22 @@ const (
 )
 
 type Modbus struct {
-	Host            string        `yaml:"host"`
-	Port            int           `yaml:"port"`
-	UnitID          int           `yaml:"unit_id"`
-	ConnectTimeout  time.Duration `yaml:"connect_timeout"`
-	RequestTimeout  time.Duration `yaml:"request_timeout"`
+	Host                string        `yaml:"host"`
+	Port                int           `yaml:"port"`
+	UnitID              int           `yaml:"unit_id"`
+	ConnectTimeout      time.Duration `yaml:"connect_timeout"`
+	RequestTimeout      time.Duration `yaml:"request_timeout"`
+	ReconnectBackoff    bool          `yaml:"reconnect_backoff"`
+	MaxReconnectBackoff time.Duration `yaml:"max_reconnect_backoff"`
 }
 
 type Organization struct {
-	ID           string           `yaml:"id"`
-	Name         string           `yaml:"name"`
-	SiteID       string           `yaml:"site_id"`
-	DeviceID     string           `yaml:"device_id"`
-	PollInterval time.Duration    `yaml:"poll_interval"`
-	Modbus       Modbus           `yaml:"modbus"`
+	ID           string        `yaml:"id"`
+	Name         string        `yaml:"name"`
+	SiteID       string        `yaml:"site_id"`
+	DeviceID     string        `yaml:"device_id"`
+	PollInterval time.Duration `yaml:"poll_interval"`
+	Modbus       Modbus        `yaml:"modbus"`
 }
 
 type RegisterAddressing struct {
@@ -38,11 +40,11 @@ type RegisterAddressing struct {
 }
 
 type Root struct {
-	DatabaseURL         string               `yaml:"database_url"`
-	RegisterCatalog     string               `yaml:"register_catalog"`
-	RegisterAddressing  RegisterAddressing  `yaml:"register_addressing"`
-	ModbusRegisterMap   ModbusRegisterMap    `yaml:"modbus_register_map"`
-	Organizations       []Organization       `yaml:"organizations"`
+	DatabaseURL        string             `yaml:"database_url"`
+	RegisterCatalog    string             `yaml:"register_catalog"`
+	RegisterAddressing RegisterAddressing `yaml:"register_addressing"`
+	ModbusRegisterMap  ModbusRegisterMap  `yaml:"modbus_register_map"`
+	Organizations      []Organization     `yaml:"organizations"`
 }
 
 // Load reads YAML config from path and applies defaults.
@@ -80,6 +82,9 @@ func Load(path string) (*Root, error) {
 		}
 		if o.Modbus.RequestTimeout <= 0 {
 			o.Modbus.RequestTimeout = 5 * time.Second
+		}
+		if o.Modbus.ReconnectBackoff && o.Modbus.MaxReconnectBackoff <= 0 {
+			o.Modbus.MaxReconnectBackoff = 2 * time.Minute
 		}
 	}
 	return &c, nil

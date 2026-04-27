@@ -5,10 +5,9 @@ import (
 	"encoding/binary"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/grid-x/modbus"
-
-	"github.com/nesh/sestelemetry/internal/config"
 )
 
 // Session holds a connected Modbus TCP client for one target.
@@ -18,18 +17,26 @@ type Session struct {
 	mock    bool
 }
 
-func Dial(ctx context.Context, o config.Organization) (*Session, error) {
-	if isMockHost(o.Modbus.Host) {
+type DialTarget struct {
+	Host           string
+	Port           int
+	UnitID         int
+	ConnectTimeout time.Duration
+	RequestTimeout time.Duration
+}
+
+func Dial(ctx context.Context, target DialTarget) (*Session, error) {
+	if isMockHost(target.Host) {
 		return &Session{mock: true}, nil
 	}
 
-	addr := fmt.Sprintf("%s:%d", o.Modbus.Host, o.Modbus.Port)
+	addr := fmt.Sprintf("%s:%d", target.Host, target.Port)
 	h := modbus.NewTCPClientHandler(addr)
-	h.Timeout = o.Modbus.RequestTimeout
+	h.Timeout = target.RequestTimeout
 	h.IdleTimeout = -1
-	h.SetSlave(byte(o.Modbus.UnitID))
+	h.SetSlave(byte(target.UnitID))
 
-	dctx, cancel := context.WithTimeout(ctx, o.Modbus.ConnectTimeout)
+	dctx, cancel := context.WithTimeout(ctx, target.ConnectTimeout)
 	defer cancel()
 	if err := h.Connect(dctx); err != nil {
 		return nil, err
