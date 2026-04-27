@@ -1,0 +1,109 @@
+# Huawei SmartLogger — documented addresses from vendor maps.
+# Addresses are treated as direct Modbus FC3 register addresses (no base subtraction).
+addressing:
+  holding_address_base: 0
+
+registers:
+  - metric_key: active_pv_power_kw
+    name: Active PV power, kW
+    address: 40388
+    data_type: UINT32
+    swap_type: ABCD_BE
+    gain: 0.001
+    offset: 0
+
+  - metric_key: active_ess_power_kw
+    name: Active ESS power, kW
+    address: 40392
+    data_type: INT32
+    swap_type: ABCD_BE
+    gain: 0.001
+    offset: 0
+
+  - metric_key: pv_energy_yield_day_kwh
+    name: PV energy yield of the day, kWh
+    address: 40444
+    data_type: UINT32
+    swap_type: ABCD_BE
+    gain: 0.01
+    offset: 0
+
+  - metric_key: accumulated_pv_energy_yield_kwh
+    name: Accumulated PV energy yield, kWh
+    address: 40446
+    data_type: INT64
+    swap_type: ABCD_BE
+    gain: 0.01
+    offset: 0
+
+  - metric_key: accumulated_electricity_purchased_kwh
+    name: Accumulated electricity purchased, kWh
+    address: 40450
+    data_type: INT64
+    swap_type: ABCD_BE
+    gain: 0.01
+    offset: 0
+
+  - metric_key: accumulated_electricity_sold_kwh
+    name: Accumulated electricity sold, kWh
+    address: 40454
+    data_type: INT64
+    swap_type: ABCD_BE
+    gain: 0.01
+    offset: 0
+
+  - metric_key: accumulated_power_consumption_kwh
+    name: Accumulated power consumption, kWh
+    address: 40458
+    data_type: INT64
+    swap_type: ABCD_BE
+    gain: 0.01
+    offset: 0
+
+  - metric_key: total_power_supply_from_grid_kwh
+    name: Total power supply from grid, kWh
+    address: 40464
+    data_type: INT64
+    swap_type: ABCD_BE
+    gain: 0.01
+    offset: 0
+
+  - metric_key: total_energy_charged_kwh
+    name: Total energy charged, kWh
+    address: 40472
+    data_type: INT64
+    swap_type: ABCD_BE
+    gain: 0.01
+    offset: 0
+
+  - metric_key: total_energy_discharged_kwh
+    name: Total energy discharged, kWh
+    address: 40476
+    data_type: UINT64
+    swap_type: ABCD_BE
+    gain: 0.01
+    offset: 0
+
+  - metric_key: load_power_kw
+    name: Load power, kW
+    address: 40503
+    data_type: UINT32
+    swap_type: ABCD_BE
+    gain: 0.001
+    offset: 0
+
+  - metric_key: grid_connected_active_power_kw
+    name: Grid-connected active power, kW
+    address: 40505
+    data_type: INT32
+    swap_type: ABCD_BE
+    gain: 0.001
+    offset: 0
+
+  - metric_key: soc_percent
+    name: SOC
+    address: 40515
+    data_type: UINT16
+    swap_type: ABCD_BE
+    gain: 0.1
+    offset: 0

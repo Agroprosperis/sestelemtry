@@ -1,0 +1,16 @@
+.DS_Store
+
+# Local environment and secrets
+.env
+.env.*
+*.pem
+*.key
+
+# Local runtime configs (do not commit device/db credentials)
+config.yaml
+config.pe-single.yaml
+
+# Logs and temp files
+*.log
+tmp/
+temp/

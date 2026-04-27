@@ -1,0 +1,14 @@
+database_url: "postgres://postgres:postgres@timescaledb:5432/telemetry?sslmode=disable"
+register_catalog: /etc/sestelemetry/registers/huawei_smartlogger.yaml
+register_addressing:
+  holding_address_base: 400001
+modbus_register_map: holding
+
+organizations:
+  - id: docker-demo
+    name: Docker demo org
+    poll_interval: 30s
+    modbus:
+      host: host.docker.internal
+      port: 502
+      unit_id: 99

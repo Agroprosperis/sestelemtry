@@ -1,0 +1,12 @@
+# PE single-register test map (FC3)
+addressing:
+  holding_address_base: 0
+
+registers:
+  - metric_key: active_ess_power_kw
+    name: Active ESS power, kW (40392)
+    address: 40392
+    data_type: INT32
+    swap_type: ABCD_BE
+    gain: 0.001
+    offset: 0

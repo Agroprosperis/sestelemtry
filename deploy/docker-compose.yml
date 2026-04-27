@@ -1,0 +1,43 @@
+services:
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: telemetry
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d telemetry"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  collector:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@timescaledb:5432/telemetry?sslmode=disable
+    volumes:
+      - ../config.docker.yaml:/etc/sestelemetry/config.yaml:ro
+      - ../registers:/etc/sestelemetry/registers:ro
+    command: ["-config", "/etc/sestelemetry/config.yaml"]
+
+  api:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@timescaledb:5432/telemetry?sslmode=disable
+      ALLOW_ORIGIN: http://localhost:5173
+    entrypoint: ["/usr/local/bin/api"]
+    command: ["-listen", ":8080", "-allow-origin", "http://localhost:5173"]
+    ports:
+      - "8080:8080"
