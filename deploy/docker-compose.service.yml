@@ -83,3 +83,4 @@ services:
 
 volumes:
   timescaledb_data:
+    name: sestelemetry_timescaledb_data

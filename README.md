@@ -109,4 +109,5 @@ Notes:
 - `restart: unless-stopped` keeps containers running after reboots/failures.
 - `watchtower` watches tagged containers and restarts them after pulling newer images.
 - keep `.env.service` out of git and restrict permissions (example: `chmod 600 /opt/sestelemetry/deploy/.env.service`).
+- TimescaleDB data is pinned to stable Docker volume `sestelemetry_timescaledb_data` to survive updates/recreates.
 
