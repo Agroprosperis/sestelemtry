@@ -63,6 +63,19 @@ bash scripts/run-local.sh backend
 
 ## Run as Linux service (auto restart + image auto-updates)
 
+One-command installer (recommended for new PC):
+
+```bash
+bash scripts/install-prod.sh
+```
+
+If `.env.service` still has placeholder values (`your-org`, `change-me`), edit it and restart:
+
+```bash
+sudo editor /opt/sestelemetry/deploy/.env.service
+sudo systemctl restart sestelemetry
+```
+
 ```bash
 # on server
 sudo mkdir -p /opt/sestelemetry
