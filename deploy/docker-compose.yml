@@ -25,8 +25,8 @@ services:
     environment:
       DATABASE_URL: postgres://postgres:postgres@timescaledb:5432/telemetry?sslmode=disable
     volumes:
-      - ../config.docker.yaml:/etc/sestelemetry/config.yaml:ro
-      - ../registers:/etc/sestelemetry/registers:ro
+      - ${SESTELEMETRY_HOST_CONFIG_PATH:-/etc/sestelemetry/config.yaml}:/etc/sestelemetry/config.yaml:ro
+      - ${SESTELEMETRY_HOST_REGISTERS_PATH:-/etc/sestelemetry/registers}:/etc/sestelemetry/registers:ro
     command: ["-config", "/etc/sestelemetry/config.yaml"]
 
   api:

@@ -74,11 +74,23 @@ cp service.env.example .env.service
 # set DB credentials and SESTELEMETRY_DATABASE_URL
 # set SESTELEMETRY_API_ALLOW_ORIGIN to your web URL (no "*")
 # set SESTELEMETRY_WEB_API_BASE_URL to your server URL, e.g. http://SERVER_IP:8080
+# keep collector config outside repo:
+#   SESTELEMETRY_HOST_CONFIG_PATH=/etc/sestelemetry/config.yaml
+#   SESTELEMETRY_HOST_REGISTERS_PATH=/etc/sestelemetry/registers
 
 sudo cp sestelemetry.service /etc/systemd/system/sestelemetry.service
 sudo systemctl daemon-reload
 sudo systemctl enable sestelemetry
 sudo systemctl start sestelemetry
+```
+
+Persist Modbus config outside git-managed repo:
+
+```bash
+sudo mkdir -p /etc/sestelemetry/registers
+sudo cp /opt/sestelemetry/config.docker.yaml /etc/sestelemetry/config.yaml
+sudo cp -r /opt/sestelemetry/registers/* /etc/sestelemetry/registers/
+sudo chown -R root:root /etc/sestelemetry
 ```
 
 Manage service:
