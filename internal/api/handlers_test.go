@@ -16,6 +16,7 @@ type mockStore struct {
 	currentErr  error
 	seriesResp  TimeseriesResponse
 	seriesErr   error
+	readyErr    error
 }
 
 func (m *mockStore) Current(_ context.Context, _ string, _ []string) (CurrentResponse, error) {
@@ -24,6 +25,10 @@ func (m *mockStore) Current(_ context.Context, _ string, _ []string) (CurrentRes
 
 func (m *mockStore) Timeseries(_ context.Context, _ string, _ []string, _, _ time.Time, _ string) (TimeseriesResponse, error) {
 	return m.seriesResp, m.seriesErr
+}
+
+func (m *mockStore) Ready(_ context.Context) error {
+	return m.readyErr
 }
 
 func TestCurrentRequiresOrganizationID(t *testing.T) {
@@ -78,6 +83,75 @@ func TestDashboardConfigEndpoint(t *testing.T) {
 	h.Router().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("want 200 got %d", rec.Code)
+	}
+}
+
+func TestReadyzSuccess(t *testing.T) {
+	h := NewHandlers(&mockStore{}, "*")
+	req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+	rec := httptest.NewRecorder()
+	h.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200 got %d", rec.Code)
+	}
+}
+
+func TestReadyzFailure(t *testing.T) {
+	h := NewHandlers(&mockStore{readyErr: errors.New("db down")}, "*")
+	req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+	rec := httptest.NewRecorder()
+	h.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("want 503 got %d", rec.Code)
+	}
+}
+
+func TestSecurityHeadersPresent(t *testing.T) {
+	h := NewHandlers(&mockStore{}, "*")
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	rec := httptest.NewRecorder()
+	h.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200 got %d", rec.Code)
+	}
+	if got := rec.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Fatalf("expected nosniff, got %q", got)
+	}
+	if got := rec.Header().Get("X-Frame-Options"); got != "DENY" {
+		t.Fatalf("expected DENY, got %q", got)
+	}
+	if got := rec.Header().Get("Referrer-Policy"); got != "no-referrer" {
+		t.Fatalf("expected no-referrer, got %q", got)
+	}
+}
+
+func TestSwaggerUIEndpoint(t *testing.T) {
+	h := NewHandlers(&mockStore{}, "*")
+	req := httptest.NewRequest(http.MethodGet, "/swagger", nil)
+	rec := httptest.NewRecorder()
+	h.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200 got %d", rec.Code)
+	}
+	if got := rec.Header().Get("Content-Type"); !strings.Contains(got, "text/html") {
+		t.Fatalf("expected html content-type, got %q", got)
+	}
+}
+
+func TestSwaggerSpecEndpoint(t *testing.T) {
+	h := NewHandlers(&mockStore{}, "*")
+	req := httptest.NewRequest(http.MethodGet, "/swagger/openapi.yaml", nil)
+	rec := httptest.NewRecorder()
+	h.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200 got %d", rec.Code)
+	}
+	if got := rec.Header().Get("Content-Type"); !strings.Contains(got, "application/yaml") {
+		t.Fatalf("expected yaml content-type, got %q", got)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "openapi: 3.0.3") {
+		t.Fatalf("expected openapi version in body, got %q", body)
 	}
 }
 

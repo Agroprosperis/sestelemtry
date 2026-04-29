@@ -18,6 +18,7 @@ type Handlers struct {
 type storeReader interface {
 	Current(ctx context.Context, organizationID string, metricKeys []string) (CurrentResponse, error)
 	Timeseries(ctx context.Context, organizationID string, metricKeys []string, from, to time.Time, bucket string) (TimeseriesResponse, error)
+	Ready(ctx context.Context) error
 }
 
 func NewHandlers(store storeReader, allowOrigin string) *Handlers {
@@ -31,14 +32,33 @@ func NewHandlers(store storeReader, allowOrigin string) *Handlers {
 func (h *Handlers) Router() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", h.healthz)
+	mux.HandleFunc("/readyz", h.readyz)
 	mux.HandleFunc("/api/v1/dashboard-config", h.dashboardConfig)
 	mux.HandleFunc("/api/v1/current", h.current)
 	mux.HandleFunc("/api/v1/timeseries", h.timeseries)
-	return h.withCORS(mux)
+	mux.HandleFunc("/swagger", h.swaggerUI)
+	mux.HandleFunc("/swagger/", h.swaggerUI)
+	mux.HandleFunc("/swagger/openapi.yaml", h.swaggerSpec)
+	return h.withSecurityHeaders(h.withCORS(mux))
 }
 
 func (h *Handlers) healthz(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (h *Handlers) readyz(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	defer cancel()
+	if err := h.store.Ready(ctx); err != nil {
+		h.log.Error("api_readyz", "err", err)
+		http.Error(w, "not ready", http.StatusServiceUnavailable)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ready"})
 }
 
 func (h *Handlers) dashboardConfig(w http.ResponseWriter, r *http.Request) {
@@ -141,8 +161,41 @@ func (h *Handlers) withCORS(next http.Handler) http.Handler {
 	})
 }
 
+func (h *Handlers) withSecurityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		next.ServeHTTP(w, r)
+	})
+}
+
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+func (h *Handlers) swaggerUI(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if r.URL.Path != "/swagger" && r.URL.Path != "/swagger/" {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(swaggerHTML))
+}
+
+func (h *Handlers) swaggerSpec(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Content-Type", "application/yaml; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(openAPISpecYAML))
 }

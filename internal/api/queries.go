@@ -110,6 +110,10 @@ func (s *Store) Timeseries(ctx context.Context, organizationID string, metricKey
 	return out, nil
 }
 
+func (s *Store) Ready(ctx context.Context) error {
+	return s.pool.Ping(ctx)
+}
+
 func ParseCSV(input string) []string {
 	if strings.TrimSpace(input) == "" {
 		return nil

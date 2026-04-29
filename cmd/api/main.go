@@ -46,6 +46,7 @@ func main() {
 	server := &http.Server{
 		Addr:              *listenAddr,
 		Handler:           svc.Router(),
+		MaxHeaderBytes:    1 << 20, // 1 MiB
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      30 * time.Second,
