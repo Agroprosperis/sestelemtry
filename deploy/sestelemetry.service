@@ -1,0 +1,19 @@
+[Unit]
+Description=SESTelemetry Docker Compose Stack
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/sestelemetry/deploy
+EnvironmentFile=/opt/sestelemetry/deploy/.env.service
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/usr/bin/env docker compose -f /opt/sestelemetry/deploy/docker-compose.service.yml up -d
+ExecStop=/usr/bin/env docker compose -f /opt/sestelemetry/deploy/docker-compose.service.yml down
+ExecReload=/usr/bin/env docker compose -f /opt/sestelemetry/deploy/docker-compose.service.yml up -d
+TimeoutStartSec=0
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,74 @@
+services:
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: telemetry
+    volumes:
+      - timescaledb_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d telemetry"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    labels:
+      - com.centurylinklabs.watchtower.enable=true
+
+  collector:
+    image: ${SESTELEMETRY_COLLECTOR_IMAGE}
+    restart: unless-stopped
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@timescaledb:5432/telemetry?sslmode=disable
+    volumes:
+      - ../config.docker.yaml:/etc/sestelemetry/config.yaml:ro
+      - ../registers:/etc/sestelemetry/registers:ro
+    command: ["-config", "/etc/sestelemetry/config.yaml"]
+    labels:
+      - com.centurylinklabs.watchtower.enable=true
+
+  api:
+    image: ${SESTELEMETRY_API_IMAGE}
+    restart: unless-stopped
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@timescaledb:5432/telemetry?sslmode=disable
+    entrypoint: ["/usr/local/bin/api"]
+    command: ["-listen", ":8080", "-allow-origin", "*"]
+    ports:
+      - "8080:8080"
+    labels:
+      - com.centurylinklabs.watchtower.enable=true
+
+  web:
+    image: ${SESTELEMETRY_WEB_IMAGE}
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      VITE_API_BASE_URL: ${SESTELEMETRY_WEB_API_BASE_URL:-http://localhost:8080}
+    ports:
+      - "5173:5173"
+    labels:
+      - com.centurylinklabs.watchtower.enable=true
+
+  watchtower:
+    image: containrrr/watchtower:latest
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    command:
+      - --label-enable
+      - --interval
+      - "30"
+      - --cleanup
+      - --rolling-restart
+
+volumes:
+  timescaledb_data:
