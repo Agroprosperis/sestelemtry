@@ -28,26 +28,29 @@ const dashboardRefreshMs = 1000
 
 const fallbackConfig: DashboardConfig = {
   cards: [
-    { key: 'load_power_kw', label: 'Load Power', unit: 'kW' },
-    { key: 'active_pv_power_kw', label: 'Active PV Power', unit: 'kW' },
-    { key: 'active_ess_power_kw', label: 'Active ESS Power', unit: 'kW' },
-    { key: 'grid_connected_active_power_kw', label: 'Grid Active Power', unit: 'kW' },
+    { key: 'pv_energy_yield_day_kwh', label: 'Виробіток за сьогодні', unit: 'kWh' },
+    { key: 'total_energy_charged_kwh', label: 'Енергія, отримана ESS сьогодні', unit: 'kWh' },
+    { key: 'total_energy_discharged_kwh', label: 'Енергія, витрачена ESS сьогодні', unit: 'kWh' },
+    { key: 'load_power_kw', label: 'Потужність навантаження', unit: 'kW' },
+    { key: 'active_pv_power_kw', label: 'Активна потужність PV', unit: 'kW' },
+    { key: 'active_ess_power_kw', label: 'Активна потужність ESS', unit: 'kW' },
+    { key: 'grid_connected_active_power_kw', label: 'Активна потужність мережі', unit: 'kW' },
     { key: 'soc_percent', label: 'SOC', unit: '%' },
-    { key: 'accumulated_pv_energy_yield_kwh', label: 'Inverter energy yield of current day', unit: 'kWh' },
-    { key: 'accumulated_electricity_purchased_kwh', label: 'Current Day Supply From Grid', unit: 'kWh' },
-    { key: 'accumulated_electricity_sold_kwh', label: 'Accumulated Grid Export', unit: 'kWh' },
-    { key: 'accumulated_power_consumption_kwh', label: 'Current Day Consumption', unit: 'kWh' },
-    { key: 'total_power_supply_from_grid_kwh', label: 'Total Supply From Grid', unit: 'kWh' },
+    { key: 'accumulated_pv_energy_yield_kwh', label: 'Виробіток інвертора за сьогодні', unit: 'kWh' },
+    { key: 'accumulated_electricity_purchased_kwh', label: 'Отримано з мережі за сьогодні', unit: 'kWh' },
+    { key: 'accumulated_electricity_sold_kwh', label: 'Подано в мережу (накопичувально)', unit: 'kWh' },
+    { key: 'accumulated_power_consumption_kwh', label: 'Споживання за сьогодні', unit: 'kWh' },
+    { key: 'total_power_supply_from_grid_kwh', label: 'Загальне постачання з мережі', unit: 'kWh' },
   ],
   power_chart: [
-    { key: 'active_pv_power_kw', label: 'PV Power', unit: 'kW' },
-    { key: 'load_power_kw', label: 'Load Power', unit: 'kW' },
-    { key: 'grid_connected_active_power_kw', label: 'Grid Active Power', unit: 'kW' },
+    { key: 'active_pv_power_kw', label: 'Потужність PV', unit: 'kW' },
+    { key: 'load_power_kw', label: 'Потужність навантаження', unit: 'kW' },
+    { key: 'grid_connected_active_power_kw', label: 'Активна потужність мережі', unit: 'kW' },
   ],
   energy_chart: [
-    { key: 'pv_energy_yield_day_kwh', label: 'PV Daily Yield', unit: 'kWh' },
-    { key: 'total_energy_charged_kwh', label: 'Energy Charged', unit: 'kWh' },
-    { key: 'total_energy_discharged_kwh', label: 'Energy Discharged', unit: 'kWh' },
+    { key: 'pv_energy_yield_day_kwh', label: 'Виробіток за сьогодні', unit: 'kWh' },
+    { key: 'total_energy_charged_kwh', label: 'Енергія, отримана ESS сьогодні', unit: 'kWh' },
+    { key: 'total_energy_discharged_kwh', label: 'Енергія, витрачена ESS сьогодні', unit: 'kWh' },
   ],
 }
 
@@ -445,9 +448,19 @@ function App() {
                   <Tooltip formatter={(v) => formatChartNumber(Number(v))} />
                   <Legend />
                   <ReferenceLine y={0} stroke="#64748b" />
-                  <Bar dataKey="pv_energy_yield_day_kwh" name="PV Daily Yield" stackId="energy" fill="#16a34a" />
-                  <Bar dataKey="total_energy_charged_kwh" name="Energy Charged" stackId="energy" fill="#0ea5e9" />
-                  <Bar dataKey="total_energy_discharged_kwh" name="Energy Discharged" stackId="energy" fill="#6b7280" />
+                  <Bar dataKey="pv_energy_yield_day_kwh" name="Виробіток за сьогодні" stackId="energy" fill="#16a34a" />
+                  <Bar
+                    dataKey="total_energy_charged_kwh"
+                    name="Енергія, отримана ESS сьогодні"
+                    stackId="energy"
+                    fill="#0ea5e9"
+                  />
+                  <Bar
+                    dataKey="total_energy_discharged_kwh"
+                    name="Енергія, витрачена ESS сьогодні"
+                    stackId="energy"
+                    fill="#6b7280"
+                  />
                 </BarChart>
               </ResponsiveContainer>
             ) : (
