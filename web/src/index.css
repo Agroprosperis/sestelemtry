@@ -191,6 +191,78 @@ body {
   font-size: 18px;
 }
 
+.energy-summary-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.energy-summary-card {
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 10px;
+  background: #f8fafc;
+}
+
+.energy-summary-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.energy-summary-title strong {
+  font-size: 14px;
+}
+
+.energy-summary-split {
+  margin-top: 6px;
+  display: flex;
+  justify-content: space-between;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.energy-summary-bar {
+  margin-top: 6px;
+  width: 100%;
+  height: 6px;
+  border-radius: 999px;
+  background: #d1fae5;
+  overflow: hidden;
+}
+
+.energy-summary-bar.sink {
+  background: #ffedd5;
+}
+
+.energy-summary-fill {
+  display: block;
+  height: 100%;
+}
+
+.energy-summary-fill.source {
+  background: #16a34a;
+}
+
+.energy-summary-fill.sink {
+  background: #f97316;
+}
+
+.energy-summary-rows {
+  margin-top: 8px;
+}
+
+.energy-summary-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+  margin-top: 3px;
+}
+
 .chart-wrap {
   width: 100%;
   height: 300px;
@@ -274,6 +346,9 @@ body {
     width: min(90vw, 560px);
   }
   .energy-tooltip-grid {
+    grid-template-columns: 1fr;
+  }
+  .energy-summary-grid {
     grid-template-columns: 1fr;
   }
   .metrics-panel .cards-grid {

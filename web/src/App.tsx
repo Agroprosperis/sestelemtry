@@ -239,6 +239,23 @@ function formatChartNumber(value: number) {
   }).format(rounded)
 }
 
+function sumSeriesValue(series: Record<string, string | number>[], metricKey: string, mode: 'positive' | 'absolute') {
+  return series.reduce((sum, row) => {
+    const raw = Number(row[metricKey] ?? 0)
+    if (!Number.isFinite(raw)) return sum
+    if (mode === 'positive') return sum + Math.max(raw, 0)
+    return sum + Math.abs(raw)
+  }, 0)
+}
+
+function formatEnergyCompactKWh(valueKWh: number) {
+  if (!Number.isFinite(valueKWh)) return '--'
+  if (valueKWh >= 1000) {
+    return `${formatChartNumber(valueKWh / 1000)} MWh`
+  }
+  return `${formatChartNumber(valueKWh)} kWh`
+}
+
 type EnergyTooltipEntry = {
   dataKey?: string | number | ((obj: unknown) => unknown)
   name?: string | number
@@ -349,6 +366,33 @@ function App() {
     }
     return [organizationID, ...knownOrganizations]
   }, [organizationID])
+
+  const energySummary = useMemo(() => {
+    const pvProduced = sumSeriesValue(energyBarSeries, 'pv_energy_yield_day_kwh', 'positive')
+    const gridExport = sumSeriesValue(energyBarSeries, 'accumulated_electricity_sold_kwh', 'absolute')
+    const pvConsumed = Math.max(pvProduced - gridExport, 0)
+    const consumption = sumSeriesValue(energyBarSeries, 'accumulated_power_consumption_kwh', 'absolute')
+    const fromGrid = sumSeriesValue(energyBarSeries, 'accumulated_electricity_purchased_kwh', 'positive')
+    const fromPV = Math.max(consumption - fromGrid, 0)
+
+    const pvConsumedPct = pvProduced > 0 ? (pvConsumed / pvProduced) * 100 : 0
+    const pvExportPct = pvProduced > 0 ? (gridExport / pvProduced) * 100 : 0
+    const loadFromPVPct = consumption > 0 ? (fromPV / consumption) * 100 : 0
+    const loadFromGridPct = consumption > 0 ? (fromGrid / consumption) * 100 : 0
+
+    return {
+      pvProduced,
+      gridExport,
+      pvConsumed,
+      consumption,
+      fromGrid,
+      fromPV,
+      pvConsumedPct,
+      pvExportPct,
+      loadFromPVPct,
+      loadFromGridPct,
+    }
+  }, [energyBarSeries])
 
   function onOrganizationChange(nextID: string) {
     setOrganizationID(nextID)
@@ -462,6 +506,54 @@ function App() {
 
         <div className="chart-card">
           <h2>Energy Trend</h2>
+          <div className="energy-summary-grid">
+            <section className="energy-summary-card">
+              <div className="energy-summary-title">
+                <span>Вироблено фотоелектричною установкою</span>
+                <strong>{formatEnergyCompactKWh(energySummary.pvProduced)}</strong>
+              </div>
+              <div className="energy-summary-split">
+                <span>{formatChartNumber(energySummary.pvConsumedPct)}%</span>
+                <span>{formatChartNumber(energySummary.pvExportPct)}%</span>
+              </div>
+              <div className="energy-summary-bar">
+                <span className="energy-summary-fill source" style={{ width: `${Math.min(energySummary.pvConsumedPct, 100)}%` }} />
+              </div>
+              <div className="energy-summary-rows">
+                <div className="energy-summary-row">
+                  <span>Спожито</span>
+                  <strong>{formatEnergyCompactKWh(energySummary.pvConsumed)}</strong>
+                </div>
+                <div className="energy-summary-row">
+                  <span>Подано в електромережу</span>
+                  <strong>{formatEnergyCompactKWh(energySummary.gridExport)}</strong>
+                </div>
+              </div>
+            </section>
+            <section className="energy-summary-card">
+              <div className="energy-summary-title">
+                <span>Споживання приладами</span>
+                <strong>{formatEnergyCompactKWh(energySummary.consumption)}</strong>
+              </div>
+              <div className="energy-summary-split">
+                <span>{formatChartNumber(energySummary.loadFromPVPct)}%</span>
+                <span>{formatChartNumber(energySummary.loadFromGridPct)}%</span>
+              </div>
+              <div className="energy-summary-bar sink">
+                <span className="energy-summary-fill sink" style={{ width: `${Math.min(energySummary.loadFromPVPct, 100)}%` }} />
+              </div>
+              <div className="energy-summary-rows">
+                <div className="energy-summary-row">
+                  <span>Від ФЕ-майданчика</span>
+                  <strong>{formatEnergyCompactKWh(energySummary.fromPV)}</strong>
+                </div>
+                <div className="energy-summary-row">
+                  <span>З електромережі</span>
+                  <strong>{formatEnergyCompactKWh(energySummary.fromGrid)}</strong>
+                </div>
+              </div>
+            </section>
+          </div>
           <div className="chart-wrap">
             {loading ? (
               <p className="chart-placeholder">Loading...</p>
