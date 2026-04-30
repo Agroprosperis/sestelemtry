@@ -438,7 +438,7 @@ function App() {
               <p className="chart-placeholder">No data available for selected range.</p>
             ) : preset !== 'day' ? (
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={energyBarSeries}>
+                <BarChart data={energyBarSeries} stackOffset="sign">
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis dataKey="time" />
                   <YAxis tickFormatter={(v) => formatChartNumber(Number(v))} />
