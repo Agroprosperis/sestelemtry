@@ -228,6 +228,13 @@ function formatChartNumber(value: number) {
   }).format(rounded)
 }
 
+function energyColor(metricKey: string): string {
+  if (metricKey === 'total_energy_discharged_kwh') return '#6b7280'
+  if (metricKey === 'total_energy_charged_kwh') return '#0ea5e9'
+  if (metricKey === 'pv_energy_yield_day_kwh') return '#16a34a'
+  return '#8b5cf6'
+}
+
 function App() {
   const [preset, setPreset] = useState<RangePreset>('day')
   const [config, setConfig] = useState<DashboardConfig>(fallbackConfig)
@@ -377,6 +384,25 @@ function App() {
               <p className="chart-placeholder">Loading...</p>
             ) : powerSeries.length === 0 ? (
               <p className="chart-placeholder">No data available for selected range.</p>
+            ) : preset !== 'day' ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={powerSeries}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="time" />
+                  <YAxis tickFormatter={(v) => formatChartNumber(Number(v))} />
+                  <Tooltip formatter={(v) => formatChartNumber(Number(v))} />
+                  <Legend />
+                  <ReferenceLine y={0} stroke="#64748b" />
+                  {config.power_chart.map((m, idx) => (
+                    <Bar
+                      key={m.key}
+                      dataKey={m.key}
+                      name={m.label}
+                      fill={['#16a34a', '#2563eb', '#f97316', '#8b5cf6'][idx % 4]}
+                    />
+                  ))}
+                </BarChart>
+              </ResponsiveContainer>
             ) : (
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={powerSeries}>
@@ -421,7 +447,7 @@ function App() {
                   <ReferenceLine y={0} stroke="#64748b" />
                   <Bar dataKey="pv_energy_yield_day_kwh" name="PV Daily Yield" stackId="energy" fill="#16a34a" />
                   <Bar dataKey="total_energy_charged_kwh" name="Energy Charged" stackId="energy" fill="#0ea5e9" />
-                  <Bar dataKey="total_energy_discharged_kwh" name="Energy Discharged" stackId="energy" fill="#f97316" />
+                  <Bar dataKey="total_energy_discharged_kwh" name="Energy Discharged" stackId="energy" fill="#6b7280" />
                 </BarChart>
               </ResponsiveContainer>
             ) : (
@@ -432,14 +458,14 @@ function App() {
                   <YAxis tickFormatter={(v) => formatChartNumber(Number(v))} />
                   <Tooltip formatter={(v) => formatChartNumber(Number(v))} />
                   <Legend />
-                  {config.energy_chart.map((m, idx) => (
+                  {config.energy_chart.map((m) => (
                     <Line
                       key={m.key}
                       type="monotone"
                       dataKey={m.key}
                       name={m.label}
                       dot={false}
-                      stroke={['#8b5cf6', '#0ea5e9', '#e11d48', '#16a34a'][idx % 4]}
+                      stroke={energyColor(m.key)}
                     />
                   ))}
                 </LineChart>
