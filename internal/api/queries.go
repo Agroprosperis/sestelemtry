@@ -57,7 +57,7 @@ func (s *Store) Current(ctx context.Context, organizationID string, metricKeys [
 	return out, nil
 }
 
-func (s *Store) Timeseries(ctx context.Context, organizationID string, metricKeys []string, from, to time.Time, bucket string) (TimeseriesResponse, error) {
+func (s *Store) Timeseries(ctx context.Context, organizationID string, metricKeys []string, from, to time.Time, bucket, tz string) (TimeseriesResponse, error) {
 	if len(metricKeys) == 0 {
 		return TimeseriesResponse{}, fmt.Errorf("metric_keys is required")
 	}
@@ -70,17 +70,20 @@ func (s *Store) Timeseries(ctx context.Context, organizationID string, metricKey
 	if bucket == "" {
 		bucket = "15 minutes"
 	}
+	if strings.TrimSpace(tz) == "" {
+		tz = "UTC"
+	}
 
-	// Bucket value is the per-bucket contribution (MAX - MIN) so callers do
-	// not have to compute deltas client-side. For monotonic counters this is
-	// the bucket's energy delta. For counters that reset within a bucket it is
-	// the visible peak; aggregations that need finer granularity (e.g. yearly
-	// totals from a daily-resetting counter) should request smaller buckets.
+	// Bucket boundaries are aligned to the caller's timezone so daily-resetting
+	// counters (e.g. pv_energy_yield_day_kwh) reset on a bucket edge rather
+	// than mid-bucket. Bucket value is the per-bucket contribution computed as
+	// last(value) - first(value) so within-bucket resets, if any, do not
+	// produce a spurious spike (we clamp negatives to zero).
 	rows, err := s.pool.Query(ctx, `
 		SELECT
-			time_bucket($1::interval, time) AS bucket_time,
+			time_bucket($1::interval, time, $6::text) AS bucket_time,
 			metric_key,
-			MAX(value) - MIN(value) AS value
+			GREATEST(last(value, time) - first(value, time), 0) AS value
 		FROM telemetry_samples
 		WHERE organization_id = $2
 			AND metric_key = ANY($3)
@@ -88,7 +91,7 @@ func (s *Store) Timeseries(ctx context.Context, organizationID string, metricKey
 			AND time <= $5
 		GROUP BY bucket_time, metric_key
 		ORDER BY bucket_time ASC, metric_key ASC
-	`, bucket, organizationID, metricKeys, from.UTC(), to.UTC())
+	`, bucket, organizationID, metricKeys, from.UTC(), to.UTC(), tz)
 	if err != nil {
 		return TimeseriesResponse{}, err
 	}

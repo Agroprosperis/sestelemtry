@@ -42,6 +42,7 @@ export async function fetchTimeseries(
     from: string
     to: string
     bucket: string
+    tz?: string
   },
   signal?: AbortSignal,
 ): Promise<TimeseriesResponse> {
@@ -51,6 +52,7 @@ export async function fetchTimeseries(
     from: input.from,
     to: input.to,
     bucket: input.bucket,
+    tz: input.tz || Intl.DateTimeFormat().resolvedOptions().timeZone || undefined,
   })
   const res = await fetch(url, { signal })
   if (!res.ok) {

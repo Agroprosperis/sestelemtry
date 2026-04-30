@@ -18,7 +18,7 @@ type Handlers struct {
 
 type storeReader interface {
 	Current(ctx context.Context, organizationID string, metricKeys []string) (CurrentResponse, error)
-	Timeseries(ctx context.Context, organizationID string, metricKeys []string, from, to time.Time, bucket string) (TimeseriesResponse, error)
+	Timeseries(ctx context.Context, organizationID string, metricKeys []string, from, to time.Time, bucket, tz string) (TimeseriesResponse, error)
 	DAMPrices(ctx context.Context, zone int, from, to time.Time) (DAMPricesResponse, error)
 	Ready(ctx context.Context) error
 }
@@ -111,12 +111,12 @@ func (h *Handlers) timeseries(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	from, to, bucket, err := parseRange(r)
+	from, to, bucket, tz, err := parseRange(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	resp, err := h.store.Timeseries(r.Context(), orgID, metricKeys, from, to, bucket)
+	resp, err := h.store.Timeseries(r.Context(), orgID, metricKeys, from, to, bucket, tz)
 	if err != nil {
 		h.log.Error("api_timeseries", "organization_id", orgID, "metric_keys", metricKeys, "err", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
@@ -200,26 +200,30 @@ func parseDateRange(r *http.Request) (from, to time.Time, err error) {
 	return from, to, nil
 }
 
-func parseRange(r *http.Request) (from time.Time, to time.Time, bucket string, err error) {
+func parseRange(r *http.Request) (from time.Time, to time.Time, bucket, tz string, err error) {
 	fromStr := strings.TrimSpace(r.URL.Query().Get("from"))
 	toStr := strings.TrimSpace(r.URL.Query().Get("to"))
 	bucket = strings.TrimSpace(r.URL.Query().Get("bucket"))
+	tz = strings.TrimSpace(r.URL.Query().Get("tz"))
 	if bucket == "" {
 		bucket = "15 minutes"
+	}
+	if tz == "" {
+		tz = "UTC"
 	}
 	if fromStr != "" {
 		from, err = time.Parse(time.RFC3339, fromStr)
 		if err != nil {
-			return time.Time{}, time.Time{}, "", err
+			return time.Time{}, time.Time{}, "", "", err
 		}
 	}
 	if toStr != "" {
 		to, err = time.Parse(time.RFC3339, toStr)
 		if err != nil {
-			return time.Time{}, time.Time{}, "", err
+			return time.Time{}, time.Time{}, "", "", err
 		}
 	}
-	return from, to, bucket, nil
+	return from, to, bucket, tz, nil
 }
 
 func (h *Handlers) withCORS(next http.Handler) http.Handler {

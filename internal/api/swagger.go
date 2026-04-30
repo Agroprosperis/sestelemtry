@@ -195,6 +195,13 @@ paths:
             type: string
             default: 15 minutes
           description: Aggregation bucket interval
+        - name: tz
+          in: query
+          required: false
+          schema:
+            type: string
+            default: UTC
+          description: IANA timezone used to align bucket boundaries (e.g. Europe/Kyiv)
       responses:
         "200":
           description: Timeseries points for chart rendering
