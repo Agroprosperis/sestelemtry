@@ -29,12 +29,23 @@ function bucketKey(date: Date, preset: RangePreset): string {
   return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}-${date.getHours()}`
 }
 
-export function energyBucketDeltaRows(
+function applyDirections(metricKeys: string[], values: Record<string, number>): EnergyRow {
+  const out: EnergyRow = { time: '' }
+  for (const key of metricKeys) {
+    const direction = ENERGY_TREND_METRIC_DIRECTIONS[key as keyof typeof ENERGY_TREND_METRIC_DIRECTIONS] ?? 1
+    out[key] = (values[key] ?? 0) * direction
+  }
+  return out
+}
+
+// indexBuckets groups bucket-contribution samples (server returns MAX - MIN per
+// bucket) into a map keyed by the local-timezone calendar slot for the chart's
+// preset. For year preset multiple daily samples sum into a single monthly key.
+function indexBuckets(
   points: TimeseriesPoint[],
   metricKeys: string[],
   preset: RangePreset,
-  anchor: Date,
-): EnergyRow[] {
+): Map<string, Record<string, number>> {
   const byKey = new Map<string, Record<string, number>>()
   for (const p of points) {
     if (!metricKeys.includes(p.metric_key)) continue
@@ -42,39 +53,31 @@ export function energyBucketDeltaRows(
     if (!Number.isFinite(t.getTime()) || !Number.isFinite(p.value)) continue
     const key = bucketKey(t, preset)
     const row = byKey.get(key) || {}
-    row[p.metric_key] = p.value
+    row[p.metric_key] = (row[p.metric_key] ?? 0) + p.value
     byKey.set(key, row)
   }
+  return byKey
+}
 
+export function energyBucketDeltaRows(
+  points: TimeseriesPoint[],
+  metricKeys: string[],
+  preset: RangePreset,
+  anchor: Date,
+): EnergyRow[] {
+  const byKey = indexBuckets(points, metricKeys, preset)
   const timeline = timelineBuckets(preset, anchor)
-  const prev = new Map<string, number>()
-
   return timeline.map(({ t, label }) => {
-    const values = byKey.get(bucketKey(new Date(t), preset)) || {}
-    const out: EnergyRow = { time: label }
-    const rawDeltas: Record<string, number> = {}
+    const date = new Date(t)
+    const values = byKey.get(bucketKey(date, preset)) || {}
+    const cell: Record<string, number> = {}
     for (const key of metricKeys) {
-      const current = values[key]
-      if (!Number.isFinite(current)) {
-        rawDeltas[key] = 0
-        continue
-      }
-      const previous = prev.get(key)
-      let delta = 0
-      if (Number.isFinite(previous)) {
-        delta = current - (previous as number)
-      }
-      if (delta < 0) delta = 0
-      prev.set(key, current)
-      rawDeltas[key] = delta
+      const v = values[key]
+      cell[key] = Number.isFinite(v) ? Math.max(v as number, 0) : 0
     }
-
-    applyApplianceConsumptionRule(rawDeltas)
-
-    for (const key of metricKeys) {
-      const direction = ENERGY_TREND_METRIC_DIRECTIONS[key as keyof typeof ENERGY_TREND_METRIC_DIRECTIONS] ?? 1
-      out[key] = (rawDeltas[key] ?? 0) * direction
-    }
-    return out
+    applyApplianceConsumptionRule(cell)
+    const row = applyDirections(metricKeys, cell)
+    row.time = label
+    return row
   })
 }

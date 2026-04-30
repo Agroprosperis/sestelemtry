@@ -71,11 +71,16 @@ func (s *Store) Timeseries(ctx context.Context, organizationID string, metricKey
 		bucket = "15 minutes"
 	}
 
+	// Bucket value is the per-bucket contribution (MAX - MIN) so callers do
+	// not have to compute deltas client-side. For monotonic counters this is
+	// the bucket's energy delta. For counters that reset within a bucket it is
+	// the visible peak; aggregations that need finer granularity (e.g. yearly
+	// totals from a daily-resetting counter) should request smaller buckets.
 	rows, err := s.pool.Query(ctx, `
 		SELECT
 			time_bucket($1::interval, time) AS bucket_time,
 			metric_key,
-			AVG(value) AS value
+			MAX(value) - MIN(value) AS value
 		FROM telemetry_samples
 		WHERE organization_id = $2
 			AND metric_key = ANY($3)

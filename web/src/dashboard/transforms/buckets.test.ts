@@ -47,11 +47,11 @@ function bucketTime(preset: 'day' | 'month' | 'year', anchor: Date, idx: number)
   return d.toISOString()
 }
 
-function pointsAt(metricKey: string, samples: { idx: number; value: number }[], anchor: Date): {
-  time: string
-  metric_key: string
-  value: number
-}[] {
+function contributionsAt(
+  metricKey: string,
+  samples: { idx: number; value: number }[],
+  anchor: Date,
+): { time: string; metric_key: string; value: number }[] {
   return samples.map(({ idx, value }) => ({
     time: bucketTime('day', anchor, idx),
     metric_key: metricKey,
@@ -63,12 +63,12 @@ describe('energyBucketDeltaRows', () => {
   const anchor = new Date(2026, 3, 30)
 
   it('produces 24 rows for the day preset and fills empty buckets with zeros', () => {
-    const points = pointsAt(
+    const points = contributionsAt(
       'pv_energy_yield_day_kwh',
       [
         { idx: 0, value: 0 },
         { idx: 1, value: 5 },
-        { idx: 2, value: 12 },
+        { idx: 2, value: 7 },
       ],
       anchor,
     )
@@ -82,12 +82,11 @@ describe('energyBucketDeltaRows', () => {
   })
 
   it('applies sign direction for sink metrics', () => {
-    const points = pointsAt(
+    const points = contributionsAt(
       'total_energy_charged_kwh',
       [
-        { idx: 0, value: 0 },
         { idx: 1, value: 1 },
-        { idx: 2, value: 4 },
+        { idx: 2, value: 3 },
       ],
       anchor,
     )
@@ -96,13 +95,12 @@ describe('energyBucketDeltaRows', () => {
     expect(rows[2].total_energy_charged_kwh).toBe(-3)
   })
 
-  it('clamps negative deltas (counter resets) to zero', () => {
-    const points = pointsAt(
+  it('clamps negative bucket values to zero', () => {
+    const points = contributionsAt(
       'pv_energy_yield_day_kwh',
       [
-        { idx: 0, value: 10 },
-        { idx: 1, value: 2 },
-        { idx: 2, value: 6 },
+        { idx: 1, value: -2 },
+        { idx: 2, value: 4 },
       ],
       anchor,
     )
@@ -120,7 +118,6 @@ describe('energyBucketDeltaRows', () => {
       'accumulated_power_consumption_kwh',
     ]
     const points = [
-      ...metricKeys.map((k) => ({ time: bucketTime('day', anchor, 0), metric_key: k, value: 0 })),
       { time: bucketTime('day', anchor, 1), metric_key: 'accumulated_electricity_purchased_kwh', value: 5 },
       { time: bucketTime('day', anchor, 1), metric_key: 'pv_energy_yield_day_kwh', value: 4 },
       { time: bucketTime('day', anchor, 1), metric_key: 'total_energy_discharged_kwh', value: 3 },
@@ -140,5 +137,20 @@ describe('energyBucketDeltaRows', () => {
   it('produces 12 rows for the year preset', () => {
     const rows = energyBucketDeltaRows([], ['pv_energy_yield_day_kwh'], 'year', anchor)
     expect(rows).toHaveLength(12)
+  })
+
+  it('sums daily contributions into months for the year preset', () => {
+    const yearAnchor = new Date(2026, 0, 1)
+    const points = [
+      { time: new Date(2026, 3, 1, 0, 0, 0).toISOString(), metric_key: 'accumulated_electricity_purchased_kwh', value: 50 },
+      { time: new Date(2026, 3, 30, 0, 0, 0).toISOString(), metric_key: 'accumulated_electricity_purchased_kwh', value: 100 },
+      { time: new Date(2026, 4, 1, 0, 0, 0).toISOString(), metric_key: 'accumulated_electricity_purchased_kwh', value: 25 },
+      { time: new Date(2026, 4, 31, 0, 0, 0).toISOString(), metric_key: 'accumulated_electricity_purchased_kwh', value: 75 },
+    ]
+    const rows = energyBucketDeltaRows(points, ['accumulated_electricity_purchased_kwh'], 'year', yearAnchor)
+    expect(rows).toHaveLength(12)
+    expect(rows[0].accumulated_electricity_purchased_kwh).toBe(0)
+    expect(rows[3].accumulated_electricity_purchased_kwh).toBe(150)
+    expect(rows[4].accumulated_electricity_purchased_kwh).toBe(100)
   })
 })
