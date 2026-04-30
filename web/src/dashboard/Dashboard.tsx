@@ -63,17 +63,16 @@ export function Dashboard() {
           periodEnergyValues={periodEnergyValues}
           loading={loading}
         />
-        <EnergyChart
-          metrics={config.energy_chart}
-          series={energySeries}
-          preset={preset}
-          summary={energySummary}
-          loading={loading}
-        />
-      </section>
-
-      <section className="dashboard-dam">
-        <DAMPriceChart series={damSeries} preset={preset} />
+        <div className="dashboard-charts">
+          <EnergyChart
+            metrics={config.energy_chart}
+            series={energySeries}
+            preset={preset}
+            summary={energySummary}
+            loading={loading}
+          />
+          <DAMPriceChart series={damSeries} preset={preset} />
+        </div>
       </section>
     </main>
   )

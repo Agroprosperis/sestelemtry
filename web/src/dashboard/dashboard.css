@@ -220,8 +220,11 @@
   font-size: 18px;
 }
 
-.dashboard-dam .chart-card {
-  margin-top: 0;
+.dashboard-charts {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
 }
 
 .dam-chart-head {

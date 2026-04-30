@@ -21,6 +21,7 @@ import (
 
 func main() {
 	configPath := flag.String("config", "config.yaml", "path to YAML config")
+	dateFlag := flag.String("date", "", "fetch a single delivery_date (YYYY-MM-DD) and exit; bypasses the daily scheduler")
 	flag.Parse()
 
 	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
@@ -74,6 +75,23 @@ func main() {
 	}
 
 	client := oree.NewClient(cfg.OREE.BaseURL, cfg.OREE.HTTPTimeout, cfg.OREE.UserAgent)
+
+	if d := strings.TrimSpace(*dateFlag); d != "" {
+		single, err := time.ParseInLocation("2006-01-02", d, tz)
+		if err != nil {
+			log.Error("date_flag", "err", err, "expected", "YYYY-MM-DD")
+			os.Exit(1)
+		}
+		log.Info("dam_one_shot",
+			"delivery_date", single.Format("2006-01-02"),
+			"zone", cfg.OREE.Zone,
+		)
+		if err := fetchAndStore(ctx, log, client, pool, cfg.OREE, single); err != nil {
+			log.Error("dam_one_shot_failed", "err", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	log.Info("dam_collector_start",
 		"zone", cfg.OREE.Zone,
