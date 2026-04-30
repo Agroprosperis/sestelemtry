@@ -280,13 +280,21 @@ function formatChartNumber(value: number) {
   }).format(rounded)
 }
 
-function energyColor(metricKey: string): string {
+function energyColor(metricKey: string, preset: RangePreset): string {
+  if (preset === 'day') {
+    if (metricKey === 'accumulated_electricity_purchased_kwh') return '#9ca3af'
+    if (metricKey === 'total_energy_discharged_kwh') return '#2563eb'
+    if (metricKey === 'pv_energy_yield_day_kwh') return '#22c55e'
+    if (metricKey === 'accumulated_electricity_sold_kwh') return '#f97316'
+    if (metricKey === 'total_energy_charged_kwh') return '#2563eb'
+    if (metricKey === 'accumulated_power_consumption_kwh') return '#f59e0b'
+  }
   if (metricKey === 'accumulated_electricity_purchased_kwh') return '#16a34a'
-  if (metricKey === 'pv_energy_yield_day_kwh') return '#22c55e'
-  if (metricKey === 'total_energy_discharged_kwh') return '#6b7280'
-  if (metricKey === 'accumulated_electricity_sold_kwh') return '#f59e0b'
-  if (metricKey === 'total_energy_charged_kwh') return '#0ea5e9'
-  if (metricKey === 'accumulated_power_consumption_kwh') return '#fb923c'
+  if (metricKey === 'total_energy_discharged_kwh') return '#4ade80'
+  if (metricKey === 'pv_energy_yield_day_kwh') return '#86efac'
+  if (metricKey === 'accumulated_electricity_sold_kwh') return '#f97316'
+  if (metricKey === 'total_energy_charged_kwh') return '#fb923c'
+  if (metricKey === 'accumulated_power_consumption_kwh') return '#fdba74'
   return '#8b5cf6'
 }
 
@@ -430,13 +438,11 @@ function App() {
           <div className="chart-wrap">
             {loading ? (
               <p className="chart-placeholder">Loading...</p>
-            ) : preset !== 'day' && energyBarSeries.length === 0 ? (
-              <p className="chart-placeholder">No data available for selected range.</p>
-            ) : energySeries.length === 0 ? (
+            ) : energyBarSeries.length === 0 ? (
               <p className="chart-placeholder">No data available for selected range.</p>
             ) : preset === 'day' ? (
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={energySeries}>
+                <LineChart data={energyBarSeries}>
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis dataKey="time" />
                   <YAxis tickFormatter={(v) => formatChartNumber(Number(v))} />
@@ -450,7 +456,7 @@ function App() {
                       dataKey={m.key}
                       name={m.label}
                       dot={false}
-                      stroke={energyColor(m.key)}
+                      stroke={energyColor(m.key, preset)}
                     />
                   ))}
                 </LineChart>
@@ -465,7 +471,13 @@ function App() {
                   <Legend />
                   <ReferenceLine y={0} stroke="#64748b" />
                   {config.energy_chart.map((m) => (
-                    <Bar key={m.key} dataKey={m.key} name={m.label} stackId="energy" fill={energyColor(m.key)} />
+                    <Bar
+                      key={m.key}
+                      dataKey={m.key}
+                      name={m.label}
+                      stackId="energy"
+                      fill={energyColor(m.key, preset)}
+                    />
                   ))}
                 </BarChart>
               </ResponsiveContainer>
