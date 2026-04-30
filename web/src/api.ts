@@ -1,9 +1,14 @@
 import type { CurrentResponse, DashboardConfig, TimeseriesResponse } from './types'
 
-const API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined) || 'http://localhost:8080'
+const API_BASE = ((import.meta.env.VITE_API_BASE_URL as string | undefined) || '').replace(/\/+$/, '')
+
+function withBase(path: string): string {
+  if (!API_BASE) return path
+  return `${API_BASE}${path}`
+}
 
 function buildURL(path: string, params: Record<string, string | undefined>) {
-  const url = new URL(path, API_BASE)
+  const url = new URL(withBase(path), window.location.origin)
   for (const [k, v] of Object.entries(params)) {
     if (!v) continue
     url.searchParams.set(k, v)
@@ -12,7 +17,7 @@ function buildURL(path: string, params: Record<string, string | undefined>) {
 }
 
 export async function fetchDashboardConfig(): Promise<DashboardConfig> {
-  const res = await fetch(`${API_BASE}/api/v1/dashboard-config`)
+  const res = await fetch(withBase('/api/v1/dashboard-config'))
   if (!res.ok) {
     throw new Error(`dashboard-config request failed: ${res.status}`)
   }

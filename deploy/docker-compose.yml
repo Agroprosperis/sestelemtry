@@ -50,7 +50,7 @@ services:
     depends_on:
       - api
     environment:
-      VITE_API_BASE_URL: http://api:8080
+      VITE_API_BASE_URL: ""
     ports:
       - "5173:5173"
 
