@@ -23,8 +23,13 @@ function isAbortError(e: unknown): boolean {
   return e instanceof DOMException && e.name === 'AbortError'
 }
 
-export function useDashboardData(input: { organizationID: string; preset: RangePreset }): DashboardData {
-  const { organizationID, preset } = input
+export function useDashboardData(input: {
+  organizationID: string
+  preset: RangePreset
+  anchor: Date
+}): DashboardData {
+  const { organizationID, preset, anchor } = input
+  const anchorTime = anchor.getTime()
   const [config, setConfig] = useState<DashboardConfig>(FALLBACK_DASHBOARD_CONFIG)
   const [current, setCurrent] = useState<CurrentResponse | null>(null)
   const [energySeries, setEnergySeries] = useState<EnergyRow[]>([])
@@ -75,13 +80,14 @@ export function useDashboardData(input: { organizationID: string; preset: RangeP
       try {
         const cfg = configRef.current
         const energyKeys = cfg.energy_chart.map((m) => m.key)
+        const anchorDate = new Date(anchorTime)
         const [cur, energy, dayEnergy] = await Promise.all([
           fetchCurrent(organizationID, controller.signal),
           fetchTimeseries(
             {
               organizationID,
               metricKeys: energyKeys,
-              ...rangeParams(preset),
+              ...rangeParams(preset, anchorDate),
             },
             controller.signal,
           ),
@@ -89,7 +95,7 @@ export function useDashboardData(input: { organizationID: string; preset: RangeP
             {
               organizationID,
               metricKeys: DAY_ENERGY_METRIC_KEYS_LIST as string[],
-              ...dayRangeParams(),
+              ...dayRangeParams(preset === 'day' ? anchorDate : new Date()),
             },
             controller.signal,
           ),
@@ -122,7 +128,7 @@ export function useDashboardData(input: { organizationID: string; preset: RangeP
       if (timer !== null) window.clearInterval(timer)
       document.removeEventListener('visibilitychange', onVisibilityChange)
     }
-  }, [organizationID, preset])
+  }, [organizationID, preset, anchorTime])
 
   const energySummary = useMemo(() => energySummaryFromSeries(energySeries), [energySeries])
 

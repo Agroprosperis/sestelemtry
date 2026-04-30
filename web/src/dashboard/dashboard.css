@@ -76,6 +76,57 @@
   color: #ffffff;
 }
 
+.period-picker {
+  display: inline-flex;
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 2px;
+  color: #334155;
+  gap: 2px;
+}
+
+.period-picker .period-nav {
+  border: none;
+  background: transparent;
+  color: #475569;
+  font-size: 18px;
+  line-height: 1;
+  padding: 4px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.period-picker .period-nav:hover:not(:disabled) {
+  background: #f1f5f9;
+}
+
+.period-picker .period-nav:disabled {
+  color: #cbd5e1;
+  cursor: not-allowed;
+}
+
+.period-picker .period-input {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 8px;
+  min-width: 140px;
+  justify-content: center;
+}
+
+.period-picker input[type='date'],
+.period-picker input[type='month'],
+.period-picker select {
+  border: none;
+  background: transparent;
+  color: #0f172a;
+  font-size: 14px;
+  outline: none;
+  font-family: inherit;
+  padding: 0;
+}
+
 .error-banner {
   border: 1px solid #fecaca;
   background: #fee2e2;

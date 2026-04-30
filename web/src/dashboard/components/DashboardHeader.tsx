@@ -1,5 +1,6 @@
 import type { RangePreset } from '../range'
 import { OrganizationSelect } from './OrganizationSelect'
+import { PeriodPicker } from './PeriodPicker'
 import { RangeSwitch } from './RangeSwitch'
 
 type Props = {
@@ -8,6 +9,8 @@ type Props = {
   onOrganizationChange: (next: string) => void
   preset: RangePreset
   onPresetChange: (next: RangePreset) => void
+  anchor: Date
+  onAnchorChange: (next: Date) => void
 }
 
 export function DashboardHeader({
@@ -16,6 +19,8 @@ export function DashboardHeader({
   onOrganizationChange,
   preset,
   onPresetChange,
+  anchor,
+  onAnchorChange,
 }: Props) {
   return (
     <header className="dashboard-header">
@@ -26,6 +31,7 @@ export function DashboardHeader({
       <div className="header-controls">
         <OrganizationSelect value={organizationID} options={organizationOptions} onChange={onOrganizationChange} />
         <RangeSwitch value={preset} onChange={onPresetChange} />
+        <PeriodPicker preset={preset} anchor={anchor} onChange={onAnchorChange} />
       </div>
     </header>
   )

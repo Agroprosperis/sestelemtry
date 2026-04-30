@@ -1,15 +1,28 @@
-import { useState } from 'react'
+import { useCallback, useState } from 'react'
 import './dashboard.css'
 import { DashboardHeader } from './components/DashboardHeader'
 import { EnergyChart } from './components/EnergyChart'
 import { MetricsPanel } from './components/MetricsPanel'
 import { useDashboardData } from './hooks/useDashboardData'
 import { useOrganizationParam } from './hooks/useOrganizationParam'
-import type { RangePreset } from './range'
+import { startOfPeriod, type RangePreset } from './range'
 
 export function Dashboard() {
-  const [preset, setPreset] = useState<RangePreset>('day')
+  const [preset, setPresetState] = useState<RangePreset>('day')
+  const [anchor, setAnchor] = useState<Date>(() => startOfPeriod('day', new Date()))
   const { organizationID, options, change: onOrganizationChange } = useOrganizationParam()
+
+  const onPresetChange = useCallback((next: RangePreset) => {
+    setPresetState(next)
+    setAnchor(startOfPeriod(next, new Date()))
+  }, [])
+
+  const onAnchorChange = useCallback(
+    (next: Date) => {
+      setAnchor(startOfPeriod(preset, next))
+    },
+    [preset],
+  )
 
   const {
     config,
@@ -20,7 +33,7 @@ export function Dashboard() {
     energySummary,
     loading,
     error,
-  } = useDashboardData({ organizationID, preset })
+  } = useDashboardData({ organizationID, preset, anchor })
 
   return (
     <main className="dashboard-page">
@@ -29,7 +42,9 @@ export function Dashboard() {
         organizationOptions={options}
         onOrganizationChange={onOrganizationChange}
         preset={preset}
-        onPresetChange={setPreset}
+        onPresetChange={onPresetChange}
+        anchor={anchor}
+        onAnchorChange={onAnchorChange}
       />
 
       {error && (
