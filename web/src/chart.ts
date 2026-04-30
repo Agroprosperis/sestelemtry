@@ -1,10 +1,15 @@
 import type { TimeseriesPoint } from './types'
 
-export function toChartRows(points: TimeseriesPoint[], metricKeys: string[]) {
+export function toChartRows(
+  points: TimeseriesPoint[],
+  metricKeys: string[],
+  timeLabelFormatter: (date: Date) => string = (date) => date.toLocaleString(),
+) {
   const rows = new Map<string, Record<string, number | string>>()
   for (const p of points) {
-    const key = new Date(p.time).toISOString()
-    const existing = rows.get(key) || { time: new Date(p.time).toLocaleString() }
+    const date = new Date(p.time)
+    const key = date.toISOString()
+    const existing = rows.get(key) || { time: timeLabelFormatter(date) }
     existing[p.metric_key] = p.value
     rows.set(key, existing)
   }

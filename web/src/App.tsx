@@ -152,8 +152,23 @@ function normalizePeriodEnergyPoints(points: TimeseriesPoint[]): TimeseriesPoint
     if (!baseline) {
       return p
     }
-    return { ...p, value: p.value - baseline.value }
+    const delta = p.value - baseline.value
+    const safeDelta = delta > 0 ? delta : 0
+    return {
+      ...p,
+      value: p.metric_key === 'total_energy_discharged_kwh' ? -safeDelta : safeDelta,
+    }
   })
+}
+
+function formatTimeLabel(date: Date, preset: RangePreset): string {
+  if (preset === 'year') {
+    return date.toLocaleDateString(undefined, { month: 'short' })
+  }
+  if (preset === 'month') {
+    return date.toLocaleDateString(undefined, { day: '2-digit' })
+  }
+  return date.toLocaleTimeString(undefined, { hour: '2-digit' })
 }
 
 function energyBucketDeltaRows(points: TimeseriesPoint[], preset: RangePreset) {
@@ -174,12 +189,7 @@ function energyBucketDeltaRows(points: TimeseriesPoint[], preset: RangePreset) {
 
   return sorted.map((row) => {
     const dt = new Date(row.t)
-    const timeLabel =
-      preset === 'year'
-        ? dt.toLocaleDateString(undefined, { month: 'short' })
-        : preset === 'month'
-        ? dt.toLocaleDateString(undefined, { day: '2-digit' })
-        : dt.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+    const timeLabel = formatTimeLabel(dt, preset)
     const out: Record<string, string | number> = { time: timeLabel }
     for (const key of metricKeys) {
       const current = row.values[key]
@@ -281,8 +291,12 @@ function App() {
         ])
         if (!active) return
         setCurrent(cur)
-        setPowerSeries(toChartRows(power.points, cfg.power_chart.map((m) => m.key)))
-        setEnergySeries(toChartRows(normalizePeriodEnergyPoints(energy.points), cfg.energy_chart.map((m) => m.key)))
+        setPowerSeries(toChartRows(power.points, cfg.power_chart.map((m) => m.key), (d) => formatTimeLabel(d, preset)))
+        setEnergySeries(
+          toChartRows(normalizePeriodEnergyPoints(energy.points), cfg.energy_chart.map((m) => m.key), (d) =>
+            formatTimeLabel(d, preset),
+          ),
+        )
         setEnergyBarSeries(energyBucketDeltaRows(energy.points, preset))
         setPeriodEnergyValues(periodEnergyDeltas(energy.points))
         setDayEnergyValues(dayEnergyDeltas(dayEnergy.points))
