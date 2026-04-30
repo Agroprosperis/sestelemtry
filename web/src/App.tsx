@@ -25,6 +25,11 @@ const fallbackConfig: DashboardConfig = {
     { key: 'active_ess_power_kw', label: 'Active ESS Power', unit: 'kW' },
     { key: 'grid_connected_active_power_kw', label: 'Grid Active Power', unit: 'kW' },
     { key: 'soc_percent', label: 'SOC', unit: '%' },
+    { key: 'accumulated_pv_energy_yield_kwh', label: 'Accumulated PV Yield', unit: 'kWh' },
+    { key: 'accumulated_electricity_purchased_kwh', label: 'Accumulated Grid Import', unit: 'kWh' },
+    { key: 'accumulated_electricity_sold_kwh', label: 'Accumulated Grid Export', unit: 'kWh' },
+    { key: 'accumulated_power_consumption_kwh', label: 'Accumulated Consumption', unit: 'kWh' },
+    { key: 'total_power_supply_from_grid_kwh', label: 'Total Supply From Grid', unit: 'kWh' },
   ],
   power_chart: [
     { key: 'active_pv_power_kw', label: 'PV Power', unit: 'kW' },

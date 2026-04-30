@@ -11,6 +11,11 @@ var DefaultDashboardMetrics = []string{
 	"pv_energy_yield_day_kwh",
 	"total_energy_charged_kwh",
 	"total_energy_discharged_kwh",
+	"accumulated_pv_energy_yield_kwh",
+	"accumulated_electricity_purchased_kwh",
+	"accumulated_electricity_sold_kwh",
+	"accumulated_power_consumption_kwh",
+	"total_power_supply_from_grid_kwh",
 }
 
 type DashboardMetric struct {
@@ -34,6 +39,11 @@ var DefaultDashboardConfig = DashboardConfig{
 		{Key: "soc_percent", Label: "SOC", Unit: "%"},
 		{Key: "total_energy_charged_kwh", Label: "Total Energy Charged", Unit: "kWh"},
 		{Key: "total_energy_discharged_kwh", Label: "Total Energy Discharged", Unit: "kWh"},
+		{Key: "accumulated_pv_energy_yield_kwh", Label: "Accumulated PV Yield", Unit: "kWh"},
+		{Key: "accumulated_electricity_purchased_kwh", Label: "Accumulated Grid Import", Unit: "kWh"},
+		{Key: "accumulated_electricity_sold_kwh", Label: "Accumulated Grid Export", Unit: "kWh"},
+		{Key: "accumulated_power_consumption_kwh", Label: "Accumulated Consumption", Unit: "kWh"},
+		{Key: "total_power_supply_from_grid_kwh", Label: "Total Supply From Grid", Unit: "kWh"},
 	},
 	PowerChart: []DashboardMetric{
 		{Key: "active_pv_power_kw", Label: "PV Power", Unit: "kW"},
