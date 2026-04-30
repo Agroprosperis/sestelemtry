@@ -15,7 +15,7 @@ export function Dashboard() {
 
   const onPresetChange = useCallback((next: RangePreset) => {
     setPresetState(next)
-    setAnchor(startOfPeriod(next, new Date()))
+    setAnchor((prev) => startOfPeriod(next, prev))
   }, [])
 
   const onAnchorChange = useCallback(

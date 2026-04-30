@@ -40,19 +40,23 @@ export function EnergySummary({ summary }: Props) {
           <strong>{formatEnergyCompactKWh(summary.consumption)}</strong>
         </div>
         <div className="energy-summary-split">
-          <span>{formatChartNumber(summary.loadFromPVPct)}%</span>
+          <span>{formatChartNumber(summary.selfSufficiencyPct)}%</span>
           <span>{formatChartNumber(summary.loadFromGridPct)}%</span>
         </div>
         <div className="energy-summary-bar sink">
           <span
             className="energy-summary-fill sink"
-            style={{ width: `${Math.min(summary.loadFromPVPct, 100)}%` }}
+            style={{ width: `${Math.min(summary.selfSufficiencyPct, 100)}%` }}
           />
         </div>
         <div className="energy-summary-rows">
           <div className="energy-summary-row">
-            <span>Від ФЕ-майданчика</span>
+            <span>Від ФЕ</span>
             <strong>{formatEnergyCompactKWh(summary.fromPV)}</strong>
+          </div>
+          <div className="energy-summary-row">
+            <span>Від накопичувача</span>
+            <strong>{formatEnergyCompactKWh(summary.fromBattery)}</strong>
           </div>
           <div className="energy-summary-row">
             <span>З електромережі</span>

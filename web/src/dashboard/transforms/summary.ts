@@ -18,10 +18,13 @@ export type EnergySummary = {
   consumption: number
   fromGrid: number
   fromPV: number
+  fromBattery: number
   pvConsumedPct: number
   pvExportPct: number
   loadFromPVPct: number
+  loadFromBatteryPct: number
   loadFromGridPct: number
+  selfSufficiencyPct: number
 }
 
 export function energySummaryFromSeries(series: EnergyRow[]): EnergySummary {
@@ -30,23 +33,40 @@ export function energySummaryFromSeries(series: EnergyRow[]): EnergySummary {
   const pvConsumed = Math.max(pvProduced - gridExport, 0)
   const consumption = sumSeriesValue(series, 'accumulated_power_consumption_kwh', 'absolute')
   const fromGrid = sumSeriesValue(series, 'accumulated_electricity_purchased_kwh', 'positive')
-  const fromPV = Math.max(consumption - fromGrid, 0)
+
+  const charge = sumSeriesValue(series, 'total_energy_charged_kwh', 'absolute')
+  const discharge = sumSeriesValue(series, 'total_energy_discharged_kwh', 'absolute')
+  const batteryNet = Math.max(discharge - charge, 0)
+
+  // Allocate consumption among sources: trust measured grid purchase first (it
+  // matches the chart's grid bar), then battery net discharge (matches the
+  // discharge bar minus charge bar), and treat the remainder as PV-to-load.
+  // Sum of the three rows equals consumption by construction.
+  const fromGridUsed = Math.min(fromGrid, consumption)
+  const remainingAfterGrid = Math.max(consumption - fromGridUsed, 0)
+  const fromBattery = Math.min(batteryNet, remainingAfterGrid)
+  const fromPV = Math.max(remainingAfterGrid - fromBattery, 0)
 
   const pvConsumedPct = pvProduced > 0 ? (pvConsumed / pvProduced) * 100 : 0
   const pvExportPct = pvProduced > 0 ? (gridExport / pvProduced) * 100 : 0
   const loadFromPVPct = consumption > 0 ? (fromPV / consumption) * 100 : 0
-  const loadFromGridPct = consumption > 0 ? (fromGrid / consumption) * 100 : 0
+  const loadFromBatteryPct = consumption > 0 ? (fromBattery / consumption) * 100 : 0
+  const loadFromGridPct = consumption > 0 ? (fromGridUsed / consumption) * 100 : 0
+  const selfSufficiencyPct = loadFromPVPct + loadFromBatteryPct
 
   return {
     pvProduced,
     gridExport,
     pvConsumed,
     consumption,
-    fromGrid,
+    fromGrid: fromGridUsed,
     fromPV,
+    fromBattery,
     pvConsumedPct,
     pvExportPct,
     loadFromPVPct,
+    loadFromBatteryPct,
     loadFromGridPct,
+    selfSufficiencyPct,
   }
 }
