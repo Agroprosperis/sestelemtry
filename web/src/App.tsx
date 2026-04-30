@@ -439,6 +439,27 @@ function App() {
       {error && <section className="error-banner">Failed to load data: {error}</section>}
 
       <section className="dashboard-main">
+        <aside className="metrics-panel">
+          <h2>Поточні показники</h2>
+          <section className="cards-grid">
+            {config.cards.map((card) => (
+              <article key={card.key} className="card" aria-busy={loading}>
+                <p className="card-label">{card.label}</p>
+                <p className="card-value">
+                  {loading
+                    ? '...'
+                    : dayEnergyMetricKeys.has(card.key)
+                      ? formatNumber(dayEnergyValues[card.key] ?? 0, card.unit)
+                      : periodEnergyMetricKeys.has(card.key)
+                      ? formatNumber(periodEnergyValues[card.key] ?? 0, card.unit)
+                      : formatValue(card, current)}{' '}
+                  <span>{card.unit}</span>
+                </p>
+              </article>
+            ))}
+          </section>
+        </aside>
+
         <div className="chart-card">
           <h2>Energy Trend</h2>
           <div className="chart-wrap">
@@ -490,27 +511,6 @@ function App() {
             )}
           </div>
         </div>
-
-        <aside className="metrics-panel">
-          <h2>Поточні показники</h2>
-          <section className="cards-grid">
-            {config.cards.map((card) => (
-              <article key={card.key} className="card" aria-busy={loading}>
-                <p className="card-label">{card.label}</p>
-                <p className="card-value">
-                  {loading
-                    ? '...'
-                    : dayEnergyMetricKeys.has(card.key)
-                      ? formatNumber(dayEnergyValues[card.key] ?? 0, card.unit)
-                      : periodEnergyMetricKeys.has(card.key)
-                      ? formatNumber(periodEnergyValues[card.key] ?? 0, card.unit)
-                      : formatValue(card, current)}{' '}
-                  <span>{card.unit}</span>
-                </p>
-              </article>
-            ))}
-          </section>
-        </aside>
       </section>
     </main>
   )
