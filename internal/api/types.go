@@ -52,9 +52,12 @@ var DefaultDashboardConfig = DashboardConfig{
 		{Key: "grid_connected_active_power_kw", Label: "Активна потужність мережі", Unit: "kW"},
 	},
 	EnergyChart: []DashboardMetric{
-		{Key: "pv_energy_yield_day_kwh", Label: "Виробіток за сьогодні", Unit: "kWh"},
-		{Key: "total_energy_charged_kwh", Label: "Енергія, отримана ESS сьогодні", Unit: "kWh"},
-		{Key: "total_energy_discharged_kwh", Label: "Енергія, витрачена ESS сьогодні", Unit: "kWh"},
+		{Key: "accumulated_electricity_purchased_kwh", Label: "З електромережі", Unit: "kWh"},
+		{Key: "total_energy_discharged_kwh", Label: "Розряджання системи накопичення енергії", Unit: "kWh"},
+		{Key: "pv_energy_yield_day_kwh", Label: "Вироблено фотоелектричною установкою", Unit: "kWh"},
+		{Key: "accumulated_electricity_sold_kwh", Label: "Подано в електромережу", Unit: "kWh"},
+		{Key: "total_energy_charged_kwh", Label: "Заряджання системи накопичення енергії", Unit: "kWh"},
+		{Key: "accumulated_power_consumption_kwh", Label: "Споживання приладами", Unit: "kWh"},
 	},
 }
 

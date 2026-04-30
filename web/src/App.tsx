@@ -19,6 +19,16 @@ import { toChartRows } from './chart'
 type RangePreset = 'day' | 'month' | 'year'
 const knownOrganizations = ['demo-org', 'pe']
 const periodEnergyMetricKeys = new Set(['total_energy_charged_kwh', 'total_energy_discharged_kwh'])
+const energyTrendMetricDirections: Record<string, 1 | -1> = {
+  accumulated_electricity_purchased_kwh: 1,
+  total_energy_discharged_kwh: 1,
+  pv_energy_yield_day_kwh: 1,
+  accumulated_electricity_sold_kwh: -1,
+  total_energy_charged_kwh: -1,
+  accumulated_power_consumption_kwh: -1,
+}
+const energyTrendMetricKeys = new Set(Object.keys(energyTrendMetricDirections))
+const applianceConsumptionMetricKey = 'accumulated_power_consumption_kwh'
 const dayEnergyMetricKeys = new Set([
   'accumulated_pv_energy_yield_kwh',
   'accumulated_power_consumption_kwh',
@@ -48,9 +58,12 @@ const fallbackConfig: DashboardConfig = {
     { key: 'grid_connected_active_power_kw', label: 'Активна потужність мережі', unit: 'kW' },
   ],
   energy_chart: [
-    { key: 'pv_energy_yield_day_kwh', label: 'Виробіток за сьогодні', unit: 'kWh' },
-    { key: 'total_energy_charged_kwh', label: 'Енергія, отримана ESS сьогодні', unit: 'kWh' },
-    { key: 'total_energy_discharged_kwh', label: 'Енергія, витрачена ESS сьогодні', unit: 'kWh' },
+    { key: 'accumulated_electricity_purchased_kwh', label: 'З електромережі', unit: 'kWh' },
+    { key: 'total_energy_discharged_kwh', label: 'Розряджання системи накопичення енергії', unit: 'kWh' },
+    { key: 'pv_energy_yield_day_kwh', label: 'Вироблено фотоелектричною установкою', unit: 'kWh' },
+    { key: 'accumulated_electricity_sold_kwh', label: 'Подано в електромережу', unit: 'kWh' },
+    { key: 'total_energy_charged_kwh', label: 'Заряджання системи накопичення енергії', unit: 'kWh' },
+    { key: 'accumulated_power_consumption_kwh', label: 'Споживання приладами', unit: 'kWh' },
   ],
 }
 
@@ -138,7 +151,7 @@ function dayEnergyDeltas(points: TimeseriesPoint[]): Record<string, number> {
 function normalizePeriodEnergyPoints(points: TimeseriesPoint[]): TimeseriesPoint[] {
   const baselines = new Map<string, { time: number; value: number }>()
   for (const p of points) {
-    if (!periodEnergyMetricKeys.has(p.metric_key)) continue
+    if (!energyTrendMetricKeys.has(p.metric_key)) continue
     const t = new Date(p.time).getTime()
     if (!Number.isFinite(t) || !Number.isFinite(p.value)) continue
     const baseline = baselines.get(p.metric_key)
@@ -147,19 +160,39 @@ function normalizePeriodEnergyPoints(points: TimeseriesPoint[]): TimeseriesPoint
     }
   }
 
-  return points.map((p) => {
-    if (!periodEnergyMetricKeys.has(p.metric_key)) {
-      return p
-    }
+  const rawByTime = new Map<string, Record<string, number>>()
+  for (const p of points) {
+    if (!energyTrendMetricKeys.has(p.metric_key)) continue
     const baseline = baselines.get(p.metric_key)
-    if (!baseline) {
-      return p
-    }
+    if (!baseline) continue
     const delta = p.value - baseline.value
     const safeDelta = delta > 0 ? delta : 0
+    const iso = new Date(p.time).toISOString()
+    const row = rawByTime.get(iso) || {}
+    row[p.metric_key] = safeDelta
+    rawByTime.set(iso, row)
+  }
+
+  return points.map((p) => {
+    if (!energyTrendMetricKeys.has(p.metric_key)) {
+      return p
+    }
+    const iso = new Date(p.time).toISOString()
+    const row = rawByTime.get(iso) || {}
+    let safeDelta = row[p.metric_key] ?? 0
+    if (p.metric_key === applianceConsumptionMetricKey) {
+      // Appliance consumption = from grid + PV production + ESS discharge - ESS charge.
+      safeDelta =
+        (row.accumulated_electricity_purchased_kwh ?? 0) +
+        (row.pv_energy_yield_day_kwh ?? 0) +
+        (row.total_energy_discharged_kwh ?? 0) -
+        (row.total_energy_charged_kwh ?? 0)
+      if (safeDelta < 0) safeDelta = 0
+    }
+    const direction = energyTrendMetricDirections[p.metric_key] ?? 1
     return {
       ...p,
-      value: p.metric_key === 'total_energy_discharged_kwh' ? -safeDelta : safeDelta,
+      value: safeDelta * direction,
     }
   })
 }
@@ -174,8 +207,7 @@ function formatTimeLabel(date: Date, preset: RangePreset): string {
   return date.toLocaleTimeString(undefined, { hour: '2-digit' })
 }
 
-function energyBucketDeltaRows(points: TimeseriesPoint[], preset: RangePreset) {
-  const metricKeys = ['pv_energy_yield_day_kwh', 'total_energy_charged_kwh', 'total_energy_discharged_kwh']
+function energyBucketDeltaRows(points: TimeseriesPoint[], metricKeys: string[], preset: RangePreset) {
   const keyed = new Map<string, { t: number; values: Record<string, number> }>()
   for (const p of points) {
     if (!metricKeys.includes(p.metric_key)) continue
@@ -194,10 +226,11 @@ function energyBucketDeltaRows(points: TimeseriesPoint[], preset: RangePreset) {
     const dt = new Date(row.t)
     const timeLabel = formatTimeLabel(dt, preset)
     const out: Record<string, string | number> = { time: timeLabel }
+    const rawDeltas: Record<string, number> = {}
     for (const key of metricKeys) {
       const current = row.values[key]
       if (!Number.isFinite(current)) {
-        out[key] = 0
+        rawDeltas[key] = 0
         continue
       }
       const previous = prev.get(key)
@@ -207,7 +240,23 @@ function energyBucketDeltaRows(points: TimeseriesPoint[], preset: RangePreset) {
       }
       if (delta < 0) delta = 0
       prev.set(key, current)
-      out[key] = key === 'total_energy_discharged_kwh' ? -delta : delta
+      rawDeltas[key] = delta
+    }
+
+    if (applianceConsumptionMetricKey in rawDeltas) {
+      rawDeltas[applianceConsumptionMetricKey] =
+        (rawDeltas.accumulated_electricity_purchased_kwh ?? 0) +
+        (rawDeltas.pv_energy_yield_day_kwh ?? 0) +
+        (rawDeltas.total_energy_discharged_kwh ?? 0) -
+        (rawDeltas.total_energy_charged_kwh ?? 0)
+      if (rawDeltas[applianceConsumptionMetricKey] < 0) {
+        rawDeltas[applianceConsumptionMetricKey] = 0
+      }
+    }
+
+    for (const key of metricKeys) {
+      const direction = energyTrendMetricDirections[key] ?? 1
+      out[key] = (rawDeltas[key] ?? 0) * direction
     }
     return out
   })
@@ -232,9 +281,12 @@ function formatChartNumber(value: number) {
 }
 
 function energyColor(metricKey: string): string {
+  if (metricKey === 'accumulated_electricity_purchased_kwh') return '#16a34a'
+  if (metricKey === 'pv_energy_yield_day_kwh') return '#22c55e'
   if (metricKey === 'total_energy_discharged_kwh') return '#6b7280'
+  if (metricKey === 'accumulated_electricity_sold_kwh') return '#f59e0b'
   if (metricKey === 'total_energy_charged_kwh') return '#0ea5e9'
-  if (metricKey === 'pv_energy_yield_day_kwh') return '#16a34a'
+  if (metricKey === 'accumulated_power_consumption_kwh') return '#fb923c'
   return '#8b5cf6'
 }
 
@@ -307,7 +359,7 @@ function App() {
             formatTimeLabel(d, preset),
           ),
         )
-        setEnergyBarSeries(energyBucketDeltaRows(energy.points, preset))
+        setEnergyBarSeries(energyBucketDeltaRows(energy.points, cfg.energy_chart.map((m) => m.key), preset))
         setPeriodEnergyValues(periodEnergyDeltas(energy.points))
         setDayEnergyValues(dayEnergyDeltas(dayEnergy.points))
       } catch (e) {
@@ -381,6 +433,53 @@ function App() {
 
       <section className="chart-grid">
         <div className="chart-card">
+          <h2>Energy Trend</h2>
+          <div className="chart-wrap">
+            {loading ? (
+              <p className="chart-placeholder">Loading...</p>
+            ) : preset !== 'day' && energyBarSeries.length === 0 ? (
+              <p className="chart-placeholder">No data available for selected range.</p>
+            ) : energySeries.length === 0 ? (
+              <p className="chart-placeholder">No data available for selected range.</p>
+            ) : preset !== 'day' ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={energyBarSeries} stackOffset="sign">
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="time" />
+                  <YAxis tickFormatter={(v) => formatChartNumber(Number(v))} />
+                  <Tooltip formatter={(v) => formatChartNumber(Number(v))} />
+                  <Legend />
+                  <ReferenceLine y={0} stroke="#64748b" />
+                  {config.energy_chart.map((m) => (
+                    <Bar key={m.key} dataKey={m.key} name={m.label} stackId="energy" fill={energyColor(m.key)} />
+                  ))}
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={energySeries}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="time" />
+                  <YAxis tickFormatter={(v) => formatChartNumber(Number(v))} />
+                  <Tooltip formatter={(v) => formatChartNumber(Number(v))} />
+                  <Legend />
+                  {config.energy_chart.map((m) => (
+                    <Line
+                      key={m.key}
+                      type="monotone"
+                      dataKey={m.key}
+                      name={m.label}
+                      dot={false}
+                      stroke={energyColor(m.key)}
+                    />
+                  ))}
+                </LineChart>
+              </ResponsiveContainer>
+            )}
+          </div>
+        </div>
+
+        <div className="chart-card">
           <h2>Power Trend</h2>
           <div className="chart-wrap">
             {loading ? (
@@ -430,62 +529,6 @@ function App() {
           </div>
         </div>
 
-        <div className="chart-card">
-          <h2>Energy Trend</h2>
-          <div className="chart-wrap">
-            {loading ? (
-              <p className="chart-placeholder">Loading...</p>
-            ) : preset !== 'day' && energyBarSeries.length === 0 ? (
-              <p className="chart-placeholder">No data available for selected range.</p>
-            ) : energySeries.length === 0 ? (
-              <p className="chart-placeholder">No data available for selected range.</p>
-            ) : preset !== 'day' ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={energyBarSeries} stackOffset="sign">
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="time" />
-                  <YAxis tickFormatter={(v) => formatChartNumber(Number(v))} />
-                  <Tooltip formatter={(v) => formatChartNumber(Number(v))} />
-                  <Legend />
-                  <ReferenceLine y={0} stroke="#64748b" />
-                  <Bar dataKey="pv_energy_yield_day_kwh" name="Виробіток за сьогодні" stackId="energy" fill="#16a34a" />
-                  <Bar
-                    dataKey="total_energy_charged_kwh"
-                    name="Енергія, отримана ESS сьогодні"
-                    stackId="energy"
-                    fill="#0ea5e9"
-                  />
-                  <Bar
-                    dataKey="total_energy_discharged_kwh"
-                    name="Енергія, витрачена ESS сьогодні"
-                    stackId="energy"
-                    fill="#6b7280"
-                  />
-                </BarChart>
-              </ResponsiveContainer>
-            ) : (
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={energySeries}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="time" />
-                  <YAxis tickFormatter={(v) => formatChartNumber(Number(v))} />
-                  <Tooltip formatter={(v) => formatChartNumber(Number(v))} />
-                  <Legend />
-                  {config.energy_chart.map((m) => (
-                    <Line
-                      key={m.key}
-                      type="monotone"
-                      dataKey={m.key}
-                      name={m.label}
-                      dot={false}
-                      stroke={energyColor(m.key)}
-                    />
-                  ))}
-                </LineChart>
-              </ResponsiveContainer>
-            )}
-          </div>
-        </div>
       </section>
     </main>
   )
