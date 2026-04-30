@@ -16,7 +16,7 @@ import { fetchCurrent, fetchDashboardConfig, fetchTimeseries } from './api'
 import type { CurrentResponse, DashboardConfig, DashboardMetric, TimeseriesPoint } from './types'
 import { toChartRows } from './chart'
 
-type RangePreset = 'day' | 'week' | 'month'
+type RangePreset = 'day' | 'month' | 'year'
 const knownOrganizations = ['demo-org', 'pe']
 const periodEnergyMetricKeys = new Set(['total_energy_charged_kwh', 'total_energy_discharged_kwh'])
 const dayEnergyMetricKeys = new Set([
@@ -59,13 +59,14 @@ function rangeParams(preset: RangePreset) {
   const to = new Date()
   const from = new Date(to)
   let bucket: string
-  if (preset === 'week') {
-    from.setDate(to.getDate() - 7)
-    bucket = '1 hour'
-  } else if (preset === 'month') {
+  if (preset === 'month') {
     from.setDate(1)
     from.setHours(0, 0, 0, 0)
     bucket = '1 day'
+  } else if (preset === 'year') {
+    from.setMonth(0, 1)
+    from.setHours(0, 0, 0, 0)
+    bucket = '1 month'
   } else {
     from.setHours(0, 0, 0, 0)
     bucket = '1 hour'
@@ -174,7 +175,9 @@ function energyBucketDeltaRows(points: TimeseriesPoint[], preset: RangePreset) {
   return sorted.map((row) => {
     const dt = new Date(row.t)
     const timeLabel =
-      preset === 'month'
+      preset === 'year'
+        ? dt.toLocaleDateString(undefined, { month: 'short' })
+        : preset === 'month'
         ? dt.toLocaleDateString(undefined, { day: '2-digit' })
         : dt.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
     const out: Record<string, string | number> = { time: timeLabel }
@@ -322,11 +325,11 @@ function App() {
             <button type="button" onClick={() => setPreset('day')} className={preset === 'day' ? 'active' : ''}>
               Day
             </button>
-            <button type="button" onClick={() => setPreset('week')} className={preset === 'week' ? 'active' : ''}>
-              Week
-            </button>
             <button type="button" onClick={() => setPreset('month')} className={preset === 'month' ? 'active' : ''}>
               Month
+            </button>
+            <button type="button" onClick={() => setPreset('year')} className={preset === 'year' ? 'active' : ''}>
+              Year
             </button>
           </div>
         </div>
@@ -389,11 +392,11 @@ function App() {
           <div className="chart-wrap">
             {loading ? (
               <p className="chart-placeholder">Loading...</p>
-            ) : (preset === 'day' || preset === 'month') && energyBarSeries.length === 0 ? (
+            ) : preset !== 'day' && energyBarSeries.length === 0 ? (
               <p className="chart-placeholder">No data available for selected range.</p>
             ) : energySeries.length === 0 ? (
               <p className="chart-placeholder">No data available for selected range.</p>
-            ) : preset === 'day' || preset === 'month' ? (
+            ) : preset !== 'day' ? (
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={energyBarSeries}>
                   <CartesianGrid strokeDasharray="3 3" />
