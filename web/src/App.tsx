@@ -262,24 +262,6 @@ function energyBucketDeltaRows(points: TimeseriesPoint[], metricKeys: string[], 
   })
 }
 
-function buildDayFlowSeries(rows: Record<string, string | number>[]) {
-  return rows.map((row) => {
-    const grid = Number(row.grid_connected_active_power_kw ?? 0)
-    const ess = Number(row.active_ess_power_kw ?? 0)
-    const pv = Number(row.active_pv_power_kw ?? 0)
-    const load = Number(row.load_power_kw ?? 0)
-    return {
-      time: row.time,
-      grid_import_kw: Math.max(grid, 0),
-      ess_discharging_kw: Math.max(-ess, 0),
-      pv_output_kw: Math.max(pv, 0),
-      grid_export_kw: -Math.max(-grid, 0),
-      ess_charging_kw: -Math.max(ess, 0),
-      appliance_consumption_kw: -Math.max(load, 0),
-    }
-  })
-}
-
 function formatNumber(value: number, unit: string) {
   const decimals = unit === '%' ? 1 : 2
   const factor = 10 ** decimals
@@ -299,10 +281,6 @@ function formatChartNumber(value: number) {
 }
 
 function energyColor(metricKey: string): string {
-  if (metricKey === 'grid_import_kw' || metricKey === 'grid_export_kw') return '#9ca3af'
-  if (metricKey === 'ess_discharging_kw' || metricKey === 'ess_charging_kw') return '#2563eb'
-  if (metricKey === 'pv_output_kw') return '#22c55e'
-  if (metricKey === 'appliance_consumption_kw') return '#f59e0b'
   if (metricKey === 'accumulated_electricity_purchased_kwh') return '#16a34a'
   if (metricKey === 'pv_energy_yield_day_kwh') return '#22c55e'
   if (metricKey === 'total_energy_discharged_kwh') return '#6b7280'
@@ -316,8 +294,6 @@ function App() {
   const [preset, setPreset] = useState<RangePreset>('day')
   const [config, setConfig] = useState<DashboardConfig>(fallbackConfig)
   const [current, setCurrent] = useState<CurrentResponse | null>(null)
-  const [powerSeries, setPowerSeries] = useState<Record<string, string | number>[]>([])
-  const [dayFlowSeries, setDayFlowSeries] = useState<Record<string, string | number>[]>([])
   const [energySeries, setEnergySeries] = useState<Record<string, string | number>[]>([])
   const [energyBarSeries, setEnergyBarSeries] = useState<Record<string, string | number>[]>([])
   const [periodEnergyValues, setPeriodEnergyValues] = useState<Record<string, number>>({})
@@ -356,13 +332,8 @@ function App() {
         if (!active) return
         setConfig(cfg)
 
-        const [cur, power, energy, dayEnergy] = await Promise.all([
+        const [cur, energy, dayEnergy] = await Promise.all([
           fetchCurrent(organizationID),
-          fetchTimeseries({
-            organizationID,
-            metricKeys: cfg.power_chart.map((m) => m.key),
-            ...rangeParams(preset),
-          }),
           fetchTimeseries({
             organizationID,
             metricKeys: cfg.energy_chart.map((m) => m.key),
@@ -376,9 +347,6 @@ function App() {
         ])
         if (!active) return
         setCurrent(cur)
-        const powerRows = toChartRows(power.points, cfg.power_chart.map((m) => m.key), (d) => formatTimeLabel(d, preset))
-        setPowerSeries(powerRows)
-        setDayFlowSeries(buildDayFlowSeries(powerRows))
         setEnergySeries(
           toChartRows(normalizePeriodEnergyPoints(energy.points), cfg.energy_chart.map((m) => m.key), (d) =>
             formatTimeLabel(d, preset),
@@ -462,63 +430,29 @@ function App() {
           <div className="chart-wrap">
             {loading ? (
               <p className="chart-placeholder">Loading...</p>
-            ) : preset === 'day' && dayFlowSeries.length === 0 ? (
-              <p className="chart-placeholder">No data available for selected range.</p>
             ) : preset !== 'day' && energyBarSeries.length === 0 ? (
               <p className="chart-placeholder">No data available for selected range.</p>
-            ) : preset !== 'day' && energySeries.length === 0 ? (
+            ) : energySeries.length === 0 ? (
               <p className="chart-placeholder">No data available for selected range.</p>
             ) : preset === 'day' ? (
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={dayFlowSeries}>
+                <LineChart data={energySeries}>
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis dataKey="time" />
                   <YAxis tickFormatter={(v) => formatChartNumber(Number(v))} />
                   <Tooltip formatter={(v) => formatChartNumber(Number(v))} />
                   <Legend />
                   <ReferenceLine y={0} stroke="#64748b" />
-                  <Line
-                    type="monotone"
-                    dataKey="grid_import_kw"
-                    name="Енергія від електромережі"
-                    dot={false}
-                    stroke={energyColor('grid_import_kw')}
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="ess_discharging_kw"
-                    name="Потужність розряджання ESS"
-                    dot={false}
-                    stroke={energyColor('ess_discharging_kw')}
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="pv_output_kw"
-                    name="Вихід фотоелектричного обладнання"
-                    dot={false}
-                    stroke={energyColor('pv_output_kw')}
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="grid_export_kw"
-                    name="Постачання енергії"
-                    dot={false}
-                    stroke={energyColor('grid_export_kw')}
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="ess_charging_kw"
-                    name="Потужність заряджання ESS"
-                    dot={false}
-                    stroke={energyColor('ess_charging_kw')}
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="appliance_consumption_kw"
-                    name="Споживання приладами"
-                    dot={false}
-                    stroke={energyColor('appliance_consumption_kw')}
-                  />
+                  {config.energy_chart.map((m) => (
+                    <Line
+                      key={m.key}
+                      type="monotone"
+                      dataKey={m.key}
+                      name={m.label}
+                      dot={false}
+                      stroke={energyColor(m.key)}
+                    />
+                  ))}
                 </LineChart>
               </ResponsiveContainer>
             ) : (
