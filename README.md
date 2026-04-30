@@ -6,6 +6,7 @@ Modbus telemetry collector for Huawei SmartLogger + dashboard stack.
 
 - `collector` (Go): polls Modbus and writes telemetry to TimescaleDB
 - `api` (Go): serves dashboard endpoints from TimescaleDB
+- `dam-collector` (Go): once per day, fetches Day-Ahead Market (RDN) prices from oree.com.ua and stores them in `market_dam_prices`
 - `web` (React + Vite): dashboard UI
 
 ## API endpoints
@@ -47,6 +48,46 @@ Use query param for organization:
 - For web API target override, set `VITE_API_BASE_URL`
 - Set `modbus.host: mock` for an in-process mocked Modbus source
 - `SESTELEMETRY_MAX_REGISTERS_PER_READ` can reduce FC3/FC4 batch size (1-125, default 125)
+
+## Day-Ahead Market collector (RDN)
+
+`dam-collector` downloads the OREE DAM XLS once per day and upserts hourly
+prices/volumes into `market_dam_prices`. The service is **opt-in** behind the
+`dam` Compose profile: existing modbus-only deployments are unaffected by an
+update — `dam-collector` will not start unless you explicitly enable it.
+
+Configure under the `oree:` section in `config.yaml` (see
+`config.example.yaml`):
+
+```yaml
+oree:
+  enabled: true
+  zone: 2                     # 1 = Burshtyn island, 2 = unified UA grid
+  run_at: "14:00"             # local time of day in `timezone`
+  timezone: "Europe/Kyiv"
+  delivery_offset_days: 1     # 1 = fetch tomorrow's prices
+```
+
+To turn the service on under `docker-compose.service.yml` (production),
+add to `.env.service`:
+
+```
+COMPOSE_PROFILES=dam
+```
+
+Then `sudo systemctl restart sestelemetry`. The service performs an idempotent
+catch-up on startup (skipped if 24 rows are already present for the target
+date) and then sleeps until the next `run_at` in the configured timezone. URL
+hit per fetch: `https://www.oree.com.ua/index.php/PXS/downloadxlsx/DD.MM.YYYY/DAM/{zone}`.
+
+### Safe production update path
+
+Re-running `bash scripts/install-prod.sh` on a host that already has
+`/etc/sestelemetry/config.yaml` is **non-destructive**: the script seeds those
+files only when missing (`if ! sudo test -f`). The container mounts them
+read-only. Watchtower only updates Docker images; host files are untouched.
+Your existing modbus configuration on the production host stays exactly as it
+is across this update — and `dam-collector` stays inert until you opt in.
 
 ## Run locally without Docker
 

@@ -33,6 +33,28 @@ services:
     labels:
       - com.centurylinklabs.watchtower.enable=true
 
+  # Opt-in: not started by default. To enable, add `COMPOSE_PROFILES=dam`
+  # to .env.service AND populate the `oree:` section in /etc/sestelemetry/config.yaml.
+  dam-collector:
+    image: ${SESTELEMETRY_COLLECTOR_IMAGE}
+    profiles: ["dam"]
+    restart: unless-stopped
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: ${SESTELEMETRY_DATABASE_URL}
+      TZ: Europe/Kyiv
+    entrypoint: ["/usr/local/bin/dam-collector"]
+    command: ["-config", "/etc/sestelemetry/config.yaml"]
+    volumes:
+      - ${SESTELEMETRY_HOST_CONFIG_PATH:-/etc/sestelemetry/config.yaml}:/etc/sestelemetry/config.yaml:ro
+      - ${SESTELEMETRY_HOST_REGISTERS_PATH:-/etc/sestelemetry/registers}:/etc/sestelemetry/registers:ro
+    cpus: 0.25
+    mem_limit: 128m
+    labels:
+      - com.centurylinklabs.watchtower.enable=true
+
   api:
     image: ${SESTELEMETRY_API_IMAGE}
     restart: unless-stopped

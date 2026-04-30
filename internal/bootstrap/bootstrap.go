@@ -19,6 +19,9 @@ func Load(configPath string) (*Runtime, error) {
 	if err != nil {
 		return nil, fmt.Errorf("config: %w", err)
 	}
+	if err := cfg.RequireModbus(); err != nil {
+		return nil, err
+	}
 	resolved, err := resolveCatalog(cfg)
 	if err != nil {
 		return nil, err

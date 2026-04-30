@@ -28,3 +28,18 @@ organizations:
       host: 10.0.0.20
       port: 502
       unit_id: 99
+
+# Day-Ahead Market (RDN) prices from oree.com.ua (consumed by dam-collector).
+# Set enabled: false to skip running the dam-collector against this config.
+oree:
+  enabled: true
+  base_url: "https://www.oree.com.ua"
+  zone: 2                       # 1 = Burshtyn island, 2 = unified UA grid (default)
+  run_at: "14:00"               # HH:MM in `timezone` to run the daily fetch
+  timezone: "Europe/Kyiv"
+  delivery_offset_days: 1       # 1 = "tomorrow", 0 = "today", -1 = "yesterday"
+  http_timeout: 30s
+  user_agent: "sestelemetry-dam/1.0"
+  retry:
+    attempts: 5
+    backoff: 5m
