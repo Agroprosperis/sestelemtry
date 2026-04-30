@@ -14,7 +14,6 @@ import {
 } from 'recharts'
 import { fetchCurrent, fetchDashboardConfig, fetchTimeseries } from './api'
 import type { CurrentResponse, DashboardConfig, DashboardMetric, TimeseriesPoint } from './types'
-import { toChartRows } from './chart'
 
 type RangePreset = 'day' | 'month' | 'year'
 const knownOrganizations = ['demo-org', 'pe']
@@ -27,7 +26,6 @@ const energyTrendMetricDirections: Record<string, 1 | -1> = {
   total_energy_charged_kwh: -1,
   accumulated_power_consumption_kwh: -1,
 }
-const energyTrendMetricKeys = new Set(Object.keys(energyTrendMetricDirections))
 const applianceConsumptionMetricKey = 'accumulated_power_consumption_kwh'
 const dayEnergyMetricKeys = new Set([
   'accumulated_pv_energy_yield_kwh',
@@ -35,6 +33,16 @@ const dayEnergyMetricKeys = new Set([
   'accumulated_electricity_purchased_kwh',
 ])
 const dashboardRefreshMs = 1000
+const sourceEnergyMetricKeys = [
+  'accumulated_electricity_purchased_kwh',
+  'total_energy_discharged_kwh',
+  'pv_energy_yield_day_kwh',
+]
+const sinkEnergyMetricKeys = [
+  'accumulated_electricity_sold_kwh',
+  'total_energy_charged_kwh',
+  'accumulated_power_consumption_kwh',
+]
 
 const fallbackConfig: DashboardConfig = {
   cards: [
@@ -148,55 +156,6 @@ function dayEnergyDeltas(points: TimeseriesPoint[]): Record<string, number> {
   return metricDeltas(points, dayEnergyMetricKeys)
 }
 
-function normalizePeriodEnergyPoints(points: TimeseriesPoint[]): TimeseriesPoint[] {
-  const baselines = new Map<string, { time: number; value: number }>()
-  for (const p of points) {
-    if (!energyTrendMetricKeys.has(p.metric_key)) continue
-    const t = new Date(p.time).getTime()
-    if (!Number.isFinite(t) || !Number.isFinite(p.value)) continue
-    const baseline = baselines.get(p.metric_key)
-    if (!baseline || t < baseline.time) {
-      baselines.set(p.metric_key, { time: t, value: p.value })
-    }
-  }
-
-  const rawByTime = new Map<string, Record<string, number>>()
-  for (const p of points) {
-    if (!energyTrendMetricKeys.has(p.metric_key)) continue
-    const baseline = baselines.get(p.metric_key)
-    if (!baseline) continue
-    const delta = p.value - baseline.value
-    const safeDelta = delta > 0 ? delta : 0
-    const iso = new Date(p.time).toISOString()
-    const row = rawByTime.get(iso) || {}
-    row[p.metric_key] = safeDelta
-    rawByTime.set(iso, row)
-  }
-
-  return points.map((p) => {
-    if (!energyTrendMetricKeys.has(p.metric_key)) {
-      return p
-    }
-    const iso = new Date(p.time).toISOString()
-    const row = rawByTime.get(iso) || {}
-    let safeDelta = row[p.metric_key] ?? 0
-    if (p.metric_key === applianceConsumptionMetricKey) {
-      // Appliance consumption = from grid + PV production + ESS discharge - ESS charge.
-      safeDelta =
-        (row.accumulated_electricity_purchased_kwh ?? 0) +
-        (row.pv_energy_yield_day_kwh ?? 0) +
-        (row.total_energy_discharged_kwh ?? 0) -
-        (row.total_energy_charged_kwh ?? 0)
-      if (safeDelta < 0) safeDelta = 0
-    }
-    const direction = energyTrendMetricDirections[p.metric_key] ?? 1
-    return {
-      ...p,
-      value: safeDelta * direction,
-    }
-  })
-}
-
 function formatTimeLabel(date: Date, preset: RangePreset): string {
   if (preset === 'year') {
     return date.toLocaleDateString(undefined, { month: 'short' })
@@ -280,6 +239,77 @@ function formatChartNumber(value: number) {
   }).format(rounded)
 }
 
+type EnergyTooltipEntry = {
+  dataKey?: string | number | ((obj: unknown) => unknown)
+  name?: string | number
+  value?: unknown
+  color?: string
+}
+
+function energyTooltipContent(props: {
+  active?: boolean
+  label?: string | number
+  payload?: readonly EnergyTooltipEntry[]
+  preset: RangePreset
+}) {
+  const { active, label, payload, preset } = props
+  if (!active || !payload || payload.length === 0 || preset === 'day') {
+    return null
+  }
+
+  const byKey = new Map<string, EnergyTooltipEntry>()
+  for (const entry of payload) {
+    if (typeof entry.dataKey === 'string') byKey.set(entry.dataKey, entry)
+  }
+
+  const sourceTotal = sourceEnergyMetricKeys.reduce((sum, key) => {
+    const v = Number(byKey.get(key)?.value)
+    if (!Number.isFinite(v)) return sum
+    return sum + Math.max(v, 0)
+  }, 0)
+
+  const sinkTotal = sinkEnergyMetricKeys.reduce((sum, key) => {
+    const v = Number(byKey.get(key)?.value)
+    if (!Number.isFinite(v)) return sum
+    return sum + Math.abs(v)
+  }, 0)
+
+  function row(key: string, asAbs = false) {
+    const entry = byKey.get(key)
+    const raw = Number(entry?.value)
+    const value = Number.isFinite(raw) ? (asAbs ? Math.abs(raw) : raw) : null
+    return (
+      <div key={key} className="energy-tooltip-row">
+        <span className="energy-tooltip-dot" style={{ backgroundColor: entry?.color ?? '#94a3b8' }} />
+        <span className="energy-tooltip-name">{entry?.name ? String(entry.name) : key}</span>
+        <span className="energy-tooltip-value">{value === null ? '--' : `${formatChartNumber(value)} kWh`}</span>
+      </div>
+    )
+  }
+
+  return (
+    <div className="energy-tooltip">
+      <div className="energy-tooltip-label">{label}</div>
+      <div className="energy-tooltip-grid">
+        <div>
+          <div className="energy-tooltip-head">
+            <span>Джерела енергії</span>
+            <span>{formatChartNumber(sourceTotal)} kWh</span>
+          </div>
+          {sourceEnergyMetricKeys.map((key) => row(key))}
+        </div>
+        <div>
+          <div className="energy-tooltip-head">
+            <span>Стоки енергії</span>
+            <span>{formatChartNumber(sinkTotal)} kWh</span>
+          </div>
+          {sinkEnergyMetricKeys.map((key) => row(key, true))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function energyColor(metricKey: string, preset: RangePreset): string {
   if (preset === 'day') {
     if (metricKey === 'accumulated_electricity_purchased_kwh') return '#9ca3af'
@@ -302,7 +332,6 @@ function App() {
   const [preset, setPreset] = useState<RangePreset>('day')
   const [config, setConfig] = useState<DashboardConfig>(fallbackConfig)
   const [current, setCurrent] = useState<CurrentResponse | null>(null)
-  const [energySeries, setEnergySeries] = useState<Record<string, string | number>[]>([])
   const [energyBarSeries, setEnergyBarSeries] = useState<Record<string, string | number>[]>([])
   const [periodEnergyValues, setPeriodEnergyValues] = useState<Record<string, number>>({})
   const [dayEnergyValues, setDayEnergyValues] = useState<Record<string, number>>({})
@@ -355,11 +384,6 @@ function App() {
         ])
         if (!active) return
         setCurrent(cur)
-        setEnergySeries(
-          toChartRows(normalizePeriodEnergyPoints(energy.points), cfg.energy_chart.map((m) => m.key), (d) =>
-            formatTimeLabel(d, preset),
-          ),
-        )
         setEnergyBarSeries(energyBucketDeltaRows(energy.points, cfg.energy_chart.map((m) => m.key), preset))
         setPeriodEnergyValues(periodEnergyDeltas(energy.points))
         setDayEnergyValues(dayEnergyDeltas(dayEnergy.points))
@@ -414,25 +438,7 @@ function App() {
 
       {error && <section className="error-banner">Failed to load data: {error}</section>}
 
-      <section className="cards-grid">
-        {config.cards.map((card) => (
-          <article key={card.key} className="card" aria-busy={loading}>
-            <p className="card-label">{card.label}</p>
-            <p className="card-value">
-              {loading
-                ? '...'
-                : dayEnergyMetricKeys.has(card.key)
-                  ? formatNumber(dayEnergyValues[card.key] ?? 0, card.unit)
-                  : periodEnergyMetricKeys.has(card.key)
-                  ? formatNumber(periodEnergyValues[card.key] ?? 0, card.unit)
-                  : formatValue(card, current)}{' '}
-              <span>{card.unit}</span>
-            </p>
-          </article>
-        ))}
-      </section>
-
-      <section className="chart-grid">
+      <section className="dashboard-main">
         <div className="chart-card">
           <h2>Energy Trend</h2>
           <div className="chart-wrap">
@@ -467,7 +473,7 @@ function App() {
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis dataKey="time" />
                   <YAxis tickFormatter={(v) => formatChartNumber(Number(v))} />
-                  <Tooltip formatter={(v) => formatChartNumber(Number(v))} />
+                  <Tooltip content={(p) => energyTooltipContent({ ...p, preset })} />
                   <Legend />
                   <ReferenceLine y={0} stroke="#64748b" />
                   {config.energy_chart.map((m) => (
@@ -484,6 +490,27 @@ function App() {
             )}
           </div>
         </div>
+
+        <aside className="metrics-panel">
+          <h2>Поточні показники</h2>
+          <section className="cards-grid">
+            {config.cards.map((card) => (
+              <article key={card.key} className="card" aria-busy={loading}>
+                <p className="card-label">{card.label}</p>
+                <p className="card-value">
+                  {loading
+                    ? '...'
+                    : dayEnergyMetricKeys.has(card.key)
+                      ? formatNumber(dayEnergyValues[card.key] ?? 0, card.unit)
+                      : periodEnergyMetricKeys.has(card.key)
+                      ? formatNumber(periodEnergyValues[card.key] ?? 0, card.unit)
+                      : formatValue(card, current)}{' '}
+                  <span>{card.unit}</span>
+                </p>
+              </article>
+            ))}
+          </section>
+        </aside>
       </section>
     </main>
   )

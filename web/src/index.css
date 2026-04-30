@@ -108,8 +108,8 @@ body {
 
 .cards-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 14px;
+  grid-template-columns: 1fr;
+  gap: 10px;
 }
 
 .card {
@@ -138,10 +138,11 @@ body {
   font-weight: 500;
 }
 
-.chart-grid {
+.dashboard-main {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 2fr) minmax(320px, 1fr);
   gap: 14px;
+  align-items: start;
 }
 
 .chart-card {
@@ -149,6 +150,18 @@ body {
   border: 1px solid #e2e8f0;
   border-radius: 12px;
   padding: 14px;
+}
+
+.metrics-panel {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 14px;
+}
+
+.metrics-panel h2 {
+  margin: 0 0 12px;
+  font-size: 18px;
 }
 
 .chart-card h2 {
@@ -170,6 +183,58 @@ body {
   height: 100%;
 }
 
+.energy-tooltip {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 10px 12px;
+  min-width: 560px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
+}
+
+.energy-tooltip-label {
+  font-size: 13px;
+  color: #475569;
+  margin-bottom: 6px;
+}
+
+.energy-tooltip-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+.energy-tooltip-head {
+  display: flex;
+  justify-content: space-between;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.energy-tooltip-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0;
+}
+
+.energy-tooltip-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  flex: 0 0 auto;
+}
+
+.energy-tooltip-name {
+  color: #334155;
+  flex: 1;
+}
+
+.energy-tooltip-value {
+  color: #0f172a;
+  font-weight: 500;
+}
+
 @media (max-width: 900px) {
   .dashboard-header {
     flex-direction: column;
@@ -179,16 +244,20 @@ body {
     width: 100%;
     flex-wrap: wrap;
   }
-  .cards-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  .dashboard-main {
+    grid-template-columns: 1fr;
+  }
+  .energy-tooltip {
+    min-width: 0;
+    width: min(90vw, 560px);
+  }
+  .energy-tooltip-grid {
+    grid-template-columns: 1fr;
   }
 }
 
 @media (max-width: 640px) {
   .dashboard-page {
     padding: 14px;
-  }
-  .cards-grid {
-    grid-template-columns: 1fr;
   }
 }
