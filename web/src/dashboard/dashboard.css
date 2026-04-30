@@ -85,6 +85,7 @@
   padding: 2px;
   color: #334155;
   gap: 2px;
+  width: 220px;
 }
 
 .period-picker .period-nav {
@@ -108,10 +109,11 @@
 }
 
 .period-picker .period-input {
+  flex: 1 1 auto;
+  min-width: 0;
   display: inline-flex;
   align-items: center;
   padding: 4px 8px;
-  min-width: 140px;
   justify-content: center;
 }
 
@@ -125,6 +127,10 @@
   outline: none;
   font-family: inherit;
   padding: 0;
+  width: 100%;
+  min-width: 0;
+  text-align: center;
+  text-align-last: center;
 }
 
 .error-banner {
