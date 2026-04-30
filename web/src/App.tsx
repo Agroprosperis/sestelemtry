@@ -16,6 +16,11 @@ import { toChartRows } from './chart'
 type RangePreset = 'day' | 'week' | 'month'
 const knownOrganizations = ['demo-org', 'pe']
 const periodEnergyMetricKeys = new Set(['total_energy_charged_kwh', 'total_energy_discharged_kwh'])
+const dayEnergyMetricKeys = new Set([
+  'accumulated_pv_energy_yield_kwh',
+  'accumulated_power_consumption_kwh',
+  'accumulated_electricity_purchased_kwh',
+])
 const dashboardRefreshMs = 1000
 
 const fallbackConfig: DashboardConfig = {
@@ -25,10 +30,10 @@ const fallbackConfig: DashboardConfig = {
     { key: 'active_ess_power_kw', label: 'Active ESS Power', unit: 'kW' },
     { key: 'grid_connected_active_power_kw', label: 'Grid Active Power', unit: 'kW' },
     { key: 'soc_percent', label: 'SOC', unit: '%' },
-    { key: 'accumulated_pv_energy_yield_kwh', label: 'Accumulated PV Yield', unit: 'kWh' },
-    { key: 'accumulated_electricity_purchased_kwh', label: 'Accumulated Grid Import', unit: 'kWh' },
+    { key: 'accumulated_pv_energy_yield_kwh', label: 'Inverter energy yield of current day', unit: 'kWh' },
+    { key: 'accumulated_electricity_purchased_kwh', label: 'Current Day Supply From Grid', unit: 'kWh' },
     { key: 'accumulated_electricity_sold_kwh', label: 'Accumulated Grid Export', unit: 'kWh' },
-    { key: 'accumulated_power_consumption_kwh', label: 'Accumulated Consumption', unit: 'kWh' },
+    { key: 'accumulated_power_consumption_kwh', label: 'Current Day Consumption', unit: 'kWh' },
     { key: 'total_power_supply_from_grid_kwh', label: 'Total Supply From Grid', unit: 'kWh' },
   ],
   power_chart: [
@@ -68,6 +73,17 @@ function rangeParams(preset: RangePreset) {
   }
 }
 
+function dayRangeParams() {
+  const to = new Date()
+  const from = new Date(to)
+  from.setHours(0, 0, 0, 0)
+  return {
+    from: toISO(from),
+    to: toISO(to),
+    bucket: '15 minutes',
+  }
+}
+
 function formatValue(metric: DashboardMetric, current: CurrentResponse | null) {
   const m = current?.metrics?.[metric.key]
   if (!m) {
@@ -76,10 +92,10 @@ function formatValue(metric: DashboardMetric, current: CurrentResponse | null) {
   return formatNumber(m.value, metric.unit)
 }
 
-function periodEnergyDeltas(points: TimeseriesPoint[]): Record<string, number> {
+function metricDeltas(points: TimeseriesPoint[], keys: Set<string>): Record<string, number> {
   const span = new Map<string, { firstTime: number; firstValue: number; lastTime: number; lastValue: number }>()
   for (const p of points) {
-    if (!periodEnergyMetricKeys.has(p.metric_key)) continue
+    if (!keys.has(p.metric_key)) continue
     const t = new Date(p.time).getTime()
     if (!Number.isFinite(t) || !Number.isFinite(p.value)) continue
     const current = span.get(p.metric_key)
@@ -101,6 +117,14 @@ function periodEnergyDeltas(points: TimeseriesPoint[]): Record<string, number> {
     out[metricKey] = v.lastValue - v.firstValue
   }
   return out
+}
+
+function periodEnergyDeltas(points: TimeseriesPoint[]): Record<string, number> {
+  return metricDeltas(points, periodEnergyMetricKeys)
+}
+
+function dayEnergyDeltas(points: TimeseriesPoint[]): Record<string, number> {
+  return metricDeltas(points, dayEnergyMetricKeys)
 }
 
 function normalizePeriodEnergyPoints(points: TimeseriesPoint[]): TimeseriesPoint[] {
@@ -152,6 +176,7 @@ function App() {
   const [powerSeries, setPowerSeries] = useState<Record<string, string | number>[]>([])
   const [energySeries, setEnergySeries] = useState<Record<string, string | number>[]>([])
   const [periodEnergyValues, setPeriodEnergyValues] = useState<Record<string, number>>({})
+  const [dayEnergyValues, setDayEnergyValues] = useState<Record<string, number>>({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -186,7 +211,7 @@ function App() {
         if (!active) return
         setConfig(cfg)
 
-        const [cur, power, energy] = await Promise.all([
+        const [cur, power, energy, dayEnergy] = await Promise.all([
           fetchCurrent(organizationID),
           fetchTimeseries({
             organizationID,
@@ -198,12 +223,18 @@ function App() {
             metricKeys: cfg.energy_chart.map((m) => m.key),
             ...rangeParams(preset),
           }),
+          fetchTimeseries({
+            organizationID,
+            metricKeys: Array.from(dayEnergyMetricKeys),
+            ...dayRangeParams(),
+          }),
         ])
         if (!active) return
         setCurrent(cur)
         setPowerSeries(toChartRows(power.points, cfg.power_chart.map((m) => m.key)))
         setEnergySeries(toChartRows(normalizePeriodEnergyPoints(energy.points), cfg.energy_chart.map((m) => m.key)))
         setPeriodEnergyValues(periodEnergyDeltas(energy.points))
+        setDayEnergyValues(dayEnergyDeltas(dayEnergy.points))
       } catch (e) {
         if (!active) return
         setError(e instanceof Error ? e.message : 'Failed to load dashboard data')
@@ -262,7 +293,9 @@ function App() {
             <p className="card-value">
               {loading
                 ? '...'
-                : periodEnergyMetricKeys.has(card.key)
+                : dayEnergyMetricKeys.has(card.key)
+                  ? formatNumber(dayEnergyValues[card.key] ?? 0, card.unit)
+                  : periodEnergyMetricKeys.has(card.key)
                   ? formatNumber(periodEnergyValues[card.key] ?? 0, card.unit)
                   : formatValue(card, current)}{' '}
               <span>{card.unit}</span>
