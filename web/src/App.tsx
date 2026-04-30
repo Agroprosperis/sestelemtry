@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
+  Bar,
+  BarChart,
   CartesianGrid,
   Legend,
   Line,
   LineChart,
+  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -60,11 +63,12 @@ function rangeParams(preset: RangePreset) {
     from.setDate(to.getDate() - 7)
     bucket = '1 hour'
   } else if (preset === 'month') {
-    from.setDate(to.getDate() - 30)
-    bucket = '6 hours'
+    from.setDate(1)
+    from.setHours(0, 0, 0, 0)
+    bucket = '1 day'
   } else {
-    from.setDate(to.getDate() - 1)
-    bucket = '15 minutes'
+    from.setHours(0, 0, 0, 0)
+    bucket = '1 hour'
   }
   return {
     from: toISO(from),
@@ -151,6 +155,48 @@ function normalizePeriodEnergyPoints(points: TimeseriesPoint[]): TimeseriesPoint
   })
 }
 
+function energyBucketDeltaRows(points: TimeseriesPoint[], preset: RangePreset) {
+  const metricKeys = ['pv_energy_yield_day_kwh', 'total_energy_charged_kwh', 'total_energy_discharged_kwh']
+  const keyed = new Map<string, { t: number; values: Record<string, number> }>()
+  for (const p of points) {
+    if (!metricKeys.includes(p.metric_key)) continue
+    const t = new Date(p.time).getTime()
+    if (!Number.isFinite(t) || !Number.isFinite(p.value)) continue
+    const k = new Date(p.time).toISOString()
+    const row = keyed.get(k) || { t, values: {} }
+    row.values[p.metric_key] = p.value
+    keyed.set(k, row)
+  }
+
+  const sorted = Array.from(keyed.values()).sort((a, b) => a.t - b.t)
+  const prev = new Map<string, number>()
+
+  return sorted.map((row) => {
+    const dt = new Date(row.t)
+    const timeLabel =
+      preset === 'month'
+        ? dt.toLocaleDateString(undefined, { day: '2-digit' })
+        : dt.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+    const out: Record<string, string | number> = { time: timeLabel }
+    for (const key of metricKeys) {
+      const current = row.values[key]
+      if (!Number.isFinite(current)) {
+        out[key] = 0
+        continue
+      }
+      const previous = prev.get(key)
+      let delta = 0
+      if (Number.isFinite(previous)) {
+        delta = current - (previous as number)
+      }
+      if (delta < 0) delta = 0
+      prev.set(key, current)
+      out[key] = key === 'total_energy_discharged_kwh' ? -delta : delta
+    }
+    return out
+  })
+}
+
 function formatNumber(value: number, unit: string) {
   const decimals = unit === '%' ? 1 : 2
   const factor = 10 ** decimals
@@ -175,6 +221,7 @@ function App() {
   const [current, setCurrent] = useState<CurrentResponse | null>(null)
   const [powerSeries, setPowerSeries] = useState<Record<string, string | number>[]>([])
   const [energySeries, setEnergySeries] = useState<Record<string, string | number>[]>([])
+  const [energyBarSeries, setEnergyBarSeries] = useState<Record<string, string | number>[]>([])
   const [periodEnergyValues, setPeriodEnergyValues] = useState<Record<string, number>>({})
   const [dayEnergyValues, setDayEnergyValues] = useState<Record<string, number>>({})
   const [loading, setLoading] = useState(true)
@@ -233,6 +280,7 @@ function App() {
         setCurrent(cur)
         setPowerSeries(toChartRows(power.points, cfg.power_chart.map((m) => m.key)))
         setEnergySeries(toChartRows(normalizePeriodEnergyPoints(energy.points), cfg.energy_chart.map((m) => m.key)))
+        setEnergyBarSeries(energyBucketDeltaRows(energy.points, preset))
         setPeriodEnergyValues(periodEnergyDeltas(energy.points))
         setDayEnergyValues(dayEnergyDeltas(dayEnergy.points))
       } catch (e) {
@@ -341,8 +389,24 @@ function App() {
           <div className="chart-wrap">
             {loading ? (
               <p className="chart-placeholder">Loading...</p>
+            ) : (preset === 'day' || preset === 'month') && energyBarSeries.length === 0 ? (
+              <p className="chart-placeholder">No data available for selected range.</p>
             ) : energySeries.length === 0 ? (
               <p className="chart-placeholder">No data available for selected range.</p>
+            ) : preset === 'day' || preset === 'month' ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={energyBarSeries}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="time" />
+                  <YAxis tickFormatter={(v) => formatChartNumber(Number(v))} />
+                  <Tooltip formatter={(v) => formatChartNumber(Number(v))} />
+                  <Legend />
+                  <ReferenceLine y={0} stroke="#64748b" />
+                  <Bar dataKey="pv_energy_yield_day_kwh" name="PV Daily Yield" stackId="energy" fill="#16a34a" />
+                  <Bar dataKey="total_energy_charged_kwh" name="Energy Charged" stackId="energy" fill="#0ea5e9" />
+                  <Bar dataKey="total_energy_discharged_kwh" name="Energy Discharged" stackId="energy" fill="#f97316" />
+                </BarChart>
+              </ResponsiveContainer>
             ) : (
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={energySeries}>
