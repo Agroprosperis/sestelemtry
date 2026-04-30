@@ -87,3 +87,23 @@ type TimeseriesResponse struct {
 	To             time.Time         `json:"to"`
 	Points         []TimeseriesPoint `json:"points"`
 }
+
+// DAMPrice is one hourly Day-Ahead Market record exposed via the API.
+// Numeric fields are pointers because the source XLS may omit cells.
+type DAMPrice struct {
+	DeliveryDate                time.Time `json:"delivery_date"`
+	Hour                        int       `json:"hour"`
+	Zone                        int       `json:"zone"`
+	PriceUAHPerMWh              *float64  `json:"price_uah_per_mwh,omitempty"`
+	SaleVolumeMWh               *float64  `json:"sale_volume_mwh,omitempty"`
+	PurchaseVolumeMWh           *float64  `json:"purchase_volume_mwh,omitempty"`
+	DeclaredSaleVolumeMWh       *float64  `json:"declared_sale_volume_mwh,omitempty"`
+	DeclaredPurchaseVolumeMWh   *float64  `json:"declared_purchase_volume_mwh,omitempty"`
+}
+
+type DAMPricesResponse struct {
+	Zone   int        `json:"zone"`
+	From   time.Time  `json:"from"`
+	To     time.Time  `json:"to"`
+	Prices []DAMPrice `json:"prices"`
+}

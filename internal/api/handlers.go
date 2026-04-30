@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -18,6 +19,7 @@ type Handlers struct {
 type storeReader interface {
 	Current(ctx context.Context, organizationID string, metricKeys []string) (CurrentResponse, error)
 	Timeseries(ctx context.Context, organizationID string, metricKeys []string, from, to time.Time, bucket string) (TimeseriesResponse, error)
+	DAMPrices(ctx context.Context, zone int, from, to time.Time) (DAMPricesResponse, error)
 	Ready(ctx context.Context) error
 }
 
@@ -36,6 +38,7 @@ func (h *Handlers) Router() http.Handler {
 	mux.HandleFunc("/api/v1/dashboard-config", h.dashboardConfig)
 	mux.HandleFunc("/api/v1/current", h.current)
 	mux.HandleFunc("/api/v1/timeseries", h.timeseries)
+	mux.HandleFunc("/api/v1/dam-prices", h.damPrices)
 	mux.HandleFunc("/swagger", h.swaggerUI)
 	mux.HandleFunc("/swagger/", h.swaggerUI)
 	mux.HandleFunc("/swagger/openapi.yaml", h.swaggerSpec)
@@ -120,6 +123,81 @@ func (h *Handlers) timeseries(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handlers) damPrices(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	zone, err := parseZone(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	from, to, err := parseDateRange(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	resp, err := h.store.DAMPrices(r.Context(), zone, from, to)
+	if err != nil {
+		h.log.Error("api_dam_prices", "zone", zone, "from", from, "to", to, "err", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// parseZone reads `zone` query param (1..99). Defaults to 2 (unified UA grid).
+func parseZone(r *http.Request) (int, error) {
+	raw := strings.TrimSpace(r.URL.Query().Get("zone"))
+	if raw == "" {
+		return 2, nil
+	}
+	var n int
+	for _, ch := range raw {
+		if ch < '0' || ch > '9' {
+			return 0, fmt.Errorf("zone must be a positive integer")
+		}
+		n = n*10 + int(ch-'0')
+		if n > 99 {
+			return 0, fmt.Errorf("zone out of range")
+		}
+	}
+	if n < 1 {
+		return 0, fmt.Errorf("zone must be >= 1")
+	}
+	return n, nil
+}
+
+// parseDateRange reads `from` and `to` (YYYY-MM-DD) query params; both default to today UTC
+// when omitted, returning a single-day window.
+func parseDateRange(r *http.Request) (from, to time.Time, err error) {
+	fromStr := strings.TrimSpace(r.URL.Query().Get("from"))
+	toStr := strings.TrimSpace(r.URL.Query().Get("to"))
+	now := time.Now().UTC()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	if fromStr == "" {
+		from = today
+	} else {
+		from, err = time.Parse("2006-01-02", fromStr)
+		if err != nil {
+			return time.Time{}, time.Time{}, fmt.Errorf("from must be YYYY-MM-DD")
+		}
+	}
+	if toStr == "" {
+		to = from
+	} else {
+		to, err = time.Parse("2006-01-02", toStr)
+		if err != nil {
+			return time.Time{}, time.Time{}, fmt.Errorf("to must be YYYY-MM-DD")
+		}
+	}
+	if to.Before(from) {
+		return time.Time{}, time.Time{}, fmt.Errorf("to must be on or after from")
+	}
+	return from, to, nil
 }
 
 func parseRange(r *http.Request) (from time.Time, to time.Time, bucket string, err error) {

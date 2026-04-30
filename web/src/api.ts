@@ -1,4 +1,4 @@
-import type { CurrentResponse, DashboardConfig, TimeseriesResponse } from './types'
+import type { CurrentResponse, DAMPricesResponse, DashboardConfig, TimeseriesResponse } from './types'
 
 const API_BASE = ((import.meta.env.VITE_API_BASE_URL as string | undefined) || '').replace(/\/+$/, '')
 
@@ -55,6 +55,22 @@ export async function fetchTimeseries(
   const res = await fetch(url, { signal })
   if (!res.ok) {
     throw new Error(`timeseries request failed: ${res.status}`)
+  }
+  return res.json()
+}
+
+export async function fetchDAMPrices(
+  input: { from: string; to: string; zone?: number },
+  signal?: AbortSignal,
+): Promise<DAMPricesResponse> {
+  const url = buildURL('/api/v1/dam-prices', {
+    zone: input.zone !== undefined ? String(input.zone) : undefined,
+    from: input.from,
+    to: input.to,
+  })
+  const res = await fetch(url, { signal })
+  if (!res.ok) {
+    throw new Error(`dam-prices request failed: ${res.status}`)
   }
   return res.json()
 }

@@ -16,7 +16,13 @@ type mockStore struct {
 	currentErr  error
 	seriesResp  TimeseriesResponse
 	seriesErr   error
+	damResp     DAMPricesResponse
+	damErr      error
 	readyErr    error
+
+	damZone int
+	damFrom time.Time
+	damTo   time.Time
 }
 
 func (m *mockStore) Current(_ context.Context, _ string, _ []string) (CurrentResponse, error) {
@@ -25,6 +31,11 @@ func (m *mockStore) Current(_ context.Context, _ string, _ []string) (CurrentRes
 
 func (m *mockStore) Timeseries(_ context.Context, _ string, _ []string, _, _ time.Time, _ string) (TimeseriesResponse, error) {
 	return m.seriesResp, m.seriesErr
+}
+
+func (m *mockStore) DAMPrices(_ context.Context, zone int, from, to time.Time) (DAMPricesResponse, error) {
+	m.damZone, m.damFrom, m.damTo = zone, from, to
+	return m.damResp, m.damErr
 }
 
 func (m *mockStore) Ready(_ context.Context) error {
@@ -152,6 +163,86 @@ func TestSwaggerSpecEndpoint(t *testing.T) {
 	body := rec.Body.String()
 	if !strings.Contains(body, "openapi: 3.0.3") {
 		t.Fatalf("expected openapi version in body, got %q", body)
+	}
+}
+
+func TestDAMPricesDefaultZoneAndDate(t *testing.T) {
+	priceA := 5600.0
+	store := &mockStore{
+		damResp: DAMPricesResponse{
+			Zone:   2,
+			Prices: []DAMPrice{{DeliveryDate: time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC), Hour: 1, Zone: 2, PriceUAHPerMWh: &priceA}},
+		},
+	}
+	h := NewHandlers(store, "*")
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/dam-prices", nil)
+	rec := httptest.NewRecorder()
+	h.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200 got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if store.damZone != 2 {
+		t.Fatalf("expected default zone=2, got %d", store.damZone)
+	}
+	var got DAMPricesResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Prices) != 1 || got.Prices[0].Hour != 1 || got.Prices[0].PriceUAHPerMWh == nil || *got.Prices[0].PriceUAHPerMWh != 5600.0 {
+		t.Fatalf("unexpected payload: %#v", got)
+	}
+}
+
+func TestDAMPricesParsesQueryParams(t *testing.T) {
+	store := &mockStore{}
+	h := NewHandlers(store, "*")
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/dam-prices?zone=1&from=2026-04-29&to=2026-05-01", nil)
+	rec := httptest.NewRecorder()
+	h.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200 got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if store.damZone != 1 {
+		t.Fatalf("zone=1 not propagated, got %d", store.damZone)
+	}
+	wantFrom := time.Date(2026, 4, 29, 0, 0, 0, 0, time.UTC)
+	wantTo := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	if !store.damFrom.Equal(wantFrom) || !store.damTo.Equal(wantTo) {
+		t.Fatalf("date range mismatch: from=%v to=%v", store.damFrom, store.damTo)
+	}
+}
+
+func TestDAMPricesRejectsBadParams(t *testing.T) {
+	cases := []string{
+		"/api/v1/dam-prices?zone=abc",
+		"/api/v1/dam-prices?zone=0",
+		"/api/v1/dam-prices?zone=2&from=not-a-date",
+		"/api/v1/dam-prices?zone=2&from=2026-05-02&to=2026-05-01",
+	}
+	for _, url := range cases {
+		t.Run(url, func(t *testing.T) {
+			h := NewHandlers(&mockStore{}, "*")
+			req := httptest.NewRequest(http.MethodGet, url, nil)
+			rec := httptest.NewRecorder()
+			h.Router().ServeHTTP(rec, req)
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("want 400, got %d body=%s", rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestDAMPricesHidesInternalError(t *testing.T) {
+	h := NewHandlers(&mockStore{damErr: errors.New("db down")}, "*")
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/dam-prices", nil)
+	rec := httptest.NewRecorder()
+	h.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("want 500 got %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "internal server error") {
+		t.Fatalf("expected generic error body, got %q", rec.Body.String())
 	}
 }
 

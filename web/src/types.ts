@@ -36,3 +36,21 @@ export type TimeseriesResponse = {
   to: string
   points: TimeseriesPoint[]
 }
+
+export type DAMPrice = {
+  delivery_date: string
+  hour: number
+  zone: number
+  price_uah_per_mwh?: number | null
+  sale_volume_mwh?: number | null
+  purchase_volume_mwh?: number | null
+  declared_sale_volume_mwh?: number | null
+  declared_purchase_volume_mwh?: number | null
+}
+
+export type DAMPricesResponse = {
+  zone: number
+  from: string
+  to: string
+  prices: DAMPrice[]
+}

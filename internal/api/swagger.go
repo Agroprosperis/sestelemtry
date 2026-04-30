@@ -97,6 +97,60 @@ paths:
               schema:
                 type: string
                 example: internal server error
+  /api/v1/dam-prices:
+    get:
+      summary: Day-Ahead Market hourly prices and volumes
+      operationId: getDAMPrices
+      description: |
+        Returns hourly Day-Ahead Market (RDN) records collected from
+        oree.com.ua. Records are available for delivery dates that the
+        dam-collector has already fetched. Numeric fields may be omitted
+        when the source XLS lacks a value for that hour.
+      parameters:
+        - name: zone
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 2
+            minimum: 1
+            maximum: 99
+          description: Trading zone (1 = Burshtyn island, 2 = unified UA grid)
+        - name: from
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+          description: Inclusive lower bound for delivery_date (YYYY-MM-DD). Defaults to today UTC.
+        - name: to
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+          description: Inclusive upper bound for delivery_date (YYYY-MM-DD). Defaults to from.
+      responses:
+        "200":
+          description: DAM hourly rows for the requested zone and date range
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DAMPricesResponse"
+        "400":
+          description: Invalid query parameters
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: from must be YYYY-MM-DD
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: internal server error
   /api/v1/timeseries:
     get:
       summary: Timeseries for chart graphics
@@ -263,4 +317,60 @@ components:
           items:
             $ref: "#/components/schemas/TimeseriesPoint"
       required: [organization_id, metric_keys, bucket, from, to, points]
+    DAMPrice:
+      type: object
+      properties:
+        delivery_date:
+          type: string
+          format: date-time
+          example: "2026-05-01T00:00:00Z"
+        hour:
+          type: integer
+          minimum: 1
+          maximum: 24
+          example: 14
+        zone:
+          type: integer
+          example: 2
+        price_uah_per_mwh:
+          type: number
+          format: double
+          nullable: true
+          example: 5600.00
+        sale_volume_mwh:
+          type: number
+          format: double
+          nullable: true
+          example: 3396.3
+        purchase_volume_mwh:
+          type: number
+          format: double
+          nullable: true
+          example: 3396.3
+        declared_sale_volume_mwh:
+          type: number
+          format: double
+          nullable: true
+        declared_purchase_volume_mwh:
+          type: number
+          format: double
+          nullable: true
+      required: [delivery_date, hour, zone]
+    DAMPricesResponse:
+      type: object
+      properties:
+        zone:
+          type: integer
+          example: 2
+        from:
+          type: string
+          format: date-time
+        to:
+          type: string
+          format: date-time
+        prices:
+          type: array
+          items:
+            $ref: "#/components/schemas/DAMPrice"
+      required: [zone, from, to, prices]
 `

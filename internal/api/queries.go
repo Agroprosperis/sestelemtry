@@ -110,6 +110,50 @@ func (s *Store) Timeseries(ctx context.Context, organizationID string, metricKey
 	return out, nil
 }
 
+// DAMPrices returns hourly Day-Ahead Market rows for the inclusive date range
+// [from, to] and the given trading zone. Rows are sorted by delivery_date
+// ascending then by hour ascending.
+func (s *Store) DAMPrices(ctx context.Context, zone int, from, to time.Time) (DAMPricesResponse, error) {
+	out := DAMPricesResponse{
+		Zone:   zone,
+		From:   from.UTC(),
+		To:     to.UTC(),
+		Prices: make([]DAMPrice, 0),
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT
+			delivery_date, hour, zone,
+			price_uah_per_mwh,
+			sale_volume_mwh, purchase_volume_mwh,
+			declared_sale_volume_mwh, declared_purchase_volume_mwh
+		FROM market_dam_prices
+		WHERE zone = $1
+			AND delivery_date >= $2::date
+			AND delivery_date <= $3::date
+		ORDER BY delivery_date ASC, hour ASC
+	`, zone, from, to)
+	if err != nil {
+		return out, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var p DAMPrice
+		if err := rows.Scan(
+			&p.DeliveryDate, &p.Hour, &p.Zone,
+			&p.PriceUAHPerMWh,
+			&p.SaleVolumeMWh, &p.PurchaseVolumeMWh,
+			&p.DeclaredSaleVolumeMWh, &p.DeclaredPurchaseVolumeMWh,
+		); err != nil {
+			return out, err
+		}
+		out.Prices = append(out.Prices, p)
+	}
+	if err := rows.Err(); err != nil {
+		return out, err
+	}
+	return out, nil
+}
+
 func (s *Store) Ready(ctx context.Context) error {
 	return s.pool.Ping(ctx)
 }
