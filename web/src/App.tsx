@@ -538,57 +538,6 @@ function App() {
             )}
           </div>
         </div>
-
-        <div className="chart-card">
-          <h2>Power Trend</h2>
-          <div className="chart-wrap">
-            {loading ? (
-              <p className="chart-placeholder">Loading...</p>
-            ) : powerSeries.length === 0 ? (
-              <p className="chart-placeholder">No data available for selected range.</p>
-            ) : preset !== 'day' ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={powerSeries}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="time" />
-                  <YAxis tickFormatter={(v) => formatChartNumber(Number(v))} />
-                  <Tooltip formatter={(v) => formatChartNumber(Number(v))} />
-                  <Legend />
-                  <ReferenceLine y={0} stroke="#64748b" />
-                  {config.power_chart.map((m, idx) => (
-                    <Bar
-                      key={m.key}
-                      dataKey={m.key}
-                      name={m.label}
-                      fill={['#16a34a', '#2563eb', '#f97316', '#8b5cf6'][idx % 4]}
-                    />
-                  ))}
-                </BarChart>
-              </ResponsiveContainer>
-            ) : (
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={powerSeries}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="time" />
-                  <YAxis tickFormatter={(v) => formatChartNumber(Number(v))} />
-                  <Tooltip formatter={(v) => formatChartNumber(Number(v))} />
-                  <Legend />
-                  {config.power_chart.map((m, idx) => (
-                    <Line
-                      key={m.key}
-                      type="monotone"
-                      dataKey={m.key}
-                      name={m.label}
-                      dot={false}
-                      stroke={['#16a34a', '#2563eb', '#f97316', '#8b5cf6'][idx % 4]}
-                    />
-                  ))}
-                </LineChart>
-              </ResponsiveContainer>
-            )}
-          </div>
-        </div>
-
       </section>
     </main>
   )
