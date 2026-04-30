@@ -5,12 +5,10 @@ import { MetricCard } from './MetricCard'
 type Props = {
   cards: DashboardMetric[]
   current: CurrentResponse | null
-  dayEnergyValues: Record<string, number>
-  periodEnergyValues: Record<string, number>
   loading: boolean
 }
 
-export function MetricsPanel({ cards, current, dayEnergyValues, periodEnergyValues, loading }: Props) {
+export function MetricsPanel({ cards, current, loading }: Props) {
   return (
     <aside className="metrics-panel">
       <h2>Поточні показники</h2>
@@ -19,7 +17,7 @@ export function MetricsPanel({ cards, current, dayEnergyValues, periodEnergyValu
           <MetricCard
             key={card.key}
             card={card}
-            value={pickCardValue(card, { current, dayEnergyValues, periodEnergyValues })}
+            value={pickCardValue(card, { current })}
             loading={loading}
           />
         ))}

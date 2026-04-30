@@ -2,19 +2,15 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { fetchCurrent, fetchDAMPrices, fetchDashboardConfig, fetchTimeseries } from '../../api'
 import type { CurrentResponse, DashboardConfig } from '../../types'
 import { DASHBOARD_REFRESH_MS, FALLBACK_DASHBOARD_CONFIG } from '../config'
-import { DAY_ENERGY_METRIC_KEYS_LIST } from '../metrics'
-import { dayRangeParams, endOfPeriod, rangeParams, startOfPeriod, type RangePreset } from '../range'
+import { endOfPeriod, rangeParams, startOfPeriod, type RangePreset } from '../range'
 import { energyBucketDeltaRows, type EnergyRow } from '../transforms/buckets'
 import { damChartRows, type DAMChartRow } from '../transforms/dam'
-import { dayEnergyDeltas, periodEnergyDeltas } from '../transforms/deltas'
 import { energySummaryFromSeries, type EnergySummary } from '../transforms/summary'
 
 export type DashboardData = {
   config: DashboardConfig
   current: CurrentResponse | null
   energySeries: EnergyRow[]
-  periodEnergyValues: Record<string, number>
-  dayEnergyValues: Record<string, number>
   energySummary: EnergySummary
   damSeries: DAMChartRow[]
   loading: boolean
@@ -45,8 +41,6 @@ export function useDashboardData(input: {
   const [config, setConfig] = useState<DashboardConfig>(FALLBACK_DASHBOARD_CONFIG)
   const [current, setCurrent] = useState<CurrentResponse | null>(null)
   const [energySeries, setEnergySeries] = useState<EnergyRow[]>([])
-  const [periodEnergyValues, setPeriodEnergyValues] = useState<Record<string, number>>({})
-  const [dayEnergyValues, setDayEnergyValues] = useState<Record<string, number>>({})
   const [damSeries, setDamSeries] = useState<DAMChartRow[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -94,7 +88,7 @@ export function useDashboardData(input: {
         const cfg = configRef.current
         const energyKeys = cfg.energy_chart.map((m) => m.key)
         const anchorDate = new Date(anchorTime)
-        const [cur, energy, dayEnergy] = await Promise.all([
+        const [cur, energy] = await Promise.all([
           fetchCurrent(organizationID, controller.signal),
           fetchTimeseries(
             {
@@ -104,20 +98,10 @@ export function useDashboardData(input: {
             },
             controller.signal,
           ),
-          fetchTimeseries(
-            {
-              organizationID,
-              metricKeys: DAY_ENERGY_METRIC_KEYS_LIST as string[],
-              ...dayRangeParams(preset === 'day' ? anchorDate : new Date()),
-            },
-            controller.signal,
-          ),
         ])
         if (cancelled || controller.signal.aborted) return
         setCurrent(cur)
         setEnergySeries(energyBucketDeltaRows(energy.points, energyKeys, preset, anchorDate))
-        setPeriodEnergyValues(periodEnergyDeltas(energy.points))
-        setDayEnergyValues(dayEnergyDeltas(dayEnergy.points))
         setError(null)
       } catch (e) {
         if (cancelled || isAbortError(e)) return
@@ -178,8 +162,6 @@ export function useDashboardData(input: {
     config,
     current,
     energySeries,
-    periodEnergyValues,
-    dayEnergyValues,
     energySummary,
     damSeries,
     loading,

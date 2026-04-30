@@ -25,17 +25,11 @@ export function Dashboard() {
     [preset],
   )
 
-  const {
-    config,
-    current,
-    energySeries,
-    periodEnergyValues,
-    dayEnergyValues,
-    energySummary,
-    damSeries,
-    loading,
-    error,
-  } = useDashboardData({ organizationID, preset, anchor })
+  const { config, current, energySeries, energySummary, damSeries, loading, error } = useDashboardData({
+    organizationID,
+    preset,
+    anchor,
+  })
 
   return (
     <main className="dashboard-page">
@@ -56,13 +50,7 @@ export function Dashboard() {
       )}
 
       <section className="dashboard-main">
-        <MetricsPanel
-          cards={config.cards}
-          current={current}
-          dayEnergyValues={dayEnergyValues}
-          periodEnergyValues={periodEnergyValues}
-          loading={loading}
-        />
+        <MetricsPanel cards={config.cards} current={current} loading={loading} />
         <div className="dashboard-charts">
           <EnergyChart
             metrics={config.energy_chart}

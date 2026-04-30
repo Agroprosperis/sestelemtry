@@ -15,27 +15,42 @@ export function applyApplianceConsumptionRule(rawDeltas: Record<string, number>)
   rawDeltas[APPLIANCE_CONSUMPTION_METRIC] = value < 0 ? 0 : value
 }
 
+// bucketKey returns a calendar-component key for the local timezone so that
+// API rows bucketed in UTC by Postgres still land in the right slot of the
+// locally-rendered timeline (e.g. "1 day" buckets returned at UTC midnight
+// are still attributed to the correct local day).
+function bucketKey(date: Date, preset: RangePreset): string {
+  if (preset === 'year') {
+    return `${date.getFullYear()}-${date.getMonth()}`
+  }
+  if (preset === 'month') {
+    return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`
+  }
+  return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}-${date.getHours()}`
+}
+
 export function energyBucketDeltaRows(
   points: TimeseriesPoint[],
   metricKeys: string[],
   preset: RangePreset,
   anchor: Date,
 ): EnergyRow[] {
-  const byTime = new Map<number, Record<string, number>>()
+  const byKey = new Map<string, Record<string, number>>()
   for (const p of points) {
     if (!metricKeys.includes(p.metric_key)) continue
-    const t = new Date(p.time).getTime()
-    if (!Number.isFinite(t) || !Number.isFinite(p.value)) continue
-    const row = byTime.get(t) || {}
+    const t = new Date(p.time)
+    if (!Number.isFinite(t.getTime()) || !Number.isFinite(p.value)) continue
+    const key = bucketKey(t, preset)
+    const row = byKey.get(key) || {}
     row[p.metric_key] = p.value
-    byTime.set(t, row)
+    byKey.set(key, row)
   }
 
   const timeline = timelineBuckets(preset, anchor)
   const prev = new Map<string, number>()
 
   return timeline.map(({ t, label }) => {
-    const values = byTime.get(t) || {}
+    const values = byKey.get(bucketKey(new Date(t), preset)) || {}
     const out: EnergyRow = { time: label }
     const rawDeltas: Record<string, number> = {}
     for (const key of metricKeys) {

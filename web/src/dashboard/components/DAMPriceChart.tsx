@@ -25,8 +25,15 @@ const PRESET_LABEL: Record<RangePreset, string> = {
   year: 'середньомісячно',
 }
 
+function xAxisInterval(preset: RangePreset): number {
+  if (preset === 'day') return 1
+  if (preset === 'month') return 2
+  return 0
+}
+
 export function DAMPriceChart({ series, preset }: Props) {
   const avg = averagePrice(series)
+  const tickInterval = xAxisInterval(preset)
   return (
     <div className="chart-card">
       <div className="dam-chart-head">
@@ -54,7 +61,7 @@ export function DAMPriceChart({ series, preset }: Props) {
                 </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="time" />
+              <XAxis dataKey="time" interval={tickInterval} />
               <YAxis tickFormatter={(v) => formatChartNumber(Number(v))} />
               <Tooltip
                 formatter={(v) => [`${formatChartNumber(Number(v))} грн/МВт·год`, 'Ціна РДН']}

@@ -29,6 +29,12 @@ type Props = {
   loading: boolean
 }
 
+function xAxisInterval(preset: RangePreset): number {
+  if (preset === 'day') return 1
+  if (preset === 'month') return 2
+  return 0
+}
+
 export function EnergyChart({ metrics, series, preset, summary, loading }: Props) {
   const tooltipContent = useCallback(
     (props: Omit<React.ComponentProps<typeof EnergyTooltip>, 'preset'>) => (
@@ -36,6 +42,7 @@ export function EnergyChart({ metrics, series, preset, summary, loading }: Props
     ),
     [preset],
   )
+  const tickInterval = xAxisInterval(preset)
 
   return (
     <div className="chart-card">
@@ -50,7 +57,7 @@ export function EnergyChart({ metrics, series, preset, summary, loading }: Props
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={series}>
               <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="time" />
+              <XAxis dataKey="time" interval={tickInterval} />
               <YAxis tickFormatter={(v) => formatChartNumber(Number(v))} />
               <Tooltip formatter={(v) => formatChartNumber(Number(v))} />
               <Legend />
@@ -71,7 +78,7 @@ export function EnergyChart({ metrics, series, preset, summary, loading }: Props
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={series} stackOffset="sign">
               <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="time" />
+              <XAxis dataKey="time" interval={tickInterval} />
               <YAxis tickFormatter={(v) => formatChartNumber(Number(v))} />
               <Tooltip content={tooltipContent} />
               <Legend />
