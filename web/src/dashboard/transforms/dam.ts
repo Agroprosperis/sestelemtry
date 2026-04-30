@@ -1,6 +1,6 @@
 import type { DAMPrice } from '../../types'
-import { formatTimeLabel } from '../format'
 import type { RangePreset } from '../range'
+import { timelineBuckets } from '../timeline'
 
 export type DAMChartRow = {
   time: string
@@ -28,8 +28,8 @@ function bucketKey(preset: RangePreset, deliveryDate: Date, hour: number): numbe
   return d.getTime()
 }
 
-export function damChartRows(prices: DAMPrice[], preset: RangePreset): DAMChartRow[] {
-  type Acc = { sum: number; count: number; t: number }
+export function damChartRows(prices: DAMPrice[], preset: RangePreset, anchor: Date): DAMChartRow[] {
+  type Acc = { sum: number; count: number }
   const buckets = new Map<number, Acc>()
 
   for (const p of prices) {
@@ -42,17 +42,19 @@ export function damChartRows(prices: DAMPrice[], preset: RangePreset): DAMChartR
       acc.sum += p.price_uah_per_mwh
       acc.count += 1
     } else {
-      buckets.set(key, { sum: p.price_uah_per_mwh, count: 1, t: key })
+      buckets.set(key, { sum: p.price_uah_per_mwh, count: 1 })
     }
   }
 
-  return Array.from(buckets.values())
-    .sort((a, b) => a.t - b.t)
-    .map((acc) => ({
-      time: formatTimeLabel(new Date(acc.t), preset),
-      bucketStart: acc.t,
-      price: acc.count > 0 ? acc.sum / acc.count : null,
-    }))
+  const timeline = timelineBuckets(preset, anchor)
+  return timeline.map(({ t, label }) => {
+    const acc = buckets.get(t)
+    return {
+      time: label,
+      bucketStart: t,
+      price: acc && acc.count > 0 ? acc.sum / acc.count : null,
+    }
+  })
 }
 
 export function averagePrice(rows: DAMChartRow[]): number | null {

@@ -1,7 +1,7 @@
 import type { TimeseriesPoint } from '../../types'
-import { formatTimeLabel } from '../format'
 import { APPLIANCE_CONSUMPTION_METRIC, ENERGY_TREND_METRIC_DIRECTIONS, type MetricKey } from '../metrics'
 import type { RangePreset } from '../range'
+import { timelineBuckets } from '../timeline'
 
 export type EnergyRow = { time: string } & Partial<Record<MetricKey, number>> & Record<string, string | number>
 
@@ -19,28 +19,27 @@ export function energyBucketDeltaRows(
   points: TimeseriesPoint[],
   metricKeys: string[],
   preset: RangePreset,
+  anchor: Date,
 ): EnergyRow[] {
-  const keyed = new Map<string, { t: number; values: Record<string, number> }>()
+  const byTime = new Map<number, Record<string, number>>()
   for (const p of points) {
     if (!metricKeys.includes(p.metric_key)) continue
     const t = new Date(p.time).getTime()
     if (!Number.isFinite(t) || !Number.isFinite(p.value)) continue
-    const k = new Date(p.time).toISOString()
-    const row = keyed.get(k) || { t, values: {} }
-    row.values[p.metric_key] = p.value
-    keyed.set(k, row)
+    const row = byTime.get(t) || {}
+    row[p.metric_key] = p.value
+    byTime.set(t, row)
   }
 
-  const sorted = Array.from(keyed.values()).sort((a, b) => a.t - b.t)
+  const timeline = timelineBuckets(preset, anchor)
   const prev = new Map<string, number>()
 
-  return sorted.map((row) => {
-    const dt = new Date(row.t)
-    const timeLabel = formatTimeLabel(dt, preset)
-    const out: EnergyRow = { time: timeLabel }
+  return timeline.map(({ t, label }) => {
+    const values = byTime.get(t) || {}
+    const out: EnergyRow = { time: label }
     const rawDeltas: Record<string, number> = {}
     for (const key of metricKeys) {
-      const current = row.values[key]
+      const current = values[key]
       if (!Number.isFinite(current)) {
         rawDeltas[key] = 0
         continue

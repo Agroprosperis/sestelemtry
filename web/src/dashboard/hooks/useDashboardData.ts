@@ -115,7 +115,7 @@ export function useDashboardData(input: {
         ])
         if (cancelled || controller.signal.aborted) return
         setCurrent(cur)
-        setEnergySeries(energyBucketDeltaRows(energy.points, energyKeys, preset))
+        setEnergySeries(energyBucketDeltaRows(energy.points, energyKeys, preset, anchorDate))
         setPeriodEnergyValues(periodEnergyDeltas(energy.points))
         setDayEnergyValues(dayEnergyDeltas(dayEnergy.points))
         setError(null)
@@ -158,7 +158,7 @@ export function useDashboardData(input: {
       try {
         const resp = await fetchDAMPrices({ zone: DAM_DEFAULT_ZONE, from, to }, controller.signal)
         if (cancelled) return
-        setDamSeries(damChartRows(resp.prices, preset))
+        setDamSeries(damChartRows(resp.prices, preset, anchorDate))
       } catch (e) {
         if (cancelled || isAbortError(e)) return
         setDamSeries([])
