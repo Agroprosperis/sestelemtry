@@ -1,0 +1,341 @@
+.dashboard-page {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 24px;
+  display: grid;
+  gap: 20px;
+}
+
+.dashboard-header h1 {
+  margin: 0;
+  font-size: 28px;
+}
+
+.dashboard-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.dashboard-header p {
+  margin: 6px 0 0;
+  color: #475569;
+}
+
+.header-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.org-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 4px 8px;
+  color: #334155;
+}
+
+.org-select span {
+  font-size: 13px;
+  color: #475569;
+}
+
+.org-select select {
+  border: none;
+  background: transparent;
+  color: #0f172a;
+  font-size: 14px;
+  outline: none;
+}
+
+.range-switch {
+  display: inline-flex;
+  gap: 6px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 4px;
+}
+
+.range-switch button {
+  border: none;
+  background: transparent;
+  color: #334155;
+  padding: 6px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.range-switch button.active {
+  background: #0f172a;
+  color: #ffffff;
+}
+
+.error-banner {
+  border: 1px solid #fecaca;
+  background: #fee2e2;
+  color: #7f1d1d;
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.dashboard-main {
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) minmax(0, 2.6fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.cards-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+.card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 14px;
+}
+
+.card-label {
+  margin: 0;
+  color: #475569;
+  font-size: 13px;
+}
+
+.card-value {
+  margin: 8px 0 0;
+  font-size: 28px;
+  font-weight: 700;
+}
+
+.card-value span {
+  margin-left: 6px;
+  font-size: 14px;
+  color: #64748b;
+  font-weight: 500;
+}
+
+.metrics-panel {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 14px;
+}
+
+.metrics-panel h2 {
+  margin: 0 0 12px;
+  font-size: 18px;
+}
+
+.metrics-panel .cards-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.metrics-panel .card {
+  padding: 10px;
+}
+
+.metrics-panel .card-label {
+  font-size: 12px;
+}
+
+.metrics-panel .card-value {
+  margin-top: 6px;
+  font-size: 22px;
+}
+
+.metrics-panel .card-value span {
+  font-size: 12px;
+}
+
+.chart-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 14px;
+}
+
+.chart-card h2 {
+  margin: 0 0 12px;
+  font-size: 18px;
+}
+
+.energy-summary-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.energy-summary-card {
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 10px;
+  background: #f8fafc;
+}
+
+.energy-summary-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.energy-summary-title strong {
+  font-size: 14px;
+}
+
+.energy-summary-split {
+  margin-top: 6px;
+  display: flex;
+  justify-content: space-between;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.energy-summary-bar {
+  margin-top: 6px;
+  width: 100%;
+  height: 6px;
+  border-radius: 999px;
+  background: #d1fae5;
+  overflow: hidden;
+}
+
+.energy-summary-bar.sink {
+  background: #ffedd5;
+}
+
+.energy-summary-fill {
+  display: block;
+  height: 100%;
+}
+
+.energy-summary-fill.source {
+  background: #16a34a;
+}
+
+.energy-summary-fill.sink {
+  background: #f97316;
+}
+
+.energy-summary-rows {
+  margin-top: 8px;
+}
+
+.energy-summary-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+  margin-top: 3px;
+}
+
+.chart-wrap {
+  width: 100%;
+  height: 300px;
+}
+
+.chart-placeholder {
+  margin: 0;
+  color: #64748b;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+}
+
+.energy-tooltip {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 10px 12px;
+  min-width: 560px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
+}
+
+.energy-tooltip-label {
+  font-size: 13px;
+  color: #475569;
+  margin-bottom: 6px;
+}
+
+.energy-tooltip-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+.energy-tooltip-head {
+  display: flex;
+  justify-content: space-between;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.energy-tooltip-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0;
+}
+
+.energy-tooltip-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  flex: 0 0 auto;
+}
+
+.energy-tooltip-name {
+  color: #334155;
+  flex: 1;
+}
+
+.energy-tooltip-value {
+  color: #0f172a;
+  font-weight: 500;
+}
+
+@media (max-width: 900px) {
+  .dashboard-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .header-controls {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+  .dashboard-main {
+    grid-template-columns: 1fr;
+  }
+  .energy-tooltip {
+    min-width: 0;
+    width: min(90vw, 560px);
+  }
+  .energy-tooltip-grid {
+    grid-template-columns: 1fr;
+  }
+  .energy-summary-grid {
+    grid-template-columns: 1fr;
+  }
+  .metrics-panel .cards-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .dashboard-page {
+    padding: 14px;
+  }
+}

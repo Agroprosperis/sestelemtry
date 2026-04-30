@@ -16,32 +16,35 @@ function buildURL(path: string, params: Record<string, string | undefined>) {
   return url.toString()
 }
 
-export async function fetchDashboardConfig(): Promise<DashboardConfig> {
-  const res = await fetch(withBase('/api/v1/dashboard-config'))
+export async function fetchDashboardConfig(signal?: AbortSignal): Promise<DashboardConfig> {
+  const res = await fetch(withBase('/api/v1/dashboard-config'), { signal })
   if (!res.ok) {
     throw new Error(`dashboard-config request failed: ${res.status}`)
   }
   return res.json()
 }
 
-export async function fetchCurrent(organizationID: string): Promise<CurrentResponse> {
+export async function fetchCurrent(organizationID: string, signal?: AbortSignal): Promise<CurrentResponse> {
   const url = buildURL('/api/v1/current', {
     organization_id: organizationID,
   })
-  const res = await fetch(url)
+  const res = await fetch(url, { signal })
   if (!res.ok) {
     throw new Error(`current request failed: ${res.status}`)
   }
   return res.json()
 }
 
-export async function fetchTimeseries(input: {
-  organizationID: string
-  metricKeys: string[]
-  from: string
-  to: string
-  bucket: string
-}): Promise<TimeseriesResponse> {
+export async function fetchTimeseries(
+  input: {
+    organizationID: string
+    metricKeys: string[]
+    from: string
+    to: string
+    bucket: string
+  },
+  signal?: AbortSignal,
+): Promise<TimeseriesResponse> {
   const url = buildURL('/api/v1/timeseries', {
     organization_id: input.organizationID,
     metric_keys: input.metricKeys.join(','),
@@ -49,7 +52,7 @@ export async function fetchTimeseries(input: {
     to: input.to,
     bucket: input.bucket,
   })
-  const res = await fetch(url)
+  const res = await fetch(url, { signal })
   if (!res.ok) {
     throw new Error(`timeseries request failed: ${res.status}`)
   }
