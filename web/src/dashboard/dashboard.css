@@ -220,6 +220,34 @@
   font-size: 18px;
 }
 
+.dashboard-dam .chart-card {
+  margin-top: 0;
+}
+
+.dam-chart-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.dam-chart-head h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.dam-chart-meta {
+  color: #475569;
+  font-size: 13px;
+}
+
+.dam-chart-meta strong {
+  color: #0f172a;
+  font-weight: 600;
+}
+
 .energy-summary-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;

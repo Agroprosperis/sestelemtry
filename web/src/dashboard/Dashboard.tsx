@@ -1,10 +1,9 @@
 import { useCallback, useState } from 'react'
 import './dashboard.css'
-import { DamPricesChart } from './components/DamPricesChart'
+import { DAMPriceChart } from './components/DAMPriceChart'
 import { DashboardHeader } from './components/DashboardHeader'
 import { EnergyChart } from './components/EnergyChart'
 import { MetricsPanel } from './components/MetricsPanel'
-import { useDAMPrices } from './hooks/useDAMPrices'
 import { useDashboardData } from './hooks/useDashboardData'
 import { useOrganizationParam } from './hooks/useOrganizationParam'
 import { startOfPeriod, type RangePreset } from './range'
@@ -33,11 +32,10 @@ export function Dashboard() {
     periodEnergyValues,
     dayEnergyValues,
     energySummary,
+    damSeries,
     loading,
     error,
   } = useDashboardData({ organizationID, preset, anchor })
-
-  const dam = useDAMPrices({ preset, anchor })
 
   return (
     <main className="dashboard-page">
@@ -75,7 +73,7 @@ export function Dashboard() {
       </section>
 
       <section className="dashboard-dam">
-        <DamPricesChart prices={dam.prices} preset={preset} loading={dam.loading} error={dam.error} />
+        <DAMPriceChart series={damSeries} preset={preset} />
       </section>
     </main>
   )

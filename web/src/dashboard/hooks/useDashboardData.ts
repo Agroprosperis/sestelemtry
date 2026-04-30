@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { fetchCurrent, fetchDashboardConfig, fetchTimeseries } from '../../api'
+import { fetchCurrent, fetchDAMPrices, fetchDashboardConfig, fetchTimeseries } from '../../api'
 import type { CurrentResponse, DashboardConfig } from '../../types'
 import { DASHBOARD_REFRESH_MS, FALLBACK_DASHBOARD_CONFIG } from '../config'
 import { DAY_ENERGY_METRIC_KEYS_LIST } from '../metrics'
-import { dayRangeParams, rangeParams, type RangePreset } from '../range'
+import { dayRangeParams, endOfPeriod, rangeParams, startOfPeriod, type RangePreset } from '../range'
 import { energyBucketDeltaRows, type EnergyRow } from '../transforms/buckets'
+import { damChartRows, type DAMChartRow } from '../transforms/dam'
 import { dayEnergyDeltas, periodEnergyDeltas } from '../transforms/deltas'
 import { energySummaryFromSeries, type EnergySummary } from '../transforms/summary'
 
@@ -15,8 +16,19 @@ export type DashboardData = {
   periodEnergyValues: Record<string, number>
   dayEnergyValues: Record<string, number>
   energySummary: EnergySummary
+  damSeries: DAMChartRow[]
   loading: boolean
   error: string | null
+}
+
+const DAM_DEFAULT_ZONE = 2
+
+function pad(n: number): string {
+  return n < 10 ? `0${n}` : String(n)
+}
+
+function toDateOnly(d: Date): string {
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 }
 
 function isAbortError(e: unknown): boolean {
@@ -35,6 +47,7 @@ export function useDashboardData(input: {
   const [energySeries, setEnergySeries] = useState<EnergyRow[]>([])
   const [periodEnergyValues, setPeriodEnergyValues] = useState<Record<string, number>>({})
   const [dayEnergyValues, setDayEnergyValues] = useState<Record<string, number>>({})
+  const [damSeries, setDamSeries] = useState<DAMChartRow[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -130,6 +143,35 @@ export function useDashboardData(input: {
     }
   }, [organizationID, preset, anchorTime])
 
+  useEffect(() => {
+    const controller = new AbortController()
+    let cancelled = false
+    const anchorDate = new Date(anchorTime)
+    const fromDate = startOfPeriod(preset, anchorDate)
+    const toDateExclusive = endOfPeriod(preset, anchorDate)
+    const toDate = new Date(toDateExclusive)
+    toDate.setDate(toDate.getDate() - 1)
+    const from = toDateOnly(fromDate)
+    const to = toDateOnly(toDate)
+
+    async function load() {
+      try {
+        const resp = await fetchDAMPrices({ zone: DAM_DEFAULT_ZONE, from, to }, controller.signal)
+        if (cancelled) return
+        setDamSeries(damChartRows(resp.prices, preset))
+      } catch (e) {
+        if (cancelled || isAbortError(e)) return
+        setDamSeries([])
+      }
+    }
+    void load()
+
+    return () => {
+      cancelled = true
+      controller.abort()
+    }
+  }, [preset, anchorTime])
+
   const energySummary = useMemo(() => energySummaryFromSeries(energySeries), [energySeries])
 
   return {
@@ -139,6 +181,7 @@ export function useDashboardData(input: {
     periodEnergyValues,
     dayEnergyValues,
     energySummary,
+    damSeries,
     loading,
     error,
   }
