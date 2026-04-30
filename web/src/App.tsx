@@ -98,6 +98,30 @@ function periodEnergyDeltas(points: TimeseriesPoint[]): Record<string, number> {
   return out
 }
 
+function normalizePeriodEnergyPoints(points: TimeseriesPoint[]): TimeseriesPoint[] {
+  const baselines = new Map<string, { time: number; value: number }>()
+  for (const p of points) {
+    if (!periodEnergyMetricKeys.has(p.metric_key)) continue
+    const t = new Date(p.time).getTime()
+    if (!Number.isFinite(t) || !Number.isFinite(p.value)) continue
+    const baseline = baselines.get(p.metric_key)
+    if (!baseline || t < baseline.time) {
+      baselines.set(p.metric_key, { time: t, value: p.value })
+    }
+  }
+
+  return points.map((p) => {
+    if (!periodEnergyMetricKeys.has(p.metric_key)) {
+      return p
+    }
+    const baseline = baselines.get(p.metric_key)
+    if (!baseline) {
+      return p
+    }
+    return { ...p, value: p.value - baseline.value }
+  })
+}
+
 function formatNumber(value: number, unit: string) {
   const decimals = unit === '%' ? 1 : 2
   const factor = 10 ** decimals
@@ -173,7 +197,7 @@ function App() {
         if (!active) return
         setCurrent(cur)
         setPowerSeries(toChartRows(power.points, cfg.power_chart.map((m) => m.key)))
-        setEnergySeries(toChartRows(energy.points, cfg.energy_chart.map((m) => m.key)))
+        setEnergySeries(toChartRows(normalizePeriodEnergyPoints(energy.points), cfg.energy_chart.map((m) => m.key)))
         setPeriodEnergyValues(periodEnergyDeltas(energy.points))
       } catch (e) {
         if (!active) return
