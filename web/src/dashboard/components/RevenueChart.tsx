@@ -75,7 +75,7 @@ export function RevenueChart({ energySeries, damSeries, preset }: Props) {
                   <stop offset="100%" stopColor={REVENUE_FILL_COLOR} stopOpacity={0.05} />
                 </linearGradient>
               </defs>
-              <CartesianGrid strokeDasharray="3 3" />
+              {preset !== 'day' && <CartesianGrid strokeDasharray="3 3" />}
               <XAxis
                 dataKey="time"
                 interval={tickInterval}
