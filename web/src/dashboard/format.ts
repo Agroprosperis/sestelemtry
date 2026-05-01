@@ -33,5 +33,9 @@ export function formatTimeLabel(date: Date, preset: RangePreset): string {
   if (preset === 'month') {
     return date.toLocaleDateString(undefined, { day: '2-digit' })
   }
-  return date.toLocaleTimeString(undefined, { hour: '2-digit' })
+  return date.toLocaleTimeString(undefined, {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  })
 }

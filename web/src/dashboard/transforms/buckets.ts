@@ -1,7 +1,7 @@
 import type { TimeseriesPoint } from '../../types'
 import { APPLIANCE_CONSUMPTION_METRIC, ENERGY_TREND_METRIC_DIRECTIONS, type MetricKey } from '../metrics'
 import type { RangePreset } from '../range'
-import { timelineBuckets } from '../timeline'
+import { DAY_BUCKET_MINUTES, timelineBuckets } from '../timeline'
 
 export type EnergyRow = { time: string } & Partial<Record<MetricKey, number>> & Record<string, string | number>
 
@@ -17,8 +17,9 @@ export function applyApplianceConsumptionRule(rawDeltas: Record<string, number>)
 
 // bucketKey returns a calendar-component key for the local timezone so that
 // API rows bucketed in UTC by Postgres still land in the right slot of the
-// locally-rendered timeline (e.g. "1 day" buckets returned at UTC midnight
-// are still attributed to the correct local day).
+// locally-rendered timeline. For the day preset the key is resolved at
+// DAY_BUCKET_MINUTES granularity so samples align with the 5-minute chart
+// buckets.
 function bucketKey(date: Date, preset: RangePreset): string {
   if (preset === 'year') {
     return `${date.getFullYear()}-${date.getMonth()}`
@@ -26,7 +27,8 @@ function bucketKey(date: Date, preset: RangePreset): string {
   if (preset === 'month') {
     return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`
   }
-  return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}-${date.getHours()}`
+  const minute = Math.floor(date.getMinutes() / DAY_BUCKET_MINUTES) * DAY_BUCKET_MINUTES
+  return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}-${date.getHours()}-${minute}`
 }
 
 function applyDirections(metricKeys: string[], values: Record<string, number>): EnergyRow {
@@ -59,12 +61,13 @@ function indexBuckets(
   return byKey
 }
 
-// futureDayCutoff returns the local-time epoch (start of the hour containing
-// `now`) when the day chart should stop drawing metric values, or null when the
-// preset is not day or the anchor is not the current local day. Buckets with a
-// start time strictly greater than the cutoff are treated as "future" hours
-// that have not happened yet; their metric values are omitted from the row so
-// the line ends at the latest known value rather than dropping to zero.
+// futureDayCutoff returns the local-time epoch (start of the 5-minute bucket
+// containing `now`) when the day chart should stop drawing metric values, or
+// null when the preset is not day or the anchor is not the current local day.
+// Buckets with a start time strictly greater than the cutoff are treated as
+// "future" slots that have not happened yet; their metric values are omitted
+// from the row so the line ends at the latest known value rather than
+// dropping to zero.
 function futureDayCutoff(preset: RangePreset, anchor: Date, now: Date): number | null {
   if (preset !== 'day') return null
   const anchorDay = new Date(anchor)
@@ -72,9 +75,10 @@ function futureDayCutoff(preset: RangePreset, anchor: Date, now: Date): number |
   const today = new Date(now)
   today.setHours(0, 0, 0, 0)
   if (anchorDay.getTime() !== today.getTime()) return null
-  const currentHourStart = new Date(now)
-  currentHourStart.setMinutes(0, 0, 0)
-  return currentHourStart.getTime()
+  const currentBucketStart = new Date(now)
+  const minute = Math.floor(currentBucketStart.getMinutes() / DAY_BUCKET_MINUTES) * DAY_BUCKET_MINUTES
+  currentBucketStart.setMinutes(minute, 0, 0)
+  return currentBucketStart.getTime()
 }
 
 export function energyBucketDeltaRows(

@@ -35,8 +35,12 @@ const DAM_PRICE_KEY = 'dam_price_uah_per_mwh'
 const DAM_PRICE_COLOR = '#0ea5e9'
 const DAM_PRICE_LABEL = 'Ціна РДН'
 
+// Day preset uses 5-minute buckets (288 per day); show every 12th tick so
+// labels land on the hour and the axis stays readable.
+const DAY_TICKS_PER_HOUR = 12
+
 function xAxisInterval(preset: RangePreset): number {
-  if (preset === 'day') return 1
+  if (preset === 'day') return DAY_TICKS_PER_HOUR - 1
   if (preset === 'month') return 2
   return 0
 }
@@ -87,7 +91,7 @@ export function EnergyChart({ metrics, series, preset, summary, loading, damSeri
           <p className="chart-placeholder">No data available for selected range.</p>
         ) : preset === 'day' ? (
           <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={dayData}>
+            <ComposedChart data={dayData} barCategoryGap={0} barGap={0}>
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis dataKey="time" interval={tickInterval} />
               <YAxis
@@ -112,8 +116,7 @@ export function EnergyChart({ metrics, series, preset, summary, loading, damSeri
                 name={DAM_PRICE_LABEL}
                 fill={DAM_PRICE_COLOR}
                 fillOpacity={0.18}
-                stroke={DAM_PRICE_COLOR}
-                strokeOpacity={0.35}
+                stroke="none"
                 isAnimationActive={false}
               />
               {metrics.map((m) => (

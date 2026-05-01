@@ -28,6 +28,16 @@ function bucketKey(preset: RangePreset, deliveryDate: Date, hour: number): numbe
   return d.getTime()
 }
 
+// lookupKey maps a timeline bucket start to the aggregation key used above.
+// For day preset the timeline is 5-minute while DAM prices are hourly, so we
+// round each sub-hour bucket down to its containing hour start.
+function lookupKey(preset: RangePreset, t: number): number {
+  if (preset !== 'day') return t
+  const d = new Date(t)
+  d.setMinutes(0, 0, 0)
+  return d.getTime()
+}
+
 export function damChartRows(prices: DAMPrice[], preset: RangePreset, anchor: Date): DAMChartRow[] {
   type Acc = { sum: number; count: number }
   const buckets = new Map<number, Acc>()
@@ -48,7 +58,7 @@ export function damChartRows(prices: DAMPrice[], preset: RangePreset, anchor: Da
 
   const timeline = timelineBuckets(preset, anchor)
   return timeline.map(({ t, label }) => {
-    const acc = buckets.get(t)
+    const acc = buckets.get(lookupKey(preset, t))
     return {
       time: label,
       bucketStart: t,

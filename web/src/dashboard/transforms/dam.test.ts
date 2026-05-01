@@ -1,22 +1,35 @@
 import { describe, expect, it } from 'vitest'
+import { DAY_BUCKET_MINUTES } from '../timeline'
 import { averagePrice, damChartRows } from './dam'
+
+const DAY_BUCKETS = (24 * 60) / DAY_BUCKET_MINUTES
+const BUCKETS_PER_HOUR = 60 / DAY_BUCKET_MINUTES
 
 describe('damChartRows', () => {
   const dayAnchor = new Date(2026, 3, 30)
   const monthAnchor = new Date(2026, 3, 1)
   const yearAnchor = new Date(2026, 0, 1)
 
-  it('produces 24 hourly points for day preset, filling empty hours with null', () => {
+  it('produces 288 five-minute points for day preset, repeating hourly price across each hour', () => {
     const prices = [
       { delivery_date: '2026-04-30', hour: 1, zone: 2, price_uah_per_mwh: 1000 },
       { delivery_date: '2026-04-30', hour: 5, zone: 2, price_uah_per_mwh: 1500 },
     ]
     const rows = damChartRows(prices, 'day', dayAnchor)
-    expect(rows).toHaveLength(24)
-    expect(rows[0].price).toBe(1000)
-    expect(rows[1].price).toBeNull()
-    expect(rows[4].price).toBe(1500)
-    expect(rows[23].price).toBeNull()
+    expect(rows).toHaveLength(DAY_BUCKETS)
+    // Hour "1" on OREE = local 00:00–01:00 = buckets [0..12).
+    for (let i = 0; i < BUCKETS_PER_HOUR; i++) {
+      expect(rows[i].price).toBe(1000)
+    }
+    // Adjacent hour without data is null across its whole block.
+    for (let i = BUCKETS_PER_HOUR; i < 2 * BUCKETS_PER_HOUR; i++) {
+      expect(rows[i].price).toBeNull()
+    }
+    // Hour "5" = local 04:00–05:00 = buckets [48..60).
+    for (let i = 4 * BUCKETS_PER_HOUR; i < 5 * BUCKETS_PER_HOUR; i++) {
+      expect(rows[i].price).toBe(1500)
+    }
+    expect(rows[DAY_BUCKETS - 1].price).toBeNull()
   })
 
   it('aggregates by day for month preset (averages 24 hours per day)', () => {
@@ -61,10 +74,12 @@ describe('damChartRows', () => {
       { delivery_date: '2026-04-30', hour: 3, zone: 2, price_uah_per_mwh: 1000 },
     ]
     const rows = damChartRows(prices, 'day', dayAnchor)
-    expect(rows).toHaveLength(24)
+    expect(rows).toHaveLength(DAY_BUCKETS)
+    // Hours 1 and 2 have no price → whole blocks are null.
     expect(rows[0].price).toBeNull()
-    expect(rows[1].price).toBeNull()
-    expect(rows[2].price).toBe(1000)
+    expect(rows[BUCKETS_PER_HOUR].price).toBeNull()
+    // Hour 3 = 02:00–03:00 = buckets [24..36).
+    expect(rows[2 * BUCKETS_PER_HOUR].price).toBe(1000)
   })
 
   it('returns rows ordered by bucket start', () => {
@@ -75,8 +90,8 @@ describe('damChartRows', () => {
     ]
     const rows = damChartRows(prices, 'day', dayAnchor)
     expect(rows[0].price).toBe(10)
-    expect(rows[2].price).toBe(30)
-    expect(rows[4].price).toBe(50)
+    expect(rows[2 * BUCKETS_PER_HOUR].price).toBe(30)
+    expect(rows[4 * BUCKETS_PER_HOUR].price).toBe(50)
   })
 })
 

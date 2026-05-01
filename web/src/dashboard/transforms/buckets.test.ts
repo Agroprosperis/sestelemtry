@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
+import { DAY_BUCKET_MINUTES } from '../timeline'
 import { applyApplianceConsumptionRule, energyBucketDeltaRows, type EnergyRow } from './buckets'
+
+const DAY_BUCKETS = (24 * 60) / DAY_BUCKET_MINUTES
 
 describe('applyApplianceConsumptionRule', () => {
   it('replaces appliance consumption with formula result', () => {
@@ -36,7 +39,7 @@ describe('applyApplianceConsumptionRule', () => {
 function bucketTime(preset: 'day' | 'month' | 'year', anchor: Date, idx: number): string {
   const d = new Date(anchor)
   if (preset === 'day') {
-    d.setHours(idx, 0, 0, 0)
+    d.setHours(0, idx * DAY_BUCKET_MINUTES, 0, 0)
   } else if (preset === 'month') {
     d.setDate(idx + 1)
     d.setHours(0, 0, 0, 0)
@@ -65,7 +68,7 @@ describe('energyBucketDeltaRows', () => {
   // disabled and tests stay deterministic regardless of the wall clock.
   const nowAfterAnchor = new Date(2026, 4, 1, 12, 0, 0)
 
-  it('produces 24 rows for the day preset and fills empty buckets with zeros', () => {
+  it('produces 288 rows for the day preset and fills empty buckets with zeros', () => {
     const points = contributionsAt(
       'pv_energy_yield_day_kwh',
       [
@@ -76,12 +79,12 @@ describe('energyBucketDeltaRows', () => {
       anchor,
     )
     const rows = energyBucketDeltaRows(points, ['pv_energy_yield_day_kwh'], 'day', anchor, nowAfterAnchor)
-    expect(rows).toHaveLength(24)
+    expect(rows).toHaveLength(DAY_BUCKETS)
     expect(rows[0].pv_energy_yield_day_kwh).toBe(0)
     expect(rows[1].pv_energy_yield_day_kwh).toBe(5)
     expect(rows[2].pv_energy_yield_day_kwh).toBe(7)
     expect(rows[5].pv_energy_yield_day_kwh).toBe(0)
-    expect(rows[23].pv_energy_yield_day_kwh).toBe(0)
+    expect(rows[DAY_BUCKETS - 1].pv_energy_yield_day_kwh).toBe(0)
   })
 
   it('applies sign direction for sink metrics', () => {
@@ -133,7 +136,7 @@ describe('energyBucketDeltaRows', () => {
 
   it('returns full timeline of zeros when no matching points exist', () => {
     const rows = energyBucketDeltaRows([], ['pv_energy_yield_day_kwh'], 'day', anchor, nowAfterAnchor)
-    expect(rows).toHaveLength(24)
+    expect(rows).toHaveLength(DAY_BUCKETS)
     expect(rows.every((r) => r.pv_energy_yield_day_kwh === 0)).toBe(true)
   })
 
@@ -142,43 +145,46 @@ describe('energyBucketDeltaRows', () => {
     expect(rows).toHaveLength(12)
   })
 
-  it('omits metric values for hours after now on the current day', () => {
+  it('omits metric values for buckets after now on the current day', () => {
     const todayAnchor = new Date(2026, 4, 1)
+    // 14:30 falls on bucket index 174 (14 * 12 + 6) at 5-minute resolution.
     const now = new Date(2026, 4, 1, 14, 30, 0)
+    const currentIdx = (14 * 60 + 30) / DAY_BUCKET_MINUTES
     const points = contributionsAt(
       'pv_energy_yield_day_kwh',
       [
-        { idx: 12, value: 3 },
-        { idx: 13, value: 4 },
-        { idx: 14, value: 1 },
+        { idx: currentIdx - 2, value: 3 },
+        { idx: currentIdx - 1, value: 4 },
+        { idx: currentIdx, value: 1 },
       ],
       todayAnchor,
     )
     const rows = energyBucketDeltaRows(points, ['pv_energy_yield_day_kwh'], 'day', todayAnchor, now)
-    expect(rows).toHaveLength(24)
-    expect(rows[12].pv_energy_yield_day_kwh).toBe(3)
-    expect(rows[13].pv_energy_yield_day_kwh).toBe(4)
-    // Current hour is plotted with whatever data we have so far (partial).
-    expect(rows[14].pv_energy_yield_day_kwh).toBe(1)
-    // Future hours have no metric values so the line ends at the current hour
-    // instead of dropping to zero.
-    expect(rows[15].pv_energy_yield_day_kwh).toBeUndefined()
-    expect(rows[23].pv_energy_yield_day_kwh).toBeUndefined()
-    expect(rows[15].time).toBeDefined()
-    expect(rows[23].time).toBeDefined()
+    expect(rows).toHaveLength(DAY_BUCKETS)
+    expect(rows[currentIdx - 2].pv_energy_yield_day_kwh).toBe(3)
+    expect(rows[currentIdx - 1].pv_energy_yield_day_kwh).toBe(4)
+    // Current bucket is plotted with whatever data we have so far (partial).
+    expect(rows[currentIdx].pv_energy_yield_day_kwh).toBe(1)
+    // Future buckets have no metric values so the line ends at the current
+    // bucket instead of dropping to zero.
+    expect(rows[currentIdx + 1].pv_energy_yield_day_kwh).toBeUndefined()
+    expect(rows[DAY_BUCKETS - 1].pv_energy_yield_day_kwh).toBeUndefined()
+    expect(rows[currentIdx + 1].time).toBeDefined()
+    expect(rows[DAY_BUCKETS - 1].time).toBeDefined()
   })
 
-  it('keeps zero fill for past hours when anchor is the current day', () => {
+  it('keeps zero fill for past buckets when anchor is the current day', () => {
     const todayAnchor = new Date(2026, 4, 1)
     const now = new Date(2026, 4, 1, 10, 0, 0)
+    const currentIdx = (10 * 60) / DAY_BUCKET_MINUTES
     const rows = energyBucketDeltaRows([], ['pv_energy_yield_day_kwh'], 'day', todayAnchor, now)
     expect(rows[0].pv_energy_yield_day_kwh).toBe(0)
-    expect(rows[9].pv_energy_yield_day_kwh).toBe(0)
-    expect(rows[10].pv_energy_yield_day_kwh).toBe(0)
-    expect(rows[11].pv_energy_yield_day_kwh).toBeUndefined()
+    expect(rows[currentIdx - 1].pv_energy_yield_day_kwh).toBe(0)
+    expect(rows[currentIdx].pv_energy_yield_day_kwh).toBe(0)
+    expect(rows[currentIdx + 1].pv_energy_yield_day_kwh).toBeUndefined()
   })
 
-  it('does not omit any hours when anchor is a past day', () => {
+  it('does not omit any buckets when anchor is a past day', () => {
     const pastAnchor = new Date(2026, 3, 30)
     const now = new Date(2026, 4, 1, 8, 0, 0)
     const rows = energyBucketDeltaRows([], ['pv_energy_yield_day_kwh'], 'day', pastAnchor, now)
