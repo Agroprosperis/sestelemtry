@@ -2,8 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { fetchCurrent, fetchDAMPrices, fetchDashboardConfig, fetchTimeseries } from '../../api'
 import type { CurrentResponse, DashboardConfig } from '../../types'
 import { DASHBOARD_REFRESH_MS, FALLBACK_DASHBOARD_CONFIG } from '../config'
-import { endOfPeriod, rangeParams, startOfPeriod, type RangePreset } from '../range'
-import { energyBucketDeltaRows, type EnergyRow } from '../transforms/buckets'
+import { endOfPeriod, isCurrentPeriod, rangeParams, startOfPeriod, type RangePreset } from '../range'
+import { energyBucketDeltaRows, overrideCurrentDayCell, type EnergyRow } from '../transforms/buckets'
 import { damChartRows, type DAMChartRow } from '../transforms/dam'
 import { energySummaryFromSeries, type EnergySummary } from '../transforms/summary'
 
@@ -89,7 +89,12 @@ export function useDashboardData(input: {
         const energyKeys = cfg.energy_chart.map((m) => m.key)
         const anchorDate = new Date(anchorTime)
         const now = new Date()
-        const [cur, energy] = await Promise.all([
+        // When the user is on the month tab for the current month, we also
+        // pull today's 5-minute bucket data so the current-day cell matches
+        // the day preset exactly instead of drifting because of a 1-day
+        // server bucket.
+        const needsTodayOverride = preset === 'month' && isCurrentPeriod('month', anchorDate, now)
+        const [cur, energy, today] = await Promise.all([
           fetchCurrent(organizationID, controller.signal),
           fetchTimeseries(
             {
@@ -99,10 +104,24 @@ export function useDashboardData(input: {
             },
             controller.signal,
           ),
+          needsTodayOverride
+            ? fetchTimeseries(
+                {
+                  organizationID,
+                  metricKeys: energyKeys,
+                  ...rangeParams('day', now, now),
+                },
+                controller.signal,
+              )
+            : Promise.resolve(null),
         ])
         if (cancelled || controller.signal.aborted) return
         setCurrent(cur)
-        setEnergySeries(energyBucketDeltaRows(energy.points, energyKeys, preset, anchorDate, now))
+        let series = energyBucketDeltaRows(energy.points, energyKeys, preset, anchorDate, now)
+        if (today) {
+          series = overrideCurrentDayCell(series, today.points, energyKeys, now)
+        }
+        setEnergySeries(series)
         setError(null)
       } catch (e) {
         if (cancelled || isAbortError(e)) return
