@@ -7,7 +7,7 @@ modbus_register_map: holding
 organizations:
   - id: docker-demo
     name: Docker demo org
-    poll_interval: 30s
+    poll_interval: 1s
     modbus:
       host: host.docker.internal
       port: 502
