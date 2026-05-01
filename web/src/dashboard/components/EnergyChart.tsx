@@ -6,6 +6,7 @@ import {
   ComposedChart,
   Legend,
   Line,
+  ReferenceArea,
   ReferenceLine,
   ResponsiveContainer,
   Tooltip,
@@ -45,6 +46,41 @@ function xAxisInterval(preset: RangePreset): number {
   return 0
 }
 
+type HourlyDamArea = { x1: string; x2: string; price: number }
+
+// hourlyDamAreas turns per-5-minute damSeries into one block per hour for
+// rendering as ReferenceArea overlays. x1 is the hour-start label ("HH:00"),
+// x2 is the next hour-start label (or the last timeline label for hour 23).
+function hourlyDamAreas(
+  damSeries: DAMChartRow[] | undefined,
+  timelineLabels: string[],
+): HourlyDamArea[] {
+  if (!damSeries || damSeries.length === 0 || timelineLabels.length === 0) return []
+  const priceAtLabel = new Map<string, number>()
+  for (const r of damSeries) {
+    if (r.price == null || !Number.isFinite(r.price)) continue
+    priceAtLabel.set(String(r.time), r.price)
+  }
+  const lastLabel = timelineLabels[timelineLabels.length - 1]
+  const out: HourlyDamArea[] = []
+  for (let hour = 0; hour < 24; hour++) {
+    const label = `${String(hour).padStart(2, '0')}:00`
+    const price = priceAtLabel.get(label)
+    if (price == null || !Number.isFinite(price)) continue
+    const nextLabel =
+      hour < 23 ? `${String(hour + 1).padStart(2, '0')}:00` : lastLabel
+    out.push({ x1: label, x2: nextLabel, price })
+  }
+  return out
+}
+
+function damPriceDomain(areas: HourlyDamArea[]): [number, number] {
+  if (areas.length === 0) return [0, 0]
+  let max = 0
+  for (const a of areas) if (a.price > max) max = a.price
+  return [0, Math.ceil(max * 1.1)]
+}
+
 export function EnergyChart({ metrics, series, preset, summary, loading, damSeries }: Props) {
   const tooltipContent = useCallback(
     (props: Omit<React.ComponentProps<typeof EnergyTooltip>, 'preset'>) => (
@@ -54,6 +90,8 @@ export function EnergyChart({ metrics, series, preset, summary, loading, damSeri
   )
   const tickInterval = xAxisInterval(preset)
 
+  // Day preset carries the current hourly DAM price on every 5-minute row so
+  // the tooltip surfaces the containing hour's price at any hover position.
   const dayData = useMemo(() => {
     if (preset !== 'day') return series
     const priceByTime = new Map<string, number | null>()
@@ -67,6 +105,19 @@ export function EnergyChart({ metrics, series, preset, summary, loading, damSeri
         : row
     })
   }, [preset, series, damSeries])
+
+  const hourlyAreas = useMemo(
+    () => hourlyDamAreas(damSeries, series.map((r) => String(r.time))),
+    [damSeries, series],
+  )
+  const priceDomain = useMemo(() => damPriceDomain(hourlyAreas), [hourlyAreas])
+  const hasDam = hourlyAreas.length > 0
+
+  const dayTickFormatter = useCallback((v: unknown): string => {
+    const s = String(v)
+    const idx = s.indexOf(':')
+    return idx > 0 ? s.slice(0, idx) : s
+  }, [])
 
   const dayTooltipFormatter = useCallback(
     (value: unknown, name: unknown): [string, string] => {
@@ -91,9 +142,13 @@ export function EnergyChart({ metrics, series, preset, summary, loading, damSeri
           <p className="chart-placeholder">No data available for selected range.</p>
         ) : preset === 'day' ? (
           <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={dayData} barCategoryGap={0} barGap={0}>
+            <ComposedChart data={dayData}>
               <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="time" interval={tickInterval} />
+              <XAxis
+                dataKey="time"
+                interval={tickInterval}
+                tickFormatter={dayTickFormatter}
+              />
               <YAxis
                 yAxisId="energy"
                 tickFormatter={(v) => formatChartNumber(Number(v))}
@@ -101,21 +156,40 @@ export function EnergyChart({ metrics, series, preset, summary, loading, damSeri
               <YAxis
                 yAxisId="price"
                 orientation="right"
+                domain={priceDomain}
                 tickFormatter={(v) => formatChartNumber(Number(v))}
                 tick={{ fill: DAM_PRICE_COLOR, fontSize: 11 }}
                 axisLine={{ stroke: DAM_PRICE_COLOR, opacity: 0.4 }}
                 tickLine={{ stroke: DAM_PRICE_COLOR, opacity: 0.4 }}
                 width={48}
+                hide={!hasDam}
               />
               <Tooltip formatter={dayTooltipFormatter} />
               <Legend />
+              {hourlyAreas.map((a, i) => (
+                <ReferenceArea
+                  key={`dam-${i}`}
+                  yAxisId="price"
+                  x1={a.x1}
+                  x2={a.x2}
+                  y1={0}
+                  y2={a.price}
+                  fill={DAM_PRICE_COLOR}
+                  fillOpacity={0.18}
+                  stroke="none"
+                  ifOverflow="visible"
+                />
+              ))}
               <ReferenceLine y={0} yAxisId="energy" stroke="#64748b" />
+              {/* Invisible bar carries "Ціна РДН" into the legend + tooltip
+                  without drawing any pixels (ReferenceArea handles the
+                  hourly visual). */}
               <Bar
                 yAxisId="price"
                 dataKey={DAM_PRICE_KEY}
                 name={DAM_PRICE_LABEL}
                 fill={DAM_PRICE_COLOR}
-                fillOpacity={0.18}
+                fillOpacity={0}
                 stroke="none"
                 isAnimationActive={false}
               />
