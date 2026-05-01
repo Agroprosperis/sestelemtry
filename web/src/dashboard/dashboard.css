@@ -447,6 +447,12 @@
   font-weight: 500;
 }
 
+.energy-tooltip-dam {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #e2e8f0;
+}
+
 @media (max-width: 900px) {
   .dashboard-header {
     flex-direction: column;

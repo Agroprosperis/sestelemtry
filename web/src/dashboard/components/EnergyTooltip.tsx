@@ -16,8 +16,10 @@ type Props = {
   preset: RangePreset
 }
 
+const DAM_PRICE_KEY = 'dam_price_uah_per_mwh'
+
 export function EnergyTooltip({ active, label, payload, preset }: Props) {
-  if (!active || !payload || payload.length === 0 || preset === 'day') {
+  if (!active || !payload || payload.length === 0) {
     return null
   }
 
@@ -53,6 +55,10 @@ export function EnergyTooltip({ active, label, payload, preset }: Props) {
     )
   }
 
+  const damEntry = byKey.get(DAM_PRICE_KEY)
+  const damValue = Number(damEntry?.value)
+  const showDam = preset === 'day' && Number.isFinite(damValue)
+
   return (
     <div className="energy-tooltip">
       <div className="energy-tooltip-label">{label}</div>
@@ -72,6 +78,13 @@ export function EnergyTooltip({ active, label, payload, preset }: Props) {
           {SINK_ENERGY_METRIC_KEYS.map((key) => row(key, true))}
         </div>
       </div>
+      {showDam && (
+        <div className="energy-tooltip-row energy-tooltip-dam">
+          <span className="energy-tooltip-dot" style={{ backgroundColor: damEntry?.color ?? '#0ea5e9' }} />
+          <span className="energy-tooltip-name">Ціна РДН</span>
+          <span className="energy-tooltip-value">{formatChartNumber(damValue)} грн/МВт·год</span>
+        </div>
+      )}
     </div>
   )
 }

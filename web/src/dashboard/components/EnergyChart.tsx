@@ -119,17 +119,6 @@ export function EnergyChart({ metrics, series, preset, summary, loading, damSeri
     return idx > 0 ? s.slice(0, idx) : s
   }, [])
 
-  const dayTooltipFormatter = useCallback(
-    (value: unknown, name: unknown): [string, string] => {
-      const n = Number(value)
-      const label = typeof name === 'string' ? name : String(name ?? '')
-      if (label === DAM_PRICE_LABEL) {
-        return [`${formatChartNumber(n)} грн/МВт·год`, DAM_PRICE_LABEL]
-      }
-      return [`${formatChartNumber(n)} kWh`, label]
-    },
-    [],
-  )
 
   return (
     <div className="chart-card">
@@ -164,7 +153,7 @@ export function EnergyChart({ metrics, series, preset, summary, loading, damSeri
                 width={48}
                 hide={!hasDam}
               />
-              <Tooltip formatter={dayTooltipFormatter} />
+              <Tooltip content={tooltipContent} />
               <Legend />
               {hourlyAreas.map((a, i) => (
                 <ReferenceArea
