@@ -141,11 +141,33 @@
   padding: 10px 12px;
 }
 
-.dashboard-main {
-  display: grid;
-  grid-template-columns: minmax(280px, 1fr) minmax(0, 2.6fr);
-  gap: 14px;
-  align-items: start;
+.dashboard-tabs {
+  display: inline-flex;
+  gap: 4px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 4px;
+  width: fit-content;
+}
+
+.dashboard-tabs button {
+  border: none;
+  background: transparent;
+  color: #334155;
+  padding: 8px 16px;
+  border-radius: 8px;
+  cursor: pointer;
+  font: inherit;
+}
+
+.dashboard-tabs button.active {
+  background: #0f172a;
+  color: #ffffff;
+}
+
+.dashboard-tabs button:not(.active):hover {
+  background: #f1f5f9;
 }
 
 .cards-grid {
@@ -193,8 +215,8 @@
 }
 
 .metrics-panel .cards-grid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
 }
 
 .metrics-panel .card {
@@ -434,8 +456,11 @@
     width: 100%;
     flex-wrap: wrap;
   }
-  .dashboard-main {
-    grid-template-columns: 1fr;
+  .dashboard-tabs {
+    width: 100%;
+  }
+  .dashboard-tabs button {
+    flex: 1 1 auto;
   }
   .energy-tooltip {
     min-width: 0;
