@@ -88,20 +88,21 @@ export function useDashboardData(input: {
         const cfg = configRef.current
         const energyKeys = cfg.energy_chart.map((m) => m.key)
         const anchorDate = new Date(anchorTime)
+        const now = new Date()
         const [cur, energy] = await Promise.all([
           fetchCurrent(organizationID, controller.signal),
           fetchTimeseries(
             {
               organizationID,
               metricKeys: energyKeys,
-              ...rangeParams(preset, anchorDate),
+              ...rangeParams(preset, anchorDate, now),
             },
             controller.signal,
           ),
         ])
         if (cancelled || controller.signal.aborted) return
         setCurrent(cur)
-        setEnergySeries(energyBucketDeltaRows(energy.points, energyKeys, preset, anchorDate))
+        setEnergySeries(energyBucketDeltaRows(energy.points, energyKeys, preset, anchorDate, now))
         setError(null)
       } catch (e) {
         if (cancelled || isAbortError(e)) return

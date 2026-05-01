@@ -59,15 +59,38 @@ function indexBuckets(
   return byKey
 }
 
+// futureDayCutoff returns the local-time epoch (start of the hour containing
+// `now`) when the day chart should stop drawing metric values, or null when the
+// preset is not day or the anchor is not the current local day. Buckets with a
+// start time strictly greater than the cutoff are treated as "future" hours
+// that have not happened yet; their metric values are omitted from the row so
+// the line ends at the latest known value rather than dropping to zero.
+function futureDayCutoff(preset: RangePreset, anchor: Date, now: Date): number | null {
+  if (preset !== 'day') return null
+  const anchorDay = new Date(anchor)
+  anchorDay.setHours(0, 0, 0, 0)
+  const today = new Date(now)
+  today.setHours(0, 0, 0, 0)
+  if (anchorDay.getTime() !== today.getTime()) return null
+  const currentHourStart = new Date(now)
+  currentHourStart.setMinutes(0, 0, 0)
+  return currentHourStart.getTime()
+}
+
 export function energyBucketDeltaRows(
   points: TimeseriesPoint[],
   metricKeys: string[],
   preset: RangePreset,
   anchor: Date,
+  now: Date = new Date(),
 ): EnergyRow[] {
   const byKey = indexBuckets(points, metricKeys, preset)
   const timeline = timelineBuckets(preset, anchor)
+  const cutoff = futureDayCutoff(preset, anchor, now)
   return timeline.map(({ t, label }) => {
+    if (cutoff !== null && t > cutoff) {
+      return { time: label }
+    }
     const date = new Date(t)
     const values = byKey.get(bucketKey(date, preset)) || {}
     const cell: Record<string, number> = {}
