@@ -64,7 +64,7 @@ oree:
 	if o.Zone != 2 {
 		t.Fatalf("zone default: %d", o.Zone)
 	}
-	if o.RunAt != "14:00" {
+	if o.RunAt != "15:30" {
 		t.Fatalf("run_at default: %q", o.RunAt)
 	}
 	if o.Timezone != "Europe/Kyiv" {

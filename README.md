@@ -63,7 +63,7 @@ Configure under the `oree:` section in `config.yaml` (see
 oree:
   enabled: true
   zone: 2                     # 1 = Burshtyn island, 2 = unified UA grid
-  run_at: "14:00"             # local time of day in `timezone`
+  run_at: "15:30"             # local time of day in `timezone`
   timezone: "Europe/Kyiv"
   delivery_offset_days: 1     # 1 = fetch tomorrow's prices
 ```

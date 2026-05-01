@@ -124,7 +124,7 @@ func (c *Root) applyOREEDefaults() {
 		o.Zone = 2
 	}
 	if strings.TrimSpace(o.RunAt) == "" {
-		o.RunAt = "14:00"
+		o.RunAt = "15:30"
 	}
 	if strings.TrimSpace(o.Timezone) == "" {
 		o.Timezone = "Europe/Kyiv"
