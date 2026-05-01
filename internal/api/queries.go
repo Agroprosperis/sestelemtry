@@ -76,20 +76,47 @@ func (s *Store) Timeseries(ctx context.Context, organizationID string, metricKey
 
 	// Bucket boundaries are aligned to the caller's timezone so daily-resetting
 	// counters (e.g. pv_energy_yield_day_kwh) reset on a bucket edge rather
-	// than mid-bucket. Bucket value is the per-bucket contribution computed as
-	// last(value) - first(value) so within-bucket resets, if any, do not
-	// produce a spurious spike (we clamp negatives to zero).
+	// than mid-bucket.
+	//
+	// Bucket value is the *accumulated counter delta* for the bucket, computed
+	// as `last(value, time)` of the current bucket minus `last(value, time)`
+	// of the previous bucket. This is robust when a bucket has only a single
+	// sample (or none while an adjacent bucket recovers): with last-minus-first
+	// inside a single bucket a sparse bucket would silently render as 0 and
+	// "lose" the energy that actually accumulated between samples. By
+	// referencing the previous bucket's last value we capture the entire
+	// delta across sample gaps, so a transient Modbus/collector outage leaves
+	// the first bucket after recovery absorbing the missed energy instead of
+	// the chart flatlining to zero.
+	//
+	// We extend the lookback window by one bucket interval so the very first
+	// displayed bucket can find a seed value in the previous bucket. Negative
+	// deltas (possible on daily-resetting counters or rare manual adjustments)
+	// are clamped to zero with GREATEST.
 	rows, err := s.pool.Query(ctx, `
+		WITH bucketed AS (
+			SELECT
+				time_bucket($1::interval, time, $6::text) AS bucket_time,
+				metric_key,
+				last(value, time) AS last_value
+			FROM telemetry_samples
+			WHERE organization_id = $2
+				AND metric_key = ANY($3)
+				AND time >= $4::timestamptz - $1::interval
+				AND time <= $5
+			GROUP BY bucket_time, metric_key
+		)
 		SELECT
-			time_bucket($1::interval, time, $6::text) AS bucket_time,
+			bucket_time,
 			metric_key,
-			GREATEST(last(value, time) - first(value, time), 0) AS value
-		FROM telemetry_samples
-		WHERE organization_id = $2
-			AND metric_key = ANY($3)
-			AND time >= $4
-			AND time <= $5
-		GROUP BY bucket_time, metric_key
+			GREATEST(
+				last_value - lag(last_value) OVER (
+					PARTITION BY metric_key ORDER BY bucket_time
+				),
+				0
+			) AS value
+		FROM bucketed
+		WHERE bucket_time >= $4
 		ORDER BY bucket_time ASC, metric_key ASC
 	`, bucket, organizationID, metricKeys, from.UTC(), to.UTC(), tz)
 	if err != nil {
