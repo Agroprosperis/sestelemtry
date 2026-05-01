@@ -9,7 +9,7 @@ export function applyApplianceConsumptionRule(rawDeltas: Record<string, number>)
   if (!(APPLIANCE_CONSUMPTION_METRIC in rawDeltas)) return
   const value =
     (rawDeltas.accumulated_electricity_purchased_kwh ?? 0) +
-    (rawDeltas.pv_energy_yield_day_kwh ?? 0) +
+    (rawDeltas.accumulated_pv_energy_yield_kwh ?? 0) +
     (rawDeltas.total_energy_discharged_kwh ?? 0) -
     (rawDeltas.total_energy_charged_kwh ?? 0)
   rawDeltas[APPLIANCE_CONSUMPTION_METRIC] = value < 0 ? 0 : value

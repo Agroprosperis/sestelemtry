@@ -6,7 +6,7 @@ import { revenueChartRows, totalRevenue } from './revenue'
 function energy(pv: Array<number | undefined>): EnergyRow[] {
   return pv.map((v, i) => {
     const row: EnergyRow = { time: `t${i}` }
-    if (v !== undefined) row.pv_energy_yield_day_kwh = v
+    if (v !== undefined) row.accumulated_pv_energy_yield_kwh = v
     return row
   })
 }
@@ -39,8 +39,8 @@ describe('revenueChartRows', () => {
 
   it('aligns rows by time label, not by index', () => {
     const energyRows: EnergyRow[] = [
-      { time: 'a', pv_energy_yield_day_kwh: 2 },
-      { time: 'b', pv_energy_yield_day_kwh: 5 },
+      { time: 'a', accumulated_pv_energy_yield_kwh: 2 },
+      { time: 'b', accumulated_pv_energy_yield_kwh: 5 },
     ]
     const damRows: DAMChartRow[] = [
       { time: 'b', bucketStart: 0, price: 2000 },

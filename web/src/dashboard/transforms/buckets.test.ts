@@ -8,7 +8,7 @@ describe('applyApplianceConsumptionRule', () => {
   it('replaces appliance consumption with formula result', () => {
     const deltas: Record<string, number> = {
       accumulated_electricity_purchased_kwh: 5,
-      pv_energy_yield_day_kwh: 4,
+      accumulated_pv_energy_yield_kwh: 4,
       total_energy_discharged_kwh: 3,
       total_energy_charged_kwh: 2,
       accumulated_power_consumption_kwh: 0,
@@ -20,7 +20,7 @@ describe('applyApplianceConsumptionRule', () => {
   it('clamps negative results to zero', () => {
     const deltas: Record<string, number> = {
       accumulated_electricity_purchased_kwh: 0,
-      pv_energy_yield_day_kwh: 0,
+      accumulated_pv_energy_yield_kwh: 0,
       total_energy_discharged_kwh: 0,
       total_energy_charged_kwh: 50,
       accumulated_power_consumption_kwh: 0,
@@ -70,7 +70,7 @@ describe('energyBucketDeltaRows', () => {
 
   it('produces 288 rows for the day preset and fills empty buckets with zeros', () => {
     const points = contributionsAt(
-      'pv_energy_yield_day_kwh',
+      'accumulated_pv_energy_yield_kwh',
       [
         { idx: 0, value: 0 },
         { idx: 1, value: 5 },
@@ -78,13 +78,13 @@ describe('energyBucketDeltaRows', () => {
       ],
       anchor,
     )
-    const rows = energyBucketDeltaRows(points, ['pv_energy_yield_day_kwh'], 'day', anchor, nowAfterAnchor)
+    const rows = energyBucketDeltaRows(points, ['accumulated_pv_energy_yield_kwh'], 'day', anchor, nowAfterAnchor)
     expect(rows).toHaveLength(DAY_BUCKETS)
-    expect(rows[0].pv_energy_yield_day_kwh).toBe(0)
-    expect(rows[1].pv_energy_yield_day_kwh).toBe(5)
-    expect(rows[2].pv_energy_yield_day_kwh).toBe(7)
-    expect(rows[5].pv_energy_yield_day_kwh).toBe(0)
-    expect(rows[DAY_BUCKETS - 1].pv_energy_yield_day_kwh).toBe(0)
+    expect(rows[0].accumulated_pv_energy_yield_kwh).toBe(0)
+    expect(rows[1].accumulated_pv_energy_yield_kwh).toBe(5)
+    expect(rows[2].accumulated_pv_energy_yield_kwh).toBe(7)
+    expect(rows[5].accumulated_pv_energy_yield_kwh).toBe(0)
+    expect(rows[DAY_BUCKETS - 1].accumulated_pv_energy_yield_kwh).toBe(0)
   })
 
   it('applies sign direction for sink metrics', () => {
@@ -103,29 +103,29 @@ describe('energyBucketDeltaRows', () => {
 
   it('clamps negative bucket values to zero', () => {
     const points = contributionsAt(
-      'pv_energy_yield_day_kwh',
+      'accumulated_pv_energy_yield_kwh',
       [
         { idx: 1, value: -2 },
         { idx: 2, value: 4 },
       ],
       anchor,
     )
-    const rows = energyBucketDeltaRows(points, ['pv_energy_yield_day_kwh'], 'day', anchor, nowAfterAnchor)
-    expect(rows[1].pv_energy_yield_day_kwh).toBe(0)
-    expect(rows[2].pv_energy_yield_day_kwh).toBe(4)
+    const rows = energyBucketDeltaRows(points, ['accumulated_pv_energy_yield_kwh'], 'day', anchor, nowAfterAnchor)
+    expect(rows[1].accumulated_pv_energy_yield_kwh).toBe(0)
+    expect(rows[2].accumulated_pv_energy_yield_kwh).toBe(4)
   })
 
   it('recomputes appliance consumption from formula', () => {
     const metricKeys = [
       'accumulated_electricity_purchased_kwh',
-      'pv_energy_yield_day_kwh',
+      'accumulated_pv_energy_yield_kwh',
       'total_energy_discharged_kwh',
       'total_energy_charged_kwh',
       'accumulated_power_consumption_kwh',
     ]
     const points = [
       { time: bucketTime('day', anchor, 1), metric_key: 'accumulated_electricity_purchased_kwh', value: 5 },
-      { time: bucketTime('day', anchor, 1), metric_key: 'pv_energy_yield_day_kwh', value: 4 },
+      { time: bucketTime('day', anchor, 1), metric_key: 'accumulated_pv_energy_yield_kwh', value: 4 },
       { time: bucketTime('day', anchor, 1), metric_key: 'total_energy_discharged_kwh', value: 3 },
       { time: bucketTime('day', anchor, 1), metric_key: 'total_energy_charged_kwh', value: 2 },
       { time: bucketTime('day', anchor, 1), metric_key: 'accumulated_power_consumption_kwh', value: 0 },
@@ -135,13 +135,13 @@ describe('energyBucketDeltaRows', () => {
   })
 
   it('returns full timeline of zeros when no matching points exist', () => {
-    const rows = energyBucketDeltaRows([], ['pv_energy_yield_day_kwh'], 'day', anchor, nowAfterAnchor)
+    const rows = energyBucketDeltaRows([], ['accumulated_pv_energy_yield_kwh'], 'day', anchor, nowAfterAnchor)
     expect(rows).toHaveLength(DAY_BUCKETS)
-    expect(rows.every((r) => r.pv_energy_yield_day_kwh === 0)).toBe(true)
+    expect(rows.every((r) => r.accumulated_pv_energy_yield_kwh === 0)).toBe(true)
   })
 
   it('produces 12 rows for the year preset', () => {
-    const rows = energyBucketDeltaRows([], ['pv_energy_yield_day_kwh'], 'year', anchor)
+    const rows = energyBucketDeltaRows([], ['accumulated_pv_energy_yield_kwh'], 'year', anchor)
     expect(rows).toHaveLength(12)
   })
 
@@ -151,7 +151,7 @@ describe('energyBucketDeltaRows', () => {
     const now = new Date(2026, 4, 1, 14, 30, 0)
     const currentIdx = (14 * 60 + 30) / DAY_BUCKET_MINUTES
     const points = contributionsAt(
-      'pv_energy_yield_day_kwh',
+      'accumulated_pv_energy_yield_kwh',
       [
         { idx: currentIdx - 2, value: 3 },
         { idx: currentIdx - 1, value: 4 },
@@ -159,16 +159,16 @@ describe('energyBucketDeltaRows', () => {
       ],
       todayAnchor,
     )
-    const rows = energyBucketDeltaRows(points, ['pv_energy_yield_day_kwh'], 'day', todayAnchor, now)
+    const rows = energyBucketDeltaRows(points, ['accumulated_pv_energy_yield_kwh'], 'day', todayAnchor, now)
     expect(rows).toHaveLength(DAY_BUCKETS)
-    expect(rows[currentIdx - 2].pv_energy_yield_day_kwh).toBe(3)
-    expect(rows[currentIdx - 1].pv_energy_yield_day_kwh).toBe(4)
+    expect(rows[currentIdx - 2].accumulated_pv_energy_yield_kwh).toBe(3)
+    expect(rows[currentIdx - 1].accumulated_pv_energy_yield_kwh).toBe(4)
     // Current bucket is plotted with whatever data we have so far (partial).
-    expect(rows[currentIdx].pv_energy_yield_day_kwh).toBe(1)
+    expect(rows[currentIdx].accumulated_pv_energy_yield_kwh).toBe(1)
     // Future buckets have no metric values so the line ends at the current
     // bucket instead of dropping to zero.
-    expect(rows[currentIdx + 1].pv_energy_yield_day_kwh).toBeUndefined()
-    expect(rows[DAY_BUCKETS - 1].pv_energy_yield_day_kwh).toBeUndefined()
+    expect(rows[currentIdx + 1].accumulated_pv_energy_yield_kwh).toBeUndefined()
+    expect(rows[DAY_BUCKETS - 1].accumulated_pv_energy_yield_kwh).toBeUndefined()
     expect(rows[currentIdx + 1].time).toBeDefined()
     expect(rows[DAY_BUCKETS - 1].time).toBeDefined()
   })
@@ -177,18 +177,18 @@ describe('energyBucketDeltaRows', () => {
     const todayAnchor = new Date(2026, 4, 1)
     const now = new Date(2026, 4, 1, 10, 0, 0)
     const currentIdx = (10 * 60) / DAY_BUCKET_MINUTES
-    const rows = energyBucketDeltaRows([], ['pv_energy_yield_day_kwh'], 'day', todayAnchor, now)
-    expect(rows[0].pv_energy_yield_day_kwh).toBe(0)
-    expect(rows[currentIdx - 1].pv_energy_yield_day_kwh).toBe(0)
-    expect(rows[currentIdx].pv_energy_yield_day_kwh).toBe(0)
-    expect(rows[currentIdx + 1].pv_energy_yield_day_kwh).toBeUndefined()
+    const rows = energyBucketDeltaRows([], ['accumulated_pv_energy_yield_kwh'], 'day', todayAnchor, now)
+    expect(rows[0].accumulated_pv_energy_yield_kwh).toBe(0)
+    expect(rows[currentIdx - 1].accumulated_pv_energy_yield_kwh).toBe(0)
+    expect(rows[currentIdx].accumulated_pv_energy_yield_kwh).toBe(0)
+    expect(rows[currentIdx + 1].accumulated_pv_energy_yield_kwh).toBeUndefined()
   })
 
   it('does not omit any buckets when anchor is a past day', () => {
     const pastAnchor = new Date(2026, 3, 30)
     const now = new Date(2026, 4, 1, 8, 0, 0)
-    const rows = energyBucketDeltaRows([], ['pv_energy_yield_day_kwh'], 'day', pastAnchor, now)
-    expect(rows.every((r) => r.pv_energy_yield_day_kwh === 0)).toBe(true)
+    const rows = energyBucketDeltaRows([], ['accumulated_pv_energy_yield_kwh'], 'day', pastAnchor, now)
+    expect(rows.every((r) => r.accumulated_pv_energy_yield_kwh === 0)).toBe(true)
   })
 
   it('sums daily contributions into months for the year preset', () => {

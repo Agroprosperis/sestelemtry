@@ -28,7 +28,7 @@ export const FALLBACK_DASHBOARD_CONFIG: DashboardConfig = {
   energy_chart: [
     { key: 'accumulated_electricity_purchased_kwh', label: 'З електромережі', unit: 'kWh' },
     { key: 'total_energy_discharged_kwh', label: 'Розряджання системи накопичення енергії', unit: 'kWh' },
-    { key: 'pv_energy_yield_day_kwh', label: 'Вироблено фотоелектричною установкою', unit: 'kWh' },
+    { key: 'accumulated_pv_energy_yield_kwh', label: 'Вироблено фотоелектричною установкою', unit: 'kWh' },
     { key: 'accumulated_electricity_sold_kwh', label: 'Подано в електромережу', unit: 'kWh' },
     { key: 'total_energy_charged_kwh', label: 'Заряджання системи накопичення енергії', unit: 'kWh' },
     { key: 'accumulated_power_consumption_kwh', label: 'Споживання приладами', unit: 'kWh' },

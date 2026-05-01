@@ -28,7 +28,7 @@ export type EnergySummary = {
 }
 
 export function energySummaryFromSeries(series: EnergyRow[]): EnergySummary {
-  const pvProduced = sumSeriesValue(series, 'pv_energy_yield_day_kwh', 'positive')
+  const pvProduced = sumSeriesValue(series, 'accumulated_pv_energy_yield_kwh', 'positive')
   const gridExport = sumSeriesValue(series, 'accumulated_electricity_sold_kwh', 'absolute')
   const pvConsumed = Math.max(pvProduced - gridExport, 0)
   const consumption = sumSeriesValue(series, 'accumulated_power_consumption_kwh', 'absolute')

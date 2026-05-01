@@ -27,7 +27,7 @@ describe('energySummaryFromSeries', () => {
     const rows: EnergyRow[] = [
       {
         time: '00',
-        pv_energy_yield_day_kwh: 100,
+        accumulated_pv_energy_yield_kwh: 100,
         accumulated_electricity_sold_kwh: -25,
         accumulated_power_consumption_kwh: -80,
         accumulated_electricity_purchased_kwh: 30,
@@ -60,7 +60,7 @@ describe('energySummaryFromSeries', () => {
     const rows: EnergyRow[] = [
       {
         time: '00',
-        pv_energy_yield_day_kwh: 10,
+        accumulated_pv_energy_yield_kwh: 10,
         accumulated_electricity_sold_kwh: -50,
         accumulated_power_consumption_kwh: -10,
         accumulated_electricity_purchased_kwh: 100,

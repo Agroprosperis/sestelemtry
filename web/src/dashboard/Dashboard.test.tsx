@@ -7,7 +7,7 @@ vi.mock('./hooks/useDashboardData', () => ({
     config: {
       cards: [{ key: 'soc_percent', label: 'SOC', unit: '%' }],
       power_chart: [{ key: 'active_pv_power_kw', label: 'PV Power', unit: 'kW' }],
-      energy_chart: [{ key: 'pv_energy_yield_day_kwh', label: 'PV Daily Yield', unit: 'kWh' }],
+      energy_chart: [{ key: 'accumulated_pv_energy_yield_kwh', label: 'PV Daily Yield', unit: 'kWh' }],
     },
     current: {
       organization_id: 'demo-org',

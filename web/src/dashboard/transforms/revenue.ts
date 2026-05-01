@@ -21,7 +21,7 @@ export function revenueChartRows(
   }
   return energy.map((row) => {
     const time = String(row.time)
-    const rawPV = row.pv_energy_yield_day_kwh
+    const rawPV = row.accumulated_pv_energy_yield_kwh
     const pv = Number(rawPV)
     const price = priceByTime.get(time)
     if (
