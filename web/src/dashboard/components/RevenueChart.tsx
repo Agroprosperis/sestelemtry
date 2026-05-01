@@ -1,3 +1,4 @@
+import { useCallback } from 'react'
 import {
   Area,
   AreaChart,
@@ -22,6 +23,10 @@ type Props = {
 const REVENUE_LINE_COLOR = '#16a34a'
 const REVENUE_FILL_COLOR = '#86efac'
 
+// Day preset uses 5-minute buckets (288 per day); show every 12th tick so
+// labels land on the hour and the axis stays readable.
+const DAY_TICKS_PER_HOUR = 12
+
 const PRESET_LABEL: Record<RangePreset, string> = {
   day: 'погодинно',
   month: 'за день',
@@ -29,7 +34,7 @@ const PRESET_LABEL: Record<RangePreset, string> = {
 }
 
 function xAxisInterval(preset: RangePreset): number {
-  if (preset === 'day') return 1
+  if (preset === 'day') return DAY_TICKS_PER_HOUR - 1
   if (preset === 'month') return 2
   return 0
 }
@@ -39,6 +44,11 @@ export function RevenueChart({ energySeries, damSeries, preset }: Props) {
   const hasAnyValue = series.some((r) => r.revenue != null)
   const total = totalRevenue(series)
   const tickInterval = xAxisInterval(preset)
+  const dayTickFormatter = useCallback((v: unknown): string => {
+    const s = String(v)
+    const idx = s.indexOf(':')
+    return idx > 0 ? s.slice(0, idx) : s
+  }, [])
   return (
     <div className="chart-card">
       <div className="dam-chart-head">
@@ -66,7 +76,11 @@ export function RevenueChart({ energySeries, damSeries, preset }: Props) {
                 </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="time" interval={tickInterval} />
+              <XAxis
+                dataKey="time"
+                interval={tickInterval}
+                tickFormatter={preset === 'day' ? dayTickFormatter : undefined}
+              />
               <YAxis tickFormatter={(v) => formatChartNumber(Number(v))} />
               <Tooltip
                 formatter={(v) => [`${formatChartNumber(Number(v))} грн`, 'Дохід від ФЕ']}
