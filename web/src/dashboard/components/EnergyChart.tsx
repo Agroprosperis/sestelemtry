@@ -172,7 +172,14 @@ export function EnergyChart({ metrics, series, preset, summary, loading, damSeri
                 domain={[0, 100]}
                 hide
               />
-              <Tooltip content={tooltipContent} />
+              <Tooltip
+                content={tooltipContent}
+                position={{ x: 0, y: 0 }}
+                allowEscapeViewBox={{ x: true, y: true }}
+                wrapperStyle={{ pointerEvents: 'none', zIndex: 5 }}
+                isAnimationActive={false}
+                cursor={{ stroke: '#94a3b8', strokeDasharray: '3 3' }}
+              />
               <Legend />
               {hasSoc && (
                 <Area
@@ -239,7 +246,14 @@ export function EnergyChart({ metrics, series, preset, summary, loading, damSeri
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis dataKey="time" interval={tickInterval} />
               <YAxis tickFormatter={(v) => formatChartNumber(Number(v))} />
-              <Tooltip content={tooltipContent} />
+              <Tooltip
+                content={tooltipContent}
+                position={{ x: 0, y: 0 }}
+                allowEscapeViewBox={{ x: true, y: true }}
+                wrapperStyle={{ pointerEvents: 'none', zIndex: 5 }}
+                isAnimationActive={false}
+                cursor={{ fill: 'rgba(148, 163, 184, 0.15)' }}
+              />
               <Legend />
               <ReferenceLine y={0} stroke="#64748b" />
               {metrics.map((m) => (

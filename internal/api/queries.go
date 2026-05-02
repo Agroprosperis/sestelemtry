@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -18,17 +19,37 @@ func NewStore(pool *pgxpool.Pool) *Store {
 	return &Store{pool: pool}
 }
 
-func (s *Store) Current(ctx context.Context, organizationID string, metricKeys []string) (CurrentResponse, error) {
+// Current returns the latest sample per metric. When `at` is non-zero the
+// query is scoped to samples at or before that instant (allowing "snapshot at
+// a specific timestamp" lookups); otherwise it returns the very latest sample
+// regardless of time.
+func (s *Store) Current(ctx context.Context, organizationID string, metricKeys []string, at time.Time) (CurrentResponse, error) {
 	if len(metricKeys) == 0 {
 		metricKeys = DefaultDashboardMetrics
 	}
-	rows, err := s.pool.Query(ctx, `
-		SELECT DISTINCT ON (metric_key)
-			metric_key, value, time, labels
-		FROM telemetry_samples
-		WHERE organization_id = $1 AND metric_key = ANY($2)
-		ORDER BY metric_key, time DESC
-	`, organizationID, metricKeys)
+	var (
+		rows pgx.Rows
+		err  error
+	)
+	if at.IsZero() {
+		rows, err = s.pool.Query(ctx, `
+			SELECT DISTINCT ON (metric_key)
+				metric_key, value, time, labels
+			FROM telemetry_samples
+			WHERE organization_id = $1 AND metric_key = ANY($2)
+			ORDER BY metric_key, time DESC
+		`, organizationID, metricKeys)
+	} else {
+		rows, err = s.pool.Query(ctx, `
+			SELECT DISTINCT ON (metric_key)
+				metric_key, value, time, labels
+			FROM telemetry_samples
+			WHERE organization_id = $1
+				AND metric_key = ANY($2)
+				AND time <= $3
+			ORDER BY metric_key, time DESC
+		`, organizationID, metricKeys, at.UTC())
+	}
 	if err != nil {
 		return CurrentResponse{}, err
 	}

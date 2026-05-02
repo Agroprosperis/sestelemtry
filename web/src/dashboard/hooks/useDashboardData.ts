@@ -37,9 +37,11 @@ export function useDashboardData(input: {
   organizationID: string
   preset: RangePreset
   anchor: Date
+  metricsAt?: Date | null
 }): DashboardData {
-  const { organizationID, preset, anchor } = input
+  const { organizationID, preset, anchor, metricsAt } = input
   const anchorTime = anchor.getTime()
+  const metricsAtTime = metricsAt ? metricsAt.getTime() : null
   const [config, setConfig] = useState<DashboardConfig>(FALLBACK_DASHBOARD_CONFIG)
   const [current, setCurrent] = useState<CurrentResponse | null>(null)
   const [energySeries, setEnergySeries] = useState<EnergyRow[]>([])
@@ -103,7 +105,13 @@ export function useDashboardData(input: {
         // background band).
         const needsSOC = preset === 'day'
         const [cur, energy, today, soc] = await Promise.all([
-          fetchCurrent(organizationID, controller.signal),
+          fetchCurrent(
+            {
+              organizationID,
+              at: metricsAtTime ? new Date(metricsAtTime).toISOString() : undefined,
+            },
+            controller.signal,
+          ),
           fetchTimeseries(
             {
               organizationID,
@@ -165,7 +173,7 @@ export function useDashboardData(input: {
       if (timer !== null) window.clearInterval(timer)
       document.removeEventListener('visibilitychange', onVisibilityChange)
     }
-  }, [organizationID, preset, anchorTime])
+  }, [organizationID, preset, anchorTime, metricsAtTime])
 
   useEffect(() => {
     const controller = new AbortController()

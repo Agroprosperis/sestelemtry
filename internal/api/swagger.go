@@ -76,6 +76,16 @@ paths:
           schema:
             type: string
           description: Comma-separated list of metric keys
+        - name: at
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: |
+            Optional RFC3339 timestamp. When provided, returns the latest
+            sample at or before this instant for each metric (snapshot
+            lookup). When omitted, returns the most recent sample.
       responses:
         "200":
           description: Current values for requested metrics

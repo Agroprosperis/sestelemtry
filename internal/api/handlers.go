@@ -17,7 +17,7 @@ type Handlers struct {
 }
 
 type storeReader interface {
-	Current(ctx context.Context, organizationID string, metricKeys []string) (CurrentResponse, error)
+	Current(ctx context.Context, organizationID string, metricKeys []string, at time.Time) (CurrentResponse, error)
 	Timeseries(ctx context.Context, organizationID string, metricKeys []string, from, to time.Time, bucket, tz string, aggregation TimeseriesAggregation) (TimeseriesResponse, error)
 	DAMPrices(ctx context.Context, zone int, from, to time.Time) (DAMPricesResponse, error)
 	Ready(ctx context.Context) error
@@ -83,13 +83,32 @@ func (h *Handlers) current(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	metricKeys := ParseCSV(r.URL.Query().Get("metric_keys"))
-	resp, err := h.store.Current(r.Context(), orgID, metricKeys)
+	at, err := parseAt(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	resp, err := h.store.Current(r.Context(), orgID, metricKeys, at)
 	if err != nil {
 		h.log.Error("api_current", "organization_id", orgID, "err", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// parseAt reads the optional `at` query param (RFC3339). When omitted, the
+// caller receives the zero time which signals "latest" to the store.
+func parseAt(r *http.Request) (time.Time, error) {
+	raw := strings.TrimSpace(r.URL.Query().Get("at"))
+	if raw == "" {
+		return time.Time{}, nil
+	}
+	t, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("at must be RFC3339 timestamp")
+	}
+	return t, nil
 }
 
 func (h *Handlers) timeseries(w http.ResponseWriter, r *http.Request) {

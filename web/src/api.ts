@@ -24,9 +24,14 @@ export async function fetchDashboardConfig(signal?: AbortSignal): Promise<Dashbo
   return res.json()
 }
 
-export async function fetchCurrent(organizationID: string, signal?: AbortSignal): Promise<CurrentResponse> {
+export async function fetchCurrent(
+  input: string | { organizationID: string; at?: string },
+  signal?: AbortSignal,
+): Promise<CurrentResponse> {
+  const params = typeof input === 'string' ? { organizationID: input } : input
   const url = buildURL('/api/v1/current', {
-    organization_id: organizationID,
+    organization_id: params.organizationID,
+    at: params.at,
   })
   const res = await fetch(url, { signal })
   if (!res.ok) {

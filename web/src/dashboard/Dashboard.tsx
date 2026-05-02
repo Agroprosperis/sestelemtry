@@ -19,6 +19,7 @@ export function Dashboard() {
   const [preset, setPresetState] = useState<RangePreset>('day')
   const [anchor, setAnchor] = useState<Date>(() => startOfPeriod('day', new Date()))
   const [activeTab, setActiveTab] = useState<DashboardTab>('metrics')
+  const [metricsAt, setMetricsAt] = useState<Date | null>(null)
   const { organizationID, options, change: onOrganizationChange } = useOrganizationParam()
 
   const onPresetChange = useCallback((next: RangePreset) => {
@@ -37,6 +38,7 @@ export function Dashboard() {
     organizationID,
     preset,
     anchor,
+    metricsAt,
   })
 
   return (
@@ -81,7 +83,13 @@ export function Dashboard() {
         hidden={activeTab !== 'metrics'}
       >
         {activeTab === 'metrics' && (
-          <MetricsPanel cards={config.cards} current={current} loading={loading} />
+          <MetricsPanel
+            cards={config.cards}
+            current={current}
+            loading={loading}
+            metricsAt={metricsAt}
+            onMetricsAtChange={setMetricsAt}
+          />
         )}
       </section>
 

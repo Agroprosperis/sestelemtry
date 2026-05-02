@@ -210,8 +210,101 @@
 }
 
 .metrics-panel h2 {
-  margin: 0 0 12px;
+  margin: 0;
   font-size: 18px;
+}
+
+.metrics-panel-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.metrics-at-hint {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: #475569;
+}
+
+.metrics-at-hint strong {
+  color: #0f172a;
+  font-weight: 600;
+}
+
+.metrics-at-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.metrics-at-toggle {
+  display: inline-flex;
+  gap: 4px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 3px;
+}
+
+.metrics-at-toggle button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  background: transparent;
+  color: #334155;
+  padding: 6px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+}
+
+.metrics-at-toggle button.active {
+  background: #0f172a;
+  color: #ffffff;
+}
+
+.metrics-at-toggle button:not(.active):hover {
+  background: #f1f5f9;
+}
+
+.metrics-at-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #22c55e;
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.2);
+}
+
+.metrics-at-picker input[type='datetime-local'] {
+  font: inherit;
+  font-size: 13px;
+  color: #0f172a;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 6px 8px;
+  outline: none;
+}
+
+.metrics-at-now {
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  color: #334155;
+  border-radius: 10px;
+  padding: 6px 10px;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.metrics-at-now:hover {
+  background: #f1f5f9;
 }
 
 .metrics-panel .cards-grid {
@@ -396,24 +489,27 @@
 }
 
 .energy-tooltip {
-  background: #ffffff;
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
   border: 1px solid #e2e8f0;
   border-radius: 10px;
-  padding: 10px 12px;
-  min-width: 560px;
+  padding: 8px 10px;
+  min-width: 460px;
+  font-size: 12px;
   box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
 }
 
 .energy-tooltip-label {
-  font-size: 13px;
+  font-size: 12px;
   color: #475569;
-  margin-bottom: 6px;
+  margin-bottom: 4px;
 }
 
 .energy-tooltip-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 14px;
+  gap: 10px;
 }
 
 .energy-tooltip-head {
@@ -427,7 +523,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  margin: 4px 0;
+  margin: 2px 0;
 }
 
 .energy-tooltip-dot {
@@ -448,8 +544,8 @@
 }
 
 .energy-tooltip-dam {
-  margin-top: 8px;
-  padding-top: 8px;
+  margin-top: 6px;
+  padding-top: 6px;
   border-top: 1px solid #e2e8f0;
 }
 
@@ -470,7 +566,7 @@
   }
   .energy-tooltip {
     min-width: 0;
-    width: min(90vw, 560px);
+    width: min(90vw, 460px);
   }
   .energy-tooltip-grid {
     grid-template-columns: 1fr;

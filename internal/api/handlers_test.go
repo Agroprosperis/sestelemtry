@@ -20,12 +20,15 @@ type mockStore struct {
 	damErr      error
 	readyErr    error
 
+	currentAt time.Time
+
 	damZone int
 	damFrom time.Time
 	damTo   time.Time
 }
 
-func (m *mockStore) Current(_ context.Context, _ string, _ []string) (CurrentResponse, error) {
+func (m *mockStore) Current(_ context.Context, _ string, _ []string, at time.Time) (CurrentResponse, error) {
+	m.currentAt = at
 	return m.currentResp, m.currentErr
 }
 
@@ -74,6 +77,33 @@ func TestCurrentSuccess(t *testing.T) {
 	}
 	if got.OrganizationID != "org-a" {
 		t.Fatalf("unexpected org id: %s", got.OrganizationID)
+	}
+}
+
+func TestCurrentPropagatesAtParam(t *testing.T) {
+	store := &mockStore{currentResp: CurrentResponse{OrganizationID: "org-a"}}
+	h := NewHandlers(store, "*")
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/current?organization_id=org-a&at=2026-05-02T12:34:56Z", nil)
+	rec := httptest.NewRecorder()
+	h.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200 got %d body=%s", rec.Code, rec.Body.String())
+	}
+	want := time.Date(2026, 5, 2, 12, 34, 56, 0, time.UTC)
+	if !store.currentAt.Equal(want) {
+		t.Fatalf("at mismatch: want %v got %v", want, store.currentAt)
+	}
+}
+
+func TestCurrentRejectsBadAt(t *testing.T) {
+	h := NewHandlers(&mockStore{}, "*")
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/current?organization_id=org-a&at=not-a-date", nil)
+	rec := httptest.NewRecorder()
+	h.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("want 400 got %d", rec.Code)
 	}
 }
 
