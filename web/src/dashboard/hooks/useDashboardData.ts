@@ -1,7 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import { fetchCurrent, fetchDAMPrices, fetchDashboardConfig, fetchTimeseries } from '../../api'
 import type { CurrentResponse, DashboardConfig } from '../../types'
-import { DASHBOARD_REFRESH_MS, FALLBACK_DASHBOARD_CONFIG } from '../config'
+import {
+  DASHBOARD_REFRESH_MS,
+  FALLBACK_DASHBOARD_CONFIG,
+  MIN_RELIABLE_DATA_AT,
+} from '../config'
 import { DAY_POWER_METRIC_KEYS } from '../metrics'
 import { endOfPeriod, rangeParams, startOfPeriod, type RangePreset } from '../range'
 import { energyBucketDeltaRows, type EnergyRow } from '../transforms/buckets'
@@ -185,9 +189,17 @@ export function useDashboardData(input: {
         // and at min(endOfPeriod, now)) are subtracted per metric to get
         // the period total — six subtractions, no per-bucket summing for
         // any preset. The chart still owns its own fetch shape.
-        const summaryStart = startOfPeriod(preset, anchorDate)
-        const summaryEndCandidate = endOfPeriod(preset, anchorDate)
-        const summaryEnd = summaryEndCandidate.getTime() > now.getTime() ? now : summaryEndCandidate
+        //
+        // Both timestamps are clamped to MIN_RELIABLE_DATA_AT to avoid
+        // pulling lifetime counters from before the deployment was healthy
+        // (which would inflate the totals). Periods that sit entirely
+        // before the floor collapse to a zero-total summary.
+        const minReliable = MIN_RELIABLE_DATA_AT.getTime()
+        const startCandidate = startOfPeriod(preset, anchorDate)
+        const endCandidate = endOfPeriod(preset, anchorDate)
+        const cappedEnd = endCandidate.getTime() > now.getTime() ? now : endCandidate
+        const summaryStart = new Date(Math.max(startCandidate.getTime(), minReliable))
+        const summaryEnd = new Date(Math.max(cappedEnd.getTime(), minReliable))
         // Month/year still need a bucket-cumulative timeseries to draw
         // per-day/per-month bars. Day's chart uses 5-minute deltas (also
         // consumed by the revenue chart) and instantaneous power lines.

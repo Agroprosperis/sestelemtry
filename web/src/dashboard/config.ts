@@ -4,6 +4,17 @@ export const KNOWN_ORGANIZATIONS = ['demo-org', 'pe']
 
 export const DASHBOARD_REFRESH_MS = 1000
 
+// Earliest local-time instant whose cumulative-counter readings are
+// considered reliable. Energy Summary computes period totals as
+// `end - seed` over /current?at=... lookups; on periods that include
+// dates before this floor the seed query returns the lifetime counter
+// from a backfilled / faulty pre-deployment sample, which inflates the
+// totals to nonsense (e.g. April 2026 once showed ~65 MWh consumption
+// against ~20 MWh production). Both seed and end timestamps are clamped
+// to be at-or-after this instant; if the whole period sits before it,
+// totals are returned as zero.
+export const MIN_RELIABLE_DATA_AT = new Date(2026, 3, 30)
+
 export const FALLBACK_DASHBOARD_CONFIG: DashboardConfig = {
   cards: [
     { key: 'pv_energy_yield_day_kwh', label: 'Виробіток СЕС за день (PV energy yield of the day)', unit: 'kWh' },
