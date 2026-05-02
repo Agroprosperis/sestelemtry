@@ -6,7 +6,6 @@ import {
   CartesianGrid,
   ComposedChart,
   Legend,
-  Line,
   ReferenceArea,
   ReferenceLine,
   ResponsiveContainer,
@@ -243,20 +242,26 @@ export function EnergyChart({
                   stroke="none"
                   isAnimationActive={false}
                 />
-                {DAY_POWER_METRIC_KEYS.map((key) => (
-                  <Line
-                    key={key}
-                    yAxisId="power"
-                    type="monotone"
-                    dataKey={key}
-                    name={DAY_POWER_METRIC_LABELS[key] ?? key}
-                    stroke={dayPowerColor(key)}
-                    strokeWidth={2}
-                    dot={false}
-                    connectNulls={false}
-                    isAnimationActive={false}
-                  />
-                ))}
+                {DAY_POWER_METRIC_KEYS.map((key) => {
+                  const color = dayPowerColor(key)
+                  return (
+                    <Area
+                      key={key}
+                      yAxisId="power"
+                      type="monotone"
+                      dataKey={key}
+                      name={DAY_POWER_METRIC_LABELS[key] ?? key}
+                      stroke={color}
+                      strokeWidth={2}
+                      fill={color}
+                      fillOpacity={0.18}
+                      baseValue={0}
+                      dot={false}
+                      connectNulls={false}
+                      isAnimationActive={false}
+                    />
+                  )
+                })}
               </ComposedChart>
             </ResponsiveContainer>
           )

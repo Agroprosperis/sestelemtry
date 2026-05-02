@@ -31,13 +31,16 @@ export function energyColor(metricKey: string, preset: RangePreset): string {
   return ENERGY_COLORS[preset][metricKey as MetricKey] ?? FALLBACK_COLOR
 }
 
-// Day-preset palette for the instantaneous-power lines (kW snapshots). Kept
-// separate from ENERGY_COLORS so the energy summary cards (still using the
-// energy delta palette) and the power chart can evolve independently.
+// Day-preset palette for the instantaneous-power areas (kW snapshots). Mirrors
+// the previous day energy palette so users carry visual continuity across
+// chart redesigns: PV is green (matches accumulated_pv_energy_yield_kwh), ESS
+// is blue (matches charge/discharge series), grid is gray (matches
+// purchased), load is amber (matches accumulated_power_consumption_kwh).
 const DAY_POWER_COLORS: Partial<Record<MetricKey, string>> = {
-  active_ess_power_kw: '#f97316',
-  grid_connected_active_power_kw: '#16a34a',
-  load_power_kw: '#2563eb',
+  active_pv_power_kw: '#22c55e',
+  active_ess_power_kw: '#2563eb',
+  grid_connected_active_power_kw: '#9ca3af',
+  load_power_kw: '#f59e0b',
 }
 
 export function dayPowerColor(metricKey: string): string {
