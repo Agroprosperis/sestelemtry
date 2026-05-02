@@ -174,8 +174,8 @@ export function EnergyChart({ metrics, series, preset, summary, loading, damSeri
               />
               <Tooltip
                 content={tooltipContent}
-                offset={16}
-                allowEscapeViewBox={{ x: true, y: true }}
+                offset={12}
+                allowEscapeViewBox={{ x: false, y: true }}
                 wrapperStyle={{ pointerEvents: 'none', zIndex: 5 }}
                 isAnimationActive={false}
                 cursor={{ stroke: '#94a3b8', strokeDasharray: '3 3' }}
@@ -248,8 +248,8 @@ export function EnergyChart({ metrics, series, preset, summary, loading, damSeri
               <YAxis tickFormatter={(v) => formatChartNumber(Number(v))} />
               <Tooltip
                 content={tooltipContent}
-                offset={16}
-                allowEscapeViewBox={{ x: true, y: true }}
+                offset={12}
+                allowEscapeViewBox={{ x: false, y: true }}
                 wrapperStyle={{ pointerEvents: 'none', zIndex: 5 }}
                 isAnimationActive={false}
                 cursor={{ fill: 'rgba(148, 163, 184, 0.15)' }}
