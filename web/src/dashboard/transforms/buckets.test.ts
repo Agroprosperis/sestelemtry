@@ -1,11 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { DAY_BUCKET_MINUTES } from '../timeline'
-import {
-  applyApplianceConsumptionRule,
-  energyBucketDeltaRows,
-  overrideCurrentDayCell,
-  type EnergyRow,
-} from './buckets'
+import { applyApplianceConsumptionRule, energyBucketDeltaRows, type EnergyRow } from './buckets'
 
 const DAY_BUCKETS = (24 * 60) / DAY_BUCKET_MINUTES
 
@@ -194,28 +189,6 @@ describe('energyBucketDeltaRows', () => {
     const now = new Date(2026, 4, 1, 8, 0, 0)
     const rows = energyBucketDeltaRows([], ['accumulated_pv_energy_yield_kwh'], 'day', pastAnchor, now)
     expect(rows.every((r) => r.accumulated_pv_energy_yield_kwh === 0)).toBe(true)
-  })
-
-  it('replaces the current-day cell with the 5-minute day-preset sum', () => {
-    const now = new Date(2026, 4, 3, 14, 30, 0)
-    const monthRows: EnergyRow[] = Array.from({ length: 31 }, (_, i) => ({
-      time: `2026-05-${String(i + 1).padStart(2, '0')}`,
-      accumulated_pv_energy_yield_kwh: 99,
-    }))
-    const todayPoints = contributionsAt(
-      'accumulated_pv_energy_yield_kwh',
-      [
-        { idx: 0, value: 1.5 },
-        { idx: 1, value: 2.5 },
-        { idx: 2, value: 4 },
-      ],
-      now,
-    )
-    const out = overrideCurrentDayCell(monthRows, todayPoints, ['accumulated_pv_energy_yield_kwh'], now)
-    expect(out[2].accumulated_pv_energy_yield_kwh).toBe(8)
-    expect(out[2].time).toBe('2026-05-03')
-    expect(out[1].accumulated_pv_energy_yield_kwh).toBe(99)
-    expect(out[3].accumulated_pv_energy_yield_kwh).toBe(99)
   })
 
   it('sums daily contributions into months for the year preset', () => {

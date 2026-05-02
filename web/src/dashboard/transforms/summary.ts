@@ -27,15 +27,22 @@ export type EnergySummary = {
   selfSufficiencyPct: number
 }
 
-export function energySummaryFromSeries(series: EnergyRow[]): EnergySummary {
-  const pvProduced = sumSeriesValue(series, 'accumulated_pv_energy_yield_kwh', 'positive')
-  const gridExport = sumSeriesValue(series, 'accumulated_electricity_sold_kwh', 'absolute')
+// energySummaryFromTotals derives the dashboard summary from a precomputed
+// {metric_key: total_for_period} map. Used by the cumulative path
+// (month/year) where totals come straight from `last(end) - last(start)`
+// and don't need to be reconstructed by summing 30+ per-bucket deltas. Each
+// total is treated as positive energy in the metric's natural direction
+// (sources stay positive, sinks are absolute) so the allocation math below
+// works regardless of sign conventions in upstream callers.
+export function energySummaryFromTotals(totals: Record<string, number>): EnergySummary {
+  const pvProduced = Math.max(totals.accumulated_pv_energy_yield_kwh ?? 0, 0)
+  const gridExport = Math.abs(totals.accumulated_electricity_sold_kwh ?? 0)
   const pvConsumed = Math.max(pvProduced - gridExport, 0)
-  const consumption = sumSeriesValue(series, 'accumulated_power_consumption_kwh', 'absolute')
-  const fromGrid = sumSeriesValue(series, 'accumulated_electricity_purchased_kwh', 'positive')
+  const consumption = Math.abs(totals.accumulated_power_consumption_kwh ?? 0)
+  const fromGrid = Math.max(totals.accumulated_electricity_purchased_kwh ?? 0, 0)
 
-  const charge = sumSeriesValue(series, 'total_energy_charged_kwh', 'absolute')
-  const discharge = sumSeriesValue(series, 'total_energy_discharged_kwh', 'absolute')
+  const charge = Math.abs(totals.total_energy_charged_kwh ?? 0)
+  const discharge = Math.abs(totals.total_energy_discharged_kwh ?? 0)
   const batteryNet = Math.max(discharge - charge, 0)
 
   // Allocate consumption among sources: trust measured grid purchase first (it
@@ -69,4 +76,15 @@ export function energySummaryFromSeries(series: EnergyRow[]): EnergySummary {
     loadFromGridPct,
     selfSufficiencyPct,
   }
+}
+
+export function energySummaryFromSeries(series: EnergyRow[]): EnergySummary {
+  return energySummaryFromTotals({
+    accumulated_pv_energy_yield_kwh: sumSeriesValue(series, 'accumulated_pv_energy_yield_kwh', 'positive'),
+    accumulated_electricity_sold_kwh: sumSeriesValue(series, 'accumulated_electricity_sold_kwh', 'absolute'),
+    accumulated_power_consumption_kwh: sumSeriesValue(series, 'accumulated_power_consumption_kwh', 'absolute'),
+    accumulated_electricity_purchased_kwh: sumSeriesValue(series, 'accumulated_electricity_purchased_kwh', 'positive'),
+    total_energy_charged_kwh: sumSeriesValue(series, 'total_energy_charged_kwh', 'absolute'),
+    total_energy_discharged_kwh: sumSeriesValue(series, 'total_energy_discharged_kwh', 'absolute'),
+  })
 }

@@ -1,14 +1,23 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { fetchCurrent, fetchDAMPrices, fetchDashboardConfig, fetchTimeseries } from '../../api'
 import type { CurrentResponse, DashboardConfig } from '../../types'
 import { DASHBOARD_REFRESH_MS, FALLBACK_DASHBOARD_CONFIG } from '../config'
 import { DAY_POWER_METRIC_KEYS } from '../metrics'
-import { endOfPeriod, isCurrentPeriod, rangeParams, startOfPeriod, type RangePreset } from '../range'
-import { energyBucketDeltaRows, overrideCurrentDayCell, type EnergyRow } from '../transforms/buckets'
+import { endOfPeriod, rangeParams, startOfPeriod, type RangePreset } from '../range'
+import { energyBucketDeltaRows, type EnergyRow } from '../transforms/buckets'
+import {
+  cumulativeBucketDeltaRows,
+  cumulativeTotals,
+  type CumulativeInput,
+} from '../transforms/cumulative'
 import { damChartRows, type DAMChartRow } from '../transforms/dam'
 import { powerChartRows, type PowerChartRow } from '../transforms/power'
 import { socChartRows, type SOCChartRow } from '../transforms/soc'
-import { energySummaryFromSeries, type EnergySummary } from '../transforms/summary'
+import {
+  energySummaryFromSeries,
+  energySummaryFromTotals,
+  type EnergySummary,
+} from '../transforms/summary'
 
 export type DashboardData = {
   config: DashboardConfig
@@ -48,6 +57,9 @@ export function useDashboardData(input: {
   const [config, setConfig] = useState<DashboardConfig>(FALLBACK_DASHBOARD_CONFIG)
   const [current, setCurrent] = useState<CurrentResponse | null>(null)
   const [energySeries, setEnergySeries] = useState<EnergyRow[]>([])
+  const [energySummary, setEnergySummary] = useState<EnergySummary>(() =>
+    energySummaryFromTotals({}),
+  )
   const [damSeries, setDamSeries] = useState<DAMChartRow[]>([])
   const [socSeries, setSocSeries] = useState<SOCChartRow[]>([])
   const [powerSeries, setPowerSeries] = useState<PowerChartRow[]>([])
@@ -98,11 +110,16 @@ export function useDashboardData(input: {
         const energyKeys = cfg.energy_chart.map((m) => m.key)
         const anchorDate = new Date(anchorTime)
         const now = new Date()
-        // When the user is on the month tab for the current month, we also
-        // pull today's 5-minute bucket data so the current-day cell matches
-        // the day preset exactly instead of drifting because of a 1-day
-        // server bucket.
-        const needsTodayOverride = preset === 'month' && isCurrentPeriod('month', anchorDate, now)
+        // For month/year we feed the chart cumulative readings + a
+        // start-of-period seed and compute deltas on the client. The seed
+        // request is a `current?at=startOfPeriod` lookup that returns the
+        // last sample at-or-before period start per metric. Combined with
+        // bucket-level `aggregation=last` it yields telescoping deltas
+        // without losing the first bucket to a missing lag (the cause of
+        // the old "10 vs 127 kWh" symptom) and turns Energy Summary totals
+        // into a single subtraction instead of a sum of 30+ small values.
+        const isCumulative = preset === 'month' || preset === 'year'
+        const cumulativeBucket = preset === 'year' ? '1 month' : '1 day'
         // SOC is an instantaneous metric, so we fetch it with an `avg`
         // aggregation instead of the default accumulator-delta. We only
         // need it for the day preset (the energy chart overlays it as a
@@ -112,7 +129,8 @@ export function useDashboardData(input: {
         // (kW snapshots) with `last` aggregation. They drive the redesigned
         // day-chart lines (ESS/Grid/Load) instead of the energy delta areas.
         const needsPower = preset === 'day'
-        const [cur, energy, today, soc, power] = await Promise.all([
+        const baseRange = rangeParams(preset, anchorDate, now)
+        const [cur, energy, seed, soc, power] = await Promise.all([
           fetchCurrent(
             {
               organizationID,
@@ -121,19 +139,26 @@ export function useDashboardData(input: {
             controller.signal,
           ),
           fetchTimeseries(
-            {
-              organizationID,
-              metricKeys: energyKeys,
-              ...rangeParams(preset, anchorDate, now),
-            },
-            controller.signal,
-          ),
-          needsTodayOverride
-            ? fetchTimeseries(
-                {
+            isCumulative
+              ? {
                   organizationID,
                   metricKeys: energyKeys,
-                  ...rangeParams('day', now, now),
+                  ...baseRange,
+                  bucket: cumulativeBucket,
+                  aggregation: 'last',
+                }
+              : {
+                  organizationID,
+                  metricKeys: energyKeys,
+                  ...baseRange,
+                },
+            controller.signal,
+          ),
+          isCumulative
+            ? fetchCurrent(
+                {
+                  organizationID,
+                  at: startOfPeriod(preset, anchorDate).toISOString(),
                 },
                 controller.signal,
               )
@@ -163,11 +188,29 @@ export function useDashboardData(input: {
         ])
         if (cancelled || controller.signal.aborted) return
         setCurrent(cur)
-        let series = energyBucketDeltaRows(energy.points, energyKeys, preset, anchorDate, now)
-        if (today) {
-          series = overrideCurrentDayCell(series, today.points, energyKeys, now)
+        let series: EnergyRow[]
+        let summary: EnergySummary
+        if (isCumulative) {
+          const seedValues: Record<string, number> = {}
+          if (seed) {
+            for (const [key, m] of Object.entries(seed.metrics)) {
+              if (Number.isFinite(m.value)) seedValues[key] = m.value
+            }
+          }
+          const cumInput: CumulativeInput = {
+            bucketPoints: energy.points,
+            seed: seedValues,
+          }
+          series = cumulativeBucketDeltaRows(cumInput, energyKeys, preset, anchorDate)
+          summary = energySummaryFromTotals(
+            cumulativeTotals(cumInput, energyKeys, preset, anchorDate),
+          )
+        } else {
+          series = energyBucketDeltaRows(energy.points, energyKeys, preset, anchorDate, now)
+          summary = energySummaryFromSeries(series)
         }
         setEnergySeries(series)
+        setEnergySummary(summary)
         setSocSeries(soc ? socChartRows(soc.points, 'day', anchorDate) : [])
         setPowerSeries(
           power ? powerChartRows(power.points, DAY_POWER_METRIC_KEYS, anchorDate, now) : [],
@@ -225,8 +268,6 @@ export function useDashboardData(input: {
       controller.abort()
     }
   }, [preset, anchorTime])
-
-  const energySummary = useMemo(() => energySummaryFromSeries(energySeries), [energySeries])
 
   return {
     config,

@@ -108,31 +108,3 @@ export function energyBucketDeltaRows(
     return row
   })
 }
-
-// overrideCurrentDayCell replaces the current-day row in a month series with
-// totals re-aggregated from the day preset's 5-minute bucket points. This
-// keeps the partial-day cell identical to what the day preset shows, instead
-// of relying on a single 1-day server bucket whose first/last samples can
-// drift from the 5-minute sum.
-export function overrideCurrentDayCell(
-  monthRows: EnergyRow[],
-  todayPoints: TimeseriesPoint[],
-  metricKeys: string[],
-  now: Date,
-): EnergyRow[] {
-  const idx = now.getDate() - 1
-  if (idx < 0 || idx >= monthRows.length) return monthRows
-  const dayRows = energyBucketDeltaRows(todayPoints, metricKeys, 'day', now, now)
-  const totals: Record<string, number> = {}
-  for (const key of metricKeys) totals[key] = 0
-  for (const row of dayRows) {
-    for (const key of metricKeys) {
-      const v = Number(row[key] ?? 0)
-      if (!Number.isFinite(v)) continue
-      totals[key] += v
-    }
-  }
-  const out = monthRows.slice()
-  out[idx] = { ...totals, time: monthRows[idx].time }
-  return out
-}
