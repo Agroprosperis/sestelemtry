@@ -7,17 +7,13 @@ import { endOfPeriod, rangeParams, startOfPeriod, type RangePreset } from '../ra
 import { energyBucketDeltaRows, type EnergyRow } from '../transforms/buckets'
 import {
   cumulativeBucketDeltaRows,
-  cumulativeTotals,
   type CumulativeInput,
 } from '../transforms/cumulative'
 import { damChartRows, type DAMChartRow } from '../transforms/dam'
 import { powerChartRows, type PowerChartRow } from '../transforms/power'
 import { socChartRows, type SOCChartRow } from '../transforms/soc'
-import {
-  energySummaryFromSeries,
-  energySummaryFromTotals,
-  type EnergySummary,
-} from '../transforms/summary'
+import { energySummaryFromTotals, type EnergySummary } from '../transforms/summary'
+import { summaryTotalsFromReadings } from '../transforms/summaryTotals'
 
 export type DashboardData = {
   config: DashboardConfig
@@ -43,6 +39,18 @@ function toDateOnly(d: Date): string {
 
 function isAbortError(e: unknown): boolean {
   return e instanceof DOMException && e.name === 'AbortError'
+}
+
+// readingsFromCurrent collapses a /current response into a flat
+// {metric_key: value} map, dropping any non-finite samples so callers can
+// safely subtract two readings without checking for nulls.
+function readingsFromCurrent(resp: CurrentResponse | null): Record<string, number> {
+  const out: Record<string, number> = {}
+  if (!resp) return out
+  for (const [key, m] of Object.entries(resp.metrics)) {
+    if (Number.isFinite(m.value)) out[key] = m.value
+  }
+  return out
 }
 
 export function useDashboardData(input: {
@@ -110,15 +118,18 @@ export function useDashboardData(input: {
         const energyKeys = cfg.energy_chart.map((m) => m.key)
         const anchorDate = new Date(anchorTime)
         const now = new Date()
-        // For month/year we feed the chart cumulative readings + a
-        // start-of-period seed and compute deltas on the client. The seed
-        // request is a `current?at=startOfPeriod` lookup that returns the
-        // last sample at-or-before period start per metric. Combined with
-        // bucket-level `aggregation=last` it yields telescoping deltas
-        // without losing the first bucket to a missing lag (the cause of
-        // the old "10 vs 127 kWh" symptom) and turns Energy Summary totals
-        // into a single subtraction instead of a sum of 30+ small values.
-        const isCumulative = preset === 'month' || preset === 'year'
+        // The Energy Summary cards live independently of the chart series.
+        // Two `fetchCurrent` lookups (cumulative reading at start of period
+        // and at min(endOfPeriod, now)) are subtracted per metric to get
+        // the period total — six subtractions, no per-bucket summing for
+        // any preset. The chart still owns its own fetch shape.
+        const summaryStart = startOfPeriod(preset, anchorDate)
+        const summaryEndCandidate = endOfPeriod(preset, anchorDate)
+        const summaryEnd = summaryEndCandidate.getTime() > now.getTime() ? now : summaryEndCandidate
+        // Month/year still need a bucket-cumulative timeseries to draw
+        // per-day/per-month bars. Day's chart uses 5-minute deltas (also
+        // consumed by the revenue chart) and instantaneous power lines.
+        const isBucketCumulative = preset === 'month' || preset === 'year'
         const cumulativeBucket = preset === 'year' ? '1 month' : '1 day'
         // SOC is an instantaneous metric, so we fetch it with an `avg`
         // aggregation instead of the default accumulator-delta. We only
@@ -130,7 +141,7 @@ export function useDashboardData(input: {
         // day-chart lines (ESS/Grid/Load) instead of the energy delta areas.
         const needsPower = preset === 'day'
         const baseRange = rangeParams(preset, anchorDate, now)
-        const [cur, energy, seed, soc, power] = await Promise.all([
+        const [cur, energy, seed, end, soc, power] = await Promise.all([
           fetchCurrent(
             {
               organizationID,
@@ -139,7 +150,7 @@ export function useDashboardData(input: {
             controller.signal,
           ),
           fetchTimeseries(
-            isCumulative
+            isBucketCumulative
               ? {
                   organizationID,
                   metricKeys: energyKeys,
@@ -154,15 +165,14 @@ export function useDashboardData(input: {
                 },
             controller.signal,
           ),
-          isCumulative
-            ? fetchCurrent(
-                {
-                  organizationID,
-                  at: startOfPeriod(preset, anchorDate).toISOString(),
-                },
-                controller.signal,
-              )
-            : Promise.resolve(null),
+          fetchCurrent(
+            { organizationID, at: summaryStart.toISOString() },
+            controller.signal,
+          ),
+          fetchCurrent(
+            { organizationID, at: summaryEnd.toISOString() },
+            controller.signal,
+          ),
           needsSOC
             ? fetchTimeseries(
                 {
@@ -188,27 +198,21 @@ export function useDashboardData(input: {
         ])
         if (cancelled || controller.signal.aborted) return
         setCurrent(cur)
+        const seedValues = readingsFromCurrent(seed)
+        const endValues = readingsFromCurrent(end)
         let series: EnergyRow[]
-        let summary: EnergySummary
-        if (isCumulative) {
-          const seedValues: Record<string, number> = {}
-          if (seed) {
-            for (const [key, m] of Object.entries(seed.metrics)) {
-              if (Number.isFinite(m.value)) seedValues[key] = m.value
-            }
-          }
+        if (isBucketCumulative) {
           const cumInput: CumulativeInput = {
             bucketPoints: energy.points,
             seed: seedValues,
           }
           series = cumulativeBucketDeltaRows(cumInput, energyKeys, preset, anchorDate)
-          summary = energySummaryFromTotals(
-            cumulativeTotals(cumInput, energyKeys, preset, anchorDate),
-          )
         } else {
           series = energyBucketDeltaRows(energy.points, energyKeys, preset, anchorDate, now)
-          summary = energySummaryFromSeries(series)
         }
+        const summary = energySummaryFromTotals(
+          summaryTotalsFromReadings({ seed: seedValues, end: endValues }, energyKeys),
+        )
         setEnergySeries(series)
         setEnergySummary(summary)
         setSocSeries(soc ? socChartRows(soc.points, 'day', anchorDate) : [])

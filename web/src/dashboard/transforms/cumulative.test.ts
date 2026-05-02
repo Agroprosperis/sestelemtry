@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { TimeseriesPoint } from '../../types'
-import { cumulativeBucketDeltaRows, cumulativeTotals } from './cumulative'
+import { cumulativeBucketDeltaRows } from './cumulative'
 
 const ENERGY_KEYS = [
   'accumulated_pv_energy_yield_kwh',
@@ -162,81 +162,5 @@ describe('cumulativeBucketDeltaRows (year preset)', () => {
     expect(rows[1].accumulated_pv_energy_yield_kwh).toBe(200)
     expect(rows[2].accumulated_pv_energy_yield_kwh).toBe(150)
     expect(rows[3].accumulated_pv_energy_yield_kwh).toBe(0)
-  })
-})
-
-describe('cumulativeTotals', () => {
-  const anchor = new Date(2026, 4, 1)
-
-  it('returns last observed minus seed', () => {
-    const points: TimeseriesPoint[] = [
-      { time: dayBucketTime(anchor, 0), metric_key: 'accumulated_pv_energy_yield_kwh', value: 110 },
-      { time: dayBucketTime(anchor, 5), metric_key: 'accumulated_pv_energy_yield_kwh', value: 200 },
-    ]
-    const totals = cumulativeTotals(
-      { bucketPoints: points, seed: { accumulated_pv_energy_yield_kwh: 100 } },
-      ['accumulated_pv_energy_yield_kwh'],
-      'month',
-      anchor,
-    )
-    expect(totals.accumulated_pv_energy_yield_kwh).toBe(100)
-  })
-
-  it('returns 0 when there is neither seed nor data', () => {
-    const totals = cumulativeTotals(
-      { bucketPoints: [], seed: {} },
-      ['accumulated_pv_energy_yield_kwh'],
-      'month',
-      anchor,
-    )
-    expect(totals.accumulated_pv_energy_yield_kwh).toBe(0)
-  })
-
-  it('uses implicit seed for fresh deployments without pre-period samples', () => {
-    const points: TimeseriesPoint[] = [
-      { time: dayBucketTime(anchor, 5), metric_key: 'accumulated_pv_energy_yield_kwh', value: 50 },
-      { time: dayBucketTime(anchor, 6), metric_key: 'accumulated_pv_energy_yield_kwh', value: 70 },
-    ]
-    const totals = cumulativeTotals(
-      { bucketPoints: points, seed: {} },
-      ['accumulated_pv_energy_yield_kwh'],
-      'month',
-      anchor,
-    )
-    expect(totals.accumulated_pv_energy_yield_kwh).toBe(20)
-  })
-
-  it('clamps negative totals to zero', () => {
-    const points: TimeseriesPoint[] = [
-      { time: dayBucketTime(anchor, 0), metric_key: 'accumulated_pv_energy_yield_kwh', value: 90 },
-    ]
-    const totals = cumulativeTotals(
-      { bucketPoints: points, seed: { accumulated_pv_energy_yield_kwh: 100 } },
-      ['accumulated_pv_energy_yield_kwh'],
-      'month',
-      anchor,
-    )
-    expect(totals.accumulated_pv_energy_yield_kwh).toBe(0)
-  })
-
-  it('applies appliance consumption rule to totals', () => {
-    const seed: Record<string, number> = {}
-    for (const k of ENERGY_KEYS) seed[k] = 0
-    const points: TimeseriesPoint[] = [
-      { time: dayBucketTime(anchor, 0), metric_key: 'accumulated_electricity_purchased_kwh', value: 50 },
-      { time: dayBucketTime(anchor, 0), metric_key: 'accumulated_pv_energy_yield_kwh', value: 30 },
-      { time: dayBucketTime(anchor, 0), metric_key: 'total_energy_discharged_kwh', value: 10 },
-      { time: dayBucketTime(anchor, 0), metric_key: 'total_energy_charged_kwh', value: 20 },
-      // Device-reported consumption is intentionally absurd to prove the
-      // appliance rule overrides it with the formula result.
-      { time: dayBucketTime(anchor, 0), metric_key: 'accumulated_power_consumption_kwh', value: 1500 },
-    ]
-    const totals = cumulativeTotals(
-      { bucketPoints: points, seed },
-      ENERGY_KEYS,
-      'month',
-      anchor,
-    )
-    expect(totals.accumulated_power_consumption_kwh).toBe(70)
   })
 })

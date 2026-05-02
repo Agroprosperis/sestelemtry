@@ -117,35 +117,3 @@ export function cumulativeBucketDeltaRows(
     return row
   })
 }
-
-// cumulativeTotals returns, per metric, `last(observed) - effective_seed`
-// — exactly the period total without summing 30+ per-bucket deltas. Negative
-// results (counter rollback / device restart) are clamped to zero.
-export function cumulativeTotals(
-  input: CumulativeInput,
-  metricKeys: string[],
-  preset: RangePreset,
-  anchor: Date,
-): Record<string, number> {
-  const { bucketPoints, seed } = input
-  const indexed = indexBuckets(bucketPoints, metricKeys, preset)
-  const timeline = timelineBuckets(preset, anchor)
-  const tlKeys = timeline.map(({ t }) => bucketKey(new Date(t), preset))
-
-  const totals: Record<string, number> = {}
-  for (const key of metricKeys) {
-    const start = effectiveSeed(key, seed, indexed, tlKeys)
-    let end = start
-    for (let i = tlKeys.length - 1; i >= 0; i--) {
-      const v = indexed.get(tlKeys[i])?.[key]
-      if (v != null && Number.isFinite(v)) {
-        end = v
-        break
-      }
-    }
-    const total = end - start
-    totals[key] = total < 0 ? 0 : total
-  }
-  applyApplianceConsumptionRule(totals)
-  return totals
-}
