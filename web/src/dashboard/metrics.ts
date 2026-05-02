@@ -51,3 +51,18 @@ export const ENERGY_TREND_METRIC_DIRECTIONS: Partial<Record<MetricKey, 1 | -1>> 
   total_energy_charged_kwh: -1,
   accumulated_power_consumption_kwh: -1,
 }
+
+// Day-preset power lines (instantaneous kW snapshots, aggregation=last). The
+// list is intentionally local to the frontend so it can evolve independently
+// of the bigger DashboardConfig.PowerChart shipped from the backend.
+export const DAY_POWER_METRIC_KEYS: MetricKey[] = [
+  'active_ess_power_kw',
+  'grid_connected_active_power_kw',
+  'load_power_kw',
+]
+
+export const DAY_POWER_METRIC_LABELS: Partial<Record<MetricKey, string>> = {
+  active_ess_power_kw: 'Потужність УЗЕ (заряд/розряд)',
+  grid_connected_active_power_kw: 'Потужність у точці приєднання',
+  load_power_kw: 'Потужність навантаження',
+}

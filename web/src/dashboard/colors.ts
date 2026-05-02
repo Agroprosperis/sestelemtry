@@ -30,3 +30,16 @@ const ENERGY_COLORS: Record<RangePreset, Partial<Record<MetricKey, string>>> = {
 export function energyColor(metricKey: string, preset: RangePreset): string {
   return ENERGY_COLORS[preset][metricKey as MetricKey] ?? FALLBACK_COLOR
 }
+
+// Day-preset palette for the instantaneous-power lines (kW snapshots). Kept
+// separate from ENERGY_COLORS so the energy summary cards (still using the
+// energy delta palette) and the power chart can evolve independently.
+const DAY_POWER_COLORS: Partial<Record<MetricKey, string>> = {
+  active_ess_power_kw: '#f97316',
+  grid_connected_active_power_kw: '#16a34a',
+  load_power_kw: '#2563eb',
+}
+
+export function dayPowerColor(metricKey: string): string {
+  return DAY_POWER_COLORS[metricKey as MetricKey] ?? FALLBACK_COLOR
+}

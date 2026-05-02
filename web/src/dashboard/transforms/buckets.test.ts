@@ -197,7 +197,6 @@ describe('energyBucketDeltaRows', () => {
   })
 
   it('replaces the current-day cell with the 5-minute day-preset sum', () => {
-    const monthAnchor = new Date(2026, 4, 1)
     const now = new Date(2026, 4, 3, 14, 30, 0)
     const monthRows: EnergyRow[] = Array.from({ length: 31 }, (_, i) => ({
       time: `2026-05-${String(i + 1).padStart(2, '0')}`,

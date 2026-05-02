@@ -2,9 +2,11 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { fetchCurrent, fetchDAMPrices, fetchDashboardConfig, fetchTimeseries } from '../../api'
 import type { CurrentResponse, DashboardConfig } from '../../types'
 import { DASHBOARD_REFRESH_MS, FALLBACK_DASHBOARD_CONFIG } from '../config'
+import { DAY_POWER_METRIC_KEYS } from '../metrics'
 import { endOfPeriod, isCurrentPeriod, rangeParams, startOfPeriod, type RangePreset } from '../range'
 import { energyBucketDeltaRows, overrideCurrentDayCell, type EnergyRow } from '../transforms/buckets'
 import { damChartRows, type DAMChartRow } from '../transforms/dam'
+import { powerChartRows, type PowerChartRow } from '../transforms/power'
 import { socChartRows, type SOCChartRow } from '../transforms/soc'
 import { energySummaryFromSeries, type EnergySummary } from '../transforms/summary'
 
@@ -15,6 +17,7 @@ export type DashboardData = {
   energySummary: EnergySummary
   damSeries: DAMChartRow[]
   socSeries: SOCChartRow[]
+  powerSeries: PowerChartRow[]
   loading: boolean
   error: string | null
 }
@@ -47,6 +50,7 @@ export function useDashboardData(input: {
   const [energySeries, setEnergySeries] = useState<EnergyRow[]>([])
   const [damSeries, setDamSeries] = useState<DAMChartRow[]>([])
   const [socSeries, setSocSeries] = useState<SOCChartRow[]>([])
+  const [powerSeries, setPowerSeries] = useState<PowerChartRow[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -104,7 +108,11 @@ export function useDashboardData(input: {
         // need it for the day preset (the energy chart overlays it as a
         // background band).
         const needsSOC = preset === 'day'
-        const [cur, energy, today, soc] = await Promise.all([
+        // Day preset additionally fetches three instantaneous power metrics
+        // (kW snapshots) with `last` aggregation. They drive the redesigned
+        // day-chart lines (ESS/Grid/Load) instead of the energy delta areas.
+        const needsPower = preset === 'day'
+        const [cur, energy, today, soc, power] = await Promise.all([
           fetchCurrent(
             {
               organizationID,
@@ -141,6 +149,17 @@ export function useDashboardData(input: {
                 controller.signal,
               )
             : Promise.resolve(null),
+          needsPower
+            ? fetchTimeseries(
+                {
+                  organizationID,
+                  metricKeys: DAY_POWER_METRIC_KEYS,
+                  ...rangeParams('day', anchorDate, now),
+                  aggregation: 'last',
+                },
+                controller.signal,
+              )
+            : Promise.resolve(null),
         ])
         if (cancelled || controller.signal.aborted) return
         setCurrent(cur)
@@ -150,6 +169,9 @@ export function useDashboardData(input: {
         }
         setEnergySeries(series)
         setSocSeries(soc ? socChartRows(soc.points, 'day', anchorDate) : [])
+        setPowerSeries(
+          power ? powerChartRows(power.points, DAY_POWER_METRIC_KEYS, anchorDate, now) : [],
+        )
         setError(null)
       } catch (e) {
         if (cancelled || isAbortError(e)) return
@@ -213,6 +235,7 @@ export function useDashboardData(input: {
     energySummary,
     damSeries,
     socSeries,
+    powerSeries,
     loading,
     error,
   }
