@@ -23,7 +23,11 @@ export type DashboardData = {
   damSeries: DAMChartRow[]
   socSeries: SOCChartRow[]
   powerSeries: PowerChartRow[]
+  // loading reflects the charts/summary fetch state and is what `EnergyChart`
+  // shows the "Loading..." placeholder for. Cards have their own
+  // `cardsLoading` flag so they don't go blank between live ticks.
   loading: boolean
+  cardsLoading: boolean
   error: string | null
 }
 
@@ -72,6 +76,7 @@ export function useDashboardData(input: {
   const [socSeries, setSocSeries] = useState<SOCChartRow[]>([])
   const [powerSeries, setPowerSeries] = useState<PowerChartRow[]>([])
   const [loading, setLoading] = useState(true)
+  const [cardsLoading, setCardsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   const configRef = useRef(config)
@@ -101,14 +106,71 @@ export function useDashboardData(input: {
     }
   }, [])
 
+  // Cards live tick: a single /current request, polled at
+  // DASHBOARD_REFRESH_MS. The cards represent the system's current state and
+  // are independent of which day/preset the user is viewing in the chart
+  // tab. A historical snapshot (metricsAt != null) is fetched once and not
+  // polled, since the past is immutable.
   useEffect(() => {
     let cancelled = false
     let inflight: AbortController | null = null
     let timer: number | null = null
+    const isHistoricalSnapshot = metricsAtTime !== null
 
-    async function tick(showLoading: boolean) {
+    async function tickCards(showLoading: boolean) {
       if (cancelled) return
       if (document.visibilityState === 'hidden') return
+      if (inflight) inflight.abort()
+      const controller = new AbortController()
+      inflight = controller
+      if (showLoading) setCardsLoading(true)
+      try {
+        const cur = await fetchCurrent(
+          {
+            organizationID,
+            at: metricsAtTime ? new Date(metricsAtTime).toISOString() : undefined,
+          },
+          controller.signal,
+        )
+        if (cancelled || controller.signal.aborted) return
+        setCurrent(cur)
+      } catch (e) {
+        if (cancelled || isAbortError(e)) return
+        setError(e instanceof Error ? e.message : 'Failed to load current metrics')
+      } finally {
+        if (!cancelled && showLoading) setCardsLoading(false)
+      }
+    }
+
+    void tickCards(true)
+    if (!isHistoricalSnapshot) {
+      timer = window.setInterval(() => void tickCards(false), DASHBOARD_REFRESH_MS)
+    }
+
+    function onVisibilityChange() {
+      if (document.visibilityState === 'visible') void tickCards(false)
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange)
+
+    return () => {
+      cancelled = true
+      if (inflight) inflight.abort()
+      if (timer !== null) window.clearInterval(timer)
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+    }
+  }, [organizationID, metricsAtTime])
+
+  // Charts and summary fetch on mount and whenever the user changes preset
+  // or anchor; no setInterval. The user explicitly asked for live updates
+  // only on the cards — charts are heavy (5 parallel queries) and the
+  // numbers don't drift visibly within a few minutes, so on-demand
+  // refresh is the right tradeoff here.
+  useEffect(() => {
+    let cancelled = false
+    let inflight: AbortController | null = null
+
+    async function tickCharts(showLoading: boolean) {
+      if (cancelled) return
       if (inflight) inflight.abort()
       const controller = new AbortController()
       inflight = controller
@@ -141,14 +203,7 @@ export function useDashboardData(input: {
         // day-chart lines (ESS/Grid/Load) instead of the energy delta areas.
         const needsPower = preset === 'day'
         const baseRange = rangeParams(preset, anchorDate, now)
-        const [cur, energy, seed, end, soc, power] = await Promise.all([
-          fetchCurrent(
-            {
-              organizationID,
-              at: metricsAtTime ? new Date(metricsAtTime).toISOString() : undefined,
-            },
-            controller.signal,
-          ),
+        const [energy, seed, end, soc, power] = await Promise.all([
           fetchTimeseries(
             isBucketCumulative
               ? {
@@ -197,7 +252,6 @@ export function useDashboardData(input: {
             : Promise.resolve(null),
         ])
         if (cancelled || controller.signal.aborted) return
-        setCurrent(cur)
         const seedValues = readingsFromCurrent(seed)
         const endValues = readingsFromCurrent(end)
         let series: EnergyRow[]
@@ -228,21 +282,13 @@ export function useDashboardData(input: {
       }
     }
 
-    void tick(true)
-    timer = window.setInterval(() => void tick(false), DASHBOARD_REFRESH_MS)
-
-    function onVisibilityChange() {
-      if (document.visibilityState === 'visible') void tick(false)
-    }
-    document.addEventListener('visibilitychange', onVisibilityChange)
+    void tickCharts(true)
 
     return () => {
       cancelled = true
       if (inflight) inflight.abort()
-      if (timer !== null) window.clearInterval(timer)
-      document.removeEventListener('visibilitychange', onVisibilityChange)
     }
-  }, [organizationID, preset, anchorTime, metricsAtTime])
+  }, [organizationID, preset, anchorTime])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -282,6 +328,7 @@ export function useDashboardData(input: {
     socSeries,
     powerSeries,
     loading,
+    cardsLoading,
     error,
   }
 }

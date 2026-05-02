@@ -36,6 +36,7 @@ vi.mock('./hooks/useDashboardData', () => ({
       loadFromGridPct: 0,
     },
     loading: false,
+    cardsLoading: false,
     error: null,
   })),
 }))

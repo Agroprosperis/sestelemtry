@@ -34,7 +34,18 @@ export function Dashboard() {
     [preset],
   )
 
-  const { config, current, energySeries, energySummary, damSeries, socSeries, powerSeries, loading, error } = useDashboardData({
+  const {
+    config,
+    current,
+    energySeries,
+    energySummary,
+    damSeries,
+    socSeries,
+    powerSeries,
+    loading,
+    cardsLoading,
+    error,
+  } = useDashboardData({
     organizationID,
     preset,
     anchor,
@@ -86,7 +97,7 @@ export function Dashboard() {
           <MetricsPanel
             cards={config.cards}
             current={current}
-            loading={loading}
+            loading={cardsLoading}
             metricsAt={metricsAt}
             onMetricsAtChange={setMetricsAt}
           />
