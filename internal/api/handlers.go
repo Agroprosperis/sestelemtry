@@ -18,7 +18,7 @@ type Handlers struct {
 
 type storeReader interface {
 	Current(ctx context.Context, organizationID string, metricKeys []string) (CurrentResponse, error)
-	Timeseries(ctx context.Context, organizationID string, metricKeys []string, from, to time.Time, bucket, tz string) (TimeseriesResponse, error)
+	Timeseries(ctx context.Context, organizationID string, metricKeys []string, from, to time.Time, bucket, tz string, aggregation TimeseriesAggregation) (TimeseriesResponse, error)
 	DAMPrices(ctx context.Context, zone int, from, to time.Time) (DAMPricesResponse, error)
 	Ready(ctx context.Context) error
 }
@@ -116,7 +116,12 @@ func (h *Handlers) timeseries(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	resp, err := h.store.Timeseries(r.Context(), orgID, metricKeys, from, to, bucket, tz)
+	aggregation, err := parseAggregation(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	resp, err := h.store.Timeseries(r.Context(), orgID, metricKeys, from, to, bucket, tz, aggregation)
 	if err != nil {
 		h.log.Error("api_timeseries", "organization_id", orgID, "metric_keys", metricKeys, "err", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
@@ -198,6 +203,18 @@ func parseDateRange(r *http.Request) (from, to time.Time, err error) {
 		return time.Time{}, time.Time{}, fmt.Errorf("to must be on or after from")
 	}
 	return from, to, nil
+}
+
+func parseAggregation(r *http.Request) (TimeseriesAggregation, error) {
+	raw := strings.TrimSpace(r.URL.Query().Get("aggregation"))
+	if raw == "" {
+		return AggregationDelta, nil
+	}
+	switch TimeseriesAggregation(raw) {
+	case AggregationDelta, AggregationAvg, AggregationLast:
+		return TimeseriesAggregation(raw), nil
+	}
+	return "", fmt.Errorf("aggregation must be one of delta, avg, last")
 }
 
 func parseRange(r *http.Request) (from time.Time, to time.Time, bucket, tz string, err error) {

@@ -33,7 +33,7 @@ export function Dashboard() {
     [preset],
   )
 
-  const { config, current, energySeries, energySummary, damSeries, loading, error } = useDashboardData({
+  const { config, current, energySeries, energySummary, damSeries, socSeries, loading, error } = useDashboardData({
     organizationID,
     preset,
     anchor,
@@ -100,6 +100,7 @@ export function Dashboard() {
               summary={energySummary}
               loading={loading}
               damSeries={damSeries}
+              socSeries={socSeries}
             />
             <RevenueChart energySeries={energySeries} damSeries={damSeries} preset={preset} />
           </div>

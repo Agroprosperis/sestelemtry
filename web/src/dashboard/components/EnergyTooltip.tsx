@@ -17,6 +17,7 @@ type Props = {
 }
 
 const DAM_PRICE_KEY = 'dam_price_uah_per_mwh'
+const SOC_KEY = 'soc_percent'
 
 export function EnergyTooltip({ active, label, payload, preset }: Props) {
   if (!active || !payload || payload.length === 0) {
@@ -58,6 +59,9 @@ export function EnergyTooltip({ active, label, payload, preset }: Props) {
   const damEntry = byKey.get(DAM_PRICE_KEY)
   const damValue = Number(damEntry?.value)
   const showDam = preset === 'day' && Number.isFinite(damValue)
+  const socEntry = byKey.get(SOC_KEY)
+  const socValue = Number(socEntry?.value)
+  const showSoc = preset === 'day' && Number.isFinite(socValue)
 
   return (
     <div className="energy-tooltip">
@@ -78,6 +82,13 @@ export function EnergyTooltip({ active, label, payload, preset }: Props) {
           {SINK_ENERGY_METRIC_KEYS.map((key) => row(key, true))}
         </div>
       </div>
+      {showSoc && (
+        <div className="energy-tooltip-row energy-tooltip-dam">
+          <span className="energy-tooltip-dot" style={{ backgroundColor: socEntry?.color ?? '#a855f7' }} />
+          <span className="energy-tooltip-name">SOC</span>
+          <span className="energy-tooltip-value">{formatChartNumber(socValue)} %</span>
+        </div>
+      )}
       {showDam && (
         <div className="energy-tooltip-row energy-tooltip-dam">
           <span className="energy-tooltip-dot" style={{ backgroundColor: damEntry?.color ?? '#0ea5e9' }} />

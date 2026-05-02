@@ -43,6 +43,7 @@ export async function fetchTimeseries(
     to: string
     bucket: string
     tz?: string
+    aggregation?: 'delta' | 'avg' | 'last'
   },
   signal?: AbortSignal,
 ): Promise<TimeseriesResponse> {
@@ -53,6 +54,7 @@ export async function fetchTimeseries(
     to: input.to,
     bucket: input.bucket,
     tz: input.tz || Intl.DateTimeFormat().resolvedOptions().timeZone || undefined,
+    aggregation: input.aggregation,
   })
   const res = await fetch(url, { signal })
   if (!res.ok) {

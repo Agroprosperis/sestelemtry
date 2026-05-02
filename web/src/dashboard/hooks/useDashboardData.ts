@@ -5,6 +5,7 @@ import { DASHBOARD_REFRESH_MS, FALLBACK_DASHBOARD_CONFIG } from '../config'
 import { endOfPeriod, isCurrentPeriod, rangeParams, startOfPeriod, type RangePreset } from '../range'
 import { energyBucketDeltaRows, overrideCurrentDayCell, type EnergyRow } from '../transforms/buckets'
 import { damChartRows, type DAMChartRow } from '../transforms/dam'
+import { socChartRows, type SOCChartRow } from '../transforms/soc'
 import { energySummaryFromSeries, type EnergySummary } from '../transforms/summary'
 
 export type DashboardData = {
@@ -13,6 +14,7 @@ export type DashboardData = {
   energySeries: EnergyRow[]
   energySummary: EnergySummary
   damSeries: DAMChartRow[]
+  socSeries: SOCChartRow[]
   loading: boolean
   error: string | null
 }
@@ -42,6 +44,7 @@ export function useDashboardData(input: {
   const [current, setCurrent] = useState<CurrentResponse | null>(null)
   const [energySeries, setEnergySeries] = useState<EnergyRow[]>([])
   const [damSeries, setDamSeries] = useState<DAMChartRow[]>([])
+  const [socSeries, setSocSeries] = useState<SOCChartRow[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -94,7 +97,12 @@ export function useDashboardData(input: {
         // the day preset exactly instead of drifting because of a 1-day
         // server bucket.
         const needsTodayOverride = preset === 'month' && isCurrentPeriod('month', anchorDate, now)
-        const [cur, energy, today] = await Promise.all([
+        // SOC is an instantaneous metric, so we fetch it with an `avg`
+        // aggregation instead of the default accumulator-delta. We only
+        // need it for the day preset (the energy chart overlays it as a
+        // background band).
+        const needsSOC = preset === 'day'
+        const [cur, energy, today, soc] = await Promise.all([
           fetchCurrent(organizationID, controller.signal),
           fetchTimeseries(
             {
@@ -114,6 +122,17 @@ export function useDashboardData(input: {
                 controller.signal,
               )
             : Promise.resolve(null),
+          needsSOC
+            ? fetchTimeseries(
+                {
+                  organizationID,
+                  metricKeys: ['soc_percent'],
+                  ...rangeParams('day', anchorDate, now),
+                  aggregation: 'avg',
+                },
+                controller.signal,
+              )
+            : Promise.resolve(null),
         ])
         if (cancelled || controller.signal.aborted) return
         setCurrent(cur)
@@ -122,6 +141,7 @@ export function useDashboardData(input: {
           series = overrideCurrentDayCell(series, today.points, energyKeys, now)
         }
         setEnergySeries(series)
+        setSocSeries(soc ? socChartRows(soc.points, 'day', anchorDate) : [])
         setError(null)
       } catch (e) {
         if (cancelled || isAbortError(e)) return
@@ -184,6 +204,7 @@ export function useDashboardData(input: {
     energySeries,
     energySummary,
     damSeries,
+    socSeries,
     loading,
     error,
   }

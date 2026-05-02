@@ -29,7 +29,7 @@ func (m *mockStore) Current(_ context.Context, _ string, _ []string) (CurrentRes
 	return m.currentResp, m.currentErr
 }
 
-func (m *mockStore) Timeseries(_ context.Context, _ string, _ []string, _, _ time.Time, _, _ string) (TimeseriesResponse, error) {
+func (m *mockStore) Timeseries(_ context.Context, _ string, _ []string, _, _ time.Time, _, _ string, _ TimeseriesAggregation) (TimeseriesResponse, error) {
 	return m.seriesResp, m.seriesErr
 }
 

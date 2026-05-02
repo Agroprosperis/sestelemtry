@@ -21,6 +21,7 @@ vi.mock('./hooks/useDashboardData', () => ({
     },
     energySeries: [],
     damSeries: [],
+    socSeries: [],
     energySummary: {
       pvProduced: 0,
       gridExport: 0,

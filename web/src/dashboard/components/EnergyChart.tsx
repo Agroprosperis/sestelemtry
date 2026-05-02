@@ -1,5 +1,6 @@
 import { useCallback, useMemo } from 'react'
 import {
+  Area,
   Bar,
   BarChart,
   CartesianGrid,
@@ -19,6 +20,7 @@ import { formatChartNumber } from '../format'
 import type { RangePreset } from '../range'
 import type { EnergyRow } from '../transforms/buckets'
 import type { DAMChartRow } from '../transforms/dam'
+import type { SOCChartRow } from '../transforms/soc'
 import type { EnergySummary as Summary } from '../transforms/summary'
 import { EnergySummary } from './EnergySummary'
 import { EnergyTooltip } from './EnergyTooltip'
@@ -30,11 +32,15 @@ type Props = {
   summary: Summary
   loading: boolean
   damSeries?: DAMChartRow[]
+  socSeries?: SOCChartRow[]
 }
 
 const DAM_PRICE_KEY = 'dam_price_uah_per_mwh'
 const DAM_PRICE_COLOR = '#0ea5e9'
 const DAM_PRICE_LABEL = 'Ціна РДН'
+const SOC_KEY = 'soc_percent'
+const SOC_COLOR = '#a855f7'
+const SOC_LABEL = 'SOC'
 
 // Day preset uses 5-minute buckets (288 per day); show every 12th tick so
 // labels land on the hour and the axis stays readable.
@@ -81,7 +87,7 @@ function damPriceDomain(areas: HourlyDamArea[]): [number, number] {
   return [0, Math.ceil(max * 1.1)]
 }
 
-export function EnergyChart({ metrics, series, preset, summary, loading, damSeries }: Props) {
+export function EnergyChart({ metrics, series, preset, summary, loading, damSeries, socSeries }: Props) {
   const tooltipContent = useCallback(
     (props: Omit<React.ComponentProps<typeof EnergyTooltip>, 'preset'>) => (
       <EnergyTooltip {...props} preset={preset} />
@@ -90,21 +96,29 @@ export function EnergyChart({ metrics, series, preset, summary, loading, damSeri
   )
   const tickInterval = xAxisInterval(preset)
 
-  // Day preset carries the current hourly DAM price on every 5-minute row so
-  // the tooltip surfaces the containing hour's price at any hover position.
+  // Day preset carries hourly DAM price and the SOC band on every 5-minute
+  // row so Recharts can align both overlays with the energy timeline and the
+  // tooltip can surface them without separate lookups.
   const dayData = useMemo(() => {
     if (preset !== 'day') return series
     const priceByTime = new Map<string, number | null>()
     for (const row of damSeries ?? []) {
       priceByTime.set(String(row.time), row.price)
     }
+    const socByTime = new Map<string, number | null>()
+    for (const row of socSeries ?? []) {
+      socByTime.set(String(row.time), row.soc)
+    }
     return series.map((row) => {
+      const merged: EnergyRow = { ...row }
       const price = priceByTime.get(String(row.time))
-      return price != null && Number.isFinite(price)
-        ? { ...row, [DAM_PRICE_KEY]: price }
-        : row
+      if (price != null && Number.isFinite(price)) merged[DAM_PRICE_KEY] = price
+      const soc = socByTime.get(String(row.time))
+      if (soc != null && Number.isFinite(soc)) merged[SOC_KEY] = soc
+      return merged
     })
-  }, [preset, series, damSeries])
+  }, [preset, series, damSeries, socSeries])
+  const hasSoc = (socSeries ?? []).some((r) => r.soc != null && Number.isFinite(r.soc))
 
   const hourlyAreas = useMemo(
     () => hourlyDamAreas(damSeries, series.map((r) => String(r.time))),
@@ -153,8 +167,27 @@ export function EnergyChart({ metrics, series, preset, summary, loading, damSeri
                 width={48}
                 hide={!hasDam}
               />
+              <YAxis
+                yAxisId="soc"
+                orientation="right"
+                domain={[0, 100]}
+                hide
+              />
               <Tooltip content={tooltipContent} />
               <Legend />
+              {hasSoc && (
+                <Area
+                  yAxisId="soc"
+                  type="monotone"
+                  dataKey={SOC_KEY}
+                  name={SOC_LABEL}
+                  stroke="none"
+                  fill={SOC_COLOR}
+                  fillOpacity={0.12}
+                  isAnimationActive={false}
+                  connectNulls
+                />
+              )}
               {hourlyAreas.map((a, i) => (
                 <ReferenceArea
                   key={`dam-${i}`}

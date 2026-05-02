@@ -57,7 +57,22 @@ func (s *Store) Current(ctx context.Context, organizationID string, metricKeys [
 	return out, nil
 }
 
-func (s *Store) Timeseries(ctx context.Context, organizationID string, metricKeys []string, from, to time.Time, bucket, tz string) (TimeseriesResponse, error) {
+// TimeseriesAggregation selects how the bucket value is computed.
+//
+//   - "delta" (default): per-bucket contribution of a monotonic counter
+//     calculated as last(value, time) of the current bucket minus last value
+//     of the previous bucket (negatives clamped to zero).
+//   - "avg":   arithmetic mean of samples in the bucket (instantaneous metric).
+//   - "last":  the latest sample in the bucket (instantaneous metric).
+type TimeseriesAggregation string
+
+const (
+	AggregationDelta TimeseriesAggregation = "delta"
+	AggregationAvg   TimeseriesAggregation = "avg"
+	AggregationLast  TimeseriesAggregation = "last"
+)
+
+func (s *Store) Timeseries(ctx context.Context, organizationID string, metricKeys []string, from, to time.Time, bucket, tz string, aggregation TimeseriesAggregation) (TimeseriesResponse, error) {
 	if len(metricKeys) == 0 {
 		return TimeseriesResponse{}, fmt.Errorf("metric_keys is required")
 	}
@@ -73,7 +88,23 @@ func (s *Store) Timeseries(ctx context.Context, organizationID string, metricKey
 	if strings.TrimSpace(tz) == "" {
 		tz = "UTC"
 	}
+	if aggregation == "" {
+		aggregation = AggregationDelta
+	}
 
+	switch aggregation {
+	case AggregationDelta:
+		return s.timeseriesDelta(ctx, organizationID, metricKeys, from, to, bucket, tz)
+	case AggregationAvg, AggregationLast:
+		return s.timeseriesInstant(ctx, organizationID, metricKeys, from, to, bucket, tz, aggregation)
+	default:
+		return TimeseriesResponse{}, fmt.Errorf("unsupported aggregation %q", aggregation)
+	}
+}
+
+// timeseriesDelta computes monotonic-counter deltas per bucket. See package
+// docs above for why we compare last-of-current-bucket with last-of-previous.
+func (s *Store) timeseriesDelta(ctx context.Context, organizationID string, metricKeys []string, from, to time.Time, bucket, tz string) (TimeseriesResponse, error) {
 	// Bucket boundaries are aligned to the caller's timezone so daily-resetting
 	// counters (e.g. pv_energy_yield_day_kwh) reset on a bucket edge rather
 	// than mid-bucket.
@@ -119,6 +150,61 @@ func (s *Store) Timeseries(ctx context.Context, organizationID string, metricKey
 		WHERE bucket_time >= $4
 		ORDER BY bucket_time ASC, metric_key ASC
 	`, bucket, organizationID, metricKeys, from.UTC(), to.UTC(), tz)
+	if err != nil {
+		return TimeseriesResponse{}, err
+	}
+	defer rows.Close()
+
+	out := TimeseriesResponse{
+		OrganizationID: organizationID,
+		MetricKeys:     metricKeys,
+		Bucket:         bucket,
+		From:           from.UTC(),
+		To:             to.UTC(),
+		Points:         make([]TimeseriesPoint, 0),
+	}
+	for rows.Next() {
+		var p TimeseriesPoint
+		if err := rows.Scan(&p.Time, &p.MetricKey, &p.Value); err != nil {
+			return TimeseriesResponse{}, err
+		}
+		out.Points = append(out.Points, p)
+	}
+	if err := rows.Err(); err != nil {
+		return TimeseriesResponse{}, err
+	}
+	return out, nil
+}
+
+// timeseriesInstant returns per-bucket values for instantaneous metrics (SOC,
+// power readings, etc.) — either the mean of samples inside the bucket
+// ("avg") or the last sample ("last"). No cross-bucket lookback is needed
+// because there is no counter delta to compute.
+func (s *Store) timeseriesInstant(ctx context.Context, organizationID string, metricKeys []string, from, to time.Time, bucket, tz string, aggregation TimeseriesAggregation) (TimeseriesResponse, error) {
+	var valueExpr string
+	switch aggregation {
+	case AggregationAvg:
+		valueExpr = "avg(value)"
+	case AggregationLast:
+		valueExpr = "last(value, time)"
+	default:
+		return TimeseriesResponse{}, fmt.Errorf("unsupported instant aggregation %q", aggregation)
+	}
+
+	sql := fmt.Sprintf(`
+		SELECT
+			time_bucket($1::interval, time, $6::text) AS bucket_time,
+			metric_key,
+			%s AS value
+		FROM telemetry_samples
+		WHERE organization_id = $2
+			AND metric_key = ANY($3)
+			AND time >= $4
+			AND time <= $5
+		GROUP BY bucket_time, metric_key
+		ORDER BY bucket_time ASC, metric_key ASC
+	`, valueExpr)
+	rows, err := s.pool.Query(ctx, sql, bucket, organizationID, metricKeys, from.UTC(), to.UTC(), tz)
 	if err != nil {
 		return TimeseriesResponse{}, err
 	}
