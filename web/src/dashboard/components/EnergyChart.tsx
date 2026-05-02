@@ -176,12 +176,6 @@ export function EnergyChart({
                   tickFormatter={(v) => formatChartNumber(Number(v))}
                 />
                 <YAxis
-                  yAxisId="price"
-                  orientation="right"
-                  domain={priceDomain}
-                  hide
-                />
-                <YAxis
                   yAxisId="soc"
                   orientation="right"
                   domain={[0, 100]}
@@ -190,7 +184,13 @@ export function EnergyChart({
                   axisLine={{ stroke: SOC_COLOR, opacity: 0.4 }}
                   tickLine={{ stroke: SOC_COLOR, opacity: 0.4 }}
                   width={48}
-                  hide={!hasSoc}
+                />
+                <YAxis
+                  yAxisId="price"
+                  orientation="right"
+                  domain={priceDomain}
+                  hide
+                  width={0}
                 />
                 <Tooltip
                   content={powerTooltip}
