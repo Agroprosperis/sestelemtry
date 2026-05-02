@@ -498,6 +498,11 @@
   min-width: 460px;
   font-size: 12px;
   box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
+  /* Recharts' wrapper is vertically centered around the cursor. Shift the
+     visible tooltip down by 50% of its own height + a small gap so its
+     top edge sits immediately below the cursor (bottom-right of it),
+     instead of covering the data point being inspected. */
+  transform: translateY(calc(50% + 10px));
 }
 
 .energy-tooltip-label {

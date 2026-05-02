@@ -176,7 +176,7 @@ export function EnergyChart({ metrics, series, preset, summary, loading, damSeri
                 content={tooltipContent}
                 offset={16}
                 allowEscapeViewBox={{ x: true, y: true }}
-                wrapperStyle={{ pointerEvents: 'none', zIndex: 5, transform: 'translateY(24px)' }}
+                wrapperStyle={{ pointerEvents: 'none', zIndex: 5 }}
                 isAnimationActive={false}
                 cursor={{ stroke: '#94a3b8', strokeDasharray: '3 3' }}
               />
@@ -250,7 +250,7 @@ export function EnergyChart({ metrics, series, preset, summary, loading, damSeri
                 content={tooltipContent}
                 offset={16}
                 allowEscapeViewBox={{ x: true, y: true }}
-                wrapperStyle={{ pointerEvents: 'none', zIndex: 5, transform: 'translateY(24px)' }}
+                wrapperStyle={{ pointerEvents: 'none', zIndex: 5 }}
                 isAnimationActive={false}
                 cursor={{ fill: 'rgba(148, 163, 184, 0.15)' }}
               />
