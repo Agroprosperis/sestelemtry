@@ -138,7 +138,6 @@ export function EnergyChart({
   const dayLabels = useMemo(() => dayData.map((r) => String(r.time)), [dayData])
   const hourlyAreas = useMemo(() => hourlyDamAreas(damSeries, dayLabels), [damSeries, dayLabels])
   const priceDomain = useMemo(() => damPriceDomain(hourlyAreas), [hourlyAreas])
-  const hasDam = hourlyAreas.length > 0
 
   const dayHasData = dayData.some((row) =>
     DAY_POWER_METRIC_KEYS.some((k) => {
@@ -180,18 +179,18 @@ export function EnergyChart({
                   yAxisId="price"
                   orientation="right"
                   domain={priceDomain}
-                  tickFormatter={(v) => formatChartNumber(Number(v))}
-                  tick={{ fill: DAM_PRICE_COLOR, fontSize: 11 }}
-                  axisLine={{ stroke: DAM_PRICE_COLOR, opacity: 0.4 }}
-                  tickLine={{ stroke: DAM_PRICE_COLOR, opacity: 0.4 }}
-                  width={48}
-                  hide={!hasDam}
+                  hide
                 />
                 <YAxis
                   yAxisId="soc"
                   orientation="right"
                   domain={[0, 100]}
-                  hide
+                  tickFormatter={(v) => `${v}%`}
+                  tick={{ fill: SOC_COLOR, fontSize: 11 }}
+                  axisLine={{ stroke: SOC_COLOR, opacity: 0.4 }}
+                  tickLine={{ stroke: SOC_COLOR, opacity: 0.4 }}
+                  width={48}
+                  hide={!hasSoc}
                 />
                 <Tooltip
                   content={powerTooltip}
@@ -227,6 +226,13 @@ export function EnergyChart({
                     fillOpacity={0.18}
                     stroke="none"
                     ifOverflow="visible"
+                    label={{
+                      value: (a.price / 1000).toFixed(1),
+                      position: 'insideTop',
+                      fill: DAM_PRICE_COLOR,
+                      fontSize: 11,
+                      fontWeight: 600,
+                    }}
                   />
                 ))}
                 <ReferenceLine y={0} yAxisId="power" stroke="#64748b" />
