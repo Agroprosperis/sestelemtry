@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import {
   Area,
   Bar,
@@ -86,13 +86,31 @@ function damPriceDomain(areas: HourlyDamArea[]): [number, number] {
   return [0, Math.ceil(max * 1.1)]
 }
 
+type HoverState = {
+  label: string | number | undefined
+  payload: React.ComponentProps<typeof EnergyTooltip>['payload']
+}
+
+type ChartMouseState = {
+  activeLabel?: string | number
+  activePayload?: HoverState['payload']
+}
+
 export function EnergyChart({ metrics, series, preset, summary, loading, damSeries, socSeries }: Props) {
-  const tooltipContent = useCallback(
-    (props: Omit<React.ComponentProps<typeof EnergyTooltip>, 'preset'>) => (
-      <EnergyTooltip {...props} preset={preset} />
-    ),
-    [preset],
-  )
+  // We intentionally don't render Recharts' built-in floating tooltip: it
+  // hovers above the chart and covers the data under the cursor. Instead we
+  // capture the active payload via onMouseMove and render the full details
+  // in a dedicated panel *below* the chart, so the graph itself stays
+  // visible at all times.
+  const [hover, setHover] = useState<HoverState | null>(null)
+  const onChartMove = useCallback((state: ChartMouseState | null | undefined) => {
+    if (!state || !Array.isArray(state.activePayload) || state.activePayload.length === 0) {
+      setHover(null)
+      return
+    }
+    setHover({ label: state.activeLabel, payload: state.activePayload })
+  }, [])
+  const onChartLeave = useCallback(() => setHover(null), [])
   const tickInterval = xAxisInterval(preset)
 
   // Day preset carries hourly DAM price and the SOC band on every 5-minute
@@ -144,7 +162,7 @@ export function EnergyChart({ metrics, series, preset, summary, loading, damSeri
           <p className="chart-placeholder">No data available for selected range.</p>
         ) : preset === 'day' ? (
           <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={dayData}>
+            <ComposedChart data={dayData} onMouseMove={onChartMove} onMouseLeave={onChartLeave}>
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis
                 dataKey="time"
@@ -173,10 +191,7 @@ export function EnergyChart({ metrics, series, preset, summary, loading, damSeri
                 hide
               />
               <Tooltip
-                content={tooltipContent}
-                position={{ x: 0, y: 0 }}
-                allowEscapeViewBox={{ x: true, y: true }}
-                wrapperStyle={{ pointerEvents: 'none', zIndex: 5 }}
+                content={() => null}
                 isAnimationActive={false}
                 cursor={{ stroke: '#94a3b8', strokeDasharray: '3 3' }}
               />
@@ -242,15 +257,12 @@ export function EnergyChart({ metrics, series, preset, summary, loading, damSeri
           </ResponsiveContainer>
         ) : (
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={series} stackOffset="sign">
+            <BarChart data={series} stackOffset="sign" onMouseMove={onChartMove} onMouseLeave={onChartLeave}>
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis dataKey="time" interval={tickInterval} />
               <YAxis tickFormatter={(v) => formatChartNumber(Number(v))} />
               <Tooltip
-                content={tooltipContent}
-                position={{ x: 0, y: 0 }}
-                allowEscapeViewBox={{ x: true, y: true }}
-                wrapperStyle={{ pointerEvents: 'none', zIndex: 5 }}
+                content={() => null}
                 isAnimationActive={false}
                 cursor={{ fill: 'rgba(148, 163, 184, 0.15)' }}
               />
@@ -267,6 +279,18 @@ export function EnergyChart({ metrics, series, preset, summary, loading, damSeri
               ))}
             </BarChart>
           </ResponsiveContainer>
+        )}
+      </div>
+      <div className="chart-hover-panel" aria-live="polite">
+        {hover ? (
+          <EnergyTooltip
+            active
+            label={hover.label}
+            payload={hover.payload}
+            preset={preset}
+          />
+        ) : (
+          <p className="chart-hover-hint">Наведіть курсор на графік, щоб побачити деталі за момент.</p>
         )}
       </div>
     </div>

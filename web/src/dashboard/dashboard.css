@@ -489,15 +489,31 @@
 }
 
 .energy-tooltip {
-  background: rgba(255, 255, 255, 0.92);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
+  background: #ffffff;
   border: 1px solid #e2e8f0;
   border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 13px;
+}
+
+.chart-hover-panel {
+  margin-top: 10px;
+  min-height: 64px;
+}
+
+.chart-hover-panel .energy-tooltip {
+  box-shadow: none;
   padding: 8px 10px;
-  min-width: 460px;
-  font-size: 12px;
-  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
+}
+
+.chart-hover-hint {
+  margin: 0;
+  padding: 14px 12px;
+  color: #94a3b8;
+  font-size: 13px;
+  border: 1px dashed #e2e8f0;
+  border-radius: 10px;
+  text-align: center;
 }
 
 .energy-tooltip-label {
@@ -563,10 +579,6 @@
   }
   .dashboard-tabs button {
     flex: 1 1 auto;
-  }
-  .energy-tooltip {
-    min-width: 0;
-    width: min(90vw, 460px);
   }
   .energy-tooltip-grid {
     grid-template-columns: 1fr;
