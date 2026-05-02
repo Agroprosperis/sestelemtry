@@ -6,7 +6,6 @@ import {
   CartesianGrid,
   ComposedChart,
   Legend,
-  Line,
   ReferenceArea,
   ReferenceLine,
   ResponsiveContainer,
@@ -215,17 +214,23 @@ export function EnergyChart({ metrics, series, preset, summary, loading, damSeri
                 stroke="none"
                 isAnimationActive={false}
               />
-              {metrics.map((m) => (
-                <Line
-                  key={m.key}
-                  yAxisId="energy"
-                  type="monotone"
-                  dataKey={m.key}
-                  name={m.label}
-                  dot={false}
-                  stroke={energyColor(m.key, preset)}
-                />
-              ))}
+              {metrics.map((m) => {
+                const color = energyColor(m.key, preset)
+                return (
+                  <Area
+                    key={m.key}
+                    yAxisId="energy"
+                    type="monotone"
+                    dataKey={m.key}
+                    name={m.label}
+                    dot={false}
+                    stroke={color}
+                    fill={color}
+                    fillOpacity={0.18}
+                    isAnimationActive={false}
+                  />
+                )
+              })}
             </ComposedChart>
           </ResponsiveContainer>
         ) : (
