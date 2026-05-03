@@ -64,7 +64,6 @@ export function Dashboard() {
 
       <div className="dashboard-content">
         <MetricsPanel
-          cards={config.cards}
           current={current}
           loading={cardsLoading}
           metricsAt={metricsAt}

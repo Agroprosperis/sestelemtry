@@ -26,6 +26,17 @@ export function formatEnergyCompactKWh(valueKWh: number): string {
   return `${formatChartNumber(valueKWh)} kWh`
 }
 
+// formatEnergyCompactKWhUk renders a kWh total in Ukrainian units. Mirrors
+// formatEnergyCompactKWh but uses кВт·год / МВт·год — used by the
+// narrative panels where rows read as plain Ukrainian sentences.
+export function formatEnergyCompactKWhUk(valueKWh: number): string {
+  if (!Number.isFinite(valueKWh)) return '--'
+  if (valueKWh >= 1000) {
+    return `${formatChartNumber(valueKWh / 1000)} МВт·год`
+  }
+  return `${formatChartNumber(valueKWh)} кВт·год`
+}
+
 export function formatTimeLabel(date: Date, preset: RangePreset): string {
   if (preset === 'year') {
     return date.toLocaleDateString(undefined, { month: 'short' })

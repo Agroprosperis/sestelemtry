@@ -148,38 +148,6 @@
   padding: 10px 12px;
 }
 
-.cards-grid {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 10px;
-}
-
-.card {
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
-  border-radius: 12px;
-  padding: 14px;
-}
-
-.card-label {
-  margin: 0;
-  color: #475569;
-  font-size: 13px;
-}
-
-.card-value {
-  margin: 8px 0 0;
-  font-size: 28px;
-  font-weight: 700;
-}
-
-.card-value span {
-  margin-left: 6px;
-  font-size: 14px;
-  color: #64748b;
-  font-weight: 500;
-}
-
 .metrics-panel-stack {
   display: grid;
   gap: 14px;
@@ -215,17 +183,12 @@
 
 .daily-narrative-list li {
   display: grid;
-  grid-template-columns: 24px 1fr;
+  grid-template-columns: 24px 1fr auto;
   align-items: baseline;
   gap: 8px;
   font-size: 13px;
   color: #334155;
   line-height: 1.4;
-}
-
-.daily-narrative-list strong {
-  color: #0f172a;
-  font-weight: 600;
 }
 
 .daily-narrative-icon {
@@ -234,8 +197,22 @@
   line-height: 1;
 }
 
+.daily-narrative-label {
+  color: #334155;
+}
+
+.daily-narrative-value {
+  color: #0f172a;
+  font-weight: 600;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 .daily-narrative-note {
   color: #64748b;
+  font-weight: 400;
+  margin-left: 4px;
 }
 
 .metrics-at-hint {
@@ -320,28 +297,6 @@
 
 .metrics-at-now:hover {
   background: #f1f5f9;
-}
-
-.metrics-group .cards-grid {
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 10px;
-}
-
-.metrics-group .card {
-  padding: 10px;
-}
-
-.metrics-group .card-label {
-  font-size: 12px;
-}
-
-.metrics-group .card-value {
-  margin-top: 6px;
-  font-size: 22px;
-}
-
-.metrics-group .card-value span {
-  font-size: 12px;
 }
 
 .chart-card {
@@ -615,9 +570,6 @@
     grid-template-columns: 1fr;
   }
   .energy-summary-grid {
-    grid-template-columns: 1fr;
-  }
-  .metrics-group .cards-grid {
     grid-template-columns: 1fr;
   }
 }
