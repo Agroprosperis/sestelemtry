@@ -200,20 +200,7 @@ export function EnergyChart({
                   isAnimationActive={false}
                   cursor={{ stroke: '#94a3b8', strokeDasharray: '3 3' }}
                 />
-                <Legend />
-                {hasSoc && (
-                  <Area
-                    yAxisId="soc"
-                    type="monotone"
-                    dataKey={SOC_KEY}
-                    name={SOC_LABEL}
-                    stroke="none"
-                    fill={SOC_COLOR}
-                    fillOpacity={0.12}
-                    isAnimationActive={false}
-                    connectNulls
-                  />
-                )}
+                <Legend wrapperStyle={{ fontSize: 12 }} />
                 {hourlyAreas.map((a, i) => (
                   <ReferenceArea
                     key={`dam-${i}`}
@@ -236,18 +223,6 @@ export function EnergyChart({
                   />
                 ))}
                 <ReferenceLine y={0} yAxisId="power" stroke="#64748b" />
-                {/* Invisible bar carries "Ціна РДН" into the legend + tooltip
-                    without drawing any pixels (ReferenceArea handles the
-                    hourly visual). */}
-                <Bar
-                  yAxisId="price"
-                  dataKey={DAM_PRICE_KEY}
-                  name={DAM_PRICE_LABEL}
-                  fill={DAM_PRICE_COLOR}
-                  fillOpacity={0}
-                  stroke="none"
-                  isAnimationActive={false}
-                />
                 {DAY_POWER_METRIC_KEYS.map((key) => {
                   const color = dayPowerColor(key)
                   return (
@@ -268,6 +243,36 @@ export function EnergyChart({
                     />
                   )
                 })}
+                {/* Invisible bar carries "Ціна РДН" into the legend + tooltip
+                    without drawing any pixels (ReferenceArea handles the
+                    hourly visual). Placed after power Areas so the legend
+                    lists DAM after the power lines. */}
+                <Bar
+                  yAxisId="price"
+                  dataKey={DAM_PRICE_KEY}
+                  name={DAM_PRICE_LABEL}
+                  fill={DAM_PRICE_COLOR}
+                  fillOpacity={0}
+                  stroke="none"
+                  isAnimationActive={false}
+                />
+                {/* SOC Area is rendered last so it appears at the end of the
+                    legend; its fill is kept very translucent (0.12) so it
+                    reads as a background tint over the power areas instead
+                    of obscuring them. */}
+                {hasSoc && (
+                  <Area
+                    yAxisId="soc"
+                    type="monotone"
+                    dataKey={SOC_KEY}
+                    name={SOC_LABEL}
+                    stroke="none"
+                    fill={SOC_COLOR}
+                    fillOpacity={0.12}
+                    isAnimationActive={false}
+                    connectNulls
+                  />
+                )}
               </ComposedChart>
             </ResponsiveContainer>
           )
@@ -287,7 +292,7 @@ export function EnergyChart({
                 isAnimationActive={false}
                 cursor={{ fill: 'rgba(148, 163, 184, 0.15)' }}
               />
-              <Legend />
+              <Legend wrapperStyle={{ fontSize: 12 }} />
               <ReferenceLine y={0} stroke="#64748b" />
               {metrics.map((m) => (
                 <Bar

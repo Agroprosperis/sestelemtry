@@ -1,5 +1,5 @@
 import type { CurrentResponse, DashboardMetric } from '../../types'
-import { pickCardValue } from '../cards'
+import { CARD_GROUP_LABELS, CARD_GROUP_ORDER, groupCards, pickCardValue } from '../cards'
 import { MetricCard } from './MetricCard'
 import { MetricsAtPicker } from './MetricsAtPicker'
 
@@ -23,10 +23,10 @@ function formatSnapshotLabel(at: Date): string {
 }
 
 export function MetricsPanel({ cards, current, loading, metricsAt, onMetricsAtChange }: Props) {
+  const groups = groupCards(cards)
   return (
-    <aside className="metrics-panel">
-      <header className="metrics-panel-head">
-        <h2>Поточні показники</h2>
+    <div className="metrics-panel-stack">
+      <header className="metrics-at-bar">
         <MetricsAtPicker value={metricsAt} onChange={onMetricsAtChange} />
       </header>
       {metricsAt && (
@@ -34,16 +34,27 @@ export function MetricsPanel({ cards, current, loading, metricsAt, onMetricsAtCh
           Показники станом на <strong>{formatSnapshotLabel(metricsAt)}</strong>
         </p>
       )}
-      <section className="cards-grid">
-        {cards.map((card) => (
-          <MetricCard
-            key={card.key}
-            card={card}
-            value={pickCardValue(card, { current })}
-            loading={loading}
-          />
-        ))}
-      </section>
-    </aside>
+      {CARD_GROUP_ORDER.map((groupId) => {
+        const groupCardsForId = groups[groupId]
+        if (groupCardsForId.length === 0) return null
+        return (
+          <section key={groupId} className="metrics-group" aria-labelledby={`metrics-group-${groupId}`}>
+            <h2 id={`metrics-group-${groupId}`} className="metrics-group-title">
+              {CARD_GROUP_LABELS[groupId]}
+            </h2>
+            <div className="cards-grid">
+              {groupCardsForId.map((card) => (
+                <MetricCard
+                  key={card.key}
+                  card={card}
+                  value={pickCardValue(card, { current })}
+                  loading={loading}
+                />
+              ))}
+            </div>
+          </section>
+        )
+      })}
+    </div>
   )
 }
