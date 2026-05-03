@@ -30,58 +30,48 @@ export function DailySummaryNarrative({ summary, preset }: Props) {
           <span className="daily-narrative-icon" aria-hidden="true">
             ☀
           </span>
-          <span className="daily-narrative-label">СЕС згенерувала</span>
-          <strong className="daily-narrative-value">
-            {formatKWhUk(summary.pvProduced)}
-          </strong>
+          <span>
+            СЕС згенерувала: <strong>{formatKWhUk(summary.pvProduced)}</strong>
+          </span>
         </li>
         <li>
           <span className="daily-narrative-icon" aria-hidden="true">
             ⚡
           </span>
-          <span className="daily-narrative-label">Споживання приладами</span>
-          <strong className="daily-narrative-value">
-            {formatKWhUk(summary.consumption)}
-          </strong>
+          <span>
+            Споживання приладами:{' '}
+            <strong>{formatKWhUk(summary.consumption)}</strong>
+          </span>
         </li>
         <li>
           <span className="daily-narrative-icon" aria-hidden="true">
             🔌
           </span>
-          <span className="daily-narrative-label">Взяли з мережі</span>
-          <strong className="daily-narrative-value">
-            {formatKWhUk(summary.fromGrid)}
-          </strong>
+          <span>
+            Взяли з мережі: <strong>{formatKWhUk(summary.fromGrid)}</strong>
+          </span>
         </li>
         <li>
           <span className="daily-narrative-icon" aria-hidden="true">
             🌐
           </span>
-          <span className="daily-narrative-label">Віддали в мережу</span>
-          <strong className="daily-narrative-value">
-            {formatKWhUk(summary.gridExport)}
+          <span>
+            Віддали в мережу:{' '}
+            <strong>{formatKWhUk(summary.gridExport)}</strong>
             {exportIsTiny && (
               <span className="daily-narrative-note"> (майже 0)</span>
             )}
-          </strong>
+          </span>
         </li>
         <li>
           <span className="daily-narrative-icon" aria-hidden="true">
             🔋
           </span>
-          <span className="daily-narrative-label">Заряд батареї</span>
-          <strong className="daily-narrative-value">
-            {formatKWhUk(summary.batteryCharged)}
-          </strong>
-        </li>
-        <li>
-          <span className="daily-narrative-icon" aria-hidden="true">
-            🔋
+          <span>
+            Батарея: заряд{' '}
+            <strong>{formatKWhUk(summary.batteryCharged)}</strong>, розряд{' '}
+            <strong>{formatKWhUk(summary.batteryDischarged)}</strong>
           </span>
-          <span className="daily-narrative-label">Розряд батареї</span>
-          <strong className="daily-narrative-value">
-            {formatKWhUk(summary.batteryDischarged)}
-          </strong>
         </li>
       </ul>
     </section>

@@ -49,10 +49,10 @@ export function CurrentSnapshotNarrative({ current, loading }: Props) {
               <span className="daily-narrative-icon" aria-hidden="true">
                 {row.icon}
               </span>
-              <span className="daily-narrative-label">{row.label}</span>
-              <strong className="daily-narrative-value">
-                {formatValue(value, row.unit, loading)}
-              </strong>
+              <span>
+                {row.label}:{' '}
+                <strong>{formatValue(value, row.unit, loading)}</strong>
+              </span>
             </li>
           )
         })}

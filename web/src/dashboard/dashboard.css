@@ -183,12 +183,17 @@
 
 .daily-narrative-list li {
   display: grid;
-  grid-template-columns: 24px 1fr auto;
+  grid-template-columns: 24px 1fr;
   align-items: baseline;
   gap: 8px;
   font-size: 13px;
   color: #334155;
   line-height: 1.4;
+}
+
+.daily-narrative-list strong {
+  color: #0f172a;
+  font-weight: 600;
 }
 
 .daily-narrative-icon {
@@ -197,22 +202,8 @@
   line-height: 1;
 }
 
-.daily-narrative-label {
-  color: #334155;
-}
-
-.daily-narrative-value {
-  color: #0f172a;
-  font-weight: 600;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
 .daily-narrative-note {
   color: #64748b;
-  font-weight: 400;
-  margin-left: 4px;
 }
 
 .metrics-at-hint {

@@ -17,50 +17,14 @@ function formatTotal(value: number | null, loading: boolean): string {
   return formatEnergyCompactKWhUk(value)
 }
 
-type Row = {
-  icon: string
-  label: string
-  value: number | null
-}
-
 export function AccumulatedSnapshotNarrative({ current, loading }: Props) {
-  const rows: Row[] = [
-    {
-      icon: '☀',
-      label: 'Виробіток СЕС',
-      value: reading(current, 'accumulated_pv_energy_yield_kwh'),
-    },
-    {
-      icon: '⚡',
-      label: 'Споживання приладами',
-      value: reading(current, 'accumulated_power_consumption_kwh'),
-    },
-    {
-      icon: '🔌',
-      label: 'Куплено з мережі',
-      value: reading(current, 'accumulated_electricity_purchased_kwh'),
-    },
-    {
-      icon: '🌐',
-      label: 'Відпущено в мережу',
-      value: reading(current, 'accumulated_electricity_sold_kwh'),
-    },
-    {
-      icon: '🔋',
-      label: 'Заряд батареї',
-      value: reading(current, 'total_energy_charged_kwh'),
-    },
-    {
-      icon: '🔋',
-      label: 'Розряд батареї',
-      value: reading(current, 'total_energy_discharged_kwh'),
-    },
-    {
-      icon: '⚙',
-      label: 'Постачання з мережі',
-      value: reading(current, 'total_power_supply_from_grid_kwh'),
-    },
-  ]
+  const pv = reading(current, 'accumulated_pv_energy_yield_kwh')
+  const consumption = reading(current, 'accumulated_power_consumption_kwh')
+  const purchased = reading(current, 'accumulated_electricity_purchased_kwh')
+  const sold = reading(current, 'accumulated_electricity_sold_kwh')
+  const charged = reading(current, 'total_energy_charged_kwh')
+  const discharged = reading(current, 'total_energy_discharged_kwh')
+  const gridSupply = reading(current, 'total_power_supply_from_grid_kwh')
   return (
     <section
       className="metrics-group daily-narrative"
@@ -71,17 +35,58 @@ export function AccumulatedSnapshotNarrative({ current, loading }: Props) {
         Накопичувальні показники
       </h2>
       <ul className="daily-narrative-list">
-        {rows.map((row) => (
-          <li key={row.label}>
-            <span className="daily-narrative-icon" aria-hidden="true">
-              {row.icon}
-            </span>
-            <span className="daily-narrative-label">{row.label}</span>
-            <strong className="daily-narrative-value">
-              {formatTotal(row.value, loading)}
-            </strong>
-          </li>
-        ))}
+        <li>
+          <span className="daily-narrative-icon" aria-hidden="true">
+            ☀
+          </span>
+          <span>
+            Виробіток СЕС: <strong>{formatTotal(pv, loading)}</strong>
+          </span>
+        </li>
+        <li>
+          <span className="daily-narrative-icon" aria-hidden="true">
+            ⚡
+          </span>
+          <span>
+            Споживання приладами:{' '}
+            <strong>{formatTotal(consumption, loading)}</strong>
+          </span>
+        </li>
+        <li>
+          <span className="daily-narrative-icon" aria-hidden="true">
+            🔌
+          </span>
+          <span>
+            Куплено з мережі:{' '}
+            <strong>{formatTotal(purchased, loading)}</strong>
+          </span>
+        </li>
+        <li>
+          <span className="daily-narrative-icon" aria-hidden="true">
+            🌐
+          </span>
+          <span>
+            Відпущено в мережу: <strong>{formatTotal(sold, loading)}</strong>
+          </span>
+        </li>
+        <li>
+          <span className="daily-narrative-icon" aria-hidden="true">
+            🔋
+          </span>
+          <span>
+            Батарея: заряд <strong>{formatTotal(charged, loading)}</strong>,
+            розряд <strong>{formatTotal(discharged, loading)}</strong>
+          </span>
+        </li>
+        <li>
+          <span className="daily-narrative-icon" aria-hidden="true">
+            ⚙
+          </span>
+          <span>
+            Постачання з мережі (загальне):{' '}
+            <strong>{formatTotal(gridSupply, loading)}</strong>
+          </span>
+        </li>
       </ul>
     </section>
   )
