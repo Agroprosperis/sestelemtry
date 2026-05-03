@@ -62,26 +62,28 @@ export function Dashboard() {
         </section>
       )}
 
-      <MetricsPanel
-        cards={config.cards}
-        current={current}
-        loading={cardsLoading}
-        metricsAt={metricsAt}
-        onMetricsAtChange={setMetricsAt}
-      />
-
-      <div className="dashboard-charts">
-        <EnergyChart
-          metrics={config.energy_chart}
-          series={energySeries}
-          preset={preset}
-          summary={energySummary}
-          loading={loading}
-          damSeries={damSeries}
-          socSeries={socSeries}
-          powerSeries={powerSeries}
+      <div className="dashboard-content">
+        <MetricsPanel
+          cards={config.cards}
+          current={current}
+          loading={cardsLoading}
+          metricsAt={metricsAt}
+          onMetricsAtChange={setMetricsAt}
         />
-        <RevenueChart energySeries={energySeries} damSeries={damSeries} preset={preset} />
+
+        <div className="dashboard-charts">
+          <EnergyChart
+            metrics={config.energy_chart}
+            series={energySeries}
+            preset={preset}
+            summary={energySummary}
+            loading={loading}
+            damSeries={damSeries}
+            socSeries={socSeries}
+            powerSeries={powerSeries}
+          />
+          <RevenueChart energySeries={energySeries} damSeries={damSeries} preset={preset} />
+        </div>
       </div>
     </main>
   )

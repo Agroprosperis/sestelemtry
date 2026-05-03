@@ -1,9 +1,16 @@
 .dashboard-page {
-  max-width: 1200px;
+  max-width: 1400px;
   margin: 0 auto;
   padding: 24px;
   display: grid;
   gap: 20px;
+}
+
+.dashboard-content {
+  display: grid;
+  grid-template-columns: minmax(300px, 360px) minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
 }
 
 .dashboard-header h1 {
@@ -537,6 +544,9 @@
   .header-controls {
     width: 100%;
     flex-wrap: wrap;
+  }
+  .dashboard-content {
+    grid-template-columns: 1fr;
   }
   .energy-tooltip {
     min-width: 0;
