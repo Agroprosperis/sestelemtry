@@ -146,6 +146,39 @@ export function EnergyChart({
     }),
   )
 
+  // dayLegendItems pins the legend order explicitly: power lines first
+  // (in their canonical PV/ESS/Grid/Load order), then the DAM price band,
+  // then SOC at the very end. Recharts' auto-collected legend groups by
+  // component type and y-axis, which puts SOC at the front and shuffles
+  // power lines, so we render the legend ourselves via `Legend.content`.
+  const dayLegendItems = useMemo(() => {
+    type Item = { id: string; label: string; color: string }
+    const items: Item[] = DAY_POWER_METRIC_KEYS.map((key) => ({
+      id: key,
+      label: DAY_POWER_METRIC_LABELS[key] ?? key,
+      color: dayPowerColor(key),
+    }))
+    items.push({ id: DAM_PRICE_KEY, label: DAM_PRICE_LABEL, color: DAM_PRICE_COLOR })
+    if (hasSoc) {
+      items.push({ id: SOC_KEY, label: SOC_LABEL, color: SOC_COLOR })
+    }
+    return items
+  }, [hasSoc])
+
+  const renderDayLegend = useCallback(
+    () => (
+      <ul className="chart-legend">
+        {dayLegendItems.map((item) => (
+          <li key={item.id} className="chart-legend-item">
+            <span className="chart-legend-swatch" style={{ background: item.color }} />
+            <span>{item.label}</span>
+          </li>
+        ))}
+      </ul>
+    ),
+    [dayLegendItems],
+  )
+
   const dayTickFormatter = useCallback((v: unknown): string => {
     const s = String(v)
     const idx = s.indexOf(':')
@@ -200,7 +233,20 @@ export function EnergyChart({
                   isAnimationActive={false}
                   cursor={{ stroke: '#94a3b8', strokeDasharray: '3 3' }}
                 />
-                <Legend wrapperStyle={{ fontSize: 12 }} />
+                <Legend content={renderDayLegend} wrapperStyle={{ fontSize: 12 }} />
+                {hasSoc && (
+                  <Area
+                    yAxisId="soc"
+                    type="monotone"
+                    dataKey={SOC_KEY}
+                    name={SOC_LABEL}
+                    stroke="none"
+                    fill={SOC_COLOR}
+                    fillOpacity={0.12}
+                    isAnimationActive={false}
+                    connectNulls
+                  />
+                )}
                 {hourlyAreas.map((a, i) => (
                   <ReferenceArea
                     key={`dam-${i}`}
@@ -243,10 +289,11 @@ export function EnergyChart({
                     />
                   )
                 })}
-                {/* Invisible bar carries "Ціна РДН" into the legend + tooltip
-                    without drawing any pixels (ReferenceArea handles the
-                    hourly visual). Placed after power Areas so the legend
-                    lists DAM after the power lines. */}
+                {/* Invisible bar exists only so recharts can hit-test the
+                    DAM price for the tooltip; it draws zero pixels because
+                    ReferenceArea above already paints the hourly band. The
+                    legend entry comes from `dayLegendPayload`, not this
+                    bar's auto-discovered name. */}
                 <Bar
                   yAxisId="price"
                   dataKey={DAM_PRICE_KEY}
@@ -256,23 +303,6 @@ export function EnergyChart({
                   stroke="none"
                   isAnimationActive={false}
                 />
-                {/* SOC Area is rendered last so it appears at the end of the
-                    legend; its fill is kept very translucent (0.12) so it
-                    reads as a background tint over the power areas instead
-                    of obscuring them. */}
-                {hasSoc && (
-                  <Area
-                    yAxisId="soc"
-                    type="monotone"
-                    dataKey={SOC_KEY}
-                    name={SOC_LABEL}
-                    stroke="none"
-                    fill={SOC_COLOR}
-                    fillOpacity={0.12}
-                    isAnimationActive={false}
-                    connectNulls
-                  />
-                )}
               </ComposedChart>
             </ResponsiveContainer>
           )

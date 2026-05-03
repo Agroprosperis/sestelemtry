@@ -8,6 +8,7 @@ var DefaultDashboardMetrics = []string{
 	"load_power_kw",
 	"soc_percent",
 	"grid_connected_active_power_kw",
+	"pv_energy_yield_day_kwh",
 	"accumulated_pv_energy_yield_kwh",
 	"total_energy_charged_kwh",
 	"total_energy_discharged_kwh",
