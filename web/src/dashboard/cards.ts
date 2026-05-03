@@ -18,11 +18,12 @@ export const CARD_GROUP_LABELS: Record<CardGroupId, string> = {
   accumulated: 'Накопичувальні показники',
 }
 
-// CARD_GROUP_ORDER controls which group is rendered first on the page.
-// `current` first because it changes most often (live snapshot), then
-// today's totals (daily-resetting), then lifetime counters that move
-// slowest.
-export const CARD_GROUP_ORDER: CardGroupId[] = ['current', 'today', 'accumulated']
+// CARD_GROUP_ORDER controls which card groups are rendered, top-to-bottom.
+// `today` is intentionally absent: those metrics (e.g. pv_energy_yield_day_kwh)
+// are now surfaced through the DailySummaryNarrative panel instead of cards,
+// so MetricsPanel only iterates current + accumulated groups. classifyCard
+// still classifies a `_day_` key into 'today' for forward-compat.
+export const CARD_GROUP_ORDER: CardGroupId[] = ['current', 'accumulated']
 
 // classifyCard buckets a metric into one of the three card groups using
 // the metric_key naming convention:

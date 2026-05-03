@@ -69,6 +69,8 @@ export function Dashboard() {
           loading={cardsLoading}
           metricsAt={metricsAt}
           onMetricsAtChange={setMetricsAt}
+          summary={energySummary}
+          preset={preset}
         />
 
         <div className="dashboard-charts">

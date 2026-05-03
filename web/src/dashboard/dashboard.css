@@ -205,6 +205,39 @@
   color: #0f172a;
 }
 
+.daily-narrative-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.daily-narrative-list li {
+  display: grid;
+  grid-template-columns: 24px 1fr;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 13px;
+  color: #334155;
+  line-height: 1.4;
+}
+
+.daily-narrative-list strong {
+  color: #0f172a;
+  font-weight: 600;
+}
+
+.daily-narrative-icon {
+  text-align: center;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.daily-narrative-note {
+  color: #64748b;
+}
+
 .metrics-at-hint {
   margin: 0;
   font-size: 13px;

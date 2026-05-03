@@ -1,5 +1,8 @@
 import type { CurrentResponse, DashboardMetric } from '../../types'
-import { CARD_GROUP_LABELS, CARD_GROUP_ORDER, groupCards, pickCardValue } from '../cards'
+import { CARD_GROUP_LABELS, groupCards, pickCardValue } from '../cards'
+import type { RangePreset } from '../range'
+import type { EnergySummary } from '../transforms/summary'
+import { DailySummaryNarrative } from './DailySummaryNarrative'
 import { MetricCard } from './MetricCard'
 import { MetricsAtPicker } from './MetricsAtPicker'
 
@@ -9,6 +12,8 @@ type Props = {
   loading: boolean
   metricsAt: Date | null
   onMetricsAtChange: (next: Date | null) => void
+  summary: EnergySummary
+  preset: RangePreset
 }
 
 function formatSnapshotLabel(at: Date): string {
@@ -22,7 +27,15 @@ function formatSnapshotLabel(at: Date): string {
   })
 }
 
-export function MetricsPanel({ cards, current, loading, metricsAt, onMetricsAtChange }: Props) {
+export function MetricsPanel({
+  cards,
+  current,
+  loading,
+  metricsAt,
+  onMetricsAtChange,
+  summary,
+  preset,
+}: Props) {
   const groups = groupCards(cards)
   return (
     <div className="metrics-panel-stack">
@@ -34,27 +47,47 @@ export function MetricsPanel({ cards, current, loading, metricsAt, onMetricsAtCh
           Показники станом на <strong>{formatSnapshotLabel(metricsAt)}</strong>
         </p>
       )}
-      {CARD_GROUP_ORDER.map((groupId) => {
-        const groupCardsForId = groups[groupId]
-        if (groupCardsForId.length === 0) return null
-        return (
-          <section key={groupId} className="metrics-group" aria-labelledby={`metrics-group-${groupId}`}>
-            <h2 id={`metrics-group-${groupId}`} className="metrics-group-title">
-              {CARD_GROUP_LABELS[groupId]}
-            </h2>
-            <div className="cards-grid">
-              {groupCardsForId.map((card) => (
-                <MetricCard
-                  key={card.key}
-                  card={card}
-                  value={pickCardValue(card, { current })}
-                  loading={loading}
-                />
-              ))}
-            </div>
-          </section>
-        )
-      })}
+      {groups.current.length > 0 && (
+        <section
+          className="metrics-group"
+          aria-labelledby="metrics-group-current"
+        >
+          <h2 id="metrics-group-current" className="metrics-group-title">
+            {CARD_GROUP_LABELS.current}
+          </h2>
+          <div className="cards-grid">
+            {groups.current.map((card) => (
+              <MetricCard
+                key={card.key}
+                card={card}
+                value={pickCardValue(card, { current })}
+                loading={loading}
+              />
+            ))}
+          </div>
+        </section>
+      )}
+      <DailySummaryNarrative summary={summary} preset={preset} />
+      {groups.accumulated.length > 0 && (
+        <section
+          className="metrics-group"
+          aria-labelledby="metrics-group-accumulated"
+        >
+          <h2 id="metrics-group-accumulated" className="metrics-group-title">
+            {CARD_GROUP_LABELS.accumulated}
+          </h2>
+          <div className="cards-grid">
+            {groups.accumulated.map((card) => (
+              <MetricCard
+                key={card.key}
+                card={card}
+                value={pickCardValue(card, { current })}
+                loading={loading}
+              />
+            ))}
+          </div>
+        </section>
+      )}
     </div>
   )
 }

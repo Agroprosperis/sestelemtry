@@ -19,6 +19,14 @@ export type EnergySummary = {
   fromGrid: number
   fromPV: number
   fromBattery: number
+  // batteryCharged / batteryDischarged are the raw absolute totals fed
+  // through the storage in the period. fromBattery (above) is what the
+  // load actually consumed from the battery (net discharge minus what
+  // went back to charge); the two raw totals stay separately exposed
+  // because the narrative summary needs to show charge / discharge
+  // independently.
+  batteryCharged: number
+  batteryDischarged: number
   pvConsumedPct: number
   pvExportPct: number
   loadFromPVPct: number
@@ -69,6 +77,8 @@ export function energySummaryFromTotals(totals: Record<string, number>): EnergyS
     fromGrid: fromGridUsed,
     fromPV,
     fromBattery,
+    batteryCharged: charge,
+    batteryDischarged: discharge,
     pvConsumedPct,
     pvExportPct,
     loadFromPVPct,
