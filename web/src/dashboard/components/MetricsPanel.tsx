@@ -2,6 +2,7 @@ import type { CurrentResponse, DashboardMetric } from '../../types'
 import { CARD_GROUP_LABELS, groupCards, pickCardValue } from '../cards'
 import type { RangePreset } from '../range'
 import type { EnergySummary } from '../transforms/summary'
+import { CurrentSnapshotNarrative } from './CurrentSnapshotNarrative'
 import { DailySummaryNarrative } from './DailySummaryNarrative'
 import { MetricCard } from './MetricCard'
 import { MetricsAtPicker } from './MetricsAtPicker'
@@ -47,26 +48,7 @@ export function MetricsPanel({
           Показники станом на <strong>{formatSnapshotLabel(metricsAt)}</strong>
         </p>
       )}
-      {groups.current.length > 0 && (
-        <section
-          className="metrics-group"
-          aria-labelledby="metrics-group-current"
-        >
-          <h2 id="metrics-group-current" className="metrics-group-title">
-            {CARD_GROUP_LABELS.current}
-          </h2>
-          <div className="cards-grid">
-            {groups.current.map((card) => (
-              <MetricCard
-                key={card.key}
-                card={card}
-                value={pickCardValue(card, { current })}
-                loading={loading}
-              />
-            ))}
-          </div>
-        </section>
-      )}
+      <CurrentSnapshotNarrative current={current} loading={loading} />
       <DailySummaryNarrative summary={summary} preset={preset} />
       {groups.accumulated.length > 0 && (
         <section

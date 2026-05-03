@@ -49,7 +49,7 @@ vi.mock('./hooks/useDashboardData', () => ({
 describe('Dashboard', () => {
   it('renders KPI card values from the data hook', () => {
     render(<Dashboard />)
-    expect(screen.getByText('SOC')).toBeInTheDocument()
+    expect(screen.getByText(/SOC/)).toBeInTheDocument()
     expect(screen.getByText(/88[.,]5/)).toBeInTheDocument()
   })
 })
