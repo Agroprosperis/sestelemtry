@@ -189,12 +189,22 @@ func (s *Store) timeseriesDelta(ctx context.Context, organizationID string, metr
 	// displayed bucket can find a seed value in the previous bucket. Negative
 	// deltas (possible on daily-resetting counters or rare manual adjustments)
 	// are clamped to zero with GREATEST.
+	//
+	// When the previous bucket is missing entirely (typical on the very
+	// first day of a fresh deployment — no samples exist before the
+	// period start), `lag()` returns NULL and the cross-bucket delta is
+	// undefined. In that case we fall back to the in-bucket increase
+	// `last - first`, which captures the partial-day delta from the
+	// first sample of the bucket to the last sample. The bucket then
+	// renders the energy actually recorded that day instead of an
+	// invisible zero bar.
 	rows, err := s.pool.Query(ctx, `
 		WITH bucketed AS (
 			SELECT
 				time_bucket($1::interval, time, $6::text) AS bucket_time,
 				metric_key,
-				last(value, time) AS last_value
+				first(value, time) AS first_value,
+				last(value, time)  AS last_value
 			FROM telemetry_samples
 			WHERE organization_id = $2
 				AND metric_key = ANY($3)
@@ -206,8 +216,11 @@ func (s *Store) timeseriesDelta(ctx context.Context, organizationID string, metr
 			bucket_time,
 			metric_key,
 			GREATEST(
-				last_value - lag(last_value) OVER (
-					PARTITION BY metric_key ORDER BY bucket_time
+				COALESCE(
+					last_value - lag(last_value) OVER (
+						PARTITION BY metric_key ORDER BY bucket_time
+					),
+					last_value - first_value
 				),
 				0
 			) AS value
@@ -245,20 +258,23 @@ func (s *Store) timeseriesDelta(ctx context.Context, organizationID string, metr
 // timeseriesDelta. It re-buckets the materialized hourly snapshots
 // (`last(value, time)` per (org, metric, hour)) into the requested
 // `bucket`, then computes per-bucket counter contribution as
-// `last - lag(last)` clamped to >= 0.
+// `last - lag(last)` clamped to >= 0, with the same NULL-seed fallback
+// to in-bucket `last - first` as the raw path so the very first day of
+// a fresh deployment still renders a non-zero bar.
 //
 // The lookback window is widened by one bucket so the first displayed
-// bucket has a seed value to subtract from. Real-time aggregation in
-// Timescale fills in any hours newer than the refresh watermark, so
-// month/year queries see an up-to-date last bucket without us having to
-// touch the raw hypertable.
+// bucket can find a seed in the previous bucket whenever data exists
+// there. Real-time aggregation in Timescale fills in any hours newer
+// than the refresh watermark, so month/year queries see an up-to-date
+// last bucket without us having to touch the raw hypertable.
 func (s *Store) timeseriesDeltaFromHourly(ctx context.Context, organizationID string, metricKeys []string, from, to time.Time, bucket, tz string) (TimeseriesResponse, error) {
 	rows, err := s.pool.Query(ctx, `
 		WITH bucketed AS (
 			SELECT
 				time_bucket($1::interval, hour, $6::text) AS bucket_time,
 				metric_key,
-				last(last_value, hour) AS last_value
+				first(last_value, hour) AS first_value,
+				last(last_value, hour)  AS last_value
 			FROM `+storage.HourlyCAGGView+`
 			WHERE organization_id = $2
 				AND metric_key = ANY($3)
@@ -270,8 +286,11 @@ func (s *Store) timeseriesDeltaFromHourly(ctx context.Context, organizationID st
 			bucket_time,
 			metric_key,
 			GREATEST(
-				last_value - lag(last_value) OVER (
-					PARTITION BY metric_key ORDER BY bucket_time
+				COALESCE(
+					last_value - lag(last_value) OVER (
+						PARTITION BY metric_key ORDER BY bucket_time
+					),
+					last_value - first_value
 				),
 				0
 			) AS value
@@ -419,16 +438,24 @@ func (s *Store) timeseriesInstant(ctx context.Context, organizationID string, me
 }
 
 // EnergySummary returns the period-total contribution of each requested
-// accumulator metric, computed as `last(value, time <= to) - last(value,
-// time < from)` clamped to >= 0. When metricKeys is empty we default to
-// EnergySummaryAccumulators.
+// accumulator metric, computed as `end - seed`, clamped to >= 0. When
+// metricKeys is empty we default to EnergySummaryAccumulators.
 //
-// The query is one round-trip per metric pair (start/end) regardless of
-// the period length, so monthly/yearly summaries no longer require the
-// frontend to sum up 30+ bucket deltas. When the algebraic appliance-
-// consumption fallback applies (raw counter is silent), the caller
-// receives the algebraically reconstructed total via
-// `applyApplianceConsumptionRule` below.
+// `end`  is the latest sample at-or-before `to`.
+// `seed` is the latest sample strictly before `from`; when no such sample
+//        exists (typical on the first period after a fresh deployment),
+//        we fall back to the EARLIEST sample inside [from, to] so the
+//        result reflects in-period accumulation rather than the
+//        lifetime-cumulative end value. Without this fallback the first
+//        month after install reports the whole lifetime counter as the
+//        month total — which inflates "produced / consumed" cards by an
+//        order of magnitude on a brand-new install.
+//
+// Three indexed lookups per metric (end, before-seed, in-period-first)
+// stay O(log n) regardless of the period length, so monthly/yearly
+// summaries no longer require the frontend to sum 30+ bucket deltas.
+// `applyApplianceConsumptionRule` runs after the totals are read so the
+// algebraic appliance-consumption fallback applies on the server side.
 func (s *Store) EnergySummary(ctx context.Context, organizationID string, metricKeys []string, from, to time.Time) (EnergySummaryResponse, error) {
 	if len(metricKeys) == 0 {
 		metricKeys = EnergySummaryAccumulators
@@ -440,40 +467,35 @@ func (s *Store) EnergySummary(ctx context.Context, organizationID string, metric
 		return EnergySummaryResponse{}, fmt.Errorf("to must be after from")
 	}
 
-	// One pass over the hypertable: for every requested metric we pick the
-	// last sample at-or-before `to` (the period's end snapshot) and the
-	// last sample strictly before `from` (the seed value the period
-	// started from). The DELTA per metric is `end - seed`, clamped to >=
-	// 0 so monotonic-counter resets don't surface as negative summaries.
 	rows, err := s.pool.Query(ctx, `
-		WITH ranked AS (
-			SELECT
-				metric_key,
-				value,
-				time,
-				CASE
-					WHEN time <  $3 THEN 'seed'
-					WHEN time <= $4 THEN 'end'
-				END AS slot
-			FROM telemetry_samples
-			WHERE organization_id = $1
-				AND metric_key = ANY($2)
-				AND time <= $4
-		),
-		picked AS (
-			SELECT DISTINCT ON (metric_key, slot)
-				metric_key, slot, value
-			FROM ranked
-			WHERE slot IS NOT NULL
-			ORDER BY metric_key, slot, time DESC
-		)
 		SELECT
-			metric_key,
-			COALESCE(MAX(value) FILTER (WHERE slot = 'end'),  0) AS end_value,
-			COALESCE(MAX(value) FILTER (WHERE slot = 'seed'), 0) AS seed_value,
-			bool_or(slot = 'end') AS has_end
-		FROM picked
-		GROUP BY metric_key
+			m.metric_key,
+			(
+				SELECT value FROM telemetry_samples
+				WHERE organization_id = $1
+					AND metric_key = m.metric_key
+					AND time <= $4
+				ORDER BY time DESC
+				LIMIT 1
+			) AS end_value,
+			(
+				SELECT value FROM telemetry_samples
+				WHERE organization_id = $1
+					AND metric_key = m.metric_key
+					AND time < $3
+				ORDER BY time DESC
+				LIMIT 1
+			) AS before_seed,
+			(
+				SELECT value FROM telemetry_samples
+				WHERE organization_id = $1
+					AND metric_key = m.metric_key
+					AND time >= $3
+					AND time <= $4
+				ORDER BY time ASC
+				LIMIT 1
+			) AS in_period_first
+		FROM unnest($2::text[]) AS m(metric_key)
 	`, organizationID, metricKeys, from.UTC(), to.UTC())
 	if err != nil {
 		return EnergySummaryResponse{}, err
@@ -488,16 +510,25 @@ func (s *Store) EnergySummary(ctx context.Context, organizationID string, metric
 	}
 	for rows.Next() {
 		var key string
-		var endValue, seedValue float64
-		var hasEnd bool
-		if err := rows.Scan(&key, &endValue, &seedValue, &hasEnd); err != nil {
+		var endValue, beforeSeed, inPeriodFirst *float64
+		if err := rows.Scan(&key, &endValue, &beforeSeed, &inPeriodFirst); err != nil {
 			return EnergySummaryResponse{}, err
 		}
-		if !hasEnd {
+		if endValue == nil {
 			out.Totals[key] = 0
 			continue
 		}
-		delta := endValue - seedValue
+		var seed float64
+		switch {
+		case beforeSeed != nil:
+			seed = *beforeSeed
+		case inPeriodFirst != nil:
+			seed = *inPeriodFirst
+		default:
+			out.Totals[key] = 0
+			continue
+		}
+		delta := *endValue - seed
 		if delta < 0 {
 			delta = 0
 		}
