@@ -451,9 +451,25 @@ func (s *Store) timeseriesInstant(ctx context.Context, organizationID string, me
 }
 
 // summarySQLRaw is the raw-hypertable variant of the EnergySummary
-// query: three indexed `LIMIT 1` lookups per metric, scoped to the
-// (org, metric, time DESC) index. Used as the fallback when the daily
-// CAGG isn't available yet.
+// query: three indexed `LIMIT 1` lookups per metric (end value,
+// pre-period seed, in-period-first fallback) served by the
+// (organization_id, metric_key, time DESC) index. Each lookup is
+// O(log n) regardless of period length.
+//
+// Seed precedence in the Go scan:
+//
+//   - `before_seed` — last sample strictly before `from`. This is
+//     the natural choice for an established deployment.
+//   - `in_period_first` — earliest sample inside [from, to].
+//     Falling back here keeps a brand-new install from reporting the
+//     entire lifetime counter as the period total: when no pre-period
+//     sample exists we treat the period's first sample as the seed
+//     so the cards show in-period accumulation.
+//
+// `end - seed` is clamped at zero. When an inverter glitch rewrites
+// the counter mid-period the result will clamp; the dashboard then
+// refuses to fabricate a number rather than guessing across the
+// rollback.
 const summarySQLRaw = `
 	SELECT
 		m.metric_key,
@@ -485,10 +501,10 @@ const summarySQLRaw = `
 	FROM unnest($2::text[]) AS m(metric_key)
 `
 
-// summarySQLDaily is the daily-CAGG variant. Each lookup walks at most
-// ~30-365 rows (one per day in the period) instead of millions of raw
-// samples; real-time aggregation in TimescaleDB still gives an
-// up-to-date end_value for the current day.
+// summarySQLDaily is the daily-CAGG version of the same three
+// lookups. Each one walks at most ~30-365 rows on the
+// (organization_id, metric_key, day DESC) index; real-time
+// aggregation keeps the end_value fresh for the current partial day.
 var summarySQLDaily = `
 	SELECT
 		m.metric_key,
@@ -520,25 +536,22 @@ var summarySQLDaily = `
 	FROM unnest($2::text[]) AS m(metric_key)
 `
 
-// EnergySummary returns the period-total contribution of each requested
-// accumulator metric, computed as `end - seed`, clamped to >= 0. When
-// metricKeys is empty we default to EnergySummaryAccumulators.
+// EnergySummary returns the period-total contribution of each
+// requested accumulator metric, computed as `end - seed` (clamped at
+// zero). When metricKeys is empty we default to
+// EnergySummaryAccumulators. `applyApplianceConsumptionRule` runs
+// after the totals are read so the algebraic appliance-consumption
+// fallback applies identically on both the raw and CAGG paths.
 //
-// `end`  is the latest sample at-or-before `to`.
-// `seed` is the latest sample strictly before `from`; when no such sample
-//        exists (typical on the first period after a fresh deployment),
-//        we fall back to the EARLIEST sample inside [from, to] so the
-//        result reflects in-period accumulation rather than the
-//        lifetime-cumulative end value. Without this fallback the first
-//        month after install reports the whole lifetime counter as the
-//        month total — which inflates "produced / consumed" cards by an
-//        order of magnitude on a brand-new install.
-//
-// Three indexed lookups per metric (end, before-seed, in-period-first)
-// stay O(log n) regardless of the period length, so monthly/yearly
-// summaries no longer require the frontend to sum 30+ bucket deltas.
-// `applyApplianceConsumptionRule` runs after the totals are read so the
-// algebraic appliance-consumption fallback applies on the server side.
+// All accumulators currently use the same end-minus-seed lookup,
+// because that is the right answer for a healthy monotonic counter
+// and preserves the constant-time read regardless of period length.
+// A counter that rolls back mid-period (firmware bug, manual reset
+// on the inverter) will clamp the result to zero — the dashboard
+// flags this as "no usable data" rather than reconstructing a
+// plausible number from per-day deltas. Recovering from such a
+// rollback is a data-quality job (fix the bogus samples in the
+// hypertable), not a query-shape one.
 func (s *Store) EnergySummary(ctx context.Context, organizationID string, metricKeys []string, from, to time.Time) (EnergySummaryResponse, error) {
 	if len(metricKeys) == 0 {
 		metricKeys = EnergySummaryAccumulators
@@ -552,10 +565,6 @@ func (s *Store) EnergySummary(ctx context.Context, organizationID string, metric
 
 	sql := summarySQLRaw
 	if s.useDailyCAG {
-		// Daily CAGG carries one row per (org, metric, day) with both
-		// first_value and last_value precomputed. The same three
-		// "end / before-seed / in-period-first" lookups land on the
-		// CAGG's (org, metric, day DESC) index and never touch a chunk.
 		sql = summarySQLDaily
 	}
 	rows, err := s.pool.Query(ctx, sql, organizationID, metricKeys, from.UTC(), to.UTC())

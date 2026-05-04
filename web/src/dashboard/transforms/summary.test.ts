@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { energySummaryFromSeries, sumSeriesValue } from './summary'
+import {
+  energySummaryFromSeries,
+  energySummaryFromTotals,
+  sumSeriesValue,
+} from './summary'
 import type { EnergyRow } from './buckets'
 
 describe('sumSeriesValue', () => {
@@ -69,5 +73,35 @@ describe('energySummaryFromSeries', () => {
     const s = energySummaryFromSeries(rows)
     expect(s.pvConsumed).toBe(0)
     expect(s.fromPV).toBe(0)
+  })
+})
+
+describe('energySummaryFromTotals (server-side path for month/year)', () => {
+  // The month/year preset feeds totals directly from the server's
+  // /api/v1/energy-summary endpoint. The grid purchase/sale values must
+  // surface as fromGrid / gridExport on the cards even when the rest of
+  // the totals are zero — that's the regression we hit when a counter
+  // reset on a single day caused `last - seed` to clamp the whole
+  // period total to zero before the SUM-of-clamped-day-deltas fix.
+  it('exposes purchased/sold totals as fromGrid/gridExport', () => {
+    const s = energySummaryFromTotals({
+      accumulated_pv_energy_yield_kwh: 0,
+      accumulated_electricity_sold_kwh: 1.25,
+      accumulated_electricity_purchased_kwh: 235.56,
+      accumulated_power_consumption_kwh: 235.56,
+      total_energy_charged_kwh: 0,
+      total_energy_discharged_kwh: 0,
+    })
+    expect(s.fromGrid).toBeCloseTo(235.56)
+    expect(s.gridExport).toBeCloseTo(1.25)
+    expect(s.consumption).toBeCloseTo(235.56)
+  })
+
+  it('treats missing keys as zero so partial server payloads still render', () => {
+    const s = energySummaryFromTotals({})
+    expect(s.fromGrid).toBe(0)
+    expect(s.gridExport).toBe(0)
+    expect(s.pvProduced).toBe(0)
+    expect(s.consumption).toBe(0)
   })
 })

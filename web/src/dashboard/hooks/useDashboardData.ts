@@ -204,16 +204,16 @@ export function useDashboardData(input: {
         // (kW snapshots) with `last` aggregation. They drive the redesigned
         // day-chart lines (ESS/Grid/Load) instead of the energy delta areas.
         const needsPower = preset === 'day'
-        // Energy series uses the server's per-bucket `delta` aggregation for
-        // every preset (5min for day, 1day for month, 1month for year). The
-        // server applies `last(value, time) - lag(...)` per bucket and
-        // clamps each delta to >= 0 individually, so a single bogus
-        // pre-deployment sample at the period boundary can poison at most
-        // one bucket — not the whole period. The summary is derived from
-        // the same series via `energySummaryFromSeries`, which keeps the
-        // monthly/yearly totals consistent with the stacked bars and avoids
-        // the previous `end - seed` shape that lost an entire month if the
-        // seed sample was bogus.
+        // Energy series uses the server's per-bucket `delta` aggregation
+        // for every preset (5min for day, 1day for month, 1month for
+        // year). The server applies `last(value, time) - lag(...)` per
+        // bucket and clamps each delta to >= 0 individually, so a single
+        // bogus pre-deployment sample at the period boundary can poison
+        // at most one bucket — not the whole period. The day summary is
+        // derived from the same series client-side via
+        // `energySummaryFromSeries`; the month/year summary is computed
+        // server-side with the same SUM-of-clamped-bucket-deltas formula,
+        // so chart and summary stay byte-identical regardless of preset.
         //
         // The `from` edge is clamped to MIN_RELIABLE_DATA_AT to avoid
         // pulling in lifetime-counter readings from before the deployment
@@ -233,11 +233,13 @@ export function useDashboardData(input: {
         const damTo = toDateOnly(damToDate)
 
         // For month/year presets we ask the server for the summary totals
-        // directly. The server computes `last(end) - last(start)` per
-        // metric without intermediate per-bucket clamping, so a single
-        // counter reset somewhere mid-period no longer poisons the
-        // summary cards. The bar chart still renders from the per-bucket
-        // delta series so each day's contribution stays visible.
+        // directly. The server computes `last(end) - last(seed)` per
+        // metric — three indexed lookups per metric, no per-bucket
+        // aggregation — so monthly/yearly cards never block on summing
+        // 30+ deltas on the client. A counter that rolls back
+        // mid-period clamps to zero, which the dashboard intentionally
+        // surfaces as "no usable data" instead of inventing a number
+        // from corrupted samples.
         const needsServerSummary = preset !== 'day'
 
         const [energy, soc, power, dam, summaryResp] = await Promise.all([

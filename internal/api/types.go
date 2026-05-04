@@ -121,14 +121,14 @@ var EnergySummaryAccumulators = []string{
 	"total_energy_discharged_kwh",
 }
 
-// EnergySummaryResponse returns the per-period accumulator deltas used by
-// the dashboard's summary cards. Each value is `last(value, time before
-// to) - last(value, time before from)` for that metric, clamped to >= 0.
-//
-// Unlike the per-bucket delta path that backs the bar chart, this
-// computation does NOT clamp every intermediate bucket; a single
-// reset-then-recover within the period still nets to the correct period
-// total (provided the end snapshot is greater than the start snapshot).
+// EnergySummaryResponse returns the per-period accumulator deltas used
+// by the dashboard's summary cards. Each value is `last(value, time
+// before to) - last(value, time before from)`, clamped to >= 0. When
+// the counter is genuinely accumulative this matches what an operator
+// would expect ("show me how much X grew this month"); when an
+// inverter glitch drops the register mid-period the result clamps to
+// zero, which is the explicit signal we want — the dashboard refuses
+// to invent numbers from corrupted data.
 type EnergySummaryResponse struct {
 	OrganizationID string             `json:"organization_id"`
 	From           time.Time          `json:"from"`
