@@ -8,21 +8,36 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// HourlyCAGGView is the relation name of the hourly continuous aggregate
-// over telemetry_samples. The API reads this view for any bucket >= 1 hour
-// (month/year presets) so it doesn't have to scan the raw hypertable for
-// every dashboard load. Day-preset queries (5-minute buckets) still hit
-// the raw hypertable directly.
-const HourlyCAGGView = "telemetry_samples_hourly"
-
-// InitContinuousAggregates creates the hourly continuous aggregate and its
-// supporting refresh policy + index. Idempotent: safe to call on every
-// collector startup.
+// DailyCAGGView is the relation name of the daily continuous aggregate
+// over telemetry_samples. The API reads this view for any bucket >= 1 day
+// (month/year presets) so it doesn't have to scan the raw hypertable.
+// Day-preset queries (5-minute buckets) still hit the raw hypertable
+// directly because per-day granularity is too coarse for an intra-day
+// chart.
 //
-// The CAGG materializes:
-//   - last(value, time) per (org, metric, hour) — monotonic counter snapshot
-//   - avg(value)        per (org, metric, hour) — instantaneous metric mean
-//   - count(*)          per (org, metric, hour) — sample count
+// The view stores first(value, time), last(value, time), avg(value) and
+// count(*), which is everything the API needs for both delta-style chart
+// queries (with NULL-seed fallback) and the energy-summary endpoint.
+const DailyCAGGView = "telemetry_samples_daily"
+
+// LegacyHourlyCAGGView is the previous, hourly-granularity CAGG that
+// migration 003 created. We DROP it on every collector startup so a
+// rolling upgrade from 003 → 004 cleans up automatically without
+// requiring an operator to run the 004 migration by hand.
+const LegacyHourlyCAGGView = "telemetry_samples_hourly"
+
+// caggDayBucketTZ is hard-coded into the view definition because a
+// continuous aggregate's time_bucket() arguments are immutable after
+// creation. The dashboard renders Ukrainian deployments today, so
+// Europe/Kyiv local midnight is the right boundary. If a different
+// region ever needs its own dashboard, the right answer is a parallel
+// daily CAGG keyed by tz, not a runtime parameter.
+const caggDayBucketTZ = "Europe/Kyiv"
+
+// InitContinuousAggregates ensures the daily CAGG and its supporting
+// refresh policy + index exist, and drops the legacy hourly CAGG when
+// it is still around from migration 003. Idempotent: safe to call on
+// every collector startup.
 //
 // Real-time aggregation stays enabled (default), so reads above the
 // refresh watermark fall through to raw data automatically without an
@@ -32,27 +47,32 @@ func InitContinuousAggregates(ctx context.Context, pool *pgxpool.Pool) error {
 		return fmt.Errorf("storage: nil pool")
 	}
 
-	// CREATE MATERIALIZED VIEW ... WITH (timescaledb.continuous) cannot run
-	// inside a transaction. pgx's Exec auto-commits each statement, so we
-	// just issue them sequentially.
+	// Drop the legacy hourly CAGG first so deployments that already ran
+	// migration 003 don't keep two parallel materializations refreshing
+	// in the background. CASCADE removes its policy + index in one go.
+	if _, err := pool.Exec(ctx, `DROP MATERIALIZED VIEW IF EXISTS `+LegacyHourlyCAGGView+` CASCADE`); err != nil {
+		return fmt.Errorf("storage: drop legacy cagg %s: %w", LegacyHourlyCAGGView, err)
+	}
+
+	// CREATE MATERIALIZED VIEW ... WITH (timescaledb.continuous) cannot
+	// run inside a transaction; pgx.Exec auto-commits each statement.
 	const createView = `
-		CREATE MATERIALIZED VIEW IF NOT EXISTS ` + HourlyCAGGView + `
+		CREATE MATERIALIZED VIEW IF NOT EXISTS ` + DailyCAGGView + `
 		WITH (timescaledb.continuous) AS
 		SELECT
-			time_bucket(INTERVAL '1 hour', time) AS hour,
+			time_bucket(INTERVAL '1 day', time, '` + caggDayBucketTZ + `') AS day,
 			organization_id,
 			metric_key,
-			last(value, time) AS last_value,
-			avg(value)        AS avg_value,
-			count(*)          AS sample_count
+			first(value, time) AS first_value,
+			last(value, time)  AS last_value,
+			avg(value)         AS avg_value,
+			count(*)           AS sample_count
 		FROM telemetry_samples
-		GROUP BY hour, organization_id, metric_key
+		GROUP BY day, organization_id, metric_key
 		WITH NO DATA
 	`
 	if _, err := pool.Exec(ctx, createView); err != nil {
-		// Older Timescale builds may not support every modern keyword; we
-		// surface the error so install/update logs are noisy.
-		return fmt.Errorf("storage: create cagg %s: %w", HourlyCAGGView, err)
+		return fmt.Errorf("storage: create cagg %s: %w", DailyCAGGView, err)
 	}
 
 	const policy = `
@@ -60,15 +80,14 @@ func InitContinuousAggregates(ctx context.Context, pool *pgxpool.Pool) error {
 			$1,
 			start_offset => NULL,
 			end_offset   => INTERVAL '15 minutes',
-			schedule_interval => INTERVAL '5 minutes',
+			schedule_interval => INTERVAL '15 minutes',
 			if_not_exists => TRUE
 		)
 	`
-	if _, err := pool.Exec(ctx, policy, HourlyCAGGView); err != nil {
+	if _, err := pool.Exec(ctx, policy, DailyCAGGView); err != nil {
 		// Some Timescale Cloud tiers reject explicit policies; missing
-		// policy doesn't break correctness (queries will still work via
-		// real-time aggregation), so warn-and-continue by swallowing the
-		// "already exists" / "policy_already_exists" cases.
+		// policy doesn't break correctness (queries still work via
+		// real-time aggregation) so we swallow "already exists" cases.
 		msg := strings.ToLower(err.Error())
 		if !strings.Contains(msg, "already exists") {
 			return fmt.Errorf("storage: add cagg policy: %w", err)
@@ -76,30 +95,30 @@ func InitContinuousAggregates(ctx context.Context, pool *pgxpool.Pool) error {
 	}
 
 	const index = `
-		CREATE INDEX IF NOT EXISTS telemetry_samples_hourly_org_metric_hour
-			ON ` + HourlyCAGGView + ` (organization_id, metric_key, hour DESC)
+		CREATE INDEX IF NOT EXISTS telemetry_samples_daily_org_metric_day
+			ON ` + DailyCAGGView + ` (organization_id, metric_key, day DESC)
 	`
 	if _, err := pool.Exec(ctx, index); err != nil {
 		return fmt.Errorf("storage: create cagg index: %w", err)
 	}
 
-	// Trigger the initial backfill (no-op once historical buckets are
-	// already materialized). We pass NULL bounds so the policy walks the
-	// entire range. This blocks the collector startup briefly on the very
-	// first deploy; subsequent calls are cheap.
-	if _, err := pool.Exec(ctx, `CALL refresh_continuous_aggregate($1, NULL, NULL)`, HourlyCAGGView); err != nil {
+	// Trigger the initial backfill (no-op on subsequent calls). NULL
+	// bounds let the policy walk the entire range; it blocks the
+	// collector startup briefly on the very first deploy / migration
+	// 003 → 004 upgrade.
+	if _, err := pool.Exec(ctx, `CALL refresh_continuous_aggregate($1, NULL, NULL)`, DailyCAGGView); err != nil {
 		return fmt.Errorf("storage: refresh cagg: %w", err)
 	}
 
 	return nil
 }
 
-// HourlyCAGGAvailable reports whether the hourly CAGG view exists and is
-// queryable in the connected database. The API uses this at boot to pick
-// the fast (CAGG) or fallback (raw hypertable) path for monthly/yearly
-// timeseries queries without crashing on a database that hasn't run
-// migration 003 yet.
-func HourlyCAGGAvailable(ctx context.Context, pool *pgxpool.Pool) (bool, error) {
+// DailyCAGGAvailable reports whether the daily CAGG view exists and is
+// queryable in the connected database. The API uses this at boot to
+// pick the fast (CAGG) or fallback (raw hypertable) path for
+// monthly/yearly timeseries queries without crashing on a database that
+// hasn't run migration 004 yet.
+func DailyCAGGAvailable(ctx context.Context, pool *pgxpool.Pool) (bool, error) {
 	if pool == nil {
 		return false, fmt.Errorf("storage: nil pool")
 	}
@@ -110,11 +129,11 @@ func HourlyCAGGAvailable(ctx context.Context, pool *pgxpool.Pool) (bool, error) 
 			FROM timescaledb_information.continuous_aggregates
 			WHERE view_name = $1
 		)
-	`, HourlyCAGGView).Scan(&exists)
+	`, DailyCAGGView).Scan(&exists)
 	if err != nil {
-		// Missing timescaledb_information schema means the extension isn't
-		// installed at all — treat as "not available" rather than failing
-		// API startup.
+		// Missing timescaledb_information schema means the extension
+		// isn't installed at all — treat as "not available" rather than
+		// failing API startup.
 		msg := strings.ToLower(err.Error())
 		if strings.Contains(msg, "does not exist") {
 			return false, nil

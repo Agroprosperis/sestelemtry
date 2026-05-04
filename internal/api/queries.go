@@ -14,39 +14,40 @@ import (
 )
 
 type Store struct {
-	pool       *pgxpool.Pool
-	useHourCAG bool
+	pool        *pgxpool.Pool
+	useDailyCAG bool
 }
 
 func NewStore(pool *pgxpool.Pool) *Store {
 	return &Store{pool: pool}
 }
 
-// EnableHourlyCAGG marks the hourly continuous aggregate as available so
-// that timeseries queries with bucket >= 1 hour read from the materialized
-// view instead of scanning the raw hypertable. Callers should invoke
-// `storage.HourlyCAGGAvailable` once at boot and pass the result here; if
-// the CAGG is later created, a service restart picks it up.
-func (s *Store) EnableHourlyCAGG(enabled bool) {
-	s.useHourCAG = enabled
+// EnableDailyCAGG marks the daily continuous aggregate as available so
+// that month/year timeseries queries (bucket >= 1 day) and the energy
+// summary endpoint read from the materialized view instead of scanning
+// the raw hypertable. Callers should invoke `storage.DailyCAGGAvailable`
+// once at boot and pass the result here; if the CAGG is later created,
+// a service restart picks it up.
+func (s *Store) EnableDailyCAGG(enabled bool) {
+	s.useDailyCAG = enabled
 }
 
-// bucketAtLeastOneHour returns true when the bucket interval is large
-// enough that the hourly CAGG carries enough resolution to answer the
-// query. Sub-hour buckets (5/10/15 minutes) must read raw samples to keep
-// the day-preset chart granular.
+// bucketAtLeastOneDay returns true when the bucket interval is large
+// enough that the daily CAGG carries enough resolution to answer the
+// query. Sub-day buckets (5 minutes / 1 hour / etc.) must read raw
+// samples — the day-preset chart needs intra-day granularity that the
+// daily CAGG flattens away.
 //
-// Recognising this in Go avoids a round-trip to PostgreSQL just to compare
-// `$1::interval >= INTERVAL '1 hour'`. The set of bucket strings the
-// dashboard sends is small and well known; arbitrary user-supplied
+// Recognising this in Go avoids a round-trip to PostgreSQL just to
+// compare `$1::interval >= INTERVAL '1 day'`. The set of bucket strings
+// the dashboard sends is small and well known; arbitrary user-supplied
 // strings (via swagger) gracefully fall back to the raw path.
-func bucketAtLeastOneHour(bucket string) bool {
+func bucketAtLeastOneDay(bucket string) bool {
 	s := strings.ToLower(strings.TrimSpace(bucket))
 	if s == "" {
 		return false
 	}
-	if strings.Contains(s, "hour") ||
-		strings.Contains(s, "day") ||
+	if strings.Contains(s, "day") ||
 		strings.Contains(s, "week") ||
 		strings.Contains(s, "month") ||
 		strings.Contains(s, "year") {
@@ -149,17 +150,17 @@ func (s *Store) Timeseries(ctx context.Context, organizationID string, metricKey
 		aggregation = AggregationDelta
 	}
 
-	useCAGG := s.useHourCAG && bucketAtLeastOneHour(bucket)
+	useCAGG := s.useDailyCAG && bucketAtLeastOneDay(bucket)
 
 	switch aggregation {
 	case AggregationDelta:
 		if useCAGG {
-			return s.timeseriesDeltaFromHourly(ctx, organizationID, metricKeys, from, to, bucket, tz)
+			return s.timeseriesDeltaFromDaily(ctx, organizationID, metricKeys, from, to, bucket, tz)
 		}
 		return s.timeseriesDelta(ctx, organizationID, metricKeys, from, to, bucket, tz)
 	case AggregationAvg, AggregationLast:
 		if useCAGG {
-			return s.timeseriesInstantFromHourly(ctx, organizationID, metricKeys, from, to, bucket, tz, aggregation)
+			return s.timeseriesInstantFromDaily(ctx, organizationID, metricKeys, from, to, bucket, tz, aggregation)
 		}
 		return s.timeseriesInstant(ctx, organizationID, metricKeys, from, to, bucket, tz, aggregation)
 	default:
@@ -254,32 +255,38 @@ func (s *Store) timeseriesDelta(ctx context.Context, organizationID string, metr
 	return out, nil
 }
 
-// timeseriesDeltaFromHourly is the CAGG-backed equivalent of
-// timeseriesDelta. It re-buckets the materialized hourly snapshots
-// (`last(value, time)` per (org, metric, hour)) into the requested
-// `bucket`, then computes per-bucket counter contribution as
+// timeseriesDeltaFromDaily is the CAGG-backed equivalent of
+// timeseriesDelta for buckets >= 1 day. It re-buckets the daily
+// snapshots (`last(value, time)` per (org, metric, day) with day
+// boundaries aligned to the CAGG's hard-coded local timezone) into the
+// requested `bucket`, then computes per-bucket counter contribution as
 // `last - lag(last)` clamped to >= 0, with the same NULL-seed fallback
 // to in-bucket `last - first` as the raw path so the very first day of
 // a fresh deployment still renders a non-zero bar.
 //
 // The lookback window is widened by one bucket so the first displayed
 // bucket can find a seed in the previous bucket whenever data exists
-// there. Real-time aggregation in Timescale fills in any hours newer
+// there. Real-time aggregation in Timescale fills in any days newer
 // than the refresh watermark, so month/year queries see an up-to-date
 // last bucket without us having to touch the raw hypertable.
-func (s *Store) timeseriesDeltaFromHourly(ctx context.Context, organizationID string, metricKeys []string, from, to time.Time, bucket, tz string) (TimeseriesResponse, error) {
+//
+// For monthly queries the CAGG has at most 31 rows per metric; for
+// yearly queries (bucket = 1 month over 12 months) it has at most 366
+// rows per metric. Either way the planner walks the (org, metric, day
+// DESC) index and scans no raw chunks.
+func (s *Store) timeseriesDeltaFromDaily(ctx context.Context, organizationID string, metricKeys []string, from, to time.Time, bucket, tz string) (TimeseriesResponse, error) {
 	rows, err := s.pool.Query(ctx, `
 		WITH bucketed AS (
 			SELECT
-				time_bucket($1::interval, hour, $6::text) AS bucket_time,
+				time_bucket($1::interval, day, $6::text) AS bucket_time,
 				metric_key,
-				first(last_value, hour) AS first_value,
-				last(last_value, hour)  AS last_value
-			FROM `+storage.HourlyCAGGView+`
+				first(first_value, day) AS first_value,
+				last(last_value, day)   AS last_value
+			FROM `+storage.DailyCAGGView+`
 			WHERE organization_id = $2
 				AND metric_key = ANY($3)
-				AND hour >= $4::timestamptz - $1::interval
-				AND hour <= $5
+				AND day >= $4::timestamptz - $1::interval
+				AND day <= $5
 			GROUP BY bucket_time, metric_key
 		)
 		SELECT
@@ -324,12 +331,18 @@ func (s *Store) timeseriesDeltaFromHourly(ctx context.Context, organizationID st
 	return out, nil
 }
 
-// timeseriesInstantFromHourly is the CAGG-backed equivalent of
-// timeseriesInstant for buckets >= 1 hour. For `avg` we average the
-// per-hour means weighted by sample_count to keep the result statistically
-// correct when hourly buckets contain different numbers of raw samples.
-// For `last` we take the last hourly snapshot inside each bucket.
-func (s *Store) timeseriesInstantFromHourly(ctx context.Context, organizationID string, metricKeys []string, from, to time.Time, bucket, tz string, aggregation TimeseriesAggregation) (TimeseriesResponse, error) {
+// timeseriesInstantFromDaily is the CAGG-backed equivalent of
+// timeseriesInstant for buckets >= 1 day. For `avg` we average the
+// per-day means weighted by sample_count to keep the result
+// statistically correct when daily buckets contain different numbers of
+// raw samples (e.g. a partial first day of operation). For `last` we
+// take the last daily snapshot inside each bucket.
+//
+// In practice the dashboard never asks for daily-bucketed avg/last —
+// SOC and power are intra-day metrics — but the path is symmetric with
+// the delta path so any future caller (e.g. an API consumer) gets the
+// same fast read.
+func (s *Store) timeseriesInstantFromDaily(ctx context.Context, organizationID string, metricKeys []string, from, to time.Time, bucket, tz string, aggregation TimeseriesAggregation) (TimeseriesResponse, error) {
 	var valueExpr string
 	switch aggregation {
 	case AggregationAvg:
@@ -337,21 +350,21 @@ func (s *Store) timeseriesInstantFromHourly(ctx context.Context, organizationID 
 		// This recovers the same answer raw avg(value) would produce.
 		valueExpr = "sum(avg_value * sample_count) / NULLIF(sum(sample_count), 0)"
 	case AggregationLast:
-		valueExpr = "last(last_value, hour)"
+		valueExpr = "last(last_value, day)"
 	default:
 		return TimeseriesResponse{}, fmt.Errorf("unsupported instant aggregation %q", aggregation)
 	}
 
 	sql := fmt.Sprintf(`
 		SELECT
-			time_bucket($1::interval, hour, $6::text) AS bucket_time,
+			time_bucket($1::interval, day, $6::text) AS bucket_time,
 			metric_key,
 			%s AS value
-		FROM `+storage.HourlyCAGGView+`
+		FROM `+storage.DailyCAGGView+`
 		WHERE organization_id = $2
 			AND metric_key = ANY($3)
-			AND hour >= $4
-			AND hour <= $5
+			AND day >= $4
+			AND day <= $5
 		GROUP BY bucket_time, metric_key
 		ORDER BY bucket_time ASC, metric_key ASC
 	`, valueExpr)
@@ -437,6 +450,76 @@ func (s *Store) timeseriesInstant(ctx context.Context, organizationID string, me
 	return out, nil
 }
 
+// summarySQLRaw is the raw-hypertable variant of the EnergySummary
+// query: three indexed `LIMIT 1` lookups per metric, scoped to the
+// (org, metric, time DESC) index. Used as the fallback when the daily
+// CAGG isn't available yet.
+const summarySQLRaw = `
+	SELECT
+		m.metric_key,
+		(
+			SELECT value FROM telemetry_samples
+			WHERE organization_id = $1
+				AND metric_key = m.metric_key
+				AND time <= $4
+			ORDER BY time DESC
+			LIMIT 1
+		) AS end_value,
+		(
+			SELECT value FROM telemetry_samples
+			WHERE organization_id = $1
+				AND metric_key = m.metric_key
+				AND time < $3
+			ORDER BY time DESC
+			LIMIT 1
+		) AS before_seed,
+		(
+			SELECT value FROM telemetry_samples
+			WHERE organization_id = $1
+				AND metric_key = m.metric_key
+				AND time >= $3
+				AND time <= $4
+			ORDER BY time ASC
+			LIMIT 1
+		) AS in_period_first
+	FROM unnest($2::text[]) AS m(metric_key)
+`
+
+// summarySQLDaily is the daily-CAGG variant. Each lookup walks at most
+// ~30-365 rows (one per day in the period) instead of millions of raw
+// samples; real-time aggregation in TimescaleDB still gives an
+// up-to-date end_value for the current day.
+var summarySQLDaily = `
+	SELECT
+		m.metric_key,
+		(
+			SELECT last_value FROM ` + storage.DailyCAGGView + `
+			WHERE organization_id = $1
+				AND metric_key = m.metric_key
+				AND day <= $4
+			ORDER BY day DESC
+			LIMIT 1
+		) AS end_value,
+		(
+			SELECT last_value FROM ` + storage.DailyCAGGView + `
+			WHERE organization_id = $1
+				AND metric_key = m.metric_key
+				AND day < $3
+			ORDER BY day DESC
+			LIMIT 1
+		) AS before_seed,
+		(
+			SELECT first_value FROM ` + storage.DailyCAGGView + `
+			WHERE organization_id = $1
+				AND metric_key = m.metric_key
+				AND day >= $3
+				AND day <= $4
+			ORDER BY day ASC
+			LIMIT 1
+		) AS in_period_first
+	FROM unnest($2::text[]) AS m(metric_key)
+`
+
 // EnergySummary returns the period-total contribution of each requested
 // accumulator metric, computed as `end - seed`, clamped to >= 0. When
 // metricKeys is empty we default to EnergySummaryAccumulators.
@@ -467,36 +550,15 @@ func (s *Store) EnergySummary(ctx context.Context, organizationID string, metric
 		return EnergySummaryResponse{}, fmt.Errorf("to must be after from")
 	}
 
-	rows, err := s.pool.Query(ctx, `
-		SELECT
-			m.metric_key,
-			(
-				SELECT value FROM telemetry_samples
-				WHERE organization_id = $1
-					AND metric_key = m.metric_key
-					AND time <= $4
-				ORDER BY time DESC
-				LIMIT 1
-			) AS end_value,
-			(
-				SELECT value FROM telemetry_samples
-				WHERE organization_id = $1
-					AND metric_key = m.metric_key
-					AND time < $3
-				ORDER BY time DESC
-				LIMIT 1
-			) AS before_seed,
-			(
-				SELECT value FROM telemetry_samples
-				WHERE organization_id = $1
-					AND metric_key = m.metric_key
-					AND time >= $3
-					AND time <= $4
-				ORDER BY time ASC
-				LIMIT 1
-			) AS in_period_first
-		FROM unnest($2::text[]) AS m(metric_key)
-	`, organizationID, metricKeys, from.UTC(), to.UTC())
+	sql := summarySQLRaw
+	if s.useDailyCAG {
+		// Daily CAGG carries one row per (org, metric, day) with both
+		// first_value and last_value precomputed. The same three
+		// "end / before-seed / in-period-first" lookups land on the
+		// CAGG's (org, metric, day DESC) index and never touch a chunk.
+		sql = summarySQLDaily
+	}
+	rows, err := s.pool.Query(ctx, sql, organizationID, metricKeys, from.UTC(), to.UTC())
 	if err != nil {
 		return EnergySummaryResponse{}, err
 	}
