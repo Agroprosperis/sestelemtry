@@ -12,8 +12,11 @@ import { energyBucketDeltaRows, type EnergyRow } from '../transforms/buckets'
 import { damChartRows, type DAMChartRow } from '../transforms/dam'
 import { powerChartRows, type PowerChartRow } from '../transforms/power'
 import { socChartRows, type SOCChartRow } from '../transforms/soc'
-import { energySummaryFromTotals, type EnergySummary } from '../transforms/summary'
-import { summaryTotalsFromReadings } from '../transforms/summaryTotals'
+import {
+  energySummaryFromSeries,
+  energySummaryFromTotals,
+  type EnergySummary,
+} from '../transforms/summary'
 
 export type DashboardData = {
   config: DashboardConfig
@@ -43,18 +46,6 @@ function toDateOnly(d: Date): string {
 
 function isAbortError(e: unknown): boolean {
   return e instanceof DOMException && e.name === 'AbortError'
-}
-
-// readingsFromCurrent collapses a /current response into a flat
-// {metric_key: value} map, dropping any non-finite samples so callers can
-// safely subtract two readings without checking for nulls.
-function readingsFromCurrent(resp: CurrentResponse | null): Record<string, number> {
-  const out: Record<string, number> = {}
-  if (!resp) return out
-  for (const [key, m] of Object.entries(resp.metrics)) {
-    if (Number.isFinite(m.value)) out[key] = m.value
-  }
-  return out
 }
 
 export function useDashboardData(input: {
@@ -180,22 +171,6 @@ export function useDashboardData(input: {
         const energyKeys = cfg.energy_chart.map((m) => m.key)
         const anchorDate = new Date(anchorTime)
         const now = new Date()
-        // The Energy Summary cards live independently of the chart series.
-        // Two `fetchCurrent` lookups (cumulative reading at start of period
-        // and at min(endOfPeriod, now)) are subtracted per metric to get
-        // the period total — six subtractions, no per-bucket summing for
-        // any preset. The chart still owns its own fetch shape.
-        //
-        // Both timestamps are clamped to MIN_RELIABLE_DATA_AT to avoid
-        // pulling lifetime counters from before the deployment was healthy
-        // (which would inflate the totals). Periods that sit entirely
-        // before the floor collapse to a zero-total summary.
-        const minReliable = MIN_RELIABLE_DATA_AT.getTime()
-        const startCandidate = startOfPeriod(preset, anchorDate)
-        const endCandidate = endOfPeriod(preset, anchorDate)
-        const cappedEnd = endCandidate.getTime() > now.getTime() ? now : endCandidate
-        const summaryStart = new Date(Math.max(startCandidate.getTime(), minReliable))
-        const summaryEnd = new Date(Math.max(cappedEnd.getTime(), minReliable))
         // SOC is an instantaneous metric, so we fetch it with an `avg`
         // aggregation instead of the default accumulator-delta. We only
         // need it for the day preset (the energy chart overlays it as a
@@ -207,32 +182,32 @@ export function useDashboardData(input: {
         const needsPower = preset === 'day'
         // Energy series uses the server's per-bucket `delta` aggregation for
         // every preset (5min for day, 1day for month, 1month for year). The
-        // server applies `last(value, time) - lag(...)` per bucket, so the
-        // frontend just renders the rows it gets — no local cumulative
-        // diffing. The `from` edge is clamped to MIN_RELIABLE_DATA_AT to
-        // avoid pulling in lifetime-counter readings from before the
-        // deployment was healthy; periods that sit entirely before the
-        // floor return empty bars.
+        // server applies `last(value, time) - lag(...)` per bucket and
+        // clamps each delta to >= 0 individually, so a single bogus
+        // pre-deployment sample at the period boundary can poison at most
+        // one bucket — not the whole period. The summary is derived from
+        // the same series via `energySummaryFromSeries`, which keeps the
+        // monthly/yearly totals consistent with the stacked bars and avoids
+        // the previous `end - seed` shape that lost an entire month if the
+        // seed sample was bogus.
+        //
+        // The `from` edge is clamped to MIN_RELIABLE_DATA_AT to avoid
+        // pulling in lifetime-counter readings from before the deployment
+        // was healthy; periods that sit entirely before the floor return
+        // empty bars and a zero summary.
+        const minReliable = MIN_RELIABLE_DATA_AT.getTime()
         const rawRange = rangeParams(preset, anchorDate, now)
         const energyFrom = new Date(
           Math.max(new Date(rawRange.from).getTime(), minReliable),
         )
         const baseRange = { ...rawRange, from: energyFrom.toISOString() }
-        const [energy, seed, end, soc, power] = await Promise.all([
+        const [energy, soc, power] = await Promise.all([
           fetchTimeseries(
             {
               organizationID,
               metricKeys: energyKeys,
               ...baseRange,
             },
-            controller.signal,
-          ),
-          fetchCurrent(
-            { organizationID, at: summaryStart.toISOString() },
-            controller.signal,
-          ),
-          fetchCurrent(
-            { organizationID, at: summaryEnd.toISOString() },
             controller.signal,
           ),
           needsSOC
@@ -259,8 +234,6 @@ export function useDashboardData(input: {
             : Promise.resolve(null),
         ])
         if (cancelled || controller.signal.aborted) return
-        const seedValues = readingsFromCurrent(seed)
-        const endValues = readingsFromCurrent(end)
         const series: EnergyRow[] = energyBucketDeltaRows(
           energy.points,
           energyKeys,
@@ -268,9 +241,7 @@ export function useDashboardData(input: {
           anchorDate,
           now,
         )
-        const summary = energySummaryFromTotals(
-          summaryTotalsFromReadings({ seed: seedValues, end: endValues }, energyKeys),
-        )
+        const summary = energySummaryFromSeries(series)
         setEnergySeries(series)
         setEnergySummary(summary)
         setSocSeries(soc ? socChartRows(soc.points, 'day', anchorDate) : [])
