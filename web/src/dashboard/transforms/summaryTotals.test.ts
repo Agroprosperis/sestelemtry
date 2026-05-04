@@ -57,7 +57,7 @@ describe('summaryTotalsFromReadings', () => {
     expect(totals.accumulated_pv_energy_yield_kwh).toBe(0)
   })
 
-  it('passes the device-reported consumption counter through unchanged', () => {
+  it('keeps the device-reported consumption when the counter is alive', () => {
     const totals = summaryTotalsFromReadings(
       {
         seed: {
@@ -79,10 +79,34 @@ describe('summaryTotalsFromReadings', () => {
       },
       ENERGY_KEYS,
     )
-    // Trust the device counter directly — the previous algebraic override
-    // (purchased + pv + discharge - charge) is no longer applied.
     expect(totals.accumulated_power_consumption_kwh).toBe(65)
     expect(totals.accumulated_electricity_sold_kwh).toBe(5)
+  })
+
+  it('falls back to algebraic formula when device counter is zero (silent counter)', () => {
+    const totals = summaryTotalsFromReadings(
+      {
+        seed: {
+          accumulated_electricity_purchased_kwh: 0,
+          accumulated_pv_energy_yield_kwh: 0,
+          total_energy_discharged_kwh: 0,
+          total_energy_charged_kwh: 0,
+          accumulated_electricity_sold_kwh: 0,
+          accumulated_power_consumption_kwh: 0,
+        },
+        end: {
+          accumulated_electricity_purchased_kwh: 50,
+          accumulated_pv_energy_yield_kwh: 30,
+          total_energy_discharged_kwh: 10,
+          total_energy_charged_kwh: 20,
+          accumulated_electricity_sold_kwh: 5,
+          accumulated_power_consumption_kwh: 0,
+        },
+      },
+      ENERGY_KEYS,
+    )
+    // formula: purchased + pv + discharge - charge = 50 + 30 + 10 - 20 = 70
+    expect(totals.accumulated_power_consumption_kwh).toBe(70)
   })
 
   it('ignores keys not in metricKeys list', () => {

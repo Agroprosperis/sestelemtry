@@ -16,6 +16,8 @@ export const ALL_METRIC_KEYS = [
 
 export type MetricKey = (typeof ALL_METRIC_KEYS)[number]
 
+export const APPLIANCE_CONSUMPTION_METRIC: MetricKey = 'accumulated_power_consumption_kwh'
+
 export const PERIOD_ENERGY_METRIC_KEYS = new Set<MetricKey>([
   'total_energy_charged_kwh',
   'total_energy_discharged_kwh',

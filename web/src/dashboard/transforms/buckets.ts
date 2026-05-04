@@ -1,9 +1,31 @@
 import type { TimeseriesPoint } from '../../types'
-import { ENERGY_TREND_METRIC_DIRECTIONS, type MetricKey } from '../metrics'
+import { APPLIANCE_CONSUMPTION_METRIC, ENERGY_TREND_METRIC_DIRECTIONS, type MetricKey } from '../metrics'
 import type { RangePreset } from '../range'
 import { DAY_BUCKET_MINUTES, timelineBuckets } from '../timeline'
 
 export type EnergyRow = { time: string } & Partial<Record<MetricKey, number>> & Record<string, string | number>
+
+// applyApplianceConsumptionRule overrides the device-reported
+// `accumulated_power_consumption_kwh` counter only when it is missing or
+// reports zero. Some Huawei deployments (e.g. the pe inverter) leave the
+// register at 0 even while the household actually consumes energy, which
+// would collapse the dashboard summary to "0 spent / 0% from PV". When
+// the device counter works (delta > 0), we trust it. When it is silent we
+// fall back to the algebraic balance:
+//   purchased + pv + discharge - charge
+// which is the same energy-conservation identity used before the trust-raw
+// experiment, just guarded so working counters keep their measured values.
+export function applyApplianceConsumptionRule(rawDeltas: Record<string, number>): void {
+  if (!(APPLIANCE_CONSUMPTION_METRIC in rawDeltas)) return
+  const raw = rawDeltas[APPLIANCE_CONSUMPTION_METRIC]
+  if (Number.isFinite(raw) && raw > 0) return
+  const value =
+    (rawDeltas.accumulated_electricity_purchased_kwh ?? 0) +
+    (rawDeltas.accumulated_pv_energy_yield_kwh ?? 0) +
+    (rawDeltas.total_energy_discharged_kwh ?? 0) -
+    (rawDeltas.total_energy_charged_kwh ?? 0)
+  rawDeltas[APPLIANCE_CONSUMPTION_METRIC] = value < 0 ? 0 : value
+}
 
 // bucketKey returns a calendar-component key for the local timezone so that
 // API rows bucketed in UTC by Postgres still land in the right slot of the
@@ -92,6 +114,7 @@ export function energyBucketDeltaRows(
       const v = values[key]
       cell[key] = Number.isFinite(v) ? Math.max(v as number, 0) : 0
     }
+    applyApplianceConsumptionRule(cell)
     const row = applyDirections(metricKeys, cell)
     row.time = label
     return row
