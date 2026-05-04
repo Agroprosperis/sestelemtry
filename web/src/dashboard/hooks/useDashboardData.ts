@@ -1,5 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
-import { fetchCurrent, fetchDAMPrices, fetchDashboardConfig, fetchTimeseries } from '../../api'
+import {
+  fetchCurrent,
+  fetchDAMPrices,
+  fetchDashboardConfig,
+  fetchEnergySummary,
+  fetchTimeseries,
+} from '../../api'
 import type { CurrentResponse, DashboardConfig } from '../../types'
 import {
   DASHBOARD_REFRESH_MS,
@@ -17,6 +23,18 @@ import {
   energySummaryFromTotals,
   type EnergySummary,
 } from '../transforms/summary'
+
+// Metrics whose period totals back the dashboard summary cards (the
+// "spent / produced / from PV" breakdown). Mirrors
+// `EnergySummaryAccumulators` on the backend.
+const ENERGY_SUMMARY_METRIC_KEYS = [
+  'accumulated_pv_energy_yield_kwh',
+  'accumulated_electricity_sold_kwh',
+  'accumulated_electricity_purchased_kwh',
+  'accumulated_power_consumption_kwh',
+  'total_energy_charged_kwh',
+  'total_energy_discharged_kwh',
+]
 
 export type DashboardData = {
   config: DashboardConfig
@@ -151,11 +169,17 @@ export function useDashboardData(input: {
     }
   }, [organizationID, metricsAtTime])
 
-  // Charts and summary fetch on mount and whenever the user changes preset
-  // or anchor; no setInterval. The user explicitly asked for live updates
-  // only on the cards — charts are heavy (5 parallel queries) and the
-  // numbers don't drift visibly within a few minutes, so on-demand
-  // refresh is the right tradeoff here.
+  // Charts, summary, and DAM prices fetch on mount and whenever the user
+  // changes preset or anchor; no setInterval. The user explicitly asked for
+  // live updates only on the cards — charts are heavy and the numbers
+  // don't drift visibly within a few minutes, so on-demand refresh is the
+  // right tradeoff here.
+  //
+  // Both the timeseries fetches and the DAM fetch share a single effect /
+  // AbortController so the chart-area `loading` flag flips false only once
+  // every panel below has the data it needs to render. Splitting them
+  // (as the previous version did) caused a two-step flicker where the
+  // energy chart appeared first and the revenue chart filled in after.
   useEffect(() => {
     let cancelled = false
     let inflight: AbortController | null = null
@@ -201,7 +225,22 @@ export function useDashboardData(input: {
           Math.max(new Date(rawRange.from).getTime(), minReliable),
         )
         const baseRange = { ...rawRange, from: energyFrom.toISOString() }
-        const [energy, soc, power] = await Promise.all([
+        const damFromDate = startOfPeriod(preset, anchorDate)
+        const damToExclusive = endOfPeriod(preset, anchorDate)
+        const damToDate = new Date(damToExclusive)
+        damToDate.setDate(damToDate.getDate() - 1)
+        const damFrom = toDateOnly(damFromDate)
+        const damTo = toDateOnly(damToDate)
+
+        // For month/year presets we ask the server for the summary totals
+        // directly. The server computes `last(end) - last(start)` per
+        // metric without intermediate per-bucket clamping, so a single
+        // counter reset somewhere mid-period no longer poisons the
+        // summary cards. The bar chart still renders from the per-bucket
+        // delta series so each day's contribution stays visible.
+        const needsServerSummary = preset !== 'day'
+
+        const [energy, soc, power, dam, summaryResp] = await Promise.all([
           fetchTimeseries(
             {
               organizationID,
@@ -232,6 +271,32 @@ export function useDashboardData(input: {
                 controller.signal,
               )
             : Promise.resolve(null),
+          fetchDAMPrices(
+            { zone: DAM_DEFAULT_ZONE, from: damFrom, to: damTo },
+            controller.signal,
+          ).catch((e) => {
+            if (isAbortError(e)) throw e
+            // DAM is best-effort: a missing day's prices shouldn't block the
+            // energy chart. Surface the failure as an empty price set and
+            // let the revenue panel show its own "no data" placeholder.
+            return null
+          }),
+          needsServerSummary
+            ? fetchEnergySummary(
+                {
+                  organizationID,
+                  from: baseRange.from,
+                  to: baseRange.to,
+                  metricKeys: ENERGY_SUMMARY_METRIC_KEYS,
+                },
+                controller.signal,
+              ).catch((e) => {
+                if (isAbortError(e)) throw e
+                // Backend may not have the new endpoint deployed yet (rolling
+                // upgrade); fall back to the legacy series-derived summary.
+                return null
+              })
+            : Promise.resolve(null),
         ])
         if (cancelled || controller.signal.aborted) return
         const series: EnergyRow[] = energyBucketDeltaRows(
@@ -241,13 +306,16 @@ export function useDashboardData(input: {
           anchorDate,
           now,
         )
-        const summary = energySummaryFromSeries(series)
+        const summary = summaryResp
+          ? energySummaryFromTotals(summaryResp.totals)
+          : energySummaryFromSeries(series)
         setEnergySeries(series)
         setEnergySummary(summary)
         setSocSeries(soc ? socChartRows(soc.points, 'day', anchorDate) : [])
         setPowerSeries(
           power ? powerChartRows(power.points, DAY_POWER_METRIC_KEYS, anchorDate, now) : [],
         )
+        setDamSeries(dam ? damChartRows(dam.prices, preset, anchorDate) : [])
         setError(null)
       } catch (e) {
         if (cancelled || isAbortError(e)) return
@@ -264,35 +332,6 @@ export function useDashboardData(input: {
       if (inflight) inflight.abort()
     }
   }, [organizationID, preset, anchorTime])
-
-  useEffect(() => {
-    const controller = new AbortController()
-    let cancelled = false
-    const anchorDate = new Date(anchorTime)
-    const fromDate = startOfPeriod(preset, anchorDate)
-    const toDateExclusive = endOfPeriod(preset, anchorDate)
-    const toDate = new Date(toDateExclusive)
-    toDate.setDate(toDate.getDate() - 1)
-    const from = toDateOnly(fromDate)
-    const to = toDateOnly(toDate)
-
-    async function load() {
-      try {
-        const resp = await fetchDAMPrices({ zone: DAM_DEFAULT_ZONE, from, to }, controller.signal)
-        if (cancelled) return
-        setDamSeries(damChartRows(resp.prices, preset, anchorDate))
-      } catch (e) {
-        if (cancelled || isAbortError(e)) return
-        setDamSeries([])
-      }
-    }
-    void load()
-
-    return () => {
-      cancelled = true
-      controller.abort()
-    }
-  }, [preset, anchorTime])
 
   return {
     config,

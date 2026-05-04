@@ -61,6 +61,12 @@ func main() {
 		log.Error("db_schema", "err", err)
 		os.Exit(1)
 	}
+	if err := storage.InitContinuousAggregates(ctx, pool); err != nil {
+		// Non-fatal: API still works against the raw hypertable, just
+		// slower for month/year presets. Surface the error so it shows up
+		// in logs and Watchtower-style monitors can flag it.
+		log.Warn("db_caggs", "err", err)
+	}
 
 	chunks := modbusclient.PlanChunks(resolved)
 	log.Info("collector_start", "orgs", len(cfg.Organizations), "metrics", len(resolved), "modbus_reads", len(chunks))

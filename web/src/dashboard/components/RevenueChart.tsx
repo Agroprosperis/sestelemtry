@@ -1,4 +1,4 @@
-import { useCallback } from 'react'
+import { useCallback, useMemo } from 'react'
 import {
   Area,
   AreaChart,
@@ -13,11 +13,13 @@ import type { RangePreset } from '../range'
 import type { EnergyRow } from '../transforms/buckets'
 import type { DAMChartRow } from '../transforms/dam'
 import { revenueChartRows, totalRevenue } from '../transforms/revenue'
+import { ChartSkeleton } from './ChartSkeleton'
 
 type Props = {
   energySeries: EnergyRow[]
   damSeries: DAMChartRow[]
   preset: RangePreset
+  loading?: boolean
 }
 
 const REVENUE_LINE_COLOR = '#16a34a'
@@ -26,6 +28,11 @@ const REVENUE_FILL_COLOR = '#86efac'
 // Day preset uses 5-minute buckets (288 per day); show every 12th tick so
 // labels land on the hour and the axis stays readable.
 const DAY_TICKS_PER_HOUR = 12
+
+// Debounce ResponsiveContainer's resize handler so layout thrash on window
+// resize / sidebar collapse doesn't trigger a full recharts relayout per
+// pixel; 150 ms is the sweet spot recommended by the recharts docs.
+const RESIZE_DEBOUNCE_MS = 150
 
 const PRESET_LABEL: Record<RangePreset, string> = {
   day: 'погодинно',
@@ -39,10 +46,13 @@ function xAxisInterval(preset: RangePreset): number {
   return 0
 }
 
-export function RevenueChart({ energySeries, damSeries, preset }: Props) {
-  const series = revenueChartRows(energySeries, damSeries)
-  const hasAnyValue = series.some((r) => r.revenue != null)
-  const total = totalRevenue(series)
+export function RevenueChart({ energySeries, damSeries, preset, loading = false }: Props) {
+  const series = useMemo(
+    () => revenueChartRows(energySeries, damSeries),
+    [energySeries, damSeries],
+  )
+  const hasAnyValue = useMemo(() => series.some((r) => r.revenue != null), [series])
+  const total = useMemo(() => totalRevenue(series), [series])
   const tickInterval = xAxisInterval(preset)
   const dayTickFormatter = useCallback((v: unknown): string => {
     const s = String(v)
@@ -64,10 +74,12 @@ export function RevenueChart({ energySeries, damSeries, preset }: Props) {
         </span>
       </div>
       <div className="chart-wrap">
-        {!hasAnyValue ? (
+        {loading ? (
+          <ChartSkeleton preset={preset} shape="line" />
+        ) : !hasAnyValue ? (
           <p className="chart-placeholder">Немає даних для розрахунку доходу.</p>
         ) : (
-          <ResponsiveContainer width="100%" height="100%">
+          <ResponsiveContainer width="100%" height="100%" debounce={RESIZE_DEBOUNCE_MS}>
             <AreaChart data={series}>
               <defs>
                 <linearGradient id="revenue-fill" x1="0" y1="0" x2="0" y2="1">
@@ -95,6 +107,7 @@ export function RevenueChart({ energySeries, damSeries, preset }: Props) {
                 fill="url(#revenue-fill)"
                 dot={false}
                 connectNulls
+                isAnimationActive={false}
               />
             </AreaChart>
           </ResponsiveContainer>

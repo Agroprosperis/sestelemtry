@@ -19,6 +19,7 @@ type Handlers struct {
 type storeReader interface {
 	Current(ctx context.Context, organizationID string, metricKeys []string, at time.Time) (CurrentResponse, error)
 	Timeseries(ctx context.Context, organizationID string, metricKeys []string, from, to time.Time, bucket, tz string, aggregation TimeseriesAggregation) (TimeseriesResponse, error)
+	EnergySummary(ctx context.Context, organizationID string, metricKeys []string, from, to time.Time) (EnergySummaryResponse, error)
 	DAMPrices(ctx context.Context, zone int, from, to time.Time) (DAMPricesResponse, error)
 	Ready(ctx context.Context) error
 }
@@ -38,6 +39,7 @@ func (h *Handlers) Router() http.Handler {
 	mux.HandleFunc("/api/v1/dashboard-config", h.dashboardConfig)
 	mux.HandleFunc("/api/v1/current", h.current)
 	mux.HandleFunc("/api/v1/timeseries", h.timeseries)
+	mux.HandleFunc("/api/v1/energy-summary", h.energySummary)
 	mux.HandleFunc("/api/v1/dam-prices", h.damPrices)
 	mux.HandleFunc("/swagger", h.swaggerUI)
 	mux.HandleFunc("/swagger/", h.swaggerUI)
@@ -140,12 +142,74 @@ func (h *Handlers) timeseries(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	start := time.Now()
 	resp, err := h.store.Timeseries(r.Context(), orgID, metricKeys, from, to, bucket, tz, aggregation)
+	dur := time.Since(start)
 	if err != nil {
-		h.log.Error("api_timeseries", "organization_id", orgID, "metric_keys", metricKeys, "err", err)
+		h.log.Error("api_timeseries",
+			"organization_id", orgID,
+			"metric_keys", metricKeys,
+			"bucket", bucket,
+			"aggregation", string(aggregation),
+			"duration_ms", dur.Milliseconds(),
+			"err", err,
+		)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
+	h.log.Info("api_timeseries_ok",
+		"organization_id", orgID,
+		"metric_keys", metricKeys,
+		"bucket", bucket,
+		"aggregation", string(aggregation),
+		"points", len(resp.Points),
+		"duration_ms", dur.Milliseconds(),
+	)
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handlers) energySummary(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	orgID := strings.TrimSpace(r.URL.Query().Get("organization_id"))
+	if orgID == "" {
+		http.Error(w, "organization_id is required", http.StatusBadRequest)
+		return
+	}
+	metricKeys := ParseCSV(r.URL.Query().Get("metric_key"))
+	if len(metricKeys) == 0 {
+		metricKeys = ParseCSV(r.URL.Query().Get("metric_keys"))
+	}
+	from, to, _, _, err := parseRange(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if from.IsZero() || to.IsZero() {
+		http.Error(w, "from and to are required", http.StatusBadRequest)
+		return
+	}
+	start := time.Now()
+	resp, err := h.store.EnergySummary(r.Context(), orgID, metricKeys, from, to)
+	dur := time.Since(start)
+	if err != nil {
+		h.log.Error("api_energy_summary",
+			"organization_id", orgID,
+			"metric_keys", metricKeys,
+			"duration_ms", dur.Milliseconds(),
+			"err", err,
+		)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+	h.log.Info("api_energy_summary_ok",
+		"organization_id", orgID,
+		"metric_keys", metricKeys,
+		"totals", len(resp.Totals),
+		"duration_ms", dur.Milliseconds(),
+	)
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -164,12 +228,27 @@ func (h *Handlers) damPrices(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	start := time.Now()
 	resp, err := h.store.DAMPrices(r.Context(), zone, from, to)
+	dur := time.Since(start)
 	if err != nil {
-		h.log.Error("api_dam_prices", "zone", zone, "from", from, "to", to, "err", err)
+		h.log.Error("api_dam_prices",
+			"zone", zone,
+			"from", from,
+			"to", to,
+			"duration_ms", dur.Milliseconds(),
+			"err", err,
+		)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
+	h.log.Info("api_dam_prices_ok",
+		"zone", zone,
+		"from", from,
+		"to", to,
+		"prices", len(resp.Prices),
+		"duration_ms", dur.Milliseconds(),
+	)
 	writeJSON(w, http.StatusOK, resp)
 }
 

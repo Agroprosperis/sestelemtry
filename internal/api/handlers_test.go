@@ -16,6 +16,8 @@ type mockStore struct {
 	currentErr  error
 	seriesResp  TimeseriesResponse
 	seriesErr   error
+	summaryResp EnergySummaryResponse
+	summaryErr  error
 	damResp     DAMPricesResponse
 	damErr      error
 	readyErr    error
@@ -25,6 +27,10 @@ type mockStore struct {
 	damZone int
 	damFrom time.Time
 	damTo   time.Time
+
+	summaryFrom time.Time
+	summaryTo   time.Time
+	summaryKeys []string
 }
 
 func (m *mockStore) Current(_ context.Context, _ string, _ []string, at time.Time) (CurrentResponse, error) {
@@ -34,6 +40,11 @@ func (m *mockStore) Current(_ context.Context, _ string, _ []string, at time.Tim
 
 func (m *mockStore) Timeseries(_ context.Context, _ string, _ []string, _, _ time.Time, _, _ string, _ TimeseriesAggregation) (TimeseriesResponse, error) {
 	return m.seriesResp, m.seriesErr
+}
+
+func (m *mockStore) EnergySummary(_ context.Context, _ string, metricKeys []string, from, to time.Time) (EnergySummaryResponse, error) {
+	m.summaryFrom, m.summaryTo, m.summaryKeys = from, to, metricKeys
+	return m.summaryResp, m.summaryErr
 }
 
 func (m *mockStore) DAMPrices(_ context.Context, zone int, from, to time.Time) (DAMPricesResponse, error) {

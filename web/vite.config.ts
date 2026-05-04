@@ -20,6 +20,23 @@ export default defineConfig({
       },
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        // recharts and its d3-* dependencies weigh ~70 KB gzipped. The
+        // function form of manualChunks is required by current Rollup
+        // typings; an object form is rejected as a `ManualChunksFunction`
+        // mismatch in this Vite/Rollup major. We isolate recharts and
+        // every d3-* package it pulls in into one chunk so the dashboard
+        // shell can paint before the chart bundle finishes parsing.
+        manualChunks(id) {
+          if (id.includes('node_modules/recharts/')) return 'recharts'
+          if (/node_modules\/(d3|victory-vendor|internmap)\//.test(id)) return 'recharts'
+          return undefined
+        },
+      },
+    },
+  },
   test: {
     environment: 'jsdom',
     setupFiles: './src/test-setup.ts',

@@ -23,6 +23,7 @@ import type { DAMChartRow } from '../transforms/dam'
 import type { PowerChartRow } from '../transforms/power'
 import type { SOCChartRow } from '../transforms/soc'
 import type { EnergySummary as Summary } from '../transforms/summary'
+import { ChartSkeleton } from './ChartSkeleton'
 import { EnergySummary } from './EnergySummary'
 import { EnergyTooltip } from './EnergyTooltip'
 import { PowerTooltip } from './PowerTooltip'
@@ -48,6 +49,10 @@ const SOC_LABEL = 'SOC'
 // Day preset uses 5-minute buckets (288 per day); show every 12th tick so
 // labels land on the hour and the axis stays readable.
 const DAY_TICKS_PER_HOUR = 12
+
+// Debounce ResponsiveContainer's resize handler so layout thrash on window
+// resize doesn't trigger a full recharts relayout per pixel.
+const RESIZE_DEBOUNCE_MS = 150
 
 function xAxisInterval(preset: RangePreset): number {
   if (preset === 'day') return DAY_TICKS_PER_HOUR - 1
@@ -191,12 +196,12 @@ export function EnergyChart({
       <EnergySummary summary={summary} />
       <div className="chart-wrap">
         {loading ? (
-          <p className="chart-placeholder">Loading...</p>
+          <ChartSkeleton preset={preset} />
         ) : preset === 'day' ? (
           !dayHasData ? (
             <p className="chart-placeholder">No data available for selected range.</p>
           ) : (
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height="100%" debounce={RESIZE_DEBOUNCE_MS}>
               <ComposedChart data={dayData}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis
@@ -309,7 +314,7 @@ export function EnergyChart({
         ) : series.length === 0 ? (
           <p className="chart-placeholder">No data available for selected range.</p>
         ) : (
-          <ResponsiveContainer width="100%" height="100%">
+          <ResponsiveContainer width="100%" height="100%" debounce={RESIZE_DEBOUNCE_MS}>
             <BarChart data={series} stackOffset="sign">
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis dataKey="time" interval={tickInterval} />
@@ -331,6 +336,7 @@ export function EnergyChart({
                   name={m.label}
                   stackId="energy"
                   fill={energyColor(m.key, preset)}
+                  isAnimationActive={false}
                 />
               ))}
             </BarChart>

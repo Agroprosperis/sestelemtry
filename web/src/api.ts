@@ -68,6 +68,35 @@ export async function fetchTimeseries(
   return res.json()
 }
 
+export type EnergySummaryResponse = {
+  organization_id: string
+  from: string
+  to: string
+  totals: Record<string, number>
+}
+
+export async function fetchEnergySummary(
+  input: {
+    organizationID: string
+    from: string
+    to: string
+    metricKeys?: string[]
+  },
+  signal?: AbortSignal,
+): Promise<EnergySummaryResponse> {
+  const url = buildURL('/api/v1/energy-summary', {
+    organization_id: input.organizationID,
+    from: input.from,
+    to: input.to,
+    metric_keys: input.metricKeys && input.metricKeys.length > 0 ? input.metricKeys.join(',') : undefined,
+  })
+  const res = await fetch(url, { signal })
+  if (!res.ok) {
+    throw new Error(`energy-summary request failed: ${res.status}`)
+  }
+  return res.json()
+}
+
 export async function fetchDAMPrices(
   input: { from: string; to: string; zone?: number },
   signal?: AbortSignal,

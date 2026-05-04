@@ -107,3 +107,31 @@ type DAMPricesResponse struct {
 	To     time.Time  `json:"to"`
 	Prices []DAMPrice `json:"prices"`
 }
+
+// EnergySummaryAccumulators are the cumulative counters used by the
+// monthly/yearly summary cards. The list is intentionally narrow: these
+// six values are everything `energySummaryFromTotals` on the frontend
+// needs to render the source/sink/percentage breakdown.
+var EnergySummaryAccumulators = []string{
+	"accumulated_pv_energy_yield_kwh",
+	"accumulated_electricity_sold_kwh",
+	"accumulated_electricity_purchased_kwh",
+	"accumulated_power_consumption_kwh",
+	"total_energy_charged_kwh",
+	"total_energy_discharged_kwh",
+}
+
+// EnergySummaryResponse returns the per-period accumulator deltas used by
+// the dashboard's summary cards. Each value is `last(value, time before
+// to) - last(value, time before from)` for that metric, clamped to >= 0.
+//
+// Unlike the per-bucket delta path that backs the bar chart, this
+// computation does NOT clamp every intermediate bucket; a single
+// reset-then-recover within the period still nets to the correct period
+// total (provided the end snapshot is greater than the start snapshot).
+type EnergySummaryResponse struct {
+	OrganizationID string             `json:"organization_id"`
+	From           time.Time          `json:"from"`
+	To             time.Time          `json:"to"`
+	Totals         map[string]float64 `json:"totals"`
+}

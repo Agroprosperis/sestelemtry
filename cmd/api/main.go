@@ -42,7 +42,20 @@ func main() {
 	}
 	defer pool.Close()
 
-	svc := api.NewHandlers(api.NewStore(pool), *allowOrigin)
+	store := api.NewStore(pool)
+	// Boot-time feature detection: if the collector has run migration 003
+	// (or InitContinuousAggregates), the hourly CAGG is queryable and
+	// month/year presets switch to the fast path. On a freshly upgraded
+	// host where CAGG creation hasn't completed yet, we fall back to
+	// scanning the raw hypertable so the dashboard never breaks.
+	hasCAGG, err := storage.HourlyCAGGAvailable(ctx, pool)
+	if err != nil {
+		log.Warn("db_caggs_probe", "err", err)
+	}
+	store.EnableHourlyCAGG(hasCAGG)
+	log.Info("api_features", "hourly_cagg", hasCAGG)
+
+	svc := api.NewHandlers(store, *allowOrigin)
 	server := &http.Server{
 		Addr:              *listenAddr,
 		Handler:           svc.Router(),

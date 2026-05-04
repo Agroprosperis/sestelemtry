@@ -1,30 +1,24 @@
-import { useCallback, useState } from 'react'
+import { lazy, Suspense, useState } from 'react'
 import './dashboard.css'
 import { DashboardHeader } from './components/DashboardHeader'
 import { EnergyChart } from './components/EnergyChart'
 import { MetricsPanel } from './components/MetricsPanel'
-import { RevenueChart } from './components/RevenueChart'
 import { useDashboardData } from './hooks/useDashboardData'
 import { useOrganizationParam } from './hooks/useOrganizationParam'
-import { startOfPeriod, type RangePreset } from './range'
+import { useRangeParams } from './hooks/useRangeParams'
+
+// RevenueChart sits below the fold for most users and pulls a sizable
+// recharts subgraph (AreaChart + gradients) that the energy chart
+// already reuses. Lazy-loading it keeps the initial paint small without
+// affecting the energy chart, which renders synchronously.
+const RevenueChart = lazy(() =>
+  import('./components/RevenueChart').then((mod) => ({ default: mod.RevenueChart })),
+)
 
 export function Dashboard() {
-  const [preset, setPresetState] = useState<RangePreset>('day')
-  const [anchor, setAnchor] = useState<Date>(() => startOfPeriod('day', new Date()))
+  const { preset, anchor, setPreset, setAnchor } = useRangeParams()
   const [metricsAt, setMetricsAt] = useState<Date | null>(null)
   const { organizationID, options, change: onOrganizationChange } = useOrganizationParam()
-
-  const onPresetChange = useCallback((next: RangePreset) => {
-    setPresetState(next)
-    setAnchor(startOfPeriod(next, new Date()))
-  }, [])
-
-  const onAnchorChange = useCallback(
-    (next: Date) => {
-      setAnchor(startOfPeriod(preset, next))
-    },
-    [preset],
-  )
 
   const {
     config,
@@ -51,9 +45,9 @@ export function Dashboard() {
         organizationOptions={options}
         onOrganizationChange={onOrganizationChange}
         preset={preset}
-        onPresetChange={onPresetChange}
+        onPresetChange={setPreset}
         anchor={anchor}
-        onAnchorChange={onAnchorChange}
+        onAnchorChange={setAnchor}
       />
 
       {error && (
@@ -83,7 +77,22 @@ export function Dashboard() {
             socSeries={socSeries}
             powerSeries={powerSeries}
           />
-          <RevenueChart energySeries={energySeries} damSeries={damSeries} preset={preset} />
+          <Suspense
+            fallback={
+              <div className="chart-card">
+                <div className="chart-wrap">
+                  <p className="chart-placeholder">Loading…</p>
+                </div>
+              </div>
+            }
+          >
+            <RevenueChart
+              energySeries={energySeries}
+              damSeries={damSeries}
+              preset={preset}
+              loading={loading}
+            />
+          </Suspense>
         </div>
       </div>
     </main>
