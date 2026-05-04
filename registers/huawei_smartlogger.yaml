@@ -20,6 +20,14 @@ registers:
     gain: 0.001
     offset: 0
 
+  - metric_key: power_supply_from_grid_day_kwh
+    name: Power supply from grid today, kWh
+    address: 40438
+    data_type: UINT32
+    swap_type: ABCD_BE
+    gain: 0.01
+    offset: 0
+
   - metric_key: pv_energy_yield_day_kwh
     name: PV energy yield of the day, kWh
     address: 40444
@@ -68,6 +76,22 @@ registers:
     gain: 0.01
     offset: 0
 
+  - metric_key: energy_charged_day_kwh
+    name: Current-day charge capacity, kWh
+    address: 40468
+    data_type: UINT32
+    swap_type: ABCD_BE
+    gain: 0.01
+    offset: 0
+
+  - metric_key: energy_discharged_day_kwh
+    name: Energy discharged today, kWh
+    address: 40470
+    data_type: UINT32
+    swap_type: ABCD_BE
+    gain: 0.01
+    offset: 0
+
   - metric_key: total_energy_charged_kwh
     name: Total energy charged, kWh
     address: 40472
@@ -98,6 +122,30 @@ registers:
     data_type: INT32
     swap_type: ABCD_BE
     gain: 0.001
+    offset: 0
+
+  - metric_key: power_consumption_day_kwh
+    name: Current day power consumption, kWh
+    address: 40509
+    data_type: UINT32
+    swap_type: ABCD_BE
+    gain: 0.01
+    offset: 0
+
+  - metric_key: electricity_sold_day_kwh
+    name: Electricity sales volume of the day, kWh
+    address: 40511
+    data_type: UINT32
+    swap_type: ABCD_BE
+    gain: 0.01
+    offset: 0
+
+  - metric_key: electricity_purchased_day_kwh
+    name: Electricity purchased on the current day, kWh
+    address: 40513
+    data_type: UINT32
+    swap_type: ABCD_BE
+    gain: 0.01
     offset: 0
 
   - metric_key: soc_percent

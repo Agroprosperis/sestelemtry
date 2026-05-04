@@ -18,6 +18,12 @@ export const MIN_RELIABLE_DATA_AT = new Date(2026, 3, 30)
 export const FALLBACK_DASHBOARD_CONFIG: DashboardConfig = {
   cards: [
     { key: 'pv_energy_yield_day_kwh', label: 'Виробіток СЕС за день (PV energy yield of the day)', unit: 'kWh' },
+    { key: 'power_supply_from_grid_day_kwh', label: 'Постачання з мережі за день (Power supply from grid today)', unit: 'kWh' },
+    { key: 'energy_charged_day_kwh', label: 'Заряд УЗЕ за день (Current-day charge capacity)', unit: 'kWh' },
+    { key: 'energy_discharged_day_kwh', label: 'Розряд УЗЕ за день (Energy discharged today)', unit: 'kWh' },
+    { key: 'power_consumption_day_kwh', label: 'Споживання за день (Current day power consumption)', unit: 'kWh' },
+    { key: 'electricity_sold_day_kwh', label: 'Експорт у мережу за день (Electricity sales volume of the day)', unit: 'kWh' },
+    { key: 'electricity_purchased_day_kwh', label: 'Імпорт з мережі за день (Electricity purchased on the current day)', unit: 'kWh' },
     { key: 'total_energy_charged_kwh', label: 'Загальна енергія заряду УЗЕ (Total energy charged)', unit: 'kWh' },
     { key: 'total_energy_discharged_kwh', label: 'Загальна енергія розряду УЗЕ (Total energy discharged)', unit: 'kWh' },
     { key: 'load_power_kw', label: 'Потужність навантаження (Load power)', unit: 'kW' },

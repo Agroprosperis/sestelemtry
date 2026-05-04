@@ -5,6 +5,7 @@ import { AccumulatedSnapshotNarrative } from './AccumulatedSnapshotNarrative'
 import { CurrentSnapshotNarrative } from './CurrentSnapshotNarrative'
 import { DailySummaryNarrative } from './DailySummaryNarrative'
 import { MetricsAtPicker } from './MetricsAtPicker'
+import { TodayCountersNarrative } from './TodayCountersNarrative'
 
 type Props = {
   current: CurrentResponse | null
@@ -45,6 +46,7 @@ export function MetricsPanel({
         </p>
       )}
       <CurrentSnapshotNarrative current={current} loading={loading} />
+      <TodayCountersNarrative current={current} loading={loading} />
       <DailySummaryNarrative summary={summary} preset={preset} />
       <AccumulatedSnapshotNarrative current={current} loading={loading} />
     </div>
