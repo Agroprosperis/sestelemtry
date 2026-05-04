@@ -9,10 +9,6 @@ import {
 import { DAY_POWER_METRIC_KEYS } from '../metrics'
 import { endOfPeriod, rangeParams, startOfPeriod, type RangePreset } from '../range'
 import { energyBucketDeltaRows, type EnergyRow } from '../transforms/buckets'
-import {
-  cumulativeBucketDeltaRows,
-  type CumulativeInput,
-} from '../transforms/cumulative'
 import { damChartRows, type DAMChartRow } from '../transforms/dam'
 import { powerChartRows, type PowerChartRow } from '../transforms/power'
 import { socChartRows, type SOCChartRow } from '../transforms/soc'
@@ -200,11 +196,6 @@ export function useDashboardData(input: {
         const cappedEnd = endCandidate.getTime() > now.getTime() ? now : endCandidate
         const summaryStart = new Date(Math.max(startCandidate.getTime(), minReliable))
         const summaryEnd = new Date(Math.max(cappedEnd.getTime(), minReliable))
-        // Month/year still need a bucket-cumulative timeseries to draw
-        // per-day/per-month bars. Day's chart uses 5-minute deltas (also
-        // consumed by the revenue chart) and instantaneous power lines.
-        const isBucketCumulative = preset === 'month' || preset === 'year'
-        const cumulativeBucket = preset === 'year' ? '1 month' : '1 day'
         // SOC is an instantaneous metric, so we fetch it with an `avg`
         // aggregation instead of the default accumulator-delta. We only
         // need it for the day preset (the energy chart overlays it as a
@@ -214,22 +205,26 @@ export function useDashboardData(input: {
         // (kW snapshots) with `last` aggregation. They drive the redesigned
         // day-chart lines (ESS/Grid/Load) instead of the energy delta areas.
         const needsPower = preset === 'day'
-        const baseRange = rangeParams(preset, anchorDate, now)
+        // Energy series uses the server's per-bucket `delta` aggregation for
+        // every preset (5min for day, 1day for month, 1month for year). The
+        // server applies `last(value, time) - lag(...)` per bucket, so the
+        // frontend just renders the rows it gets — no local cumulative
+        // diffing. The `from` edge is clamped to MIN_RELIABLE_DATA_AT to
+        // avoid pulling in lifetime-counter readings from before the
+        // deployment was healthy; periods that sit entirely before the
+        // floor return empty bars.
+        const rawRange = rangeParams(preset, anchorDate, now)
+        const energyFrom = new Date(
+          Math.max(new Date(rawRange.from).getTime(), minReliable),
+        )
+        const baseRange = { ...rawRange, from: energyFrom.toISOString() }
         const [energy, seed, end, soc, power] = await Promise.all([
           fetchTimeseries(
-            isBucketCumulative
-              ? {
-                  organizationID,
-                  metricKeys: energyKeys,
-                  ...baseRange,
-                  bucket: cumulativeBucket,
-                  aggregation: 'last',
-                }
-              : {
-                  organizationID,
-                  metricKeys: energyKeys,
-                  ...baseRange,
-                },
+            {
+              organizationID,
+              metricKeys: energyKeys,
+              ...baseRange,
+            },
             controller.signal,
           ),
           fetchCurrent(
@@ -266,16 +261,13 @@ export function useDashboardData(input: {
         if (cancelled || controller.signal.aborted) return
         const seedValues = readingsFromCurrent(seed)
         const endValues = readingsFromCurrent(end)
-        let series: EnergyRow[]
-        if (isBucketCumulative) {
-          const cumInput: CumulativeInput = {
-            bucketPoints: energy.points,
-            seed: seedValues,
-          }
-          series = cumulativeBucketDeltaRows(cumInput, energyKeys, preset, anchorDate)
-        } else {
-          series = energyBucketDeltaRows(energy.points, energyKeys, preset, anchorDate, now)
-        }
+        const series: EnergyRow[] = energyBucketDeltaRows(
+          energy.points,
+          energyKeys,
+          preset,
+          anchorDate,
+          now,
+        )
         const summary = energySummaryFromTotals(
           summaryTotalsFromReadings({ seed: seedValues, end: endValues }, energyKeys),
         )

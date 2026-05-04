@@ -1,4 +1,4 @@
-import { formatChartNumber } from '../format'
+import { formatChartNumber, formatEnergyCompactKWhUk } from '../format'
 import { SINK_ENERGY_METRIC_KEYS, SOURCE_ENERGY_METRIC_KEYS } from '../metrics'
 import type { RangePreset } from '../range'
 
@@ -50,7 +50,7 @@ export function EnergyTooltip({ active, label, payload, preset }: Props) {
         <span className="energy-tooltip-dot" style={{ backgroundColor: entry?.color ?? '#94a3b8' }} />
         <span className="energy-tooltip-name">{entry?.name ? String(entry.name) : key}</span>
         <span className="energy-tooltip-value">
-          {value === null ? '--' : `${formatChartNumber(value)} kWh`}
+          {value === null ? '--' : formatEnergyCompactKWhUk(value)}
         </span>
       </div>
     )
@@ -70,14 +70,14 @@ export function EnergyTooltip({ active, label, payload, preset }: Props) {
         <div>
           <div className="energy-tooltip-head">
             <span>Джерела енергії</span>
-            <span>{formatChartNumber(sourceTotal)} kWh</span>
+            <span>{formatEnergyCompactKWhUk(sourceTotal)}</span>
           </div>
           {SOURCE_ENERGY_METRIC_KEYS.map((key) => row(key))}
         </div>
         <div>
           <div className="energy-tooltip-head">
             <span>Стоки енергії</span>
-            <span>{formatChartNumber(sinkTotal)} kWh</span>
+            <span>{formatEnergyCompactKWhUk(sinkTotal)}</span>
           </div>
           {SINK_ENERGY_METRIC_KEYS.map((key) => row(key, true))}
         </div>

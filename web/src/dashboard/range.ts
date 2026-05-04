@@ -60,7 +60,7 @@ export function isCurrentPeriod(preset: RangePreset, anchor: Date, now: Date = n
 }
 
 function bucketFor(preset: RangePreset): string {
-  if (preset === 'year') return '1 day'
+  if (preset === 'year') return '1 month'
   if (preset === 'month') return '1 day'
   return '5 minutes'
 }

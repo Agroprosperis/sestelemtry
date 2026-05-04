@@ -57,7 +57,7 @@ describe('summaryTotalsFromReadings', () => {
     expect(totals.accumulated_pv_energy_yield_kwh).toBe(0)
   })
 
-  it('reapplies appliance consumption rule (overrides device counter)', () => {
+  it('passes the device-reported consumption counter through unchanged', () => {
     const totals = summaryTotalsFromReadings(
       {
         seed: {
@@ -74,13 +74,14 @@ describe('summaryTotalsFromReadings', () => {
           total_energy_discharged_kwh: 10,
           total_energy_charged_kwh: 20,
           accumulated_electricity_sold_kwh: 5,
-          accumulated_power_consumption_kwh: 9999,
+          accumulated_power_consumption_kwh: 65,
         },
       },
       ENERGY_KEYS,
     )
-    // formula: purchased + pv + discharge - charge = 50 + 30 + 10 - 20 = 70
-    expect(totals.accumulated_power_consumption_kwh).toBe(70)
+    // Trust the device counter directly — the previous algebraic override
+    // (purchased + pv + discharge - charge) is no longer applied.
+    expect(totals.accumulated_power_consumption_kwh).toBe(65)
     expect(totals.accumulated_electricity_sold_kwh).toBe(5)
   })
 
