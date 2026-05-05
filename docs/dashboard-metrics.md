@@ -38,8 +38,8 @@ SmartLogger та спосіб використання у фронтенді/б�
 | `total_energy_discharged_kwh`           | Загальна енергія розряду УЗЕ          | Total energy discharged                  | kWh | 40476         | UINT64 | 0.01  |
 | `load_power_kw`                         | Потужність навантаження               | Load power                               | kW  | 40503         | UINT32 | 0.001 |
 | `grid_connected_active_power_kw`        | Активна потужність у точці приєднання | Grid-connected active power              | kW  | 40505         | INT32  | 0.001 |
-| `power_consumption_day_kwh`             | Споживання за день                    | Current day power consumption            | kWh | 40509         | UINT32 | 0.01  |
-| `electricity_sold_day_kwh`              | Експорт у мережу за день              | Electricity sales volume of the day      | kWh | 40511         | UINT32 | 0.01  |
+| `power_consumption_day_kwh`             | Споживання елеватора за день          | Current day power consumption            | kWh | 40509         | UINT32 | 0.01  |
+| `electricity_sold_day_kwh`              | Експорт в мережу за день              | Electricity sales volume of the day      | kWh | 40511         | UINT32 | 0.01  |
 | `electricity_purchased_day_kwh`         | Імпорт з мережі за день               | Electricity purchased on the current day | kWh | 40513         | UINT32 | 0.01  |
 | `soc_percent`                           | Рівень заряду УЗЕ (SOC)               | State of Charge                          | %   | 40515         | UINT16 | 0.1   |
 
@@ -132,7 +132,8 @@ SmartLogger та спосіб використання у фронтенді/б�
 
 #### `power_consumption_day_kwh`
 
-- Переклад: **Споживання за день** / *Current day power consumption*
+- Переклад: **Споживання елеватора за день** /
+*Current day power consumption*
 - Modbus: 40509, UINT32, gain 0.01 → kWh
 - Суть: добове споживання навантаження за версією інвертора.
 **Особливість:** поведінка цього регістра аналогічна
@@ -142,7 +143,7 @@ SmartLogger та спосіб використання у фронтенді/б�
 
 #### `electricity_sold_day_kwh`
 
-- Переклад: **Експорт у мережу за день** /
+- Переклад: **Експорт в мережу за день** /
 *Electricity sales volume of the day*
 - Modbus: 40511, UINT32, gain 0.01 → kWh
 - Суть: скільки кВт·год об'єкт віддав у зовнішню мережу за поточну

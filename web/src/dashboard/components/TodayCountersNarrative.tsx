@@ -13,13 +13,13 @@ type Row = {
 // recomputing deltas client-side. Listed in source/sink order so the
 // column reads top-to-bottom: produced -> consumed -> grid -> battery.
 const ROWS: Row[] = [
-  { key: 'pv_energy_yield_day_kwh', icon: '☀', label: 'СЕС згенерувала' },
-  { key: 'power_consumption_day_kwh', icon: '⚡', label: 'Спожито приладами' },
-  { key: 'electricity_purchased_day_kwh', icon: '🔌', label: 'Імпорт з мережі' },
-  { key: 'electricity_sold_day_kwh', icon: '🌐', label: 'Експорт у мережу' },
-  { key: 'power_supply_from_grid_day_kwh', icon: '⚙', label: 'Постачання з мережі' },
-  { key: 'energy_charged_day_kwh', icon: '🔋', label: 'Заряд УЗЕ' },
-  { key: 'energy_discharged_day_kwh', icon: '🪫', label: 'Розряд УЗЕ' },
+  { key: 'pv_energy_yield_day_kwh', icon: '☀', label: 'Виробіток СЕС за день' },
+  { key: 'power_consumption_day_kwh', icon: '⚡', label: 'Споживання елеватора за день' },
+  { key: 'electricity_purchased_day_kwh', icon: '🔌', label: 'Імпорт з мережі за день' },
+  { key: 'electricity_sold_day_kwh', icon: '🌐', label: 'Експорт в мережу за день' },
+  { key: 'power_supply_from_grid_day_kwh', icon: '⚙', label: 'Постачання з мережі за день' },
+  { key: 'energy_charged_day_kwh', icon: '🔋', label: 'Заряд УЗЕ за день' },
+  { key: 'energy_discharged_day_kwh', icon: '🪫', label: 'Розряд УЗЕ за день' },
 ]
 
 type Props = {
