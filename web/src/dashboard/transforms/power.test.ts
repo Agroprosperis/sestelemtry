@@ -81,6 +81,20 @@ describe('powerChartRows', () => {
     expect(rows[DAY_BUCKETS - 1].load_power_kw).toBeNull()
   })
 
+  it('clamps anomalous spikes (|value| > 2000 kW) to 0 and keeps boundary values', () => {
+    const points: TimeseriesPoint[] = [
+      { time: bucketTime(anchor, 1), metric_key: 'load_power_kw', value: 5000 },
+      { time: bucketTime(anchor, 2), metric_key: 'active_ess_power_kw', value: -3500 },
+      { time: bucketTime(anchor, 3), metric_key: 'grid_connected_active_power_kw', value: 2000 },
+      { time: bucketTime(anchor, 4), metric_key: 'grid_connected_active_power_kw', value: -2000 },
+    ]
+    const rows = powerChartRows(points, keys, anchor, nowAfterAnchor)
+    expect(rows[1].load_power_kw).toBe(0)
+    expect(rows[2].active_ess_power_kw).toBe(0)
+    expect(rows[3].grid_connected_active_power_kw).toBe(2000)
+    expect(rows[4].grid_connected_active_power_kw).toBe(-2000)
+  })
+
   it('does not cut off any buckets when anchor is a past day', () => {
     const pastAnchor = new Date(2026, 3, 30)
     const now = new Date(2026, 4, 1, 8, 0, 0)

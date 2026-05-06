@@ -3,6 +3,11 @@ import { DAY_BUCKET_MINUTES, timelineBuckets } from '../timeline'
 
 export type PowerChartRow = { time: string } & Record<string, string | number | null>
 
+// Telemetry occasionally emits absurd power spikes (sensor glitches, unit
+// mismatches upstream). Anything beyond this magnitude is clamped to 0 so a
+// single bad sample doesn't blow up the y-axis scale of the day chart.
+const DAY_POWER_ANOMALY_THRESHOLD_KW = 2000
+
 // powerChartRows aligns instantaneous power samples (kW) to the day-preset
 // 5-minute timeline. For each (bucket, metric) it keeps the sample with the
 // latest `time` (semantics matches the server `aggregation=last`). Empty
@@ -41,7 +46,12 @@ export function powerChartRows(
         continue
       }
       const hit = lastByKey.get(`${key}@${slot}`)
-      row[key] = hit ? hit.value : null
+      if (!hit) {
+        row[key] = null
+      } else {
+        row[key] =
+          Math.abs(hit.value) > DAY_POWER_ANOMALY_THRESHOLD_KW ? 0 : hit.value
+      }
     }
     return row
   })
