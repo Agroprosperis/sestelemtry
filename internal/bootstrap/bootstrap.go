@@ -26,10 +26,34 @@ func Load(configPath string) (*Runtime, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := validateDeviceMetricKeys(cfg, resolved); err != nil {
+		return nil, err
+	}
 	return &Runtime{
 		Config:   cfg,
 		Resolved: resolved,
 	}, nil
+}
+
+// validateDeviceMetricKeys ensures every per-device metric_keys whitelist
+// references a key that exists in the loaded catalog. Catching typos here
+// gives a fast, explicit startup error with the offending org+host instead
+// of silent "no samples" failures during the first poll.
+func validateDeviceMetricKeys(cfg *config.Root, resolved []registers.ResolvedEntry) error {
+	if cfg == nil {
+		return nil
+	}
+	for _, org := range cfg.Organizations {
+		for j, dev := range org.ModbusDevices {
+			if len(dev.MetricKeys) == 0 {
+				continue
+			}
+			if _, err := registers.Subset(resolved, dev.MetricKeys); err != nil {
+				return fmt.Errorf("bootstrap: org=%q modbus_devices[%d] host=%s: %w", org.ID, j, dev.Host, err)
+			}
+		}
+	}
+	return nil
 }
 
 func ApplyDatabaseURLEnv(cfg *config.Root) {

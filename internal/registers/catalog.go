@@ -3,6 +3,7 @@ package registers
 import (
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -98,6 +99,50 @@ func (c *Catalog) Resolve(holdingBase int) ([]ResolvedEntry, error) {
 		})
 	}
 	return out, nil
+}
+
+// Subset returns the entries in `all` whose MetricKey is listed in `keys`,
+// preserving the catalog ordering. It returns an error listing every key
+// that does not appear in the catalog so misconfigurations surface early.
+// An empty `keys` slice returns the input unchanged so callers can use
+// Subset(all, nil) to mean "no whitelist".
+func Subset(all []ResolvedEntry, keys []string) ([]ResolvedEntry, error) {
+	if len(keys) == 0 {
+		return all, nil
+	}
+	wanted := make(map[string]struct{}, len(keys))
+	for _, k := range keys {
+		k = strings.TrimSpace(k)
+		if k == "" {
+			continue
+		}
+		wanted[k] = struct{}{}
+	}
+	out := make([]ResolvedEntry, 0, len(wanted))
+	seen := make(map[string]struct{}, len(wanted))
+	for _, e := range all {
+		if _, ok := wanted[e.MetricKey]; !ok {
+			continue
+		}
+		out = append(out, e)
+		seen[e.MetricKey] = struct{}{}
+	}
+	if len(seen) != len(wanted) {
+		missing := make([]string, 0, len(wanted)-len(seen))
+		for k := range wanted {
+			if _, ok := seen[k]; !ok {
+				missing = append(missing, k)
+			}
+		}
+		return nil, fmt.Errorf("registers: unknown metric_keys: %s", strings.Join(sortedStrings(missing), ", "))
+	}
+	return out, nil
+}
+
+func sortedStrings(s []string) []string {
+	cp := append([]string(nil), s...)
+	sort.Strings(cp)
+	return cp
 }
 
 // Load reads a YAML catalog from path.

@@ -12,3 +12,39 @@ organizations:
       host: host.docker.internal
       port: 502
       unit_id: 99
+
+  # ZE has two SmartLoggers behind one organization id. The first device
+  # owns ESS-side metrics, the second owns PV/load metrics. Each device
+  # only polls the registers it is responsible for; samples land in
+  # telemetry_samples with organization_id=ze regardless of source.
+  - id: ze
+    name: ZE
+    poll_interval: 1s
+    modbus_devices:
+      - host: 10.28.40.102          # UZE / ESS smartlogger
+        port: 502
+        unit_id: 99
+        connect_timeout: 2s
+        request_timeout: 2s
+        metric_keys:
+          - active_ess_power_kw
+          - total_power_supply_from_grid_kwh
+          - total_energy_discharged_kwh
+          - energy_charged_day_kwh
+          - energy_discharged_day_kwh
+      - host: 10.28.40.101          # PV / load smartlogger
+        port: 502
+        unit_id: 99
+        connect_timeout: 2s
+        request_timeout: 2s
+        metric_keys:
+          - pv_energy_yield_day_kwh
+          - accumulated_pv_energy_yield_kwh
+          - accumulated_electricity_purchased_kwh
+          - accumulated_electricity_sold_kwh
+          - accumulated_power_consumption_kwh
+          - load_power_kw
+          - power_consumption_day_kwh
+          - grid_connected_active_power_kw
+          - electricity_purchased_day_kwh
+          - electricity_sold_day_kwh

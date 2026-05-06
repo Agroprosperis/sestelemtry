@@ -26,13 +26,34 @@ type Modbus struct {
 	MaxReconnectBackoff time.Duration `yaml:"max_reconnect_backoff"`
 }
 
+// ModbusDevice describes one Modbus endpoint that belongs to an
+// organization. MetricKeys is an optional whitelist that scopes which
+// catalog entries this physical device is responsible for; when empty,
+// the device polls the full register catalog.
+type ModbusDevice struct {
+	Modbus     `yaml:",inline"`
+	MetricKeys []string `yaml:"metric_keys"`
+}
+
 type Organization struct {
-	ID           string        `yaml:"id"`
-	Name         string        `yaml:"name"`
-	SiteID       string        `yaml:"site_id"`
-	DeviceID     string        `yaml:"device_id"`
-	PollInterval time.Duration `yaml:"poll_interval"`
-	Modbus       Modbus        `yaml:"modbus"`
+	ID            string         `yaml:"id"`
+	Name          string         `yaml:"name"`
+	SiteID        string         `yaml:"site_id"`
+	DeviceID      string         `yaml:"device_id"`
+	PollInterval  time.Duration  `yaml:"poll_interval"`
+	Modbus        Modbus         `yaml:"modbus"`
+	ModbusDevices []ModbusDevice `yaml:"modbus_devices"`
+}
+
+// Devices returns the effective list of Modbus endpoints for this
+// organization. Orgs with the legacy single `modbus:` block are wrapped
+// into a one-element slice so the collector can treat all configs
+// uniformly. The returned slice is never empty when validation passed.
+func (o *Organization) Devices() []ModbusDevice {
+	if len(o.ModbusDevices) > 0 {
+		return o.ModbusDevices
+	}
+	return []ModbusDevice{{Modbus: o.Modbus}}
 }
 
 type RegisterAddressing struct {
@@ -89,23 +110,16 @@ func Load(path string) (*Root, error) {
 		if o.PollInterval <= 0 {
 			o.PollInterval = 15 * time.Second
 		}
-		if o.Modbus.Port == 0 {
-			o.Modbus.Port = 502
-		}
-		if o.Modbus.UnitID == 0 {
-			o.Modbus.UnitID = 99
-		}
-		if o.Modbus.UnitID < 0 || o.Modbus.UnitID > 255 {
-			return nil, fmt.Errorf("config: org %q unit_id out of range", o.ID)
-		}
-		if o.Modbus.ConnectTimeout <= 0 {
-			o.Modbus.ConnectTimeout = 5 * time.Second
-		}
-		if o.Modbus.RequestTimeout <= 0 {
-			o.Modbus.RequestTimeout = 5 * time.Second
-		}
-		if o.Modbus.ReconnectBackoff && o.Modbus.MaxReconnectBackoff <= 0 {
-			o.Modbus.MaxReconnectBackoff = 2 * time.Minute
+		if len(o.ModbusDevices) > 0 {
+			for j := range o.ModbusDevices {
+				if err := applyModbusDefaults(&o.ModbusDevices[j].Modbus); err != nil {
+					return nil, fmt.Errorf("config: org %q modbus_devices[%d]: %w", o.ID, j, err)
+				}
+			}
+		} else {
+			if err := applyModbusDefaults(&o.Modbus); err != nil {
+				return nil, fmt.Errorf("config: org %q: %w", o.ID, err)
+			}
 		}
 	}
 	c.applyOREEDefaults()
@@ -113,6 +127,31 @@ func Load(path string) (*Root, error) {
 		return nil, err
 	}
 	return &c, nil
+}
+
+// applyModbusDefaults fills in port/unit_id/timeouts on a Modbus block
+// in place. It also rejects unit_id values outside the protocol's 0..255
+// range; everything else is normalized to a sensible default.
+func applyModbusDefaults(m *Modbus) error {
+	if m.Port == 0 {
+		m.Port = 502
+	}
+	if m.UnitID == 0 {
+		m.UnitID = 99
+	}
+	if m.UnitID < 0 || m.UnitID > 255 {
+		return fmt.Errorf("unit_id out of range: %d", m.UnitID)
+	}
+	if m.ConnectTimeout <= 0 {
+		m.ConnectTimeout = 5 * time.Second
+	}
+	if m.RequestTimeout <= 0 {
+		m.RequestTimeout = 5 * time.Second
+	}
+	if m.ReconnectBackoff && m.MaxReconnectBackoff <= 0 {
+		m.MaxReconnectBackoff = 2 * time.Minute
+	}
+	return nil
 }
 
 func (c *Root) applyOREEDefaults() {
@@ -208,8 +247,18 @@ func (c *Root) validate() error {
 			return fmt.Errorf("config: duplicate organization id %q", id)
 		}
 		seen[id] = struct{}{}
-		if strings.TrimSpace(o.Modbus.Host) == "" {
-			return fmt.Errorf("config: org %q modbus.host is required", id)
+		hasLegacy := strings.TrimSpace(o.Modbus.Host) != ""
+		hasDevices := len(o.ModbusDevices) > 0
+		if !hasLegacy && !hasDevices {
+			return fmt.Errorf("config: org %q requires modbus.host or modbus_devices", id)
+		}
+		if hasLegacy && hasDevices {
+			return fmt.Errorf("config: org %q cannot set both modbus and modbus_devices", id)
+		}
+		for j, d := range o.ModbusDevices {
+			if strings.TrimSpace(d.Host) == "" {
+				return fmt.Errorf("config: org %q modbus_devices[%d].host is required", id, j)
+			}
 		}
 	}
 	return nil

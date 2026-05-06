@@ -1,6 +1,6 @@
 import type { DashboardConfig } from '../types'
 
-export const KNOWN_ORGANIZATIONS = ['demo-org', 'pe']
+export const KNOWN_ORGANIZATIONS = ['demo-org', 'pe', 'ze']
 
 export const DASHBOARD_REFRESH_MS = 1000
 

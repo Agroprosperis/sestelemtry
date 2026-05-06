@@ -49,6 +49,43 @@ Use query param for organization:
 - Set `modbus.host: mock` for an in-process mocked Modbus source
 - `SESTELEMETRY_MAX_REGISTERS_PER_READ` can reduce FC3/FC4 batch size (1-125, default 125)
 
+## Multiple Modbus devices per organization
+
+An organization can be backed by either a single `modbus:` block (the
+legacy single-device shape) or by a list of `modbus_devices:`. Each device
+declares its own host plus an optional `metric_keys` whitelist that picks
+which catalog entries that physical box is responsible for. Samples from
+all devices are written under the same `organization_id`, so the dashboard
+keeps showing one tenant.
+
+```yaml
+organizations:
+  - id: ze
+    name: ZE
+    poll_interval: 1s
+    modbus_devices:
+      - host: 10.28.40.102            # ESS / UZE smartlogger
+        metric_keys:
+          - active_ess_power_kw
+          - energy_charged_day_kwh
+          - energy_discharged_day_kwh
+      - host: 10.28.40.101            # PV / load smartlogger
+        metric_keys:
+          - pv_energy_yield_day_kwh
+          - load_power_kw
+          - grid_connected_active_power_kw
+```
+
+Notes:
+
+- `modbus:` and `modbus_devices:` are mutually exclusive on a single org.
+- Per-device defaults (`port: 502`, `unit_id: 99`, 5s timeouts) match the
+  legacy single-modbus block, so you only set what you want to override.
+- Unknown `metric_keys` are caught at startup and produce a clear
+  `bootstrap` error naming the offending org and device host.
+- The collector spawns one goroutine and one TCP session per device;
+  device-A failures do not stall device-B.
+
 ## Day-Ahead Market collector (RDN)
 
 `dam-collector` downloads the OREE DAM XLS once per day and upserts hourly

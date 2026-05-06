@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 )
 
@@ -89,6 +90,50 @@ func TestHuaweiCatalogResolvesAllKeys(t *testing.T) {
 				prev.MetricKey, prev.PDUStart, prev.PDUEnd,
 				cur.MetricKey, cur.PDUStart, cur.PDUEnd)
 		}
+	}
+}
+
+func TestSubsetFiltersAndPreservesOrder(t *testing.T) {
+	all := []ResolvedEntry{
+		{Entry: Entry{MetricKey: "a"}},
+		{Entry: Entry{MetricKey: "b"}},
+		{Entry: Entry{MetricKey: "c"}},
+		{Entry: Entry{MetricKey: "d"}},
+	}
+	got, err := Subset(all, []string{"c", "a"})
+	if err != nil {
+		t.Fatalf("Subset error: %v", err)
+	}
+	if len(got) != 2 || got[0].MetricKey != "a" || got[1].MetricKey != "c" {
+		t.Fatalf("unexpected subset result: %+v", got)
+	}
+}
+
+func TestSubsetEmptyKeysReturnsAll(t *testing.T) {
+	all := []ResolvedEntry{
+		{Entry: Entry{MetricKey: "a"}},
+		{Entry: Entry{MetricKey: "b"}},
+	}
+	got, err := Subset(all, nil)
+	if err != nil {
+		t.Fatalf("Subset error: %v", err)
+	}
+	if len(got) != len(all) {
+		t.Fatalf("expected pass-through, got %d entries", len(got))
+	}
+}
+
+func TestSubsetUnknownKeyError(t *testing.T) {
+	all := []ResolvedEntry{
+		{Entry: Entry{MetricKey: "a"}},
+	}
+	_, err := Subset(all, []string{"a", "missing", "also_missing"})
+	if err == nil {
+		t.Fatal("expected error for unknown keys")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "missing") || !strings.Contains(msg, "also_missing") {
+		t.Fatalf("error should list both missing keys: %v", err)
 	}
 }
 

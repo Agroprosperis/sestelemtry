@@ -29,6 +29,34 @@ organizations:
       port: 502
       unit_id: 99
 
+  # An organization can also be backed by several Modbus devices. Each
+  # device declares a `metric_keys` whitelist that selects which catalog
+  # entries it owns; samples are written under the same organization_id.
+  # Use this when the physical site splits e.g. ESS and PV across two
+  # SmartLoggers but should appear as one org on the dashboard.
+  - id: multi-tenant
+    name: Multi-device tenant
+    poll_interval: 1s
+    modbus_devices:
+      - host: 10.0.0.30
+        port: 502
+        unit_id: 99
+        connect_timeout: 2s
+        request_timeout: 2s
+        metric_keys:
+          - active_ess_power_kw
+          - energy_charged_day_kwh
+          - energy_discharged_day_kwh
+      - host: 10.0.0.31
+        port: 502
+        unit_id: 99
+        connect_timeout: 2s
+        request_timeout: 2s
+        metric_keys:
+          - pv_energy_yield_day_kwh
+          - load_power_kw
+          - grid_connected_active_power_kw
+
 # Day-Ahead Market (RDN) prices from oree.com.ua (consumed by dam-collector).
 # Set enabled: false to skip running the dam-collector against this config.
 oree:

@@ -144,6 +144,141 @@ func TestParseRunAt(t *testing.T) {
 	}
 }
 
+func TestLoadParsesModbusDevices(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	content := `register_catalog: registers/huawei_smartlogger.yaml
+organizations:
+  - id: ze
+    poll_interval: 1s
+    modbus_devices:
+      - host: 10.0.0.1
+        metric_keys:
+          - a
+          - b
+      - host: 10.0.0.2
+        port: 1502
+        unit_id: 7
+        connect_timeout: 3s
+        request_timeout: 4s
+        metric_keys:
+          - c
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load error: %v", err)
+	}
+	org := cfg.Organizations[0]
+	if len(org.ModbusDevices) != 2 {
+		t.Fatalf("expected 2 modbus_devices, got %d", len(org.ModbusDevices))
+	}
+	d0 := org.ModbusDevices[0]
+	if d0.Host != "10.0.0.1" || d0.Port != 502 || d0.UnitID != 99 {
+		t.Fatalf("device 0 defaults wrong: %+v", d0)
+	}
+	if d0.ConnectTimeout != 5*time.Second || d0.RequestTimeout != 5*time.Second {
+		t.Fatalf("device 0 timeout defaults wrong: %+v", d0)
+	}
+	if len(d0.MetricKeys) != 2 || d0.MetricKeys[0] != "a" || d0.MetricKeys[1] != "b" {
+		t.Fatalf("device 0 metric_keys wrong: %+v", d0.MetricKeys)
+	}
+	d1 := org.ModbusDevices[1]
+	if d1.Port != 1502 || d1.UnitID != 7 || d1.ConnectTimeout != 3*time.Second || d1.RequestTimeout != 4*time.Second {
+		t.Fatalf("device 1 explicit fields wrong: %+v", d1)
+	}
+
+	devices := org.Devices()
+	if len(devices) != 2 || devices[0].Host != "10.0.0.1" || devices[1].Host != "10.0.0.2" {
+		t.Fatalf("Devices() returned wrong slice: %+v", devices)
+	}
+}
+
+func TestDevicesLegacyFallback(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	content := `register_catalog: registers/huawei_smartlogger.yaml
+organizations:
+  - id: pe
+    modbus:
+      host: 192.168.0.10
+      port: 1502
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load error: %v", err)
+	}
+	devices := cfg.Organizations[0].Devices()
+	if len(devices) != 1 {
+		t.Fatalf("expected 1 device, got %d", len(devices))
+	}
+	if devices[0].Host != "192.168.0.10" || devices[0].Port != 1502 || devices[0].UnitID != 99 {
+		t.Fatalf("legacy device fallback wrong: %+v", devices[0])
+	}
+	if len(devices[0].MetricKeys) != 0 {
+		t.Fatalf("legacy device should have no metric_keys whitelist")
+	}
+}
+
+func TestLoadRejectsBothModbusAndDevices(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	content := `register_catalog: registers/huawei_smartlogger.yaml
+organizations:
+  - id: bad
+    modbus:
+      host: 10.0.0.1
+    modbus_devices:
+      - host: 10.0.0.2
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err == nil {
+		t.Fatal("expected error when both modbus and modbus_devices are set")
+	}
+}
+
+func TestLoadRejectsMissingHostInDevice(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	content := `register_catalog: registers/huawei_smartlogger.yaml
+organizations:
+  - id: bad
+    modbus_devices:
+      - port: 502
+        metric_keys:
+          - a
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err == nil {
+		t.Fatal("expected error when modbus_devices entry has no host")
+	}
+}
+
+func TestLoadRejectsNoModbusAtAll(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	content := `register_catalog: registers/huawei_smartlogger.yaml
+organizations:
+  - id: bad
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err == nil {
+		t.Fatal("expected error when org has neither modbus nor modbus_devices")
+	}
+}
+
 func TestLoadRejectsDuplicateOrgID(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")

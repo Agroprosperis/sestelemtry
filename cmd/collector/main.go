@@ -68,8 +68,7 @@ func main() {
 		log.Warn("db_caggs", "err", err)
 	}
 
-	chunks := modbusclient.PlanChunks(resolved)
-	log.Info("collector_start", "orgs", len(cfg.Organizations), "metrics", len(resolved), "modbus_reads", len(chunks))
+	log.Info("collector_start", "orgs", len(cfg.Organizations), "metrics", len(resolved))
 
 	var wg sync.WaitGroup
 	for _, org := range cfg.Organizations {
@@ -77,23 +76,67 @@ func main() {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			runOrg(ctx, log, cfg, org, resolved, chunks, pool)
+			runOrg(ctx, log, cfg, org, resolved, pool)
 		}()
 	}
 	wg.Wait()
 	log.Info("collector_stop")
 }
 
+// dialFunc is a package-level seam so tests can stub Dial without spinning
+// up a real Modbus listener.
+var dialFunc = modbusclient.Dial
+
+// runOrg spawns one goroutine per Modbus device declared on the organization.
+// Single-device orgs (legacy `modbus:` block) get a one-element device slice
+// from `org.Devices()`, so the call site stays identical for both shapes.
 func runOrg(
 	ctx context.Context,
 	log *slog.Logger,
 	cfg *config.Root,
 	org config.Organization,
 	resolved []registers.ResolvedEntry,
-	chunks []modbusclient.ReadChunk,
 	pool *pgxpool.Pool,
 ) {
-	log = log.With("organization_id", org.ID)
+	devices := org.Devices()
+	var wg sync.WaitGroup
+	for i, dev := range devices {
+		dev := dev
+		i := i
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			runDevice(ctx, log, cfg, org, dev, i, resolved, pool)
+		}()
+	}
+	wg.Wait()
+}
+
+// runDevice is the per-device polling loop. It filters the global resolved
+// catalog down to the device's `metric_keys` whitelist, plans its own
+// Modbus read chunks, and maintains a single TCP session to the device.
+// Each device is otherwise independent: dial failures, backoff, and
+// per-poll timeouts are scoped to that device.
+func runDevice(
+	ctx context.Context,
+	log *slog.Logger,
+	cfg *config.Root,
+	org config.Organization,
+	dev config.ModbusDevice,
+	devIndex int,
+	resolvedAll []registers.ResolvedEntry,
+	pool *pgxpool.Pool,
+) {
+	log = log.With("organization_id", org.ID, "device_host", dev.Host, "device_index", devIndex)
+
+	resolved, err := registers.Subset(resolvedAll, dev.MetricKeys)
+	if err != nil {
+		log.Error("device_subset", "err", err)
+		return
+	}
+	chunks := modbusclient.PlanChunks(resolved)
+	log.Info("device_start", "metrics", len(resolved), "modbus_reads", len(chunks))
+
 	t := time.NewTicker(org.PollInterval)
 	defer t.Stop()
 
@@ -107,13 +150,13 @@ func runOrg(
 
 	for {
 		if sess == nil {
-			s, err := modbusclient.Dial(ctx, dialTargetForOrg(org))
+			s, err := dialFunc(ctx, dialTargetForDevice(dev))
 			if err != nil {
 				if errors.Is(err, context.Canceled) {
 					return
 				}
 				dialFailures++
-				wait := reconnectWait(org, dialFailures)
+				wait := reconnectWait(org, dev, dialFailures)
 				log.Error("modbus_dial", "err", err, "retry_in", wait.String())
 				select {
 				case <-ctx.Done():
@@ -126,7 +169,7 @@ func runOrg(
 			dialFailures = 0
 		}
 
-		if err := pollAndStore(ctx, log, cfg, org, sess, resolved, chunks, pool); err != nil {
+		if err := pollAndStore(ctx, log, cfg, org, dev, sess, resolved, chunks, pool); err != nil {
 			if errors.Is(err, context.Canceled) {
 				return
 			}
@@ -148,12 +191,13 @@ func pollAndStore(
 	log *slog.Logger,
 	cfg *config.Root,
 	org config.Organization,
+	dev config.ModbusDevice,
 	sess modbusReader,
 	resolved []registers.ResolvedEntry,
 	chunks []modbusclient.ReadChunk,
 	pool *pgxpool.Pool,
 ) error {
-	readCtx, cancel := context.WithTimeout(ctx, readBudgetForPoll(org.Modbus.RequestTimeout, len(chunks)))
+	readCtx, cancel := context.WithTimeout(ctx, readBudgetForPoll(dev.RequestTimeout, len(chunks)))
 	defer cancel()
 
 	data, err := readChunkData(readCtx, cfg.ModbusRegisterMap, sess, chunks)
@@ -246,25 +290,25 @@ func labelsForOrg(org config.Organization) map[string]string {
 	return labels
 }
 
-func dialTargetForOrg(org config.Organization) modbusclient.DialTarget {
+func dialTargetForDevice(dev config.ModbusDevice) modbusclient.DialTarget {
 	return modbusclient.DialTarget{
-		Host:           org.Modbus.Host,
-		Port:           org.Modbus.Port,
-		UnitID:         org.Modbus.UnitID,
-		ConnectTimeout: org.Modbus.ConnectTimeout,
-		RequestTimeout: org.Modbus.RequestTimeout,
+		Host:           dev.Host,
+		Port:           dev.Port,
+		UnitID:         dev.UnitID,
+		ConnectTimeout: dev.ConnectTimeout,
+		RequestTimeout: dev.RequestTimeout,
 	}
 }
 
-func reconnectWait(org config.Organization, attempt int) time.Duration {
+func reconnectWait(org config.Organization, dev config.ModbusDevice, attempt int) time.Duration {
 	wait := org.PollInterval
 	if wait <= 0 {
 		wait = time.Second
 	}
-	if !org.Modbus.ReconnectBackoff || attempt <= 1 {
+	if !dev.ReconnectBackoff || attempt <= 1 {
 		return wait
 	}
-	maxWait := org.Modbus.MaxReconnectBackoff
+	maxWait := dev.MaxReconnectBackoff
 	if maxWait <= 0 {
 		maxWait = 2 * time.Minute
 	}
