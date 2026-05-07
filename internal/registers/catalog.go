@@ -24,26 +24,6 @@ const (
 	DTUint64 DataType = "UINT64"
 )
 
-// PollMode selects which collector ticker reads this register.
-//
-//   - PollFast (default for unset / empty): every fast tick
-//     (`organization.poll_interval`, typically 1s). The dashboard,
-//     accumulator deltas, and live energy-flow calculation depend on
-//     this cadence.
-//   - PollSlow: a separate slow ticker (typically 30-60s). Diagnostics
-//     registers (timezone offset, DST flags, device local time, SOC
-//     refresh) live here so we don't burn fast-tick budget on values
-//     that change rarely.
-//
-// Entries with no `poll_mode` keep the legacy behaviour and resolve to
-// PollFast, so existing catalogs don't need migration.
-type PollMode string
-
-const (
-	PollFast PollMode = "fast"
-	PollSlow PollMode = "slow"
-)
-
 // Entry is one logical metric in the catalog.
 type Entry struct {
 	MetricKey string   `yaml:"metric_key"`
@@ -53,23 +33,6 @@ type Entry struct {
 	SwapType  SwapType `yaml:"swap_type"`
 	Gain      float64  `yaml:"gain"`
 	Offset    float64  `yaml:"offset"`
-	// PollMode is optional. Empty / unrecognized value is treated as PollFast
-	// by EffectivePollMode so the legacy "everything every tick" behaviour
-	// is preserved for catalogs that don't set the field.
-	PollMode PollMode `yaml:"poll_mode"`
-}
-
-// EffectivePollMode returns PollFast when the entry leaves PollMode unset
-// or sets an unknown value. The collector relies on this so it can split
-// resolved entries into fast and slow batches without crashing on a stray
-// value from the YAML.
-func (e Entry) EffectivePollMode() PollMode {
-	switch e.PollMode {
-	case PollSlow:
-		return PollSlow
-	default:
-		return PollFast
-	}
 }
 
 // Catalog is the full register map plus addressing defaults.
@@ -174,19 +137,6 @@ func Subset(all []ResolvedEntry, keys []string) ([]ResolvedEntry, error) {
 		return nil, fmt.Errorf("registers: unknown metric_keys: %s", strings.Join(sortedStrings(missing), ", "))
 	}
 	return out, nil
-}
-
-// FilterByMode returns the entries whose effective poll_mode equals mode,
-// preserving the input ordering. Used by the collector to split a
-// device's resolved catalog into fast and slow read batches.
-func FilterByMode(all []ResolvedEntry, mode PollMode) []ResolvedEntry {
-	out := make([]ResolvedEntry, 0, len(all))
-	for _, e := range all {
-		if e.EffectivePollMode() == mode {
-			out = append(out, e)
-		}
-	}
-	return out
 }
 
 func sortedStrings(s []string) []string {

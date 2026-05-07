@@ -20,26 +20,13 @@ organizations:
   - id: ze
     name: ZE
     poll_interval: 1s
-    # Energy-flow calculator: derives ess_to_grid / ess_to_load /
-    # pv_to_ess / grid_to_ess from per-second deltas of the
-    # accumulator counters of both SmartLoggers and writes them to
-    # the energy_flows hypertable. Defaults match the spec
-    # ("ТЗ для агента: розрахунок потоків енергії УЗЕ").
-    energy_flow:
-      enabled: true
     modbus_devices:
       - host: 10.28.40.102          # UZE / ESS smartlogger
-        role: ess
         port: 502
         unit_id: 99
         connect_timeout: 2s
         request_timeout: 2s
         metric_keys:
-          - device_epoch_seconds
-          - device_timezone_offset_seconds
-          - device_dst_state
-          - device_dst_offset_minutes
-          - device_local_epoch_seconds
           - active_ess_power_kw
           - power_supply_from_grid_day_kwh
           - total_power_supply_from_grid_kwh
@@ -49,17 +36,11 @@ organizations:
           - total_energy_discharged_kwh
           - soc_percent
       - host: 10.28.40.101          # PV / load smartlogger
-        role: pv
         port: 502
         unit_id: 99
         connect_timeout: 2s
         request_timeout: 2s
         metric_keys:
-          - device_epoch_seconds
-          - device_timezone_offset_seconds
-          - device_dst_state
-          - device_dst_offset_minutes
-          - device_local_epoch_seconds
           - active_pv_power_kw
           - pv_energy_yield_day_kwh
           - accumulated_pv_energy_yield_kwh
