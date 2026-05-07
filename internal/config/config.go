@@ -26,13 +26,43 @@ type Modbus struct {
 	MaxReconnectBackoff time.Duration `yaml:"max_reconnect_backoff"`
 }
 
+// DeviceRole declares the logical place this Modbus endpoint occupies
+// in the energy chain. The energy-flow calculator (per-org goroutine in
+// the collector) routes register values to either the PV or the ESS
+// side of `EnergySample` based on this hint.
+//
+// Empty / unset is fine for legacy single-modbus organizations and for
+// tenants that don't enable the energy-flow calculator. Only the
+// energy_flow path requires both `RolePV` and `RoleESS` to be present
+// across the org's devices.
+type DeviceRole string
+
+const (
+	RolePV  DeviceRole = "pv"
+	RoleESS DeviceRole = "ess"
+)
+
 // ModbusDevice describes one Modbus endpoint that belongs to an
 // organization. MetricKeys is an optional whitelist that scopes which
 // catalog entries this physical device is responsible for; when empty,
 // the device polls the full register catalog.
 type ModbusDevice struct {
 	Modbus     `yaml:",inline"`
-	MetricKeys []string `yaml:"metric_keys"`
+	Role       DeviceRole `yaml:"role"`
+	MetricKeys []string   `yaml:"metric_keys"`
+}
+
+// EnergyFlow opts toggle the per-org energy-flow calculator. Defaults
+// match the recommended values from the technical spec ("ТЗ для агента:
+// розрахунок потоків енергії УЗЕ"); only `Enabled` is mandatory.
+type EnergyFlow struct {
+	Enabled                  bool          `yaml:"enabled"`
+	EssDischargeSign         int           `yaml:"ess_discharge_sign"`
+	MaxGapSeconds            int           `yaml:"max_gap_seconds"`
+	MaxDeviceTimeSkewSeconds int           `yaml:"max_device_time_skew_seconds"`
+	BalanceToleranceKwh      float64       `yaml:"balance_tolerance_kwh"`
+	SlowPollInterval         time.Duration `yaml:"slow_poll_interval"`
+	ActivePvPowerAddress     int           `yaml:"active_pv_power_address"`
 }
 
 type Organization struct {
@@ -43,6 +73,7 @@ type Organization struct {
 	PollInterval  time.Duration  `yaml:"poll_interval"`
 	Modbus        Modbus         `yaml:"modbus"`
 	ModbusDevices []ModbusDevice `yaml:"modbus_devices"`
+	EnergyFlow    EnergyFlow     `yaml:"energy_flow"`
 }
 
 // Devices returns the effective list of Modbus endpoints for this
@@ -115,11 +146,18 @@ func Load(path string) (*Root, error) {
 				if err := applyModbusDefaults(&o.ModbusDevices[j].Modbus); err != nil {
 					return nil, fmt.Errorf("config: org %q modbus_devices[%d]: %w", o.ID, j, err)
 				}
+				if err := validateRole(o.ModbusDevices[j].Role); err != nil {
+					return nil, fmt.Errorf("config: org %q modbus_devices[%d]: %w", o.ID, j, err)
+				}
 			}
 		} else {
 			if err := applyModbusDefaults(&o.Modbus); err != nil {
 				return nil, fmt.Errorf("config: org %q: %w", o.ID, err)
 			}
+		}
+		applyEnergyFlowDefaults(&o.EnergyFlow)
+		if err := validateEnergyFlow(o); err != nil {
+			return nil, fmt.Errorf("config: org %q: %w", o.ID, err)
 		}
 	}
 	c.applyOREEDefaults()
@@ -150,6 +188,73 @@ func applyModbusDefaults(m *Modbus) error {
 	}
 	if m.ReconnectBackoff && m.MaxReconnectBackoff <= 0 {
 		m.MaxReconnectBackoff = 2 * time.Minute
+	}
+	return nil
+}
+
+// validateRole rejects an unknown role string. Empty role is allowed —
+// it just keeps the device out of the energy-flow calculator.
+func validateRole(r DeviceRole) error {
+	switch r {
+	case "", RolePV, RoleESS:
+		return nil
+	default:
+		return fmt.Errorf("role must be empty, %q or %q (got %q)", RolePV, RoleESS, r)
+	}
+}
+
+// applyEnergyFlowDefaults fills in spec-recommended values when the
+// operator leaves them unset. Always called, but the resulting block
+// only takes effect when `Enabled` is true.
+func applyEnergyFlowDefaults(ef *EnergyFlow) {
+	if ef.EssDischargeSign == 0 {
+		ef.EssDischargeSign = 1
+	}
+	if ef.MaxGapSeconds == 0 {
+		ef.MaxGapSeconds = 5
+	}
+	if ef.MaxDeviceTimeSkewSeconds == 0 {
+		ef.MaxDeviceTimeSkewSeconds = 2
+	}
+	if ef.BalanceToleranceKwh == 0 {
+		ef.BalanceToleranceKwh = 0.1
+	}
+	if ef.SlowPollInterval <= 0 {
+		ef.SlowPollInterval = 30 * time.Second
+	}
+	if ef.ActivePvPowerAddress == 0 {
+		ef.ActivePvPowerAddress = 440388
+	}
+}
+
+// validateEnergyFlow enforces sanity for an energy-flow-enabled org:
+// `ess_discharge_sign` must be ±1, and the org must have exactly one
+// `pv` and one `ess` modbus_device. Disabled orgs (default) skip every
+// check, so legacy configs are unaffected.
+func validateEnergyFlow(o *Organization) error {
+	ef := &o.EnergyFlow
+	if !ef.Enabled {
+		return nil
+	}
+	if ef.EssDischargeSign != 1 && ef.EssDischargeSign != -1 {
+		return fmt.Errorf("energy_flow.ess_discharge_sign must be 1 or -1 (got %d)", ef.EssDischargeSign)
+	}
+	if ef.MaxGapSeconds <= 0 {
+		return fmt.Errorf("energy_flow.max_gap_seconds must be > 0")
+	}
+	if ef.MaxDeviceTimeSkewSeconds < 0 {
+		return fmt.Errorf("energy_flow.max_device_time_skew_seconds must be >= 0")
+	}
+	if ef.BalanceToleranceKwh < 0 {
+		return fmt.Errorf("energy_flow.balance_tolerance_kwh must be >= 0")
+	}
+	roles := map[DeviceRole]int{}
+	for _, d := range o.ModbusDevices {
+		roles[d.Role]++
+	}
+	if roles[RolePV] != 1 || roles[RoleESS] != 1 {
+		return fmt.Errorf("energy_flow.enabled requires exactly one device with role=%q and one with role=%q (got pv=%d ess=%d)",
+			RolePV, RoleESS, roles[RolePV], roles[RoleESS])
 	}
 	return nil
 }

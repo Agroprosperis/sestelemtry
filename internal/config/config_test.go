@@ -279,6 +279,128 @@ organizations:
 	}
 }
 
+func TestLoadEnergyFlowDefaults(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	content := `register_catalog: registers/huawei_smartlogger.yaml
+organizations:
+  - id: ze
+    poll_interval: 1s
+    energy_flow:
+      enabled: true
+    modbus_devices:
+      - host: 10.28.40.101
+        role: pv
+        metric_keys: [a]
+      - host: 10.28.40.102
+        role: ess
+        metric_keys: [b]
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load error: %v", err)
+	}
+	ef := cfg.Organizations[0].EnergyFlow
+	if !ef.Enabled {
+		t.Fatal("Enabled should be true")
+	}
+	if ef.EssDischargeSign != 1 {
+		t.Fatalf("EssDischargeSign default: %d", ef.EssDischargeSign)
+	}
+	if ef.MaxGapSeconds != 5 {
+		t.Fatalf("MaxGapSeconds default: %d", ef.MaxGapSeconds)
+	}
+	if ef.MaxDeviceTimeSkewSeconds != 2 {
+		t.Fatalf("MaxDeviceTimeSkewSeconds default: %d", ef.MaxDeviceTimeSkewSeconds)
+	}
+	if ef.BalanceToleranceKwh != 0.1 {
+		t.Fatalf("BalanceToleranceKwh default: %v", ef.BalanceToleranceKwh)
+	}
+	if ef.SlowPollInterval != 30*time.Second {
+		t.Fatalf("SlowPollInterval default: %v", ef.SlowPollInterval)
+	}
+	if ef.ActivePvPowerAddress != 440388 {
+		t.Fatalf("ActivePvPowerAddress default: %d", ef.ActivePvPowerAddress)
+	}
+	devs := cfg.Organizations[0].ModbusDevices
+	if devs[0].Role != RolePV || devs[1].Role != RoleESS {
+		t.Fatalf("device roles wrong: %q %q", devs[0].Role, devs[1].Role)
+	}
+}
+
+func TestLoadEnergyFlowRejectsMissingRole(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	content := `register_catalog: registers/huawei_smartlogger.yaml
+organizations:
+  - id: ze
+    poll_interval: 1s
+    energy_flow:
+      enabled: true
+    modbus_devices:
+      - host: 10.0.0.1
+        metric_keys: [a]
+      - host: 10.0.0.2
+        role: ess
+        metric_keys: [b]
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err == nil {
+		t.Fatal("expected error: missing pv role")
+	}
+}
+
+func TestLoadEnergyFlowRejectsBadSign(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	content := `register_catalog: registers/huawei_smartlogger.yaml
+organizations:
+  - id: ze
+    poll_interval: 1s
+    energy_flow:
+      enabled: true
+      ess_discharge_sign: 2
+    modbus_devices:
+      - host: 10.0.0.1
+        role: pv
+        metric_keys: [a]
+      - host: 10.0.0.2
+        role: ess
+        metric_keys: [b]
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err == nil {
+		t.Fatal("expected error: ess_discharge_sign must be ±1")
+	}
+}
+
+func TestLoadRejectsUnknownRole(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	content := `register_catalog: registers/huawei_smartlogger.yaml
+organizations:
+  - id: ze
+    poll_interval: 1s
+    modbus_devices:
+      - host: 10.0.0.1
+        role: weird
+        metric_keys: [a]
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err == nil {
+		t.Fatal("expected error: unknown role")
+	}
+}
+
 func TestLoadRejectsDuplicateOrgID(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")

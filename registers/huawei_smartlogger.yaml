@@ -4,6 +4,55 @@ addressing:
   holding_address_base: 0
 
 registers:
+  # Service / time-sync registers used by the energy-flow calculator
+  # (internal/energyflow). They're optional by default — devices that
+  # don't list them in their `metric_keys` whitelist won't read them, so
+  # legacy SmartLoggers behave exactly as before.
+  - metric_key: device_epoch_seconds
+    name: Date&Time (UTC epoch seconds)
+    address: 40000
+    data_type: UINT32
+    swap_type: ABCD_BE
+    gain: 1
+    offset: 0
+    poll_mode: fast
+
+  - metric_key: device_timezone_offset_seconds
+    name: Time Zone offset, seconds
+    address: 40005
+    data_type: INT32
+    swap_type: ABCD_BE
+    gain: 1
+    offset: 0
+    poll_mode: slow
+
+  - metric_key: device_dst_state
+    name: DST state
+    address: 40007
+    data_type: UINT16
+    swap_type: ABCD_BE
+    gain: 1
+    offset: 0
+    poll_mode: slow
+
+  - metric_key: device_dst_offset_minutes
+    name: DST offset, minutes
+    address: 40008
+    data_type: UINT16
+    swap_type: ABCD_BE
+    gain: 1
+    offset: 0
+    poll_mode: slow
+
+  - metric_key: device_local_epoch_seconds
+    name: Local time (epoch seconds)
+    address: 40009
+    data_type: UINT32
+    swap_type: ABCD_BE
+    gain: 1
+    offset: 0
+    poll_mode: slow
+
   - metric_key: active_pv_power_kw
     name: Active PV power, kW
     address: 40388
