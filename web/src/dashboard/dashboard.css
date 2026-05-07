@@ -522,6 +522,32 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  background: none;
+  border: 0;
+  padding: 2px 6px;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: opacity 120ms ease, background-color 120ms ease;
+}
+
+.chart-legend-item:hover {
+  background-color: rgba(148, 163, 184, 0.18);
+}
+
+.chart-legend-item:focus-visible {
+  outline: 2px solid #6366f1;
+  outline-offset: 2px;
+}
+
+.chart-legend-item--hidden {
+  opacity: 0.45;
+}
+
+.chart-legend-item--hidden .chart-legend-label {
+  text-decoration: line-through;
 }
 
 .chart-legend-swatch {

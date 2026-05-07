@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import {
   Area,
   Bar,
@@ -128,6 +128,20 @@ export function EnergyChart({
   )
   const tickInterval = xAxisInterval(preset)
 
+  // Track which day-chart series the user has temporarily hidden by
+  // clicking the corresponding legend item. State lives on the chart so
+  // it survives re-renders triggered by data refetches but resets on
+  // unmount (preset change).
+  const [hiddenSeries, setHiddenSeries] = useState<Set<string>>(() => new Set())
+  const toggleSeries = useCallback((id: string) => {
+    setHiddenSeries((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }, [])
+
   // Day preset draws three instantaneous power lines (kW snapshots from
   // powerSeries) plus the DAM price hourly bands, the SOC band overlay, and
   // hourly PV forecast bars. We merge the price/SOC/forecast values onto
@@ -203,15 +217,26 @@ export function EnergyChart({
   const renderDayLegend = useCallback(
     () => (
       <ul className="chart-legend">
-        {dayLegendItems.map((item) => (
-          <li key={item.id} className="chart-legend-item">
-            <span className="chart-legend-swatch" style={{ background: item.color }} />
-            <span>{item.label}</span>
-          </li>
-        ))}
+        {dayLegendItems.map((item) => {
+          const hidden = hiddenSeries.has(item.id)
+          return (
+            <li key={item.id}>
+              <button
+                type="button"
+                className={`chart-legend-item${hidden ? ' chart-legend-item--hidden' : ''}`}
+                aria-pressed={hidden}
+                title={hidden ? 'Показати' : 'Сховати'}
+                onClick={() => toggleSeries(item.id)}
+              >
+                <span className="chart-legend-swatch" style={{ background: item.color }} />
+                <span className="chart-legend-label">{item.label}</span>
+              </button>
+            </li>
+          )
+        })}
       </ul>
     ),
-    [dayLegendItems],
+    [dayLegendItems, hiddenSeries, toggleSeries],
   )
 
   const dayTickFormatter = useCallback((v: unknown): string => {
@@ -269,7 +294,7 @@ export function EnergyChart({
                   cursor={{ stroke: '#94a3b8', strokeDasharray: '3 3' }}
                 />
                 <Legend content={renderDayLegend} wrapperStyle={{ fontSize: 12 }} />
-                {hasSoc && (
+                {hasSoc && !hiddenSeries.has(SOC_KEY) && (
                   <Area
                     yAxisId="soc"
                     type="monotone"
@@ -282,27 +307,28 @@ export function EnergyChart({
                     connectNulls
                   />
                 )}
-                {hourlyAreas.map((a, i) => (
-                  <ReferenceArea
-                    key={`dam-${i}`}
-                    yAxisId="price"
-                    x1={a.x1}
-                    x2={a.x2}
-                    y1={0}
-                    y2={a.price}
-                    fill={DAM_PRICE_COLOR}
-                    fillOpacity={0.18}
-                    stroke="none"
-                    ifOverflow="visible"
-                    label={{
-                      value: (a.price / 1000).toFixed(1),
-                      position: 'insideTop',
-                      fill: DAM_PRICE_COLOR,
-                      fontSize: 11,
-                      fontWeight: 600,
-                    }}
-                  />
-                ))}
+                {!hiddenSeries.has(DAM_PRICE_KEY) &&
+                  hourlyAreas.map((a, i) => (
+                    <ReferenceArea
+                      key={`dam-${i}`}
+                      yAxisId="price"
+                      x1={a.x1}
+                      x2={a.x2}
+                      y1={0}
+                      y2={a.price}
+                      fill={DAM_PRICE_COLOR}
+                      fillOpacity={0.18}
+                      stroke="none"
+                      ifOverflow="visible"
+                      label={{
+                        value: (a.price / 1000).toFixed(1),
+                        position: 'insideTop',
+                        fill: DAM_PRICE_COLOR,
+                        fontSize: 11,
+                        fontWeight: 600,
+                      }}
+                    />
+                  ))}
                 <ReferenceLine y={0} yAxisId="power" stroke="#64748b" />
                 {DAY_POWER_METRIC_KEYS.map((key) => {
                   const color = dayPowerColor(key)
@@ -320,11 +346,12 @@ export function EnergyChart({
                       baseValue={0}
                       dot={false}
                       connectNulls={false}
+                      hide={hiddenSeries.has(key)}
                       isAnimationActive={false}
                     />
                   )
                 })}
-                {hasPvForecast && (
+                {hasPvForecast && !hiddenSeries.has(PV_FORECAST_KEY) && (
                   <Line
                     yAxisId="power"
                     type="monotone"
@@ -351,6 +378,7 @@ export function EnergyChart({
                   fill={DAM_PRICE_COLOR}
                   fillOpacity={0}
                   stroke="none"
+                  hide={hiddenSeries.has(DAM_PRICE_KEY)}
                   isAnimationActive={false}
                 />
               </ComposedChart>
