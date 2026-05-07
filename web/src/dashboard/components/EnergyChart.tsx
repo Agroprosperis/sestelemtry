@@ -6,6 +6,7 @@ import {
   CartesianGrid,
   ComposedChart,
   Legend,
+  Line,
   ReferenceArea,
   ReferenceLine,
   ResponsiveContainer,
@@ -48,13 +49,12 @@ const SOC_KEY = 'soc_percent'
 const SOC_COLOR = '#a855f7'
 const SOC_LABEL = 'SOC'
 // PV_FORECAST_KEY is the dataKey used to attach hourly forecast values onto
-// the day-chart rows (one non-null sample per hour, at the HH:30 bucket so
-// the bar renders centered between hour gridlines).
+// the day-chart rows. We anchor one non-null sample per hour at the HH:30
+// bucket and let recharts' `connectNulls` smooth the line through them.
 const PV_FORECAST_KEY = 'planned_ac_kw'
 const PV_FORECAST_LABEL = 'Прогноз СЕС'
 // 5-min buckets, so HH:30 is index 6 within each 12-bucket hour.
 const PV_FORECAST_BUCKET_OFFSET = 6
-const PV_FORECAST_BAR_SIZE = 28
 
 // Day preset uses 5-minute buckets (288 per day); show every 12th tick so
 // labels land on the hour and the axis stays readable.
@@ -304,18 +304,6 @@ export function EnergyChart({
                   />
                 ))}
                 <ReferenceLine y={0} yAxisId="power" stroke="#64748b" />
-                {hasPvForecast && (
-                  <Bar
-                    yAxisId="power"
-                    dataKey={PV_FORECAST_KEY}
-                    name={PV_FORECAST_LABEL}
-                    fill={PV_FORECAST_COLOR}
-                    fillOpacity={0.45}
-                    stroke="none"
-                    barSize={PV_FORECAST_BAR_SIZE}
-                    isAnimationActive={false}
-                  />
-                )}
                 {DAY_POWER_METRIC_KEYS.map((key) => {
                   const color = dayPowerColor(key)
                   return (
@@ -336,6 +324,21 @@ export function EnergyChart({
                     />
                   )
                 })}
+                {hasPvForecast && (
+                  <Line
+                    yAxisId="power"
+                    type="monotone"
+                    dataKey={PV_FORECAST_KEY}
+                    name={PV_FORECAST_LABEL}
+                    stroke={PV_FORECAST_COLOR}
+                    strokeWidth={2}
+                    strokeDasharray="5 4"
+                    dot={{ r: 3, fill: PV_FORECAST_COLOR, stroke: PV_FORECAST_COLOR }}
+                    activeDot={{ r: 4 }}
+                    connectNulls
+                    isAnimationActive={false}
+                  />
+                )}
                 {/* Invisible bar exists only so recharts can hit-test the
                     DAM price for the tooltip; it draws zero pixels because
                     ReferenceArea above already paints the hourly band. The
