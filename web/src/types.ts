@@ -54,3 +54,26 @@ export type DAMPricesResponse = {
   to: string
   prices: DAMPrice[]
 }
+
+// PvForecastPoint mirrors a single record returned by the n8n PV forecast
+// webhook. Each record describes one panel orientation × one hour-of-day in
+// local Kyiv time (the n8n flow already converts from UTC). For a single
+// elevator with N orientations this means up to N × 24 records per day.
+export type PvForecastPoint = {
+  elevator_code: string
+  orientation_idx: number
+  // hour_ending is 1..24, where 1 means the period 00:00–01:00 and 24 means
+  // 23:00–24:00. Hour-start = hour_ending - 1.
+  hour_ending: number
+  interval_start_local: string
+  gti_weighted_wm2: number
+  pdc_total_kwp: number
+  pac_limit_kw: number
+  planned_dc_kw: number
+  planned_ac_kw: number
+  planned_kwh: number
+  clip_loss_kwh: number
+  temperature_2m_c: number
+  cloud_cover_pct: number
+  model_version: string
+}

@@ -1,4 +1,10 @@
-import type { CurrentResponse, DAMPricesResponse, DashboardConfig, TimeseriesResponse } from './types'
+import type {
+  CurrentResponse,
+  DAMPricesResponse,
+  DashboardConfig,
+  PvForecastPoint,
+  TimeseriesResponse,
+} from './types'
 
 const API_BASE = ((import.meta.env.VITE_API_BASE_URL as string | undefined) || '').replace(/\/+$/, '')
 
@@ -111,4 +117,77 @@ export async function fetchDAMPrices(
     throw new Error(`dam-prices request failed: ${res.status}`)
   }
   return res.json()
+}
+
+const PV_FORECAST_WEBHOOK_URL =
+  'https://granary.app.n8n.cloud/webhook/96bac28d-5020-48b3-8f23-0bc189029c00'
+// Two retries on transient failures (5xx, network) with exponential backoff.
+// Total worst-case latency ~1s before giving up — short enough not to hold
+// up the chart, long enough to ride out a single node hiccup in n8n.
+const PV_FORECAST_RETRY_DELAYS_MS = [200, 600]
+
+function isAbortError(e: unknown): boolean {
+  return e instanceof DOMException && e.name === 'AbortError'
+}
+
+function delay(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException('Aborted', 'AbortError'))
+      return
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }, ms)
+    function onAbort() {
+      clearTimeout(timer)
+      signal?.removeEventListener('abort', onAbort)
+      reject(new DOMException('Aborted', 'AbortError'))
+    }
+    signal?.addEventListener('abort', onAbort)
+  })
+}
+
+export async function fetchPvForecast(
+  input: { elevatorCode: 'JE' | 'RE'; forecastDay: string },
+  signal?: AbortSignal,
+): Promise<PvForecastPoint[]> {
+  const url = new URL(PV_FORECAST_WEBHOOK_URL)
+  url.searchParams.set('elevator_code', input.elevatorCode)
+  url.searchParams.set('forecast_day', input.forecastDay)
+
+  let lastError: unknown = null
+  for (let attempt = 0; attempt <= PV_FORECAST_RETRY_DELAYS_MS.length; attempt++) {
+    if (signal?.aborted) {
+      throw new DOMException('Aborted', 'AbortError')
+    }
+    try {
+      const res = await fetch(url.toString(), { signal })
+      if (res.status >= 500 && res.status < 600) {
+        throw new Error(`pv-forecast request failed: ${res.status}`)
+      }
+      if (!res.ok) {
+        // Non-5xx errors (4xx, etc.) are not transient — bail immediately
+        // so a misconfigured elevator_code doesn't burn three attempts.
+        throw new Error(`pv-forecast request failed: ${res.status}`)
+      }
+      const body = (await res.json()) as unknown
+      if (!Array.isArray(body)) return []
+      return body as PvForecastPoint[]
+    } catch (e) {
+      if (isAbortError(e)) throw e
+      lastError = e
+      const isTransient =
+        e instanceof TypeError ||
+        (e instanceof Error && /pv-forecast request failed: 5\d\d/.test(e.message))
+      if (!isTransient) throw e
+      const nextDelay = PV_FORECAST_RETRY_DELAYS_MS[attempt]
+      if (nextDelay === undefined) break
+      await delay(nextDelay, signal)
+    }
+  }
+  throw lastError instanceof Error
+    ? lastError
+    : new Error('pv-forecast request failed')
 }

@@ -28,6 +28,7 @@ export function Dashboard() {
     damSeries,
     socSeries,
     powerSeries,
+    pvForecastSeries,
     loading,
     cardsLoading,
     error,
@@ -76,6 +77,7 @@ export function Dashboard() {
             damSeries={damSeries}
             socSeries={socSeries}
             powerSeries={powerSeries}
+            pvForecastSeries={pvForecastSeries}
           />
           <Suspense
             fallback={

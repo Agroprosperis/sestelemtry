@@ -14,13 +14,14 @@ import {
   YAxis,
 } from 'recharts'
 import type { DashboardMetric } from '../../types'
-import { dayPowerColor, energyColor } from '../colors'
+import { dayPowerColor, energyColor, PV_FORECAST_COLOR } from '../colors'
 import { formatChartNumber } from '../format'
 import { DAY_POWER_METRIC_KEYS, DAY_POWER_METRIC_LABELS } from '../metrics'
 import type { RangePreset } from '../range'
 import type { EnergyRow } from '../transforms/buckets'
 import type { DAMChartRow } from '../transforms/dam'
 import type { PowerChartRow } from '../transforms/power'
+import type { PvForecastHourlyRow } from '../transforms/pvForecast'
 import type { SOCChartRow } from '../transforms/soc'
 import type { EnergySummary as Summary } from '../transforms/summary'
 import { ChartSkeleton } from './ChartSkeleton'
@@ -37,6 +38,7 @@ type Props = {
   damSeries?: DAMChartRow[]
   socSeries?: SOCChartRow[]
   powerSeries?: PowerChartRow[]
+  pvForecastSeries?: PvForecastHourlyRow[]
 }
 
 const DAM_PRICE_KEY = 'dam_price_uah_per_mwh'
@@ -45,6 +47,14 @@ const DAM_PRICE_LABEL = 'Ціна РДН'
 const SOC_KEY = 'soc_percent'
 const SOC_COLOR = '#a855f7'
 const SOC_LABEL = 'SOC'
+// PV_FORECAST_KEY is the dataKey used to attach hourly forecast values onto
+// the day-chart rows (one non-null sample per hour, at the HH:30 bucket so
+// the bar renders centered between hour gridlines).
+const PV_FORECAST_KEY = 'planned_ac_kw'
+const PV_FORECAST_LABEL = 'Прогноз СЕС'
+// 5-min buckets, so HH:30 is index 6 within each 12-bucket hour.
+const PV_FORECAST_BUCKET_OFFSET = 6
+const PV_FORECAST_BAR_SIZE = 28
 
 // Day preset uses 5-minute buckets (288 per day); show every 12th tick so
 // labels land on the hour and the axis stays readable.
@@ -104,6 +114,7 @@ export function EnergyChart({
   damSeries,
   socSeries,
   powerSeries,
+  pvForecastSeries,
 }: Props) {
   const energyTooltip = useCallback(
     (props: Omit<React.ComponentProps<typeof EnergyTooltip>, 'preset'>) => (
@@ -118,10 +129,13 @@ export function EnergyChart({
   const tickInterval = xAxisInterval(preset)
 
   // Day preset draws three instantaneous power lines (kW snapshots from
-  // powerSeries) plus the DAM price hourly bands and the SOC band overlay.
-  // We merge the price/SOC values onto each power row by `time` so Recharts
-  // can align all three layers on the same x-axis and surface them in the
-  // tooltip without separate lookups.
+  // powerSeries) plus the DAM price hourly bands, the SOC band overlay, and
+  // hourly PV forecast bars. We merge the price/SOC/forecast values onto
+  // each power row by `time` so Recharts can align all four layers on the
+  // same x-axis and surface them in the tooltip without separate lookups.
+  // The forecast value is attached only at one bucket per hour (HH:30) —
+  // recharts then renders one centered Bar per hour with its width fixed
+  // by `barSize`, instead of 12 stacked thin bars per hour.
   const dayData = useMemo<PowerChartRow[]>(() => {
     if (preset !== 'day') return []
     const rows = powerSeries ?? []
@@ -129,16 +143,29 @@ export function EnergyChart({
     for (const row of damSeries ?? []) priceByTime.set(String(row.time), row.price)
     const socByTime = new Map<string, number | null>()
     for (const row of socSeries ?? []) socByTime.set(String(row.time), row.soc)
-    return rows.map((row) => {
+    const forecastByHour = new Map<number, number>()
+    for (const row of pvForecastSeries ?? []) {
+      if (Number.isFinite(row.plannedKw)) forecastByHour.set(row.hour, row.plannedKw)
+    }
+    return rows.map((row, idx) => {
       const merged: PowerChartRow = { ...row }
       const price = priceByTime.get(String(row.time))
       if (price != null && Number.isFinite(price)) merged[DAM_PRICE_KEY] = price
       const soc = socByTime.get(String(row.time))
       if (soc != null && Number.isFinite(soc)) merged[SOC_KEY] = soc
+      const hour = Math.floor(idx / 12)
+      const inHour = idx % 12
+      if (inHour === PV_FORECAST_BUCKET_OFFSET) {
+        const planned = forecastByHour.get(hour)
+        if (planned != null && Number.isFinite(planned)) {
+          merged[PV_FORECAST_KEY] = planned
+        }
+      }
       return merged
     })
-  }, [preset, powerSeries, damSeries, socSeries])
+  }, [preset, powerSeries, damSeries, socSeries, pvForecastSeries])
   const hasSoc = (socSeries ?? []).some((r) => r.soc != null && Number.isFinite(r.soc))
+  const hasPvForecast = (pvForecastSeries ?? []).length > 0
 
   const dayLabels = useMemo(() => dayData.map((r) => String(r.time)), [dayData])
   const hourlyAreas = useMemo(() => hourlyDamAreas(damSeries, dayLabels), [damSeries, dayLabels])
@@ -163,12 +190,15 @@ export function EnergyChart({
       label: DAY_POWER_METRIC_LABELS[key] ?? key,
       color: dayPowerColor(key),
     }))
+    if (hasPvForecast) {
+      items.push({ id: PV_FORECAST_KEY, label: PV_FORECAST_LABEL, color: PV_FORECAST_COLOR })
+    }
     items.push({ id: DAM_PRICE_KEY, label: DAM_PRICE_LABEL, color: DAM_PRICE_COLOR })
     if (hasSoc) {
       items.push({ id: SOC_KEY, label: SOC_LABEL, color: SOC_COLOR })
     }
     return items
-  }, [hasSoc])
+  }, [hasSoc, hasPvForecast])
 
   const renderDayLegend = useCallback(
     () => (
@@ -274,6 +304,18 @@ export function EnergyChart({
                   />
                 ))}
                 <ReferenceLine y={0} yAxisId="power" stroke="#64748b" />
+                {hasPvForecast && (
+                  <Bar
+                    yAxisId="power"
+                    dataKey={PV_FORECAST_KEY}
+                    name={PV_FORECAST_LABEL}
+                    fill={PV_FORECAST_COLOR}
+                    fillOpacity={0.45}
+                    stroke="none"
+                    barSize={PV_FORECAST_BAR_SIZE}
+                    isAnimationActive={false}
+                  />
+                )}
                 {DAY_POWER_METRIC_KEYS.map((key) => {
                   const color = dayPowerColor(key)
                   return (

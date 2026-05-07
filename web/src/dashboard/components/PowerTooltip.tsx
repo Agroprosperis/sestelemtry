@@ -16,6 +16,7 @@ type Props = {
 
 const DAM_PRICE_KEY = 'dam_price_uah_per_mwh'
 const SOC_KEY = 'soc_percent'
+const PV_FORECAST_KEY = 'planned_ac_kw'
 
 export function PowerTooltip({ active, label, payload }: Props) {
   if (!active || !payload || payload.length === 0) {
@@ -33,6 +34,12 @@ export function PowerTooltip({ active, label, payload }: Props) {
   const socEntry = byKey.get(SOC_KEY)
   const socValue = Number(socEntry?.value)
   const showSoc = Number.isFinite(socValue)
+  // Forecast values land on a single bucket per hour (HH:30); on the other
+  // 11 buckets the entry exists in the payload but with `value` undefined,
+  // so we only render the row when there's an actual number to show.
+  const pvForecastEntry = byKey.get(PV_FORECAST_KEY)
+  const pvForecastValue = Number(pvForecastEntry?.value)
+  const showPvForecast = Number.isFinite(pvForecastValue)
 
   return (
     <div className="energy-tooltip">
@@ -57,6 +64,18 @@ export function PowerTooltip({ active, label, payload }: Props) {
           )
         })}
       </div>
+      {showPvForecast && (
+        <div className="energy-tooltip-row energy-tooltip-dam">
+          <span
+            className="energy-tooltip-dot"
+            style={{ backgroundColor: pvForecastEntry?.color ?? '#16a34a' }}
+          />
+          <span className="energy-tooltip-name">Прогноз СЕС</span>
+          <span className="energy-tooltip-value">
+            {formatChartNumber(pvForecastValue)} кВт
+          </span>
+        </div>
+      )}
       {showSoc && (
         <div className="energy-tooltip-row energy-tooltip-dam">
           <span className="energy-tooltip-dot" style={{ backgroundColor: socEntry?.color ?? '#a855f7' }} />

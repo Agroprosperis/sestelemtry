@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   fetchCurrent,
   fetchDAMPrices,
@@ -17,12 +17,17 @@ import { endOfPeriod, rangeParams, startOfPeriod, type RangePreset } from '../ra
 import { energyBucketDeltaRows, type EnergyRow } from '../transforms/buckets'
 import { damChartRows, type DAMChartRow } from '../transforms/dam'
 import { powerChartRows, type PowerChartRow } from '../transforms/power'
+import {
+  aggregatePvForecastHourly,
+  type PvForecastHourlyRow,
+} from '../transforms/pvForecast'
 import { socChartRows, type SOCChartRow } from '../transforms/soc'
 import {
   energySummaryFromSeries,
   energySummaryFromTotals,
   type EnergySummary,
 } from '../transforms/summary'
+import { usePvForecast } from './usePvForecast'
 
 // Metrics whose period totals back the dashboard summary cards (the
 // "spent / produced / from PV" breakdown). Mirrors
@@ -44,6 +49,7 @@ export type DashboardData = {
   damSeries: DAMChartRow[]
   socSeries: SOCChartRow[]
   powerSeries: PowerChartRow[]
+  pvForecastSeries: PvForecastHourlyRow[]
   // loading reflects the charts/summary fetch state and is what `EnergyChart`
   // shows the "Loading..." placeholder for. Cards have their own
   // `cardsLoading` flag so they don't go blank between live ticks.
@@ -87,6 +93,15 @@ export function useDashboardData(input: {
   const [loading, setLoading] = useState(true)
   const [cardsLoading, setCardsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+
+  // Forecast lives outside the main /timeseries effect so a slow n8n call
+  // doesn't gate the rest of the day chart. For organizations without a
+  // forecast mapping (`demo-org`) the hook is a no-op and returns [].
+  const pvForecast = usePvForecast({ organizationID, anchor })
+  const pvForecastSeries = useMemo<PvForecastHourlyRow[]>(() => {
+    if (preset !== 'day') return []
+    return aggregatePvForecastHourly(pvForecast.data)
+  }, [preset, pvForecast.data])
 
   const configRef = useRef(config)
   useEffect(() => {
@@ -343,6 +358,7 @@ export function useDashboardData(input: {
     damSeries,
     socSeries,
     powerSeries,
+    pvForecastSeries,
     loading,
     cardsLoading,
     error,

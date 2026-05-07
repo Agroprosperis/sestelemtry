@@ -46,3 +46,9 @@ const DAY_POWER_COLORS: Partial<Record<MetricKey, string>> = {
 export function dayPowerColor(metricKey: string): string {
   return DAY_POWER_COLORS[metricKey as MetricKey] ?? FALLBACK_COLOR
 }
+
+// Forecast bars use a darker green than active_pv_power_kw (#22c55e) so the
+// planned-vs-actual comparison reads at a glance: the line on top of the
+// bars is the actual instantaneous PV output, the bars below are the
+// hourly forecast envelope.
+export const PV_FORECAST_COLOR = '#16a34a'
