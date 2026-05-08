@@ -8,18 +8,22 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
+import { buildRevenueExport, csvFilename } from '../exports'
 import { formatChartNumber } from '../format'
 import type { RangePreset } from '../range'
 import type { EnergyRow } from '../transforms/buckets'
 import type { DAMChartRow } from '../transforms/dam'
 import { revenueChartRows, totalRevenue } from '../transforms/revenue'
 import { ChartSkeleton } from './ChartSkeleton'
+import { ExportCsvButton } from './ExportCsvButton'
 
 type Props = {
   energySeries: EnergyRow[]
   damSeries: DAMChartRow[]
   preset: RangePreset
   loading?: boolean
+  organizationID: string
+  anchor: Date
 }
 
 const REVENUE_LINE_COLOR = '#16a34a'
@@ -46,7 +50,14 @@ function xAxisInterval(preset: RangePreset): number {
   return 0
 }
 
-export function RevenueChart({ energySeries, damSeries, preset, loading = false }: Props) {
+export function RevenueChart({
+  energySeries,
+  damSeries,
+  preset,
+  loading = false,
+  organizationID,
+  anchor,
+}: Props) {
   const series = useMemo(
     () => revenueChartRows(energySeries, damSeries),
     [energySeries, damSeries],
@@ -59,6 +70,14 @@ export function RevenueChart({ energySeries, damSeries, preset, loading = false 
     const idx = s.indexOf(':')
     return idx > 0 ? s.slice(0, idx) : s
   }, [])
+  const exportFilename = useMemo(
+    () => csvFilename({ chart: 'revenue', organizationID, preset, anchor }),
+    [organizationID, preset, anchor],
+  )
+  const buildExport = useCallback(
+    () => buildRevenueExport({ series }),
+    [series],
+  )
   return (
     <div className="chart-card">
       <div className="dam-chart-head">
@@ -72,6 +91,11 @@ export function RevenueChart({ energySeries, damSeries, preset, loading = false 
             </>
           )}
         </span>
+        <ExportCsvButton
+          filename={exportFilename}
+          build={buildExport}
+          disabled={loading || !hasAnyValue}
+        />
       </div>
       <div className="chart-wrap">
         {loading ? (

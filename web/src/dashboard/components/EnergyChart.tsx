@@ -16,6 +16,7 @@ import {
 } from 'recharts'
 import type { DashboardMetric } from '../../types'
 import { dayPowerColor, energyColor, PV_FORECAST_COLOR } from '../colors'
+import { buildEnergyExport, csvFilename } from '../exports'
 import { formatChartNumber } from '../format'
 import { DAY_POWER_METRIC_KEYS, DAY_POWER_METRIC_LABELS } from '../metrics'
 import type { RangePreset } from '../range'
@@ -28,6 +29,7 @@ import type { EnergySummary as Summary } from '../transforms/summary'
 import { ChartSkeleton } from './ChartSkeleton'
 import { EnergySummary } from './EnergySummary'
 import { EnergyTooltip } from './EnergyTooltip'
+import { ExportCsvButton } from './ExportCsvButton'
 import { PowerTooltip } from './PowerTooltip'
 
 type Props = {
@@ -40,6 +42,8 @@ type Props = {
   socSeries?: SOCChartRow[]
   powerSeries?: PowerChartRow[]
   pvForecastSeries?: PvForecastHourlyRow[]
+  organizationID: string
+  anchor: Date
 }
 
 const DAM_PRICE_KEY = 'dam_price_uah_per_mwh'
@@ -115,6 +119,8 @@ export function EnergyChart({
   socSeries,
   powerSeries,
   pvForecastSeries,
+  organizationID,
+  anchor,
 }: Props) {
   const energyTooltip = useCallback(
     (props: Omit<React.ComponentProps<typeof EnergyTooltip>, 'preset'>) => (
@@ -245,9 +251,38 @@ export function EnergyChart({
     return idx > 0 ? s.slice(0, idx) : s
   }, [])
 
+  // hasExportableData mirrors the per-preset render guards below so the
+  // CSV button stays in sync with what the user actually sees: enabled
+  // when at least one series has finite values, disabled otherwise.
+  const hasExportableData = preset === 'day' ? dayHasData : series.length > 0
+
+  const exportFilename = useMemo(
+    () => csvFilename({ chart: 'energy', organizationID, preset, anchor }),
+    [organizationID, preset, anchor],
+  )
+  const buildExport = useCallback(
+    () =>
+      buildEnergyExport({
+        preset,
+        energySeries: series,
+        powerSeries,
+        damSeries,
+        socSeries,
+        pvForecastSeries,
+      }),
+    [preset, series, powerSeries, damSeries, socSeries, pvForecastSeries],
+  )
+
   return (
     <div className="chart-card">
-      <h2>Energy Trend</h2>
+      <div className="chart-card-head">
+        <h2>Energy Trend</h2>
+        <ExportCsvButton
+          filename={exportFilename}
+          build={buildExport}
+          disabled={loading || !hasExportableData}
+        />
+      </div>
       <EnergySummary summary={summary} />
       <div className="chart-wrap">
         {loading ? (
