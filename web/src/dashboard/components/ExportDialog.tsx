@@ -42,6 +42,11 @@ const COLUMN_OPTIONS: Array<{ id: keyof CustomExportColumns; label: string; hint
     hint: 'PV / УЗЕ / мережа / навантаження. Беремо last-sample у бакеті',
   },
   {
+    id: 'device',
+    label: 'Час пристрою (epoch s)',
+    hint: 'Локальний годинник SmartLogger — для діагностики дрейфу',
+  },
+  {
     id: 'forecast',
     label: 'Прогноз СЕС (kW)',
     hint: 'Лише для одноденного 5-хв експорту pe / ze',
@@ -96,6 +101,7 @@ export function ExportDialog({ organizationID, initialAnchor, onClose }: Props) 
     price: true,
     soc: false,
     power: false,
+    device: false,
     forecast: false,
   })
   const [busy, setBusy] = useState(false)

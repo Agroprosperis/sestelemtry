@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -205,7 +206,7 @@ func pollAndStore(
 		return err
 	}
 	ts := time.Now().UTC()
-	samples, err := buildSamples(org, resolved, chunks, data, ts)
+	samples, err := buildSamples(org, dev, resolved, chunks, data, ts)
 	if err != nil {
 		return err
 	}
@@ -238,12 +239,14 @@ func readChunkData(ctx context.Context, registerMap config.ModbusRegisterMap, se
 
 func buildSamples(
 	org config.Organization,
+	dev config.ModbusDevice,
 	resolved []registers.ResolvedEntry,
 	chunks []modbusclient.ReadChunk,
 	data map[uint16][]byte,
 	ts time.Time,
 ) ([]storage.Sample, error) {
 	samples := make([]storage.Sample, 0, len(resolved))
+	labels := labelsForDevice(org, dev)
 	for _, e := range resolved {
 		payload := payloadForEntry(e, chunks, data)
 		if payload == nil {
@@ -258,7 +261,7 @@ func buildSamples(
 			OrganizationID: org.ID,
 			MetricKey:      e.MetricKey,
 			Value:          v,
-			Labels:         labelsForOrg(org),
+			Labels:         labels,
 		})
 	}
 	return samples, nil
@@ -279,13 +282,24 @@ func payloadForEntry(e registers.ResolvedEntry, chunks []modbusclient.ReadChunk,
 	return nil
 }
 
-func labelsForOrg(org config.Organization) map[string]string {
+// labelsForDevice tags every sample with the org-level metadata plus
+// the physical Modbus host the value was read from. The device_host
+// label matters when one organization has multiple SmartLoggers
+// (e.g. ze splits ESS and PV across two boxes): without it we can't
+// tell which SmartLogger reported a given value, and per-device
+// diagnostics like `local_time_epoch_s` collapse to a single
+// timeline. The label is omitted for mock/empty hosts so unit tests
+// that don't care about the device dimension stay clean.
+func labelsForDevice(org config.Organization, dev config.ModbusDevice) map[string]string {
 	labels := map[string]string{}
 	if org.SiteID != "" {
 		labels["site_id"] = org.SiteID
 	}
 	if org.DeviceID != "" {
 		labels["device_id"] = org.DeviceID
+	}
+	if h := strings.TrimSpace(dev.Host); h != "" {
+		labels["device_host"] = h
 	}
 	return labels
 }

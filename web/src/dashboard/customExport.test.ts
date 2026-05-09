@@ -103,6 +103,7 @@ describe('fetchCustomExportData', () => {
         price: false,
         soc: false,
         power: false,
+        device: false,
         forecast: false,
       },
     })
@@ -122,6 +123,7 @@ describe('fetchCustomExportData', () => {
         price: false,
         soc: true,
         power: true,
+        device: false,
         forecast: false,
       },
     })
@@ -152,6 +154,7 @@ describe('fetchCustomExportData', () => {
         price: false,
         soc: true,
         power: true,
+        device: false,
         forecast: false,
       },
       registerAddresses: {
@@ -192,6 +195,7 @@ describe('fetchCustomExportData', () => {
         price: false,
         soc: true,
         power: false,
+        device: false,
         forecast: false,
       },
     })
@@ -202,6 +206,32 @@ describe('fetchCustomExportData', () => {
     )
     expect(api.fetchDAMPrices).not.toHaveBeenCalled()
     expect(api.fetchPvForecast).not.toHaveBeenCalled()
+  })
+
+  it('fetches local_time_epoch_s with last-aggregation when the device column is checked', async () => {
+    const table = await fetchCustomExportData({
+      organizationID: 'pe',
+      from: new Date(2026, 4, 7),
+      to: new Date(2026, 4, 8),
+      bucket: '1 hour',
+      columns: {
+        energy: false,
+        price: false,
+        soc: false,
+        power: false,
+        device: true,
+        forecast: false,
+      },
+      registerAddresses: { local_time_epoch_s: 40009 },
+    })
+    expect(api.fetchTimeseries).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metricKeys: ['local_time_epoch_s'],
+        aggregation: 'last',
+      }),
+      undefined,
+    )
+    expect(table.headers).toContain('local_time_epoch_s_40009')
   })
 
   it('refuses the raw bucket — that path goes through fetchRawSamplesCsv', async () => {
@@ -216,6 +246,7 @@ describe('fetchCustomExportData', () => {
           price: false,
           soc: false,
           power: false,
+          device: false,
           forecast: false,
         },
       }),
@@ -230,11 +261,13 @@ describe('rawExportMetricKeys', () => {
       price: true, // ignored — DAM prices have no raw rows
       soc: true,
       power: true,
+      device: true,
       forecast: true, // ignored — n8n forecast has no raw rows
     })
     expect(keys).toContain('soc_percent')
     expect(keys).toContain('accumulated_pv_energy_yield_kwh')
     expect(keys).toContain('active_pv_power_kw')
+    expect(keys).toContain('local_time_epoch_s')
     // Forecast/price metric keys must not leak into the request — the
     // server would reject them since they don't live in
     // telemetry_samples, and we'd burn a round trip to find out.
@@ -249,6 +282,7 @@ describe('rawExportMetricKeys', () => {
         price: true,
         soc: false,
         power: false,
+        device: false,
         forecast: true,
       }),
     ).toEqual([])

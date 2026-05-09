@@ -35,6 +35,9 @@ organizations:
           - total_energy_charged_kwh
           - total_energy_discharged_kwh
           - soc_percent
+          # Per-device clock; lets ops spot a SmartLogger whose
+          # internal time has drifted from the collector's UTC.
+          - local_time_epoch_s
       - host: 10.28.40.101          # PV / load smartlogger
         port: 502
         unit_id: 99
@@ -52,3 +55,4 @@ organizations:
           - power_consumption_day_kwh
           - electricity_sold_day_kwh
           - electricity_purchased_day_kwh
+          - local_time_epoch_s

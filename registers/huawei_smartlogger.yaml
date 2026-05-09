@@ -4,6 +4,20 @@ addressing:
   holding_address_base: 0
 
 registers:
+  # Vendor-documented "Local time" register: epoch seconds expressed in
+  # the SmartLogger's local timezone (NOT UTC). Useful for detecting
+  # clock drift / TZ misconfiguration on the device — operators can
+  # compare against the collector's wall clock (server-side UTC) to
+  # spot devices that fell out of sync. Stored verbatim (gain = 1) so
+  # downstream tools can reconstruct the original UINT32 reading.
+  - metric_key: local_time_epoch_s
+    name: SmartLogger local time, epoch seconds
+    address: 40009
+    data_type: UINT32
+    swap_type: ABCD_BE
+    gain: 1
+    offset: 0
+
   - metric_key: active_pv_power_kw
     name: Active PV power, kW
     address: 40388

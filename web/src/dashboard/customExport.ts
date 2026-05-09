@@ -36,12 +36,22 @@ export const POWER_EXPORT_METRICS = [
   'load_power_kw',
 ] as const
 
+// Device-level diagnostic metrics. These are vendor registers that
+// describe the SmartLogger itself (clock, firmware, etc.) rather than
+// the energy flow. Kept in their own group so the dialog can offer
+// them without polluting the energy/power checkboxes used by the
+// dashboard charts.
+export const DEVICE_EXPORT_METRICS = [
+  'local_time_epoch_s',
+] as const
+
 export type CustomExportColumns = {
   energy: boolean
   price: boolean
   soc: boolean
   power: boolean
   forecast: boolean
+  device: boolean
 }
 
 // Bucket sizes offered by the export dialog. `raw` is special: it
@@ -193,6 +203,7 @@ export async function fetchCustomExportData(input: CustomExportInput): Promise<E
   if (columns.price) headers.push('dam_price_uah_per_mwh')
   if (columns.soc) headers.push(header('soc_percent'))
   if (columns.power) headers.push(...POWER_EXPORT_METRICS.map(header))
+  if (columns.device) headers.push(...DEVICE_EXPORT_METRICS.map(header))
   if (columns.forecast) headers.push('planned_ac_kw_forecast')
 
   // Empty selection short-circuits to an empty table so the dialog can
@@ -213,6 +224,7 @@ export async function fetchCustomExportData(input: CustomExportInput): Promise<E
 
   const energyKeys = columns.energy ? [...ENERGY_EXPORT_METRICS] : []
   const powerKeys = columns.power ? [...POWER_EXPORT_METRICS] : []
+  const deviceKeys = columns.device ? [...DEVICE_EXPORT_METRICS] : []
   const elevator = columns.forecast ? elevatorCodeFor(organizationID) : null
 
   const energyP = energyKeys.length
@@ -257,6 +269,24 @@ export async function fetchCustomExportData(input: CustomExportInput): Promise<E
         signal,
       )
     : Promise.resolve(null)
+  // Device metrics use `last` so the bucketed export shows the most
+  // recent reading inside the bucket (the SmartLogger clock advances
+  // monotonically — averaging would smear the value, last is the
+  // honest summary).
+  const deviceP = deviceKeys.length
+    ? fetchTimeseries(
+        {
+          organizationID,
+          metricKeys: deviceKeys,
+          from: fromIso,
+          to: toIso,
+          bucket,
+          tz,
+          aggregation: 'last',
+        },
+        signal,
+      )
+    : Promise.resolve(null)
   const damP = columns.price
     ? fetchDAMPrices(
         {
@@ -281,10 +311,11 @@ export async function fetchCustomExportData(input: CustomExportInput): Promise<E
         })
       : Promise.resolve([])
 
-  const [energy, soc, power, dam, forecast] = await Promise.all([
+  const [energy, soc, power, device, dam, forecast] = await Promise.all([
     energyP,
     socP,
     powerP,
+    deviceP,
     damP,
     forecastP,
   ])
@@ -314,6 +345,7 @@ export async function fetchCustomExportData(input: CustomExportInput): Promise<E
   take(energy?.points, energyKeys)
   take(soc?.points, ['soc_percent'])
   take(power?.points, powerKeys)
+  take(device?.points, deviceKeys)
 
   // DAM is hourly; broadcast its value to every covered bucket of the
   // requested resolution. For 1d/1mo buckets we average the price across
@@ -376,6 +408,12 @@ export async function fetchCustomExportData(input: CustomExportInput): Promise<E
         row[header(key)] = typeof v === 'number' && Number.isFinite(v) ? v : null
       }
     }
+    if (columns.device) {
+      for (const key of DEVICE_EXPORT_METRICS) {
+        const v = valuesByKeyByTime.get(key)?.get(t)
+        row[header(key)] = typeof v === 'number' && Number.isFinite(v) ? v : null
+      }
+    }
     if (columns.forecast) {
       // Forecast is hourly even when the rest of the row is on a 5-min
       // bucket — broadcast the hour's value across every 5-min bucket of
@@ -414,5 +452,6 @@ export function rawExportMetricKeys(columns: CustomExportColumns): string[] {
   if (columns.energy) keys.push(...ENERGY_EXPORT_METRICS)
   if (columns.soc) keys.push('soc_percent')
   if (columns.power) keys.push(...POWER_EXPORT_METRICS)
+  if (columns.device) keys.push(...DEVICE_EXPORT_METRICS)
   return keys
 }

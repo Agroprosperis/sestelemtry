@@ -47,6 +47,7 @@ organizations:
           - active_ess_power_kw
           - energy_charged_day_kwh
           - energy_discharged_day_kwh
+          - local_time_epoch_s        # SmartLogger clock check
       - host: 10.0.0.31
         port: 502
         unit_id: 99
@@ -56,6 +57,7 @@ organizations:
           - pv_energy_yield_day_kwh
           - load_power_kw
           - grid_connected_active_power_kw
+          - local_time_epoch_s
 
 # Day-Ahead Market (RDN) prices from oree.com.ua (consumed by dam-collector).
 # Set enabled: false to skip running the dam-collector against this config.

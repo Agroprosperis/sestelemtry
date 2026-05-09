@@ -49,6 +49,7 @@ type RegisterMeta struct {
 // have no Modbus address and are intentionally absent so the export
 // formatter falls through to the un-annotated header for them.
 var ModbusRegisterMetadata = map[string]RegisterMeta{
+	"local_time_epoch_s":                    {Address: 40009, DataType: "UINT32", Gain: 1},
 	"active_pv_power_kw":                    {Address: 40388, DataType: "UINT32", Gain: 0.001},
 	"active_ess_power_kw":                   {Address: 40392, DataType: "INT32", Gain: 0.001},
 	"power_supply_from_grid_day_kwh":        {Address: 40438, DataType: "UINT32", Gain: 0.01},
