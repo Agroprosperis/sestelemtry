@@ -55,11 +55,25 @@ export const ENERGY_TREND_METRIC_DIRECTIONS: Partial<Record<MetricKey, 1 | -1>> 
 // Day-preset power lines (instantaneous kW snapshots, aggregation=last). The
 // list is intentionally local to the frontend so it can evolve independently
 // of the bigger DashboardConfig.PowerChart shipped from the backend.
+//
+// `load_power_kw` is rendered on the chart but NOT fetched from the API: the
+// SmartLogger's 40503 register reflects only the inverter's "Backup load"
+// branch and routinely drifts from real site consumption. Instead the chart
+// derives load via Kirchhoff's bus balance (`load = PV + Grid + ESS` with
+// our sign convention: PV always positive, Grid positive=import, ESS
+// positive=discharge). See `DAY_POWER_FETCH_METRIC_KEYS` for the actual
+// API request, and `powerChartRows` for the derivation.
 export const DAY_POWER_METRIC_KEYS: MetricKey[] = [
   'active_pv_power_kw',
   'active_ess_power_kw',
   'grid_connected_active_power_kw',
   'load_power_kw',
+]
+
+export const DAY_POWER_FETCH_METRIC_KEYS: MetricKey[] = [
+  'active_pv_power_kw',
+  'active_ess_power_kw',
+  'grid_connected_active_power_kw',
 ]
 
 export const DAY_POWER_METRIC_LABELS: Partial<Record<MetricKey, string>> = {

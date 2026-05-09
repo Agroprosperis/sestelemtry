@@ -12,7 +12,7 @@ import {
   FALLBACK_DASHBOARD_CONFIG,
   MIN_RELIABLE_DATA_AT,
 } from '../config'
-import { DAY_POWER_METRIC_KEYS } from '../metrics'
+import { DAY_POWER_FETCH_METRIC_KEYS, DAY_POWER_METRIC_KEYS } from '../metrics'
 import { endOfPeriod, rangeParams, startOfPeriod, type RangePreset } from '../range'
 import { energyBucketDeltaRows, type EnergyRow } from '../transforms/buckets'
 import { damChartRows, type DAMChartRow } from '../transforms/dam'
@@ -281,7 +281,7 @@ export function useDashboardData(input: {
             ? fetchTimeseries(
                 {
                   organizationID,
-                  metricKeys: DAY_POWER_METRIC_KEYS,
+                  metricKeys: DAY_POWER_FETCH_METRIC_KEYS,
                   ...rangeParams('day', anchorDate, now),
                   aggregation: 'last',
                 },
