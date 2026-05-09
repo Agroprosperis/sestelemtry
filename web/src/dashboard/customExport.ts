@@ -5,7 +5,11 @@ import {
 } from '../api'
 import type { TimeseriesPoint } from '../types'
 import { aggregatePvForecastHourly, elevatorCodeFor } from './transforms/pvForecast'
-import type { ExportTable } from './exports'
+
+export type ExportTable = {
+  headers: string[]
+  rows: Array<Record<string, unknown>>
+}
 
 // Energy metric columns offered for export. Mirrors the EnergyChart's
 // stacked metrics; aggregation=delta turns each accumulator counter into

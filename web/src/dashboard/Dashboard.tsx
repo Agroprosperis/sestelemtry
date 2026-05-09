@@ -87,8 +87,6 @@ export function Dashboard() {
             socSeries={socSeries}
             powerSeries={powerSeries}
             pvForecastSeries={pvForecastSeries}
-            organizationID={organizationID}
-            anchor={anchor}
           />
           <Suspense
             fallback={
@@ -104,8 +102,6 @@ export function Dashboard() {
               damSeries={damSeries}
               preset={preset}
               loading={loading}
-              organizationID={organizationID}
-              anchor={anchor}
             />
           </Suspense>
         </div>
