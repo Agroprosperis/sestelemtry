@@ -169,6 +169,12 @@ export async function fetchRawSamplesCsv(
     from: string
     to: string
     limit?: number
+    // tz is the IANA name passed through to /api/v1/samples so the
+    // CSV's `time` column is rendered in that zone instead of UTC.
+    // Empty / undefined falls back to the server default (UTC) for
+    // backwards compatibility with anything that previously called
+    // this without a tz parameter.
+    tz?: string
   },
   signal?: AbortSignal,
 ): Promise<RawSamplesResult> {
@@ -178,6 +184,7 @@ export async function fetchRawSamplesCsv(
     from: input.from,
     to: input.to,
     limit: input.limit !== undefined ? String(input.limit) : undefined,
+    tz: input.tz,
   })
   const res = await fetch(url, { signal })
   if (!res.ok) {

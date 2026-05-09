@@ -69,6 +69,29 @@ describe('fetchRawSamplesCsv', () => {
     expect(result.rows).toBe(2) // sentinel is not counted as a data row
   })
 
+  it('passes the supplied tz through to the server query string', async () => {
+    let calledUrl = ''
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        calledUrl = url
+        return new Response('time,metric_key,modbus_register,data_type,gain,value,labels\r\n', {
+          status: 200,
+          headers: baseHeaders,
+        })
+      }),
+    )
+
+    await fetchRawSamplesCsv({
+      organizationID: 'pe',
+      metricKeys: ['soc_percent'],
+      from: '2026-05-09T00:00:00Z',
+      to: '2026-05-10T00:00:00Z',
+      tz: 'Europe/Kyiv',
+    })
+    expect(calledUrl).toContain('tz=Europe%2FKyiv')
+  })
+
   it('handles an empty result (header only) without underflowing the row count', async () => {
     const body = 'time,metric_key,value,labels\r\n'
     mockFetch(body)

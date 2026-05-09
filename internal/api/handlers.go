@@ -237,7 +237,7 @@ func (h *Handlers) samples(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("at most %d metric_keys are allowed", maxSamplesMetricKeys), http.StatusBadRequest)
 		return
 	}
-	from, to, _, _, err := parseRange(r)
+	from, to, _, tz, err := parseRange(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -252,6 +252,17 @@ func (h *Handlers) samples(w http.ResponseWriter, r *http.Request) {
 	}
 	if to.Sub(from) > maxSamplesRange {
 		http.Error(w, fmt.Sprintf("range must be <= %s", maxSamplesRange), http.StatusBadRequest)
+		return
+	}
+	// tz controls how each row's `time` column is rendered in the CSV.
+	// The DB stores everything in UTC; analysts almost always want
+	// human-local timestamps so date pickers like "2026-05-09" line up
+	// with what they see in their tools. We default to UTC for
+	// backwards compatibility but accept any IANA name the runtime
+	// knows (Europe/Kyiv, America/New_York, …).
+	loc, err := loadLocation(tz)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	limit, err := parseLimit(r, defaultSamplesLimit, maxSamplesLimit)
@@ -316,7 +327,7 @@ func (h *Handlers) samples(w http.ResponseWriter, r *http.Request) {
 				gain = strconv.FormatFloat(meta.Gain, 'f', -1, 64)
 			}
 			return cw.Write([]string{
-				row.Time.UTC().Format(time.RFC3339Nano),
+				row.Time.In(loc).Format(time.RFC3339Nano),
 				row.MetricKey,
 				modbusReg,
 				dataType,
@@ -542,6 +553,24 @@ func parseDateRange(r *http.Request) (from, to time.Time, err error) {
 		return time.Time{}, time.Time{}, fmt.Errorf("to must be on or after from")
 	}
 	return from, to, nil
+}
+
+// loadLocation resolves an IANA timezone name to a *time.Location.
+// Empty / "UTC" / "Z" all collapse to UTC so callers don't have to
+// special-case the zero value. Unknown zone names produce a 400-style
+// error rather than silently falling back, because a typo here would
+// otherwise silently render every timestamp in UTC and the analyst
+// would chase a phantom drift.
+func loadLocation(name string) (*time.Location, error) {
+	name = strings.TrimSpace(name)
+	if name == "" || strings.EqualFold(name, "UTC") || name == "Z" {
+		return time.UTC, nil
+	}
+	loc, err := time.LoadLocation(name)
+	if err != nil {
+		return nil, fmt.Errorf("tz must be a valid IANA timezone (got %q)", name)
+	}
+	return loc, nil
 }
 
 func parseAggregation(r *http.Request) (TimeseriesAggregation, error) {

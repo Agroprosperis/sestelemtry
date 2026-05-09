@@ -181,12 +181,18 @@ export function ExportDialog({ organizationID, initialAnchor, onClose }: Props) 
           setError('Виберіть принаймні одну метрику з telemetry_samples.')
           return
         }
+        // Send the browser's IANA tz so the CSV `time` column renders
+        // in the analyst's local zone (e.g. Europe/Kyiv → "+03:00")
+        // instead of UTC. Without this the day picker says "9 May"
+        // but the CSV shows "8 May 21:00 .. 9 May 20:59".
+        const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || undefined
         const result = await fetchRawSamplesCsv({
           organizationID,
           metricKeys,
           from: fromDate.toISOString(),
           to: toExclusive.toISOString(),
           limit: RAW_SAMPLES_LIMIT,
+          tz,
         })
         if (result.rows === 0 && !result.truncated) {
           setError('У вибраному діапазоні немає сирих даних — спробуйте інший період або метрики.')

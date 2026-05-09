@@ -492,6 +492,55 @@ func TestRegistersEndpoint(t *testing.T) {
 	}
 }
 
+// TestSamplesRendersTimeInRequestedTZ verifies that the `tz` query
+// parameter shifts the rendered `time` column out of UTC. We pick
+// Europe/Kyiv (UTC+3 in May) and assert the offset suffix is present
+// — the underlying timestamp is identical, only the formatting
+// changes. Without this the dashboard's day picker says "9 May" but
+// the CSV starts at "8 May 21:00" which is what the analyst flagged.
+func TestSamplesRendersTimeInRequestedTZ(t *testing.T) {
+	store := &mockStore{
+		samplesRows: []SampleRow{
+			{
+				Time:      time.Date(2026, 5, 9, 10, 0, 0, 0, time.UTC),
+				MetricKey: "soc_percent",
+				Value:     86.5,
+			},
+		},
+	}
+	h := NewHandlers(store, "*")
+	url := "/api/v1/samples?organization_id=org-a&metric_keys=soc_percent" +
+		"&from=2026-05-09T00:00:00Z&to=2026-05-10T00:00:00Z&tz=Europe/Kyiv"
+	req := httptest.NewRequest(http.MethodGet, url, nil)
+	rec := httptest.NewRecorder()
+	h.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200 got %d body=%s", rec.Code, rec.Body.String())
+	}
+	body := strings.TrimPrefix(rec.Body.String(), "\xef\xbb\xbf")
+	if !strings.Contains(body, "2026-05-09T13:00:00+03:00,soc_percent") {
+		t.Fatalf("expected Kyiv-local timestamp with +03:00 offset, got body=%q", body)
+	}
+}
+
+// TestSamplesRejectsUnknownTZ guards the "typo means silent UTC
+// fallback" failure mode — analysts would otherwise chase phantom
+// drift if a misspelled zone name (Europe/Kyev) downgraded to UTC.
+func TestSamplesRejectsUnknownTZ(t *testing.T) {
+	h := NewHandlers(&mockStore{}, "*")
+	url := "/api/v1/samples?organization_id=org-a&metric_keys=soc_percent" +
+		"&from=2026-05-09T00:00:00Z&to=2026-05-10T00:00:00Z&tz=Europe/Atlantis"
+	req := httptest.NewRequest(http.MethodGet, url, nil)
+	rec := httptest.NewRecorder()
+	h.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("want 400 got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "tz must be a valid IANA timezone") {
+		t.Fatalf("expected explanatory error, got %q", rec.Body.String())
+	}
+}
+
 // TestSamplesValidatesInputs locks in the bad-request paths so a
 // future regression can't accidentally accept a 6-month range or a
 // limit of 50_000_000 rows.

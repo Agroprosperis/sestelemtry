@@ -261,6 +261,17 @@ paths:
             maximum: 1000000
             default: 100000
           description: Maximum rows to return; the response is truncated when more data matches.
+        - name: tz
+          in: query
+          required: false
+          schema:
+            type: string
+            default: UTC
+          description: |
+            IANA timezone name used to render the CSV "time" column
+            (e.g. Europe/Kyiv -> +03:00 offset). Defaults to UTC.
+            Unknown zone names produce a 400 -- typos must not silently
+            fall back to UTC and mask phantom drift.
       responses:
         "200":
           description: CSV stream of telemetry_samples rows
