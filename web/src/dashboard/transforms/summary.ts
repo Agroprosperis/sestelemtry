@@ -51,15 +51,21 @@ export function energySummaryFromTotals(totals: Record<string, number>): EnergyS
 
   const charge = Math.abs(totals.total_energy_charged_kwh ?? 0)
   const discharge = Math.abs(totals.total_energy_discharged_kwh ?? 0)
-  const batteryNet = Math.max(discharge - charge, 0)
 
-  // Allocate consumption among sources: trust measured grid purchase first (it
-  // matches the chart's grid bar), then battery net discharge (matches the
-  // discharge bar minus charge bar), and treat the remainder as PV-to-load.
-  // Sum of the three rows equals consumption by construction.
+  // Allocate consumption among sources: trust measured grid purchase
+  // first (matches the chart's grid bar), then battery discharge
+  // (everything that left the battery went to the load — the ESS does
+  // not export to the grid in our topology), and treat the remainder
+  // as PV-to-load. Battery charge is intentionally NOT subtracted: it
+  // is energy stored for later, not energy delivered to the load
+  // right now, so accounting for it here would understate either the
+  // battery or the PV contribution. Charge stays exposed via
+  // `batteryCharged` for the daily narrative which displays it as a
+  // separate row. Sum of the three "load source" rows equals
+  // `consumption` by construction.
   const fromGridUsed = Math.min(fromGrid, consumption)
   const remainingAfterGrid = Math.max(consumption - fromGridUsed, 0)
-  const fromBattery = Math.min(batteryNet, remainingAfterGrid)
+  const fromBattery = Math.min(discharge, remainingAfterGrid)
   const fromPV = Math.max(remainingAfterGrid - fromBattery, 0)
 
   const pvConsumedPct = pvProduced > 0 ? (pvConsumed / pvProduced) * 100 : 0

@@ -104,4 +104,42 @@ describe('energySummaryFromTotals (server-side path for month/year)', () => {
     expect(s.pvProduced).toBe(0)
     expect(s.consumption).toBe(0)
   })
+
+  // Regression: previously `fromPV` subtracted (discharge - charge)
+  // which masked battery contribution whenever the day charged more
+  // than it discharged. The new allocation drops the `charge` term
+  // entirely and treats discharge as the actual battery → load
+  // contribution, leaving `batteryCharged` exposed only via the
+  // narrative card. fromPV + fromBattery + fromGrid still equals
+  // consumption by construction.
+  it('does not subtract battery charge from the fromPV allocation', () => {
+    const s = energySummaryFromTotals({
+      accumulated_pv_energy_yield_kwh: 200,
+      accumulated_electricity_sold_kwh: 0,
+      accumulated_electricity_purchased_kwh: 0,
+      accumulated_power_consumption_kwh: 100,
+      total_energy_charged_kwh: 50,
+      total_energy_discharged_kwh: 20,
+    })
+    expect(s.fromGrid).toBe(0)
+    expect(s.fromBattery).toBe(20)
+    expect(s.fromPV).toBe(80)
+    expect(s.fromPV + s.fromBattery + s.fromGrid).toBe(s.consumption)
+    expect(s.batteryCharged).toBe(50)
+    expect(s.batteryDischarged).toBe(20)
+  })
+
+  it('uses discharge directly as battery contribution to load', () => {
+    const s = energySummaryFromTotals({
+      accumulated_pv_energy_yield_kwh: 0,
+      accumulated_electricity_sold_kwh: 0,
+      accumulated_electricity_purchased_kwh: 50,
+      accumulated_power_consumption_kwh: 100,
+      total_energy_charged_kwh: 0,
+      total_energy_discharged_kwh: 30,
+    })
+    expect(s.fromGrid).toBe(50)
+    expect(s.fromBattery).toBe(30)
+    expect(s.fromPV).toBe(20)
+  })
 })
