@@ -89,13 +89,16 @@ export function PowerTooltip({ active, label, payload }: Props) {
           // displayed magnitude is the absolute value — analysts read
           // "Заряд УЗЕ: 0.82 кВт" much faster than "УЗЕ: -0.82 kW"
           // and don't have to remember the firmware's sign rule.
-          // Other metrics (PV active power, load) are inherently
-          // unsigned and keep their original label / signed value.
+          // load_power_kw is stored negated on the row so the chart
+          // draws it as a sink below zero, but the tooltip flips it
+          // back to a positive consumption number.
           const dirLabel = value !== null ? directionalLabel(key, value) : null
           const name =
             dirLabel ??
             (entry?.name ? String(entry.name) : (DAY_POWER_METRIC_LABELS[key] ?? key))
-          const displayed = value === null ? null : dirLabel ? Math.abs(value) : value
+          const isLoad = key === 'load_power_kw'
+          const displayed =
+            value === null ? null : dirLabel || isLoad ? Math.abs(value) : value
           return (
             <div key={key} className="energy-tooltip-row">
               <span

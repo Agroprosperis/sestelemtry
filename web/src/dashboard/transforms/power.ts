@@ -26,14 +26,25 @@ const ESS_KEY = 'active_ess_power_kw'
 //
 // `load_power_kw` is a special case: even when present in `keys`, its
 // raw samples (Modbus 40503) are ignored and the row value is derived
-// from PV + Grid + ESS via the bus-balance identity:
-//   load = active_pv_power_kw + grid_connected_active_power_kw + active_ess_power_kw
-// where Grid > 0 means import and ESS > 0 means discharge. The
+// from PV + Grid + ESS via the bus-balance identity. The
 // SmartLogger's 40503 register tracks only the inverter's "Backup
 // load" branch, so it consistently undercounts site-wide consumption
 // during normal grid-tied operation; the derived value is closer to
-// reality. If any of the three inputs is null in a bucket the load
-// stays null (gap) — partial sums would be misleading.
+// reality.
+//
+// We negate the sum so the chart renders sources (PV/Grid import/ESS
+// discharge) above zero and the load sink below zero — that mirrors
+// the physical bus balance ("what flows in equals what flows out")
+// and lets analysts read self-sufficiency at a glance:
+//   load_power_kw = -(active_pv_power_kw
+//                     + grid_connected_active_power_kw
+//                     + active_ess_power_kw)
+// where Grid > 0 means import and ESS > 0 means discharge. The
+// tooltip flips the sign back for display so users still see a
+// positive consumption number.
+//
+// If any of the three inputs is null in a bucket the load stays null
+// (gap) — partial sums would be misleading.
 export function powerChartRows(
   points: TimeseriesPoint[],
   keys: string[],
@@ -87,7 +98,7 @@ export function powerChartRows(
           typeof grid === 'number' &&
           typeof ess === 'number'
         ) {
-          row[LOAD_KEY] = pv + grid + ess
+          row[LOAD_KEY] = -(pv + grid + ess)
         } else {
           row[LOAD_KEY] = null
         }

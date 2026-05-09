@@ -83,7 +83,7 @@ describe('PowerTooltip directional labels', () => {
     expect(screen.getByText('Точка приєднання (без обміну)')).toBeInTheDocument()
   })
 
-  it('keeps inherently unsigned metrics (PV / load) free of charge/import-style relabeling', () => {
+  it('keeps PV unsigned and shows load as a positive consumption number', () => {
     render(
       <PowerTooltip
         active
@@ -92,18 +92,32 @@ describe('PowerTooltip directional labels', () => {
           active_pv_power_kw: 97.12,
           active_ess_power_kw: 0,
           grid_connected_active_power_kw: 0,
-          load_power_kw: 197.68,
+          // load is stored negated on the row (chart draws it below
+          // zero as a sink). The tooltip flips the sign back so the
+          // user reads consumption as a positive number.
+          load_power_kw: -197.68,
         })}
       />,
     )
-    // PV active power and load power are inherently unsigned; the
-    // tooltip must not graft a Заряд/Розряд/Імпорт/Експорт label
-    // onto them just because their absolute value is large.
     expect(screen.queryByText(/Заряд УЗЕ|Розряд УЗЕ/)).toBeNull()
     expect(screen.queryByText(/Імпорт з мережі|Експорт у мережу/)).toBeNull()
-    // Their numeric values land on the row as signed values (no abs
-    // because we don't repaint them as directional metrics).
     expect(screen.getByText(/^97[.,]12\s*kW$/)).toBeInTheDocument()
     expect(screen.getByText(/^197[.,]68\s*kW$/)).toBeInTheDocument()
+  })
+
+  it('shows load as positive even when raw value lands at zero', () => {
+    render(
+      <PowerTooltip
+        active
+        label="03:00"
+        payload={buildPayload({
+          active_pv_power_kw: 0,
+          active_ess_power_kw: 0,
+          grid_connected_active_power_kw: 0,
+          load_power_kw: 0,
+        })}
+      />,
+    )
+    expect(screen.getAllByText(/^0\s*kW$/).length).toBeGreaterThan(0)
   })
 })

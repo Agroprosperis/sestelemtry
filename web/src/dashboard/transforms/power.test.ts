@@ -116,14 +116,14 @@ describe('powerChartRows', () => {
   })
 
   describe('derived load_power_kw', () => {
-    it('computes load = pv + grid + ess when all three inputs exist', () => {
+    it('computes load = -(pv + grid + ess) so the sink renders below zero', () => {
       const points: TimeseriesPoint[] = [
         { time: bucketTime(anchor, 5), metric_key: 'active_pv_power_kw', value: 8 },
         { time: bucketTime(anchor, 5), metric_key: 'grid_connected_active_power_kw', value: 3 },
         { time: bucketTime(anchor, 5), metric_key: 'active_ess_power_kw', value: 1 },
       ]
       const rows = powerChartRows(points, keys, anchor, nowAfterAnchor)
-      expect(rows[5].load_power_kw).toBe(12)
+      expect(rows[5].load_power_kw).toBe(-12)
     })
 
     it('handles negative grid (export) and negative ess (charge) algebraically', () => {
@@ -133,7 +133,7 @@ describe('powerChartRows', () => {
         { time: bucketTime(anchor, 5), metric_key: 'active_ess_power_kw', value: -3 },
       ]
       const rows = powerChartRows(points, keys, anchor, nowAfterAnchor)
-      expect(rows[5].load_power_kw).toBe(3)
+      expect(rows[5].load_power_kw).toBe(-3)
     })
 
     it('returns null load when any of pv/grid/ess is missing in the bucket', () => {
@@ -153,7 +153,7 @@ describe('powerChartRows', () => {
         { time: bucketTime(anchor, 5), metric_key: 'load_power_kw', value: 999 },
       ]
       const rows = powerChartRows(points, keys, anchor, nowAfterAnchor)
-      expect(rows[5].load_power_kw).toBe(7)
+      expect(rows[5].load_power_kw).toBe(-7)
     })
 
     it('keeps load null in future buckets even when inputs would otherwise be there', () => {
