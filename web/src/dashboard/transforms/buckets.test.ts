@@ -5,28 +5,30 @@ import { applyApplianceConsumptionRule, energyBucketDeltaRows, type EnergyRow } 
 const DAY_BUCKETS = (24 * 60) / DAY_BUCKET_MINUTES
 
 describe('applyApplianceConsumptionRule', () => {
-  it('replaces zero appliance consumption with formula result', () => {
+  it('derives consumption from pv + purchased + discharge - charge - sold', () => {
     const deltas: Record<string, number> = {
       accumulated_electricity_purchased_kwh: 5,
       accumulated_pv_energy_yield_kwh: 4,
       total_energy_discharged_kwh: 3,
       total_energy_charged_kwh: 2,
+      accumulated_electricity_sold_kwh: 1,
       accumulated_power_consumption_kwh: 0,
     }
     applyApplianceConsumptionRule(deltas)
-    expect(deltas.accumulated_power_consumption_kwh).toBe(10)
+    expect(deltas.accumulated_power_consumption_kwh).toBe(9)
   })
 
-  it('keeps the device-reported value when it is non-zero', () => {
+  it('overwrites a non-zero device-reported value with the bus balance', () => {
     const deltas: Record<string, number> = {
       accumulated_electricity_purchased_kwh: 5,
       accumulated_pv_energy_yield_kwh: 4,
       total_energy_discharged_kwh: 3,
       total_energy_charged_kwh: 2,
+      accumulated_electricity_sold_kwh: 0,
       accumulated_power_consumption_kwh: 7,
     }
     applyApplianceConsumptionRule(deltas)
-    expect(deltas.accumulated_power_consumption_kwh).toBe(7)
+    expect(deltas.accumulated_power_consumption_kwh).toBe(10)
   })
 
   it('clamps negative formula results to zero', () => {
@@ -35,10 +37,24 @@ describe('applyApplianceConsumptionRule', () => {
       accumulated_pv_energy_yield_kwh: 0,
       total_energy_discharged_kwh: 0,
       total_energy_charged_kwh: 50,
+      accumulated_electricity_sold_kwh: 0,
       accumulated_power_consumption_kwh: 0,
     }
     applyApplianceConsumptionRule(deltas)
     expect(deltas.accumulated_power_consumption_kwh).toBe(0)
+  })
+
+  it('treats sold (export) as energy that did not reach the load', () => {
+    const deltas: Record<string, number> = {
+      accumulated_electricity_purchased_kwh: 0,
+      accumulated_pv_energy_yield_kwh: 100,
+      total_energy_discharged_kwh: 0,
+      total_energy_charged_kwh: 0,
+      accumulated_electricity_sold_kwh: 40,
+      accumulated_power_consumption_kwh: 0,
+    }
+    applyApplianceConsumptionRule(deltas)
+    expect(deltas.accumulated_power_consumption_kwh).toBe(60)
   })
 
   it('is a no-op when key is absent', () => {
@@ -127,12 +143,13 @@ describe('energyBucketDeltaRows', () => {
     expect(rows[2].accumulated_pv_energy_yield_kwh).toBe(4)
   })
 
-  it('keeps the device-reported consumption when it is non-zero', () => {
+  it('overrides the device-reported consumption with the bus balance per bucket', () => {
     const metricKeys = [
       'accumulated_electricity_purchased_kwh',
       'accumulated_pv_energy_yield_kwh',
       'total_energy_discharged_kwh',
       'total_energy_charged_kwh',
+      'accumulated_electricity_sold_kwh',
       'accumulated_power_consumption_kwh',
     ]
     const points = [
@@ -140,20 +157,22 @@ describe('energyBucketDeltaRows', () => {
       { time: bucketTime('day', anchor, 1), metric_key: 'accumulated_pv_energy_yield_kwh', value: 4 },
       { time: bucketTime('day', anchor, 1), metric_key: 'total_energy_discharged_kwh', value: 3 },
       { time: bucketTime('day', anchor, 1), metric_key: 'total_energy_charged_kwh', value: 2 },
-      { time: bucketTime('day', anchor, 1), metric_key: 'accumulated_power_consumption_kwh', value: 7 },
+      { time: bucketTime('day', anchor, 1), metric_key: 'accumulated_electricity_sold_kwh', value: 1 },
+      { time: bucketTime('day', anchor, 1), metric_key: 'accumulated_power_consumption_kwh', value: 99 },
     ]
     const rows: EnergyRow[] = energyBucketDeltaRows(points, metricKeys, 'day', anchor, nowAfterAnchor)
-    // Sink direction is -1, so a non-zero device-reported delta of 7 shows
-    // up as -7 on the y-axis (no algebraic override).
-    expect(rows[1].accumulated_power_consumption_kwh).toBe(-7)
+    // 4 + 5 + 3 - 2 - 1 = 9, applied as a sink (-9). The 99 sample is
+    // discarded because the rule is unconditional.
+    expect(rows[1].accumulated_power_consumption_kwh).toBe(-9)
   })
 
-  it('falls back to algebraic formula when device counter reports zero', () => {
+  it('uses the algebraic balance even when device counter reports zero', () => {
     const metricKeys = [
       'accumulated_electricity_purchased_kwh',
       'accumulated_pv_energy_yield_kwh',
       'total_energy_discharged_kwh',
       'total_energy_charged_kwh',
+      'accumulated_electricity_sold_kwh',
       'accumulated_power_consumption_kwh',
     ]
     const points = [
@@ -161,11 +180,12 @@ describe('energyBucketDeltaRows', () => {
       { time: bucketTime('day', anchor, 1), metric_key: 'accumulated_pv_energy_yield_kwh', value: 4 },
       { time: bucketTime('day', anchor, 1), metric_key: 'total_energy_discharged_kwh', value: 3 },
       { time: bucketTime('day', anchor, 1), metric_key: 'total_energy_charged_kwh', value: 2 },
+      { time: bucketTime('day', anchor, 1), metric_key: 'accumulated_electricity_sold_kwh', value: 1 },
       { time: bucketTime('day', anchor, 1), metric_key: 'accumulated_power_consumption_kwh', value: 0 },
     ]
     const rows: EnergyRow[] = energyBucketDeltaRows(points, metricKeys, 'day', anchor, nowAfterAnchor)
-    // 5 + 4 + 3 - 2 = 10, applied as a sink (-10) when the raw counter is 0.
-    expect(rows[1].accumulated_power_consumption_kwh).toBe(-10)
+    // 4 + 5 + 3 - 2 - 1 = 9, applied as a sink (-9).
+    expect(rows[1].accumulated_power_consumption_kwh).toBe(-9)
   })
 
   it('returns full timeline of zeros when no matching points exist', () => {

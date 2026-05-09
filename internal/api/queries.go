@@ -618,31 +618,36 @@ func (s *Store) EnergySummary(ctx context.Context, organizationID string, metric
 	return out, nil
 }
 
-// applyApplianceConsumptionRule mirrors the frontend rule: when the
-// device-reported `accumulated_power_consumption_kwh` counter is missing
-// or stuck at zero, derive consumption algebraically from the energy
-// balance (purchase + pv + discharge - charge). Some Huawei deployments
-// (notably the pe inverter) leave the consumption register at 0 even
-// while the household actively consumes energy, which would otherwise
-// collapse the dashboard summary to "0 spent".
+// applyApplianceConsumptionRule replaces the device-reported
+// `accumulated_power_consumption_kwh` counter with the algebraic
+// energy-balance identity:
 //
-// The rule is identical to the TypeScript implementation in
-// `web/src/dashboard/transforms/buckets.ts`. Putting it here on the
-// server lets the frontend trust the totals as-is and removes one source
-// of discrepancy between the API and the UI.
+//	consumption = pv + purchased + discharge - charge - sold
+//
+// This is the bus-balance form of Kirchhoff's current law applied
+// across a calendar period: the load is whatever was generated /
+// imported / discharged minus whatever was stored / exported. The
+// rule is unconditional now (was previously a "fallback when counter
+// is zero") because the SmartLogger's 40496/98 register tracks only
+// the inverter's "Backup load" branch on PE/ZE deployments and
+// chronically undercounts real site consumption — the same problem
+// that made the dashboard derive the day-chart load line from
+// PV+Grid+ESS instead of the raw 40503 register. Trusting the
+// counter and trusting the balance disagreed; the balance is
+// provably correct by energy conservation, so we standardize on it.
+//
+// Mirrors the TypeScript implementation in
+// `web/src/dashboard/transforms/buckets.ts`.
 func applyApplianceConsumptionRule(totals map[string]float64) {
 	const consumptionKey = "accumulated_power_consumption_kwh"
-	raw, ok := totals[consumptionKey]
-	if !ok {
+	if _, ok := totals[consumptionKey]; !ok {
 		return
 	}
-	if raw > 0 {
-		return
-	}
-	value := totals["accumulated_electricity_purchased_kwh"] +
-		totals["accumulated_pv_energy_yield_kwh"] +
+	value := totals["accumulated_pv_energy_yield_kwh"] +
+		totals["accumulated_electricity_purchased_kwh"] +
 		totals["total_energy_discharged_kwh"] -
-		totals["total_energy_charged_kwh"]
+		totals["total_energy_charged_kwh"] -
+		totals["accumulated_electricity_sold_kwh"]
 	if value < 0 {
 		value = 0
 	}

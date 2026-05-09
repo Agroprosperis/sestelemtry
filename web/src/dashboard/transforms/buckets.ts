@@ -5,25 +5,29 @@ import { DAY_BUCKET_MINUTES, timelineBuckets } from '../timeline'
 
 export type EnergyRow = { time: string } & Partial<Record<MetricKey, number>> & Record<string, string | number>
 
-// applyApplianceConsumptionRule overrides the device-reported
-// `accumulated_power_consumption_kwh` counter only when it is missing or
-// reports zero. Some Huawei deployments (e.g. the pe inverter) leave the
-// register at 0 even while the household actually consumes energy, which
-// would collapse the dashboard summary to "0 spent / 0% from PV". When
-// the device counter works (delta > 0), we trust it. When it is silent we
-// fall back to the algebraic balance:
-//   purchased + pv + discharge - charge
-// which is the same energy-conservation identity used before the trust-raw
-// experiment, just guarded so working counters keep their measured values.
+// applyApplianceConsumptionRule replaces the device-reported
+// `accumulated_power_consumption_kwh` counter with the algebraic
+// energy-balance identity:
+//   consumption = pv + purchased + discharge - charge - sold
+// This is the bus-balance form of Kirchhoff's current law applied
+// across a calendar period: the load is whatever was generated /
+// imported / discharged minus whatever was stored / exported. The
+// rule is unconditional now (was previously a "fallback when counter
+// is zero") because the SmartLogger's 40496/98 register tracks only
+// the inverter's "Backup load" branch on PE/ZE deployments and
+// chronically undercounts real site consumption — the same problem
+// that made us derive the day-chart load line from PV+Grid+ESS
+// instead of the raw 40503 register. Trusting the counter and
+// trusting the balance disagreed; the balance is provably correct
+// by energy conservation, so we standardize on it.
 export function applyApplianceConsumptionRule(rawDeltas: Record<string, number>): void {
   if (!(APPLIANCE_CONSUMPTION_METRIC in rawDeltas)) return
-  const raw = rawDeltas[APPLIANCE_CONSUMPTION_METRIC]
-  if (Number.isFinite(raw) && raw > 0) return
   const value =
-    (rawDeltas.accumulated_electricity_purchased_kwh ?? 0) +
     (rawDeltas.accumulated_pv_energy_yield_kwh ?? 0) +
+    (rawDeltas.accumulated_electricity_purchased_kwh ?? 0) +
     (rawDeltas.total_energy_discharged_kwh ?? 0) -
-    (rawDeltas.total_energy_charged_kwh ?? 0)
+    (rawDeltas.total_energy_charged_kwh ?? 0) -
+    (rawDeltas.accumulated_electricity_sold_kwh ?? 0)
   rawDeltas[APPLIANCE_CONSUMPTION_METRIC] = value < 0 ? 0 : value
 }
 

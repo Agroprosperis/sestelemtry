@@ -45,11 +45,17 @@ func TestBucketAtLeastOneDay(t *testing.T) {
 	}
 }
 
-// TestApplyApplianceConsumptionRule mirrors the frontend rule: when the
-// device-reported consumption counter is missing or stuck at zero, the
-// algebraic appliance-balance fallback (purchased + pv + discharge -
-// charge) must populate it so the dashboard summary still has a
-// consumption number. Working counters (>0) must be left alone.
+// TestApplyApplianceConsumptionRule pins the bus-balance identity used
+// to fill `accumulated_power_consumption_kwh`. The rule is unconditional
+// — the device-reported value (which on PE/ZE deployments only reflects
+// the inverter's "Backup load" branch) is overwritten by the algebraic
+// energy balance:
+//
+//	consumption = pv + purchased + discharge - charge - sold
+//
+// Working counters that happen to agree with the balance are unaffected.
+// The rule is a no-op only when the consumption key is absent from the
+// totals map (the caller didn't ask for it).
 func TestApplyApplianceConsumptionRule(t *testing.T) {
 	cases := []struct {
 		name string
@@ -67,24 +73,37 @@ func TestApplyApplianceConsumptionRule(t *testing.T) {
 			keep: true, // key not present, function returns early
 		},
 		{
-			name: "non-zero device counter is trusted",
+			name: "non-zero device counter is overwritten by the balance",
 			in: map[string]float64{
 				"accumulated_power_consumption_kwh":     12.5,
 				"accumulated_electricity_purchased_kwh": 5,
 				"accumulated_pv_energy_yield_kwh":       7,
 			},
-			want: 12.5,
+			want: 12, // pv 7 + purchased 5 + 0 discharge - 0 charge - 0 sold
 		},
 		{
-			name: "zero counter falls back to algebraic balance",
+			name: "full balance with all five terms present",
 			in: map[string]float64{
 				"accumulated_power_consumption_kwh":     0,
 				"accumulated_electricity_purchased_kwh": 5,
 				"accumulated_pv_energy_yield_kwh":       7,
 				"total_energy_discharged_kwh":           3,
 				"total_energy_charged_kwh":              2,
+				"accumulated_electricity_sold_kwh":      1,
 			},
-			want: 13, // 5 + 7 + 3 - 2
+			want: 12, // 7 + 5 + 3 - 2 - 1
+		},
+		{
+			name: "sold subtracts because export does not reach the load",
+			in: map[string]float64{
+				"accumulated_power_consumption_kwh":     0,
+				"accumulated_electricity_purchased_kwh": 0,
+				"accumulated_pv_energy_yield_kwh":       100,
+				"total_energy_discharged_kwh":           0,
+				"total_energy_charged_kwh":              0,
+				"accumulated_electricity_sold_kwh":      40,
+			},
+			want: 60,
 		},
 		{
 			name: "negative balance is clamped to zero",
@@ -94,13 +113,13 @@ func TestApplyApplianceConsumptionRule(t *testing.T) {
 				"accumulated_pv_energy_yield_kwh":       0,
 				"total_energy_discharged_kwh":           0,
 				"total_energy_charged_kwh":              10,
+				"accumulated_electricity_sold_kwh":      0,
 			},
 			want: 0,
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			before := tc.in["accumulated_power_consumption_kwh"]
 			applyApplianceConsumptionRule(tc.in)
 			got, ok := tc.in["accumulated_power_consumption_kwh"]
 			if tc.keep {
@@ -112,7 +131,6 @@ func TestApplyApplianceConsumptionRule(t *testing.T) {
 			if !ok {
 				t.Fatalf("expected consumption key to be present after rule")
 			}
-			_ = before
 			if math.Abs(got-tc.want) > 1e-9 {
 				t.Fatalf("consumption = %v, want %v", got, tc.want)
 			}

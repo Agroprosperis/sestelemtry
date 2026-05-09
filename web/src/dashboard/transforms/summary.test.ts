@@ -27,6 +27,12 @@ describe('sumSeriesValue', () => {
 })
 
 describe('energySummaryFromSeries', () => {
+  // The bus-balance rule that overrides the device-reported
+  // `accumulated_power_consumption_kwh` lives in `applyApplianceConsumptionRule`
+  // (covered by buckets.test.ts and the Go test in queries_test.go);
+  // `energySummaryFromSeries` is the allocation step that runs on
+  // already-corrected totals, so it consumes whatever consumption number
+  // the row already carries.
   it('computes percentages for a balanced series', () => {
     const rows: EnergyRow[] = [
       {
