@@ -74,7 +74,7 @@ describe('pivotRawCsvToWide', () => {
     expect(out.csv).toContain('2026-05-09T13:00:00+03:00,10.28.40.101,97.12,\r\n')
   })
 
-  it('passes the truncation sentinel through unchanged so the dialog can still warn', () => {
+  it('detects the truncation sentinel but strips it from the wide CSV body', () => {
     const long =
       HEADER +
       '2026-05-09T13:00:00+03:00,soc_percent,40515,UINT16,0.1,80,"{""device_host"":""10.28.40.102""}"\r\n' +
@@ -84,7 +84,11 @@ describe('pivotRawCsvToWide', () => {
       metricKeys: ['soc_percent'],
     })
     expect(out.truncated).toBe(true)
-    expect(out.csv).toMatch(/__TRUNCATED__,,,,,1,/)
+    // Sentinel is intentionally absent from the wide body — its
+    // 7-column long-format shape would corrupt (time, device_host,
+    // m1..mN). The dialog signals truncation via the boolean flag
+    // (and the HTTP-level detection in fetchRawSamplesCsv) instead.
+    expect(out.csv).not.toMatch(/__TRUNCATED__/)
   })
 
   it('handles header-only response (no samples) without crashing', () => {

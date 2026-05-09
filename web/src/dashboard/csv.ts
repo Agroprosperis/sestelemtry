@@ -43,18 +43,23 @@ export function rowsToCsv(headers: readonly string[], rows: readonly CsvRow[]): 
 // so the browser saves it under `filename`. The leading BOM tells Excel to
 // decode the file as UTF-8 (otherwise Cyrillic columns appear as mojibake
 // when the user opens it on a Windows Excel install with a CP-1251 default).
+//
+// URL.revokeObjectURL is deferred to the next event-loop tick. Revoking
+// synchronously after `a.click()` works in Chrome (the click resolves
+// before the call returns) but races the actual download in Safari and
+// Firefox, where the browser kicks off the save asynchronously and a
+// freshly-revoked blob URL becomes a 404. setTimeout(..., 0) is enough
+// breathing room: the download has been initiated, but the blob is
+// still alive.
 export function downloadCsv(filename: string, csv: string): void {
   const blob = new Blob(['\ufeff', csv], { type: 'text/csv;charset=utf-8;' })
   const url = URL.createObjectURL(blob)
-  try {
-    const a = document.createElement('a')
-    a.href = url
-    a.download = filename
-    a.rel = 'noopener'
-    document.body.appendChild(a)
-    a.click()
-    a.remove()
-  } finally {
-    URL.revokeObjectURL(url)
-  }
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.rel = 'noopener'
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 0)
 }

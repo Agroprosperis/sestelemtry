@@ -127,8 +127,12 @@ export function pivotRawCsvToWide(input: PivotInput): PivotResult {
     if (!line.trim()) continue
     if (line.startsWith(TRUNCATION_PREFIX)) {
       // The sentinel rides in-band because the Fetch API doesn't
-      // expose HTTP trailers; carry it through to the wide output
-      // unchanged so the dialog can still detect truncation.
+      // expose HTTP trailers. We detect it so callers can surface a
+      // truncation warning, but we do NOT carry it through to the
+      // wide CSV: its 7-column long-format shape would corrupt the
+      // (time, device_host, m1..mN) wide layout when opened in
+      // Excel/Pandas. The dialog already shows a UI message based
+      // on the `truncated` flag, so the in-band copy is redundant.
       truncationLine = line
       continue
     }
@@ -172,9 +176,6 @@ export function pivotRawCsvToWide(input: PivotInput): PivotResult {
   })
 
   let csv = rowsToCsv(headers, wideRecords)
-  if (truncationLine) {
-    csv += `\r\n${truncationLine}`
-  }
   // Ensure the file ends with a newline so cat / less / Excel render
   // the last row instead of bumping it against EOF.
   if (!csv.endsWith('\r\n')) csv += '\r\n'

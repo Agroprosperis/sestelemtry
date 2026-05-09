@@ -9,6 +9,11 @@ import { aggregatePvForecastHourly, elevatorCodeFor } from './transforms/pvForec
 export type ExportTable = {
   headers: string[]
   rows: Array<Record<string, unknown>>
+  // warnings carries non-fatal data-source failures so the dialog can
+  // surface them to the analyst (e.g. "DAM prices unavailable —
+  // column is empty"). Fatal errors still throw; this list is only
+  // for sources whose absence we paper over with empty cells.
+  warnings: string[]
 }
 
 // Energy metric columns offered for export. Mirrors the EnergyChart's
@@ -208,7 +213,7 @@ export async function fetchCustomExportData(input: CustomExportInput): Promise<E
 
   // Empty selection short-circuits to an empty table so the dialog can
   // surface a "select at least one column" hint without firing a request.
-  if (headers.length === 1) return { headers, rows: [] }
+  if (headers.length === 1) return { headers, rows: [], warnings: [] }
 
   // Range covers a single calendar day exactly when from is local midnight
   // and to is exactly +24h. Forecast is fetched only for that case (the
@@ -287,6 +292,12 @@ export async function fetchCustomExportData(input: CustomExportInput): Promise<E
         signal,
       )
     : Promise.resolve(null)
+  // damFailed / forecastFailed are flipped inside the .catch handlers
+  // when a non-abort error swallows a partial source. The dialog reads
+  // table.warnings to render a non-blocking notice — without these
+  // flags the user would silently get a CSV with a missing column.
+  let damFailed = false
+  let forecastFailed = false
   const damP = columns.price
     ? fetchDAMPrices(
         {
@@ -297,6 +308,7 @@ export async function fetchCustomExportData(input: CustomExportInput): Promise<E
         signal,
       ).catch((e) => {
         if (isAbortError(e)) throw e
+        damFailed = true
         return null
       })
     : Promise.resolve(null)
@@ -307,6 +319,7 @@ export async function fetchCustomExportData(input: CustomExportInput): Promise<E
           signal,
         ).catch((e) => {
           if (isAbortError(e)) throw e
+          forecastFailed = true
           return []
         })
       : Promise.resolve([])
@@ -426,7 +439,15 @@ export async function fetchCustomExportData(input: CustomExportInput): Promise<E
     return row
   })
 
-  return { headers, rows }
+  const warnings: string[] = []
+  if (damFailed) {
+    warnings.push('Не вдалось завантажити ціни РДН — колонка пуста.')
+  }
+  if (forecastFailed) {
+    warnings.push('Не вдалось завантажити прогноз СЕС — колонка пуста.')
+  }
+
+  return { headers, rows, warnings }
 }
 
 export function customExportFilename(input: {

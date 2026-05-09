@@ -58,6 +58,10 @@ function pad(n: number): string {
   return n < 10 ? `0${n}` : String(n)
 }
 
+function isAbortError(e: unknown): boolean {
+  return e instanceof DOMException && e.name === 'AbortError'
+}
+
 function toDateInputValue(d: Date): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 }
@@ -107,12 +111,40 @@ export function ExportDialog({ organizationID, initialAnchor, onClose }: Props) 
   })
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // abortRef carries the controller for the in-flight export so the
+  // dialog can cancel its fetches when the user closes the modal,
+  // hits ESC, or unmounts the component (e.g. navigating away). The
+  // raw export can take dozens of seconds and pull tens of MB — we
+  // can't leave it running once the user has moved on.
+  const abortRef = useRef<AbortController | null>(null)
+  // mountedRef gates post-await setState calls so an aborted export
+  // resolving after unmount doesn't trigger React's "set state on
+  // unmounted component" warning. We refrain from a hard early
+  // return inside handleDownload because we still want the catch
+  // branch to swallow the AbortError quietly.
+  const mountedRef = useRef(true)
 
   useEffect(() => {
     const dialog = dialogRef.current
     if (!dialog || dialog.open) return
     dialog.showModal()
   }, [])
+
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false
+      abortRef.current?.abort()
+    }
+  }, [])
+
+  // closeWithAbort tears down any in-flight export before propagating
+  // the dialog close. Used by the explicit close button, the cancel
+  // footer button, and the native ESC handler so all three paths
+  // behave the same way (no zombie fetches, no late setState).
+  function closeWithAbort() {
+    if (busy) abortRef.current?.abort()
+    onClose()
+  }
 
   const fromDate = useMemo(() => parseDateInput(fromStr), [fromStr])
   // toDate is exclusive in the API (next-day-after end). The picker shows
@@ -167,6 +199,14 @@ export function ExportDialog({ organizationID, initialAnchor, onClose }: Props) 
 
   async function handleDownload() {
     if (!fromDate || !toExclusive || !computedBucket) return
+    // Abort any prior in-flight attempt before starting a new one.
+    // The submit button is disabled while busy, so this branch is
+    // mostly defensive — but it also keeps the controller fresh for
+    // every retry the user kicks off after a failure.
+    abortRef.current?.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
+    const { signal } = controller
     setBusy(true)
     setError(null)
     try {
@@ -187,14 +227,18 @@ export function ExportDialog({ organizationID, initialAnchor, onClose }: Props) 
         // instead of UTC. Without this the day picker says "9 May"
         // but the CSV shows "8 May 21:00 .. 9 May 20:59".
         const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || undefined
-        const result = await fetchRawSamplesCsv({
-          organizationID,
-          metricKeys,
-          from: fromDate.toISOString(),
-          to: toExclusive.toISOString(),
-          limit: RAW_SAMPLES_LIMIT,
-          tz,
-        })
+        const result = await fetchRawSamplesCsv(
+          {
+            organizationID,
+            metricKeys,
+            from: fromDate.toISOString(),
+            to: toExclusive.toISOString(),
+            limit: RAW_SAMPLES_LIMIT,
+            tz,
+          },
+          signal,
+        )
+        if (!mountedRef.current) return
         if (result.rows === 0 && !result.truncated) {
           setError('У вибраному діапазоні немає сирих даних — спробуйте інший період або метрики.')
           return
@@ -204,13 +248,15 @@ export function ExportDialog({ organizationID, initialAnchor, onClose }: Props) 
         // are non-fatal: we just fall back to plain headers.
         let registerAddresses: Record<string, number> | undefined
         try {
-          const reg = await fetchRegisters()
+          const reg = await fetchRegisters(signal)
           registerAddresses = Object.fromEntries(
             Object.entries(reg.metadata).map(([k, v]) => [k, v.address]),
           )
-        } catch {
+        } catch (e) {
+          if (isAbortError(e)) throw e
           registerAddresses = undefined
         }
+        if (!mountedRef.current) return
         // Pivot long → wide on the client. The user explicitly
         // asked for the "one row per moment, metrics as columns"
         // layout (matches the spreadsheet they ship into) instead
@@ -237,13 +283,15 @@ export function ExportDialog({ organizationID, initialAnchor, onClose }: Props) 
       // still gets the data they asked for.
       let registerAddresses: Record<string, number> | undefined
       try {
-        const reg = await fetchRegisters()
+        const reg = await fetchRegisters(signal)
         registerAddresses = Object.fromEntries(
           Object.entries(reg.metadata).map(([k, v]) => [k, v.address]),
         )
-      } catch {
+      } catch (e) {
+        if (isAbortError(e)) throw e
         registerAddresses = undefined
       }
+      if (!mountedRef.current) return
       const table = await fetchCustomExportData({
         organizationID,
         from: fromDate,
@@ -254,7 +302,9 @@ export function ExportDialog({ organizationID, initialAnchor, onClose }: Props) 
           forecast: columns.forecast && forecastEnabled,
         },
         registerAddresses,
+        signal,
       })
+      if (!mountedRef.current) return
       if (table.rows.length === 0) {
         setError('У вибраному діапазоні немає даних — спробуйте інший період або колонки.')
         return
@@ -266,11 +316,24 @@ export function ExportDialog({ organizationID, initialAnchor, onClose }: Props) 
         bucket: computedBucket,
       })
       downloadCsv(filename, rowsToCsv(table.headers, table.rows))
+      // Partial-source failures (DAM, forecast) are non-fatal: the
+      // CSV still downloads, but the affected column is empty. We
+      // surface the warnings via the existing error slot instead of
+      // adding a separate banner — and we deliberately leave the
+      // dialog open so the user actually reads the notice before
+      // dismissing it. A clean run (no warnings) closes immediately
+      // as before.
+      if (table.warnings.length > 0) {
+        setError(table.warnings.join(' '))
+        return
+      }
       onClose()
     } catch (e) {
+      if (isAbortError(e)) return
+      if (!mountedRef.current) return
       setError(e instanceof Error ? e.message : 'Не вдалось підготувати експорт')
     } finally {
-      setBusy(false)
+      if (mountedRef.current) setBusy(false)
     }
   }
 
@@ -278,12 +341,12 @@ export function ExportDialog({ organizationID, initialAnchor, onClose }: Props) 
     <dialog
       ref={dialogRef}
       className="export-dialog"
-      onClose={onClose}
+      onClose={closeWithAbort}
       onCancel={(e) => {
         // Prevent the native ESC behavior from leaving the dialog in an
         // odd half-open state on some browsers; we'll close explicitly.
         e.preventDefault()
-        onClose()
+        closeWithAbort()
       }}
     >
       <form
@@ -299,7 +362,7 @@ export function ExportDialog({ organizationID, initialAnchor, onClose }: Props) 
             type="button"
             className="export-dialog-close"
             aria-label="Закрити"
-            onClick={onClose}
+            onClick={closeWithAbort}
           >
             ×
           </button>
@@ -387,7 +450,7 @@ export function ExportDialog({ organizationID, initialAnchor, onClose }: Props) 
         </div>
 
         <footer className="export-dialog-foot">
-          <button type="button" className="export-dialog-secondary" onClick={onClose}>
+          <button type="button" className="export-dialog-secondary" onClick={closeWithAbort}>
             Скасувати
           </button>
           <button
