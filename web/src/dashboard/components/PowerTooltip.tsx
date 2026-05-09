@@ -29,17 +29,21 @@ const IDLE_KW = 0.05
 // directionalLabel produces a sign-aware tooltip name for the two
 // metrics whose direction matters operationally: ESS (charge vs
 // discharge) and the grid meter (import vs export). The convention
-// matches the production SmartLogger firmware on PE/ZE — positive
-// values are "energy flows INTO the system being measured":
-//   * active_ess_power_kw > 0 → battery is taking power in (charging)
-//   * grid_connected_active_power_kw > 0 → site is pulling power
-//     from the external grid (import / купівля)
+// matches the production SmartLogger firmware on PE/ZE:
+//   * active_ess_power_kw > 0 → battery is delivering power
+//     (розряд / discharge); < 0 → battery is taking power in
+//     (заряд / charge). Confirmed against live readings on
+//     2026-05-09 (PV 97 < load 198, ESS slowly discharging at
+//     -0.82 was actually a charge, the value reads negative when
+//     charging).
+//   * grid_connected_active_power_kw > 0 → site pulling power
+//     from the external grid (import / купівля); < 0 → exporting.
 // Around zero we fall back to a neutral label so the tooltip doesn't
 // flicker between charge/discharge on inverter standby noise.
 function directionalLabel(metricKey: string, value: number): string | null {
   if (metricKey === 'active_ess_power_kw') {
-    if (value > IDLE_KW) return 'Заряд УЗЕ'
-    if (value < -IDLE_KW) return 'Розряд УЗЕ'
+    if (value > IDLE_KW) return 'Розряд УЗЕ'
+    if (value < -IDLE_KW) return 'Заряд УЗЕ'
     return 'УЗЕ в очікуванні'
   }
   if (metricKey === 'grid_connected_active_power_kw') {

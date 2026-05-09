@@ -26,38 +26,41 @@ function buildPayload(values: Record<string, number>) {
 }
 
 describe('PowerTooltip directional labels', () => {
-  it('renders ESS as Заряд with the absolute value when value is positive', () => {
+  it('renders ESS as Розряд with the absolute value when value is positive', () => {
     render(
       <PowerTooltip
         active
         label="14:35"
         payload={buildPayload({
           active_pv_power_kw: 97.12,
-          active_ess_power_kw: 0.82,
+          // Positive ESS = battery delivering power = розряд on the
+          // production firmware. The tooltip must say so explicitly
+          // and show the magnitude as an absolute number.
+          active_ess_power_kw: 3.5,
           grid_connected_active_power_kw: 100.56,
           load_power_kw: 197.68,
         })}
       />,
     )
-    expect(screen.getByText('Заряд УЗЕ')).toBeInTheDocument()
-    // Magnitude rendered without sign so the tooltip line reads cleanly.
-    expect(screen.getByText(/^0[.,]82\s*kW$/)).toBeInTheDocument()
+    expect(screen.getByText('Розряд УЗЕ')).toBeInTheDocument()
+    expect(screen.getByText(/^3[.,]5\s*kW$/)).toBeInTheDocument()
   })
 
-  it('renders ESS as Розряд and grid as Експорт on negative values', () => {
+  it('renders ESS as Заряд and grid as Експорт on negative values', () => {
     render(
       <PowerTooltip
         active
         label="20:00"
         payload={buildPayload({
           active_pv_power_kw: 0,
+          // Negative ESS = battery absorbing power = заряд.
           active_ess_power_kw: -3.5,
           grid_connected_active_power_kw: -12.4,
           load_power_kw: 8.9,
         })}
       />,
     )
-    expect(screen.getByText('Розряд УЗЕ')).toBeInTheDocument()
+    expect(screen.getByText('Заряд УЗЕ')).toBeInTheDocument()
     expect(screen.getByText('Експорт у мережу')).toBeInTheDocument()
     expect(screen.getByText(/^3[.,]5\s*kW$/)).toBeInTheDocument()
     expect(screen.getByText(/^12[.,]4\s*kW$/)).toBeInTheDocument()
