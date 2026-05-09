@@ -492,6 +492,60 @@ func TestRegistersEndpoint(t *testing.T) {
 	}
 }
 
+// TestSamplesRoundsValueToGainPrecision verifies that float64
+// jitter from the decoder's `int * gain` (e.g. 156 * 0.1 yielding
+// 15.600000000000001) is stripped from the CSV using the metric's
+// declared decimal precision. Without this analysts get a column
+// of weird trailing-9's that obscures the real readings.
+func TestSamplesRoundsValueToGainPrecision(t *testing.T) {
+	store := &mockStore{
+		samplesRows: []SampleRow{
+			// gain=0.1 (UINT16) — soc_percent. Real raw int 156
+			// → 156 * 0.1 = 15.600000000000001 in IEEE-754.
+			{
+				Time:      time.Date(2026, 5, 9, 10, 0, 0, 0, time.UTC),
+				MetricKey: "soc_percent",
+				Value:     15.600000000000001,
+			},
+			// gain=0.01 (INT64) — total_energy_discharged_kwh.
+			// 12009854 * 0.01 = 120098.54000000001 in IEEE-754.
+			{
+				Time:      time.Date(2026, 5, 9, 10, 0, 1, 0, time.UTC),
+				MetricKey: "total_energy_discharged_kwh",
+				Value:     120098.54000000001,
+			},
+			// Unknown metric — no gain available, must fall back
+			// to shortest round-trip so we don't silently truncate
+			// genuine precision (e.g. an averaged value from a
+			// hypothetical synthetic exporter).
+			{
+				Time:      time.Date(2026, 5, 9, 10, 0, 2, 0, time.UTC),
+				MetricKey: "synthetic_only",
+				Value:     1.234567,
+			},
+		},
+	}
+	h := NewHandlers(store, "*")
+	url := "/api/v1/samples?organization_id=org-a&metric_keys=soc_percent" +
+		"&from=2026-05-09T00:00:00Z&to=2026-05-10T00:00:00Z"
+	req := httptest.NewRequest(http.MethodGet, url, nil)
+	rec := httptest.NewRecorder()
+	h.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200 got %d", rec.Code)
+	}
+	body := strings.TrimPrefix(rec.Body.String(), "\xef\xbb\xbf")
+	if !strings.Contains(body, ",15.6,") {
+		t.Fatalf("expected SOC trimmed to 15.6, got body=%q", body)
+	}
+	if !strings.Contains(body, ",120098.54,") {
+		t.Fatalf("expected discharged_kwh trimmed to 120098.54, got body=%q", body)
+	}
+	if !strings.Contains(body, ",1.234567,") {
+		t.Fatalf("expected synthetic value preserved as 1.234567, got body=%q", body)
+	}
+}
+
 // TestSamplesRendersTimeInRequestedTZ verifies that the `tz` query
 // parameter shifts the rendered `time` column out of UTC. We pick
 // Europe/Kyiv (UTC+3 in May) and assert the offset suffix is present

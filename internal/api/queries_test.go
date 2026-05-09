@@ -158,6 +158,41 @@ func TestParseLimit(t *testing.T) {
 	}
 }
 
+// TestDecimalsForGain locks the round-table of supported gains so a
+// future catalog change (or a typo'd 0.1000001 in YAML) doesn't
+// silently downgrade to "shortest round-trip" formatting and bring
+// back the float-jitter trailing 9's analysts complained about.
+func TestDecimalsForGain(t *testing.T) {
+	cases := []struct {
+		gain     float64
+		decimals int
+		ok       bool
+	}{
+		{1, 0, true},
+		{10, 0, true},
+		{0.1, 1, true},
+		{0.01, 2, true},
+		{0.001, 3, true},
+		{0.0001, 4, true},
+		// Float jitter from YAML round-trip — must still resolve.
+		{0.01 + 1e-15, 2, true},
+		{0, 0, false},
+		{-0.01, 0, false},
+		{math.NaN(), 0, false},
+		{math.Inf(1), 0, false},
+		// Non-power-of-ten gain (1/3 ≈ 0.333…) — fall back to
+		// shortest round-trip, signaled by ok=false.
+		{1.0 / 3.0, 0, false},
+	}
+	for _, tc := range cases {
+		got, ok := decimalsForGain(tc.gain)
+		if ok != tc.ok || (ok && got != tc.decimals) {
+			t.Fatalf("decimalsForGain(%v) = (%d, %v); want (%d, %v)",
+				tc.gain, got, ok, tc.decimals, tc.ok)
+		}
+	}
+}
+
 // TestSanitizeFilenameSegment locks in the safe-character allow-list
 // used by the /api/v1/samples Content-Disposition header. Anything
 // outside [A-Za-z0-9_-] becomes underscore so a hostile organization

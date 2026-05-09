@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -321,10 +322,23 @@ func (h *Handlers) samples(w http.ResponseWriter, r *http.Request) {
 			}
 			meta, hasMeta := ModbusRegisterMetadata[row.MetricKey]
 			var modbusReg, dataType, gain string
+			// valuePrec defaults to -1 (shortest round-trip
+			// representation) so synthetic / unknown metrics keep
+			// the previous behavior. For known Modbus metrics we
+			// switch to fixed-precision formatting derived from
+			// the register's gain — see decimalsForGain — so float
+			// noise like "15.600000000000001" doesn't leak into
+			// the CSV. The displayed precision still covers the
+			// real signal: gain=0.01 → 2 decimals (the smallest
+			// raw-counter step is 0.01), gain=0.001 → 3, and so on.
+			valuePrec := -1
 			if hasMeta {
 				modbusReg = strconv.Itoa(meta.Address)
 				dataType = meta.DataType
 				gain = strconv.FormatFloat(meta.Gain, 'f', -1, 64)
+				if d, ok := decimalsForGain(meta.Gain); ok {
+					valuePrec = d
+				}
 			}
 			return cw.Write([]string{
 				row.Time.In(loc).Format(time.RFC3339Nano),
@@ -332,7 +346,7 @@ func (h *Handlers) samples(w http.ResponseWriter, r *http.Request) {
 				modbusReg,
 				dataType,
 				gain,
-				strconv.FormatFloat(row.Value, 'f', -1, 64),
+				strconv.FormatFloat(row.Value, 'f', valuePrec, 64),
 				labels,
 			})
 		},
@@ -553,6 +567,43 @@ func parseDateRange(r *http.Request) (from, to time.Time, err error) {
 		return time.Time{}, time.Time{}, fmt.Errorf("to must be on or after from")
 	}
 	return from, to, nil
+}
+
+// decimalsForGain returns the number of decimal places needed to
+// represent the smallest meaningful step of a Modbus register
+// scaled by `gain`. Since raw register values are integers, the
+// scaled output's true precision is exactly -log10(gain). We use
+// this on the raw CSV path to print "120098.54" instead of
+// "120098.54000000001" — the extra trailing digits are float64
+// noise from `int * 0.01`, not actual signal.
+//
+// Returns (decimals, true) for "nice" gains we recognize
+// (0.0001, 0.001, 0.01, 0.1, 1, 10, ...). Falls back to false for
+// anything weird (negative, zero, NaN, non-power-of-ten) so the
+// caller drops back to the shortest-round-trip representation.
+func decimalsForGain(gain float64) (int, bool) {
+	if gain <= 0 || math.IsNaN(gain) || math.IsInf(gain, 0) {
+		return 0, false
+	}
+	// We only special-case integer powers of ten between 10^-6 and
+	// 10^3 — that covers every gain in the Huawei catalog today
+	// (1, 0.1, 0.01, 0.001) and leaves headroom for a future map.
+	// Tolerate float jitter on the catalog side: the gain column
+	// is read from YAML as float64, so 0.01 in the file may not
+	// survive the round-trip to the exact double-precision 1e-2.
+	for d := 0; d <= 6; d++ {
+		step := math.Pow10(-d)
+		if math.Abs(gain-step)/step < 1e-9 {
+			return d, true
+		}
+	}
+	for d := 1; d <= 3; d++ {
+		step := math.Pow10(d)
+		if math.Abs(gain-step)/step < 1e-9 {
+			return 0, true
+		}
+	}
+	return 0, false
 }
 
 // loadLocation resolves an IANA timezone name to a *time.Location.
