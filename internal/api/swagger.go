@@ -161,6 +161,41 @@ paths:
               schema:
                 type: string
                 example: internal server error
+  /api/v1/registers:
+    get:
+      summary: Modbus register metadata for export annotation
+      operationId: getRegisters
+      description: |
+        Returns the metric_key → vendor-documented Modbus metadata
+        (register address, data_type, gain) the dashboard uses to
+        annotate CSV headers in bucketed exports. Static map; the
+        body changes only when the upstream registers/*.yaml catalog
+        is updated and the API map is re-synced.
+      responses:
+        "200":
+          description: metric_key → RegisterMeta map
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  metadata:
+                    type: object
+                    additionalProperties:
+                      type: object
+                      properties:
+                        address:
+                          type: integer
+                          example: 40388
+                        data_type:
+                          type: string
+                          example: UINT32
+                        gain:
+                          type: number
+                          format: double
+                          example: 0.001
+                      required: [address, data_type, gain]
+                required: [metadata]
   /api/v1/samples:
     get:
       summary: Raw telemetry_samples export (CSV)
@@ -172,10 +207,14 @@ paths:
         mode when an analyst needs the un-bucketed sample stream
         rather than the aggregates from /api/v1/timeseries.
 
-        The body is a header row time,metric_key,value,labels followed
-        by one row per sample. labels is a JSON object when the sample
-        carries label dimensions and empty otherwise. Rows are ordered
-        by time ASC, metric_key ASC.
+        The body is a header row
+        time,metric_key,modbus_register,data_type,gain,value,labels
+        followed by one row per sample. modbus_register/data_type/
+        gain replicate the vendor metadata for the metric_key (empty
+        when the metric isn't backed by a Modbus register). labels is
+        a JSON object when the sample carries label dimensions and
+        empty otherwise. Rows are ordered by time ASC, metric_key
+        ASC.
 
         Hard limits keep a misclick from streaming gigabytes:
           * range must be <= 31 days,

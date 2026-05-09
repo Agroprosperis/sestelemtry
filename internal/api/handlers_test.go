@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -375,9 +376,9 @@ func TestSamplesStreamsCsv(t *testing.T) {
 		t.Fatalf("expected UTF-8 BOM prefix")
 	}
 	body = strings.TrimPrefix(body, "\xef\xbb\xbf")
-	want := "time,metric_key,value,labels\r\n" +
-		"2026-05-09T10:00:00Z,active_pv_power_kw,12.345,\r\n" +
-		"2026-05-09T10:00:01Z,soc_percent,86.5,\"{\"\"unit_id\"\":\"\"ess-1\"\"}\"\r\n"
+	want := "time,metric_key,modbus_register,data_type,gain,value,labels\r\n" +
+		"2026-05-09T10:00:00Z,active_pv_power_kw,40388,UINT32,0.001,12.345,\r\n" +
+		"2026-05-09T10:00:01Z,soc_percent,40515,UINT16,0.1,86.5,\"{\"\"unit_id\"\":\"\"ess-1\"\"}\"\r\n"
 	if body != want {
 		t.Fatalf("body mismatch\n got %q\nwant %q", body, want)
 	}
@@ -395,6 +396,9 @@ func TestSamplesStreamsCsv(t *testing.T) {
 // TestSamplesAppendsTruncationSentinel verifies that when the store
 // reports truncated=true (more rows than limit) the handler writes a
 // final `__TRUNCATED__,...` row so the frontend can warn the user.
+// The sentinel must keep the 7-column shape (time, metric_key,
+// modbus_register, data_type, gain, value, labels) so RFC4180
+// parsers don't choke on a ragged last line.
 func TestSamplesAppendsTruncationSentinel(t *testing.T) {
 	store := &mockStore{
 		samplesRows: []SampleRow{
@@ -419,6 +423,72 @@ func TestSamplesAppendsTruncationSentinel(t *testing.T) {
 	}
 	if !strings.HasPrefix(lines[3], "__TRUNCATED__,") {
 		t.Fatalf("expected truncation sentinel, got %q", lines[3])
+	}
+	// Parse the sentinel through encoding/csv so quoted JSON commas
+	// don't get counted as field separators; the row must have the
+	// same 7-field shape as a regular data row.
+	rec3, err := csv.NewReader(strings.NewReader(lines[3])).Read()
+	if err != nil {
+		t.Fatalf("parse sentinel: %v", err)
+	}
+	if len(rec3) != 7 {
+		t.Fatalf("sentinel must have 7 fields, got %d: %#v", len(rec3), rec3)
+	}
+}
+
+// TestSamplesEmitsBlankMetadataForUnknownMetricKey verifies the
+// fall-through behavior when a metric_key isn't in
+// ModbusRegisterMetadata: the row still streams correctly with empty
+// modbus_register/data_type/gain cells instead of breaking the CSV
+// shape.
+func TestSamplesEmitsBlankMetadataForUnknownMetricKey(t *testing.T) {
+	store := &mockStore{
+		samplesRows: []SampleRow{
+			{
+				Time:      time.Date(2026, 5, 9, 10, 0, 0, 0, time.UTC),
+				MetricKey: "synthetic_only",
+				Value:     1.5,
+			},
+		},
+	}
+	h := NewHandlers(store, "*")
+	url := "/api/v1/samples?organization_id=org-a&metric_keys=synthetic_only" +
+		"&from=2026-05-09T00:00:00Z&to=2026-05-10T00:00:00Z"
+	req := httptest.NewRequest(http.MethodGet, url, nil)
+	rec := httptest.NewRecorder()
+	h.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200 got %d", rec.Code)
+	}
+	body := strings.TrimPrefix(rec.Body.String(), "\xef\xbb\xbf")
+	want := "time,metric_key,modbus_register,data_type,gain,value,labels\r\n" +
+		"2026-05-09T10:00:00Z,synthetic_only,,,,1.5,\r\n"
+	if body != want {
+		t.Fatalf("body mismatch\n got %q\nwant %q", body, want)
+	}
+}
+
+// TestRegistersEndpoint locks in the JSON contract for
+// /api/v1/registers — the dashboard fetches this once at startup to
+// build the metric_key → register map used in CSV header annotation.
+func TestRegistersEndpoint(t *testing.T) {
+	h := NewHandlers(&mockStore{}, "*")
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/registers", nil)
+	rec := httptest.NewRecorder()
+	h.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200 got %d", rec.Code)
+	}
+	var got RegistersResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	pv, ok := got.Metadata["active_pv_power_kw"]
+	if !ok {
+		t.Fatalf("expected active_pv_power_kw in response, got %#v", got.Metadata)
+	}
+	if pv.Address != 40388 || pv.DataType != "UINT32" || pv.Gain != 0.001 {
+		t.Fatalf("unexpected PV meta: %#v", pv)
 	}
 }
 

@@ -56,6 +56,7 @@ func (h *Handlers) Router() http.Handler {
 	mux.HandleFunc("/api/v1/current", h.current)
 	mux.HandleFunc("/api/v1/timeseries", h.timeseries)
 	mux.HandleFunc("/api/v1/samples", h.samples)
+	mux.HandleFunc("/api/v1/registers", h.registers)
 	mux.HandleFunc("/api/v1/energy-summary", h.energySummary)
 	mux.HandleFunc("/api/v1/dam-prices", h.damPrices)
 	mux.HandleFunc("/swagger", h.swaggerUI)
@@ -89,6 +90,19 @@ func (h *Handlers) dashboardConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, DefaultDashboardConfig)
+}
+
+// registers serves the static metric_key → Modbus register map used
+// by the dashboard's export dialog to annotate CSV headers (e.g.
+// `active_pv_power_kw_40388`) and by analysts cross-referencing the
+// vendor datasheet. The body is small (~20 entries) so we ship it as
+// one JSON object rather than paginating.
+func (h *Handlers) registers(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	writeJSON(w, http.StatusOK, RegistersResponse{Metadata: ModbusRegisterMetadata})
 }
 
 func (h *Handlers) current(w http.ResponseWriter, r *http.Request) {
@@ -263,7 +277,21 @@ func (h *Handlers) samples(w http.ResponseWriter, r *http.Request) {
 
 	cw := csv.NewWriter(w)
 	cw.UseCRLF = true
-	_ = cw.Write([]string{"time", "metric_key", "value", "labels"})
+	// Column layout exposes the vendor metadata (modbus_register,
+	// data_type, gain) right next to metric_key so analysts can spot
+	// which physical register backed each sample without flipping
+	// between the CSV and registers/huawei_smartlogger.yaml. Synthetic
+	// metrics (none today, but reserved for future use) leave the meta
+	// columns blank rather than guessing.
+	_ = cw.Write([]string{
+		"time",
+		"metric_key",
+		"modbus_register",
+		"data_type",
+		"gain",
+		"value",
+		"labels",
+	})
 
 	start := time.Now()
 	rowsEmitted, truncated, err := h.store.Samples(
@@ -280,9 +308,19 @@ func (h *Handlers) samples(w http.ResponseWriter, r *http.Request) {
 					labels = string(b)
 				}
 			}
+			meta, hasMeta := ModbusRegisterMetadata[row.MetricKey]
+			var modbusReg, dataType, gain string
+			if hasMeta {
+				modbusReg = strconv.Itoa(meta.Address)
+				dataType = meta.DataType
+				gain = strconv.FormatFloat(meta.Gain, 'f', -1, 64)
+			}
 			return cw.Write([]string{
 				row.Time.UTC().Format(time.RFC3339Nano),
 				row.MetricKey,
+				modbusReg,
+				dataType,
+				gain,
 				strconv.FormatFloat(row.Value, 'f', -1, 64),
 				labels,
 			})
@@ -305,6 +343,9 @@ func (h *Handlers) samples(w http.ResponseWriter, r *http.Request) {
 	if truncated {
 		_ = cw.Write([]string{
 			"__TRUNCATED__",
+			"",
+			"",
+			"",
 			"",
 			strconv.Itoa(limit),
 			fmt.Sprintf(`{"reason":"row_limit","limit":%d}`, limit),

@@ -69,7 +69,29 @@ export type CustomExportInput = {
   to: Date
   bucket: CustomExportBucket
   columns: CustomExportColumns
+  // registerAddresses, when provided, switches the wide-CSV header
+  // formatter from `metric_key` to `metric_key_<address>` for every
+  // metric that has a known Modbus register. Synthetic columns
+  // (DAM price, PV forecast, time) keep their plain header so an
+  // analyst doesn't have to hunt for them. Pass undefined to skip
+  // annotation entirely.
+  registerAddresses?: Record<string, number>
   signal?: AbortSignal
+}
+
+// annotateMetricHeader produces the wide-CSV header for a given
+// metric_key. When the metric is backed by a Modbus register
+// (`accumulated_pv_energy_yield_kwh` -> 40446), we suffix the address
+// with an underscore (`accumulated_pv_energy_yield_kwh_40446`) so the
+// header parses cleanly in tools that don't allow spaces or brackets
+// in column names. Metrics without an address are left untouched.
+export function annotateMetricHeader(
+  metricKey: string,
+  addresses?: Record<string, number>,
+): string {
+  const addr = addresses?.[metricKey]
+  if (addr === undefined || addr === null) return metricKey
+  return `${metricKey}_${addr}`
 }
 
 const ONE_DAY_MS = 24 * 60 * 60 * 1000
@@ -147,21 +169,30 @@ function isAbortError(e: unknown): boolean {
 // shape (one row per sample, no per-bucket merge), so the dialog
 // hands it to fetchRawSamplesCsv instead of going through here.
 export async function fetchCustomExportData(input: CustomExportInput): Promise<ExportTable> {
-  const { organizationID, from, to, bucket, columns, signal } = input
+  const { organizationID, from, to, bucket, columns, signal, registerAddresses } = input
   if (bucket === 'raw') {
     throw new Error('raw bucket is handled by fetchRawSamplesCsv, not this path')
   }
   const fromIso = from.toISOString()
   const toIso = to.toISOString()
+  // header(metric_key) collapses to either `metric_key_40388` or the
+  // plain key depending on whether the Modbus register is known. We
+  // memoize the lookup so the same display name is reused across
+  // header construction and per-row population without recomputing.
+  const header = (metricKey: string) =>
+    annotateMetricHeader(metricKey, registerAddresses)
 
   // Always include `time` first; the rest of the column order matches the
   // checkbox group order in the dialog so the CSV reads top-to-bottom in
-  // the same shape the user configured it.
+  // the same shape the user configured it. When a registerAddresses map
+  // is supplied, telemetry headers gain a `_<address>` suffix; synthetic
+  // columns (dam, forecast) keep their plain header because they don't
+  // correspond to a Modbus register.
   const headers: string[] = ['time']
-  if (columns.energy) headers.push(...ENERGY_EXPORT_METRICS)
+  if (columns.energy) headers.push(...ENERGY_EXPORT_METRICS.map(header))
   if (columns.price) headers.push('dam_price_uah_per_mwh')
-  if (columns.soc) headers.push('soc_percent')
-  if (columns.power) headers.push(...POWER_EXPORT_METRICS)
+  if (columns.soc) headers.push(header('soc_percent'))
+  if (columns.power) headers.push(...POWER_EXPORT_METRICS.map(header))
   if (columns.forecast) headers.push('planned_ac_kw_forecast')
 
   // Empty selection short-circuits to an empty table so the dialog can
@@ -320,10 +351,15 @@ export async function fetchCustomExportData(input: CustomExportInput): Promise<E
   const sortedTimes = Array.from(bucketTimes).sort((a, b) => a - b)
   const rows: Array<Record<string, unknown>> = sortedTimes.map((t) => {
     const row: Record<string, unknown> = { time: bucketLabel(t, bucket) }
+    // Row keys must agree with the headers list — when annotation is
+    // active each metric stores its value under the `_<address>`
+    // header, otherwise under the plain metric_key. csv.rowsToCsv
+    // accesses `row[h]` for every h in headers so a mismatch would
+    // produce empty cells.
     if (columns.energy) {
       for (const key of ENERGY_EXPORT_METRICS) {
         const v = valuesByKeyByTime.get(key)?.get(t)
-        row[key] = typeof v === 'number' && Number.isFinite(v) ? v : null
+        row[header(key)] = typeof v === 'number' && Number.isFinite(v) ? v : null
       }
     }
     if (columns.price) {
@@ -332,12 +368,12 @@ export async function fetchCustomExportData(input: CustomExportInput): Promise<E
     }
     if (columns.soc) {
       const v = valuesByKeyByTime.get('soc_percent')?.get(t)
-      row.soc_percent = typeof v === 'number' && Number.isFinite(v) ? v : null
+      row[header('soc_percent')] = typeof v === 'number' && Number.isFinite(v) ? v : null
     }
     if (columns.power) {
       for (const key of POWER_EXPORT_METRICS) {
         const v = valuesByKeyByTime.get(key)?.get(t)
-        row[key] = typeof v === 'number' && Number.isFinite(v) ? v : null
+        row[header(key)] = typeof v === 'number' && Number.isFinite(v) ? v : null
       }
     }
     if (columns.forecast) {

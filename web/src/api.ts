@@ -3,6 +3,7 @@ import type {
   DAMPricesResponse,
   DashboardConfig,
   PvForecastPoint,
+  RegistersResponse,
   TimeseriesResponse,
 } from './types'
 
@@ -28,6 +29,37 @@ export async function fetchDashboardConfig(signal?: AbortSignal): Promise<Dashbo
     throw new Error(`dashboard-config request failed: ${res.status}`)
   }
   return res.json()
+}
+
+let registersCache: Promise<RegistersResponse> | null = null
+
+// fetchRegisters returns the metric_key → Modbus metadata map. The
+// promise is memoized at module level because the data is static (a
+// hand-maintained mirror of registers/huawei_smartlogger.yaml on the
+// API server) and the export dialog calls it on every open. Cache
+// failures are not retained — a network blip on the first attempt
+// shouldn't poison every subsequent export.
+export async function fetchRegisters(signal?: AbortSignal): Promise<RegistersResponse> {
+  if (registersCache) return registersCache
+  registersCache = (async () => {
+    const res = await fetch(withBase('/api/v1/registers'), { signal })
+    if (!res.ok) {
+      throw new Error(`registers request failed: ${res.status}`)
+    }
+    return (await res.json()) as RegistersResponse
+  })().catch((e) => {
+    registersCache = null
+    throw e
+  })
+  return registersCache
+}
+
+// resetRegistersCache is only used by the test suite to drop the
+// memoized response between cases. Production code should never call
+// this — refreshing the static map mid-session has no observable
+// benefit.
+export function resetRegistersCache(): void {
+  registersCache = null
 }
 
 export async function fetchCurrent(

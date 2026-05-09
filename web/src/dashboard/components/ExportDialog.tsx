@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { fetchRawSamplesCsv } from '../../api'
+import { fetchRawSamplesCsv, fetchRegisters } from '../../api'
 import { downloadCsv, rowsToCsv } from '../csv'
 import {
   autoBucket,
@@ -201,6 +201,20 @@ export function ExportDialog({ organizationID, initialAnchor, onClose }: Props) 
         onClose()
         return
       }
+      // Pull the static metric_key → register map so the wide CSV
+      // headers can be annotated with `_<address>`. We swallow fetch
+      // failures here (and downgrade to plain headers) because
+      // missing register annotation is strictly cosmetic — the user
+      // still gets the data they asked for.
+      let registerAddresses: Record<string, number> | undefined
+      try {
+        const reg = await fetchRegisters()
+        registerAddresses = Object.fromEntries(
+          Object.entries(reg.metadata).map(([k, v]) => [k, v.address]),
+        )
+      } catch {
+        registerAddresses = undefined
+      }
       const table = await fetchCustomExportData({
         organizationID,
         from: fromDate,
@@ -210,6 +224,7 @@ export function ExportDialog({ organizationID, initialAnchor, onClose }: Props) 
           ...columns,
           forecast: columns.forecast && forecastEnabled,
         },
+        registerAddresses,
       })
       if (table.rows.length === 0) {
         setError('У вибраному діапазоні немає даних — спробуйте інший період або колонки.')

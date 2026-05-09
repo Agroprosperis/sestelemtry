@@ -55,6 +55,20 @@ export type DAMPricesResponse = {
   prices: DAMPrice[]
 }
 
+// RegisterMeta mirrors the api.RegisterMeta struct: vendor-documented
+// Modbus information attached to a metric_key. The dashboard fetches
+// the full map once at boot and uses `address` to annotate CSV
+// headers (`metric_key_40388`) in the bucketed export.
+export type RegisterMeta = {
+  address: number
+  data_type: string
+  gain: number
+}
+
+export type RegistersResponse = {
+  metadata: Record<string, RegisterMeta>
+}
+
 // PvForecastPoint mirrors a single record returned by the n8n PV forecast
 // webhook. Each record describes one panel orientation × one hour-of-day in
 // local Kyiv time (the n8n flow already converts from UTC). For a single

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { fetchRawSamplesCsv } from './api'
+import { fetchRawSamplesCsv, fetchRegisters, resetRegistersCache } from './api'
 
 // fetchRawSamplesCsv post-processes the response body just enough to
 // detect the server's truncation sentinel and pull the suggested
@@ -107,5 +107,58 @@ describe('fetchRawSamplesCsv', () => {
         to: '2026-03-01T00:00:00Z',
       }),
     ).rejects.toThrow(/samples request failed: 400 range must be <= 744h0m0s/)
+  })
+})
+
+describe('fetchRegisters', () => {
+  beforeEach(() => {
+    resetRegistersCache()
+    vi.unstubAllGlobals()
+  })
+
+  afterEach(() => {
+    resetRegistersCache()
+    vi.unstubAllGlobals()
+  })
+
+  it('memoizes the response so repeated calls hit /api/v1/registers exactly once', async () => {
+    const body = JSON.stringify({
+      metadata: {
+        active_pv_power_kw: { address: 40388, data_type: 'UINT32', gain: 0.001 },
+        soc_percent: { address: 40515, data_type: 'UINT16', gain: 0.1 },
+      },
+    })
+    const fetchSpy = vi.fn(
+      async () =>
+        new Response(body, {
+          status: 200,
+          headers: new Headers({ 'content-type': 'application/json' }),
+        }),
+    )
+    vi.stubGlobal('fetch', fetchSpy)
+
+    const a = await fetchRegisters()
+    const b = await fetchRegisters()
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+    expect(a).toBe(b)
+    expect(a.metadata.active_pv_power_kw.address).toBe(40388)
+  })
+
+  it('drops the cache on failure so a transient error doesn\'t poison subsequent exports', async () => {
+    const fetchSpy = vi
+      .fn()
+      .mockResolvedValueOnce(new Response('boom', { status: 500 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ metadata: {} }), {
+          status: 200,
+          headers: new Headers({ 'content-type': 'application/json' }),
+        }),
+      )
+    vi.stubGlobal('fetch', fetchSpy)
+
+    await expect(fetchRegisters()).rejects.toThrow(/registers request failed: 500/)
+    const ok = await fetchRegisters()
+    expect(ok.metadata).toEqual({})
+    expect(fetchSpy).toHaveBeenCalledTimes(2)
   })
 })

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as api from '../api'
 import {
+  annotateMetricHeader,
   autoBucket,
   customExportFilename,
   fetchCustomExportData,
@@ -137,6 +138,49 @@ describe('fetchCustomExportData', () => {
     expect(first.active_pv_power_kw).toBe(1)
   })
 
+  it('annotates wide-CSV headers with Modbus register suffix when registers are provided', async () => {
+    const table = await fetchCustomExportData({
+      organizationID: 'pe',
+      from: new Date(2026, 4, 7),
+      to: new Date(2026, 4, 8),
+      bucket: '1 hour',
+      columns: {
+        // price is intentionally omitted so the first bucket is one
+        // of the timeseries points (not a DAM-only bucket whose
+        // telemetry cells would be null in any timezone).
+        energy: true,
+        price: false,
+        soc: true,
+        power: true,
+        forecast: false,
+      },
+      registerAddresses: {
+        accumulated_pv_energy_yield_kwh: 40446,
+        accumulated_electricity_sold_kwh: 40454,
+        accumulated_electricity_purchased_kwh: 40450,
+        accumulated_power_consumption_kwh: 40458,
+        total_energy_charged_kwh: 40472,
+        total_energy_discharged_kwh: 40476,
+        soc_percent: 40515,
+        active_pv_power_kw: 40388,
+        active_ess_power_kw: 40392,
+        grid_connected_active_power_kw: 40505,
+        load_power_kw: 40503,
+      },
+    })
+    expect(table.headers).toContain('accumulated_pv_energy_yield_kwh_40446')
+    expect(table.headers).toContain('soc_percent_40515')
+    expect(table.headers).toContain('active_pv_power_kw_40388')
+    expect(table.headers).toContain('time')
+    // Row keys must agree with the annotated headers so the CSV
+    // serializer renders the values in the right cells.
+    const first = table.rows[0]
+    expect(first['accumulated_pv_energy_yield_kwh_40446']).toBe(10)
+    expect(first['soc_percent_40515']).toBe(50)
+    expect(first['active_pv_power_kw_40388']).toBe(1)
+    expect(first['accumulated_pv_energy_yield_kwh']).toBeUndefined()
+  })
+
   it('skips network calls for unselected columns', async () => {
     await fetchCustomExportData({
       organizationID: 'pe',
@@ -215,5 +259,23 @@ describe('raw export limits', () => {
   it('exposes server-aligned constants so the dialog hint stays truthful', () => {
     expect(RAW_SAMPLES_LIMIT).toBe(1_000_000)
     expect(RAW_SAMPLES_MAX_DAYS).toBe(31)
+  })
+})
+
+describe('annotateMetricHeader', () => {
+  it('appends `_<address>` for metrics with a known Modbus register', () => {
+    expect(
+      annotateMetricHeader('active_pv_power_kw', { active_pv_power_kw: 40388 }),
+    ).toBe('active_pv_power_kw_40388')
+  })
+
+  it('returns the plain key when no addresses map is supplied', () => {
+    expect(annotateMetricHeader('active_pv_power_kw')).toBe('active_pv_power_kw')
+  })
+
+  it('returns the plain key for metrics absent from the addresses map (synthetic columns)', () => {
+    expect(
+      annotateMetricHeader('dam_price_uah_per_mwh', { active_pv_power_kw: 40388 }),
+    ).toBe('dam_price_uah_per_mwh')
   })
 })
