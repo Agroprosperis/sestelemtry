@@ -4,6 +4,9 @@ import {
   autoBucket,
   customExportFilename,
   fetchCustomExportData,
+  rawExportMetricKeys,
+  RAW_SAMPLES_LIMIT,
+  RAW_SAMPLES_MAX_DAYS,
 } from './customExport'
 
 describe('autoBucket', () => {
@@ -155,5 +158,62 @@ describe('fetchCustomExportData', () => {
     )
     expect(api.fetchDAMPrices).not.toHaveBeenCalled()
     expect(api.fetchPvForecast).not.toHaveBeenCalled()
+  })
+
+  it('refuses the raw bucket — that path goes through fetchRawSamplesCsv', async () => {
+    await expect(
+      fetchCustomExportData({
+        organizationID: 'pe',
+        from: new Date(2026, 4, 7),
+        to: new Date(2026, 4, 8),
+        bucket: 'raw',
+        columns: {
+          energy: true,
+          price: false,
+          soc: false,
+          power: false,
+          forecast: false,
+        },
+      }),
+    ).rejects.toThrow(/raw bucket/)
+  })
+})
+
+describe('rawExportMetricKeys', () => {
+  it('flattens column groups into the metric_keys list /api/v1/samples expects', () => {
+    const keys = rawExportMetricKeys({
+      energy: true,
+      price: true, // ignored — DAM prices have no raw rows
+      soc: true,
+      power: true,
+      forecast: true, // ignored — n8n forecast has no raw rows
+    })
+    expect(keys).toContain('soc_percent')
+    expect(keys).toContain('accumulated_pv_energy_yield_kwh')
+    expect(keys).toContain('active_pv_power_kw')
+    // Forecast/price metric keys must not leak into the request — the
+    // server would reject them since they don't live in
+    // telemetry_samples, and we'd burn a round trip to find out.
+    expect(keys).not.toContain('dam_price_uah_per_mwh')
+    expect(keys).not.toContain('planned_ac_kw_forecast')
+  })
+
+  it('returns an empty array when no telemetry column is selected', () => {
+    expect(
+      rawExportMetricKeys({
+        energy: false,
+        price: true,
+        soc: false,
+        power: false,
+        forecast: true,
+      }),
+    ).toEqual([])
+  })
+})
+
+describe('raw export limits', () => {
+  it('exposes server-aligned constants so the dialog hint stays truthful', () => {
+    expect(RAW_SAMPLES_LIMIT).toBe(1_000_000)
+    expect(RAW_SAMPLES_MAX_DAYS).toBe(31)
   })
 })

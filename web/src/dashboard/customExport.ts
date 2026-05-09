@@ -44,7 +44,23 @@ export type CustomExportColumns = {
   forecast: boolean
 }
 
-export type CustomExportBucket = '5 minutes' | '1 hour' | '1 day' | '1 month'
+// Bucket sizes offered by the export dialog. `raw` is special: it
+// bypasses /api/v1/timeseries entirely and streams unbucketed
+// telemetry_samples rows from /api/v1/samples. Every other value
+// drives a bucketed query through the standard timeseries pipeline.
+export type CustomExportBucket = 'raw' | '5 minutes' | '1 hour' | '1 day' | '1 month'
+
+// Hard upper bound on rows the raw export will request from the
+// server. Mirrors the server-side `maxSamplesLimit` in
+// internal/api/handlers.go; bumping one side requires bumping the
+// other so the dialog's "obмеження" hint stays truthful.
+export const RAW_SAMPLES_LIMIT = 1_000_000
+
+// Maximum range (in days) accepted by /api/v1/samples. Mirrors
+// `maxSamplesRange` on the server (31 days). The dialog disables the
+// raw option when the picked range exceeds this so the user gets
+// validation feedback before submitting.
+export const RAW_SAMPLES_MAX_DAYS = 31
 
 export type CustomExportInput = {
   organizationID: string
@@ -61,6 +77,10 @@ const ONE_DAY_MS = 24 * 60 * 60 * 1000
 // autoBucket picks a sensible bucket size given the requested range so the
 // CSV doesn't explode into hundreds of thousands of rows. Thresholds are
 // chosen to keep typical exports below ~10k rows on the longest path.
+//
+// The `raw` bucket is intentionally never auto-selected: it bypasses
+// time_bucket() and can dump 100k+ rows for a single day, so the
+// analyst must opt into it explicitly via the dropdown.
 export function autoBucket(from: Date, to: Date): CustomExportBucket {
   const days = Math.max(0, (to.getTime() - from.getTime()) / ONE_DAY_MS)
   if (days > 366) return '1 month'
@@ -77,6 +97,11 @@ function toDateOnly(d: Date): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 }
 
+// bucketStartMs is only meaningful for the bucketed export path. The
+// `raw` mode never goes through fetchCustomExportData (it streams
+// straight from /api/v1/samples) so we treat anything else by
+// rounding down to the nearest 5-minute boundary as a defensive
+// fallback should this ever be called with `raw`.
 function bucketStartMs(t: Date, bucket: CustomExportBucket): number {
   const d = new Date(t)
   if (bucket === '1 month') {
@@ -116,8 +141,16 @@ function isAbortError(e: unknown): boolean {
 // fetchCustomExportData runs the parallel fetches required for the
 // requested column set, joins them by bucket-start timestamp, and returns
 // an ExportTable that the existing CSV serializer can render directly.
+//
+// The `raw` bucket is rejected up front: that mode lives on the
+// /api/v1/samples streaming endpoint and uses an entirely different
+// shape (one row per sample, no per-bucket merge), so the dialog
+// hands it to fetchRawSamplesCsv instead of going through here.
 export async function fetchCustomExportData(input: CustomExportInput): Promise<ExportTable> {
   const { organizationID, from, to, bucket, columns, signal } = input
+  if (bucket === 'raw') {
+    throw new Error('raw bucket is handled by fetchRawSamplesCsv, not this path')
+  }
   const fromIso = from.toISOString()
   const toIso = to.toISOString()
 
@@ -334,4 +367,16 @@ export function customExportFilename(input: {
   const inclusiveEnd = new Date(input.to.getTime() - 1)
   const bucketSuffix = input.bucket.replace(/\s+/g, '')
   return `export_${safeOrg}_${toDateOnly(input.from)}_${toDateOnly(inclusiveEnd)}_${bucketSuffix}.csv`
+}
+
+// rawExportMetricKeys flattens the column-group checkboxes back into
+// the metric_keys list /api/v1/samples expects. Forecast and DAM
+// price columns are intentionally absent: those data sources don't
+// live in `telemetry_samples` and therefore have no raw rows.
+export function rawExportMetricKeys(columns: CustomExportColumns): string[] {
+  const keys: string[] = []
+  if (columns.energy) keys.push(...ENERGY_EXPORT_METRICS)
+  if (columns.soc) keys.push('soc_percent')
+  if (columns.power) keys.push(...POWER_EXPORT_METRICS)
+  return keys
 }

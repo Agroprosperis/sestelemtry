@@ -103,6 +103,81 @@ export async function fetchEnergySummary(
   return res.json()
 }
 
+export type RawSamplesResult = {
+  // Pre-formatted CSV body, including the UTF-8 BOM and trailing
+  // truncation sentinel (when present). The caller is expected to
+  // hand this directly to a Blob/`<a download>` flow — we don't
+  // re-serialize it because the server already runs through Go's
+  // RFC4180-compliant csv.Writer.
+  text: string
+  filename: string
+  truncated: boolean
+  // rows excludes the header row and the trailing __TRUNCATED__
+  // sentinel so the dashboard can render an honest "X rows exported"
+  // counter to the analyst.
+  rows: number
+}
+
+const RAW_SAMPLES_TRUNCATION_PREFIX = '__TRUNCATED__,'
+
+// fetchRawSamplesCsv pulls the raw `telemetry_samples` rows from
+// /api/v1/samples as one streamed CSV response. Unlike the bucketed
+// /api/v1/timeseries path, the body is plain text/csv that we hand
+// directly to the user — no JSON re-parse, no per-row aggregation.
+//
+// We post-process the body just enough to detect the server's
+// `__TRUNCATED__` sentinel (last non-empty line) so the dialog can
+// warn the analyst that the result was capped. HTTP trailers would
+// be the cleaner channel but the browser Fetch API doesn't surface
+// them, so the in-band sentinel is what survives the round-trip.
+export async function fetchRawSamplesCsv(
+  input: {
+    organizationID: string
+    metricKeys: string[]
+    from: string
+    to: string
+    limit?: number
+  },
+  signal?: AbortSignal,
+): Promise<RawSamplesResult> {
+  const url = buildURL('/api/v1/samples', {
+    organization_id: input.organizationID,
+    metric_keys: input.metricKeys.join(','),
+    from: input.from,
+    to: input.to,
+    limit: input.limit !== undefined ? String(input.limit) : undefined,
+  })
+  const res = await fetch(url, { signal })
+  if (!res.ok) {
+    const body = await res.text().catch(() => '')
+    const trimmed = body.trim()
+    throw new Error(
+      `samples request failed: ${res.status}${trimmed ? ` ${trimmed}` : ''}`,
+    )
+  }
+  const text = await res.text()
+  const cd = res.headers.get('content-disposition') || ''
+  const m = /filename="?([^";]+)"?/i.exec(cd)
+  const filename = m ? m[1] : 'samples.csv'
+
+  // Strip the BOM before scanning so the truncation prefix matches
+  // even when present on the very first line; we keep it on `text`
+  // because that's what we hand to the Blob downloader.
+  const noBom = text.replace(/^\ufeff/, '')
+  const lines = noBom.split(/\r?\n/)
+  let lastNonEmpty = lines.length - 1
+  while (lastNonEmpty >= 0 && lines[lastNonEmpty].trim() === '') lastNonEmpty--
+  const truncated =
+    lastNonEmpty > 0 && lines[lastNonEmpty].startsWith(RAW_SAMPLES_TRUNCATION_PREFIX)
+  // Header row + 0..N data rows + maybe sentinel; the caller wants
+  // the data-row count.
+  let rows = Math.max(0, lastNonEmpty)
+  if (truncated) rows -= 1
+  if (rows < 0) rows = 0
+
+  return { text, filename, truncated, rows }
+}
+
 export async function fetchDAMPrices(
   input: { from: string; to: string; zone?: number },
   signal?: AbortSignal,

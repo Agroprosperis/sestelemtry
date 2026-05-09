@@ -2,10 +2,12 @@ package api
 
 import (
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -21,8 +23,22 @@ type storeReader interface {
 	Timeseries(ctx context.Context, organizationID string, metricKeys []string, from, to time.Time, bucket, tz string, aggregation TimeseriesAggregation) (TimeseriesResponse, error)
 	EnergySummary(ctx context.Context, organizationID string, metricKeys []string, from, to time.Time) (EnergySummaryResponse, error)
 	DAMPrices(ctx context.Context, zone int, from, to time.Time) (DAMPricesResponse, error)
+	Samples(ctx context.Context, organizationID string, metricKeys []string, from, to time.Time, limit int, emit func(SampleRow) error) (int, bool, error)
 	Ready(ctx context.Context) error
 }
+
+// Limits for the raw-samples export. These are deliberately on the
+// generous side — most analyst use cases sit well under them — but
+// they exist to keep a misclick on a multi-month range from streaming
+// gigabytes through the API server. The handler returns 400 when a
+// request would exceed them so the user fixes their query rather than
+// silently receiving truncated data.
+const (
+	defaultSamplesLimit  = 100_000
+	maxSamplesLimit      = 1_000_000
+	maxSamplesRange      = 31 * 24 * time.Hour
+	maxSamplesMetricKeys = 20
+)
 
 func NewHandlers(store storeReader, allowOrigin string) *Handlers {
 	return &Handlers{
@@ -39,6 +55,7 @@ func (h *Handlers) Router() http.Handler {
 	mux.HandleFunc("/api/v1/dashboard-config", h.dashboardConfig)
 	mux.HandleFunc("/api/v1/current", h.current)
 	mux.HandleFunc("/api/v1/timeseries", h.timeseries)
+	mux.HandleFunc("/api/v1/samples", h.samples)
 	mux.HandleFunc("/api/v1/energy-summary", h.energySummary)
 	mux.HandleFunc("/api/v1/dam-prices", h.damPrices)
 	mux.HandleFunc("/swagger", h.swaggerUI)
@@ -166,6 +183,189 @@ func (h *Handlers) timeseries(w http.ResponseWriter, r *http.Request) {
 		"duration_ms", dur.Milliseconds(),
 	)
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// samples streams the raw `telemetry_samples` rows that match the
+// request as a CSV download. Used by the dashboard's "Експорт даних →
+// Сирі дані" mode when the analyst wants per-poll values rather than
+// the bucketed aggregates the timeseries endpoint produces.
+//
+// The body is a single CSV with header row
+// `time,metric_key,value,labels` followed by one row per sample. We
+// emit a UTF-8 BOM so Excel auto-detects the encoding (Cyrillic-only
+// labels otherwise show as mojibake under a CP-1251 default install).
+//
+// On truncation a sentinel row prefixed with `__TRUNCATED__` is
+// appended. This is the only signaling channel that survives
+// `Content-Length: chunked` + browser `fetch()` (HTTP trailers are
+// not exposed via the Fetch API), so the dashboard scans the last
+// non-empty line of the downloaded blob to decide whether to warn
+// the user.
+func (h *Handlers) samples(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	orgID := strings.TrimSpace(r.URL.Query().Get("organization_id"))
+	if orgID == "" {
+		http.Error(w, "organization_id is required", http.StatusBadRequest)
+		return
+	}
+	metricKeys := ParseCSV(r.URL.Query().Get("metric_key"))
+	if len(metricKeys) == 0 {
+		metricKeys = ParseCSV(r.URL.Query().Get("metric_keys"))
+	}
+	if len(metricKeys) == 0 {
+		http.Error(w, "metric_key or metric_keys is required", http.StatusBadRequest)
+		return
+	}
+	if len(metricKeys) > maxSamplesMetricKeys {
+		http.Error(w, fmt.Sprintf("at most %d metric_keys are allowed", maxSamplesMetricKeys), http.StatusBadRequest)
+		return
+	}
+	from, to, _, _, err := parseRange(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if from.IsZero() || to.IsZero() {
+		http.Error(w, "from and to are required", http.StatusBadRequest)
+		return
+	}
+	if !to.After(from) {
+		http.Error(w, "to must be after from", http.StatusBadRequest)
+		return
+	}
+	if to.Sub(from) > maxSamplesRange {
+		http.Error(w, fmt.Sprintf("range must be <= %s", maxSamplesRange), http.StatusBadRequest)
+		return
+	}
+	limit, err := parseLimit(r, defaultSamplesLimit, maxSamplesLimit)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	filename := fmt.Sprintf("samples_%s_%s_%s.csv",
+		sanitizeFilenameSegment(orgID),
+		from.UTC().Format("20060102T150405Z"),
+		to.UTC().Format("20060102T150405Z"),
+	)
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Sample-Limit", strconv.Itoa(limit))
+	// Chunked encoding kicks in implicitly because we don't set
+	// Content-Length; that lets us stream the rows out of the cursor
+	// without buffering the entire result set in memory.
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte{0xEF, 0xBB, 0xBF})
+
+	cw := csv.NewWriter(w)
+	cw.UseCRLF = true
+	_ = cw.Write([]string{"time", "metric_key", "value", "labels"})
+
+	start := time.Now()
+	rowsEmitted, truncated, err := h.store.Samples(
+		r.Context(),
+		orgID,
+		metricKeys,
+		from,
+		to,
+		limit,
+		func(row SampleRow) error {
+			var labels string
+			if len(row.Labels) > 0 {
+				if b, mErr := json.Marshal(row.Labels); mErr == nil {
+					labels = string(b)
+				}
+			}
+			return cw.Write([]string{
+				row.Time.UTC().Format(time.RFC3339Nano),
+				row.MetricKey,
+				strconv.FormatFloat(row.Value, 'f', -1, 64),
+				labels,
+			})
+		},
+	)
+	if err != nil {
+		// We've already written the 200 + header row, so the response
+		// can't be replaced with a clean 500. Log and stop; the client
+		// will see a truncated download and either retry or report it.
+		h.log.Error("api_samples",
+			"organization_id", orgID,
+			"metric_keys", metricKeys,
+			"limit", limit,
+			"rows", rowsEmitted,
+			"err", err,
+		)
+		cw.Flush()
+		return
+	}
+	if truncated {
+		_ = cw.Write([]string{
+			"__TRUNCATED__",
+			"",
+			strconv.Itoa(limit),
+			fmt.Sprintf(`{"reason":"row_limit","limit":%d}`, limit),
+		})
+	}
+	cw.Flush()
+
+	dur := time.Since(start)
+	h.log.Info("api_samples_ok",
+		"organization_id", orgID,
+		"metric_keys", metricKeys,
+		"limit", limit,
+		"rows", rowsEmitted,
+		"truncated", truncated,
+		"duration_ms", dur.Milliseconds(),
+	)
+}
+
+// parseLimit reads the optional `limit` query param. Returns def when
+// omitted; rejects non-positive values or anything above max.
+func parseLimit(r *http.Request, def, max int) (int, error) {
+	raw := strings.TrimSpace(r.URL.Query().Get("limit"))
+	if raw == "" {
+		return def, nil
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 1 {
+		return 0, fmt.Errorf("limit must be a positive integer")
+	}
+	if n > max {
+		return 0, fmt.Errorf("limit must be <= %d", max)
+	}
+	return n, nil
+}
+
+// sanitizeFilenameSegment keeps the Content-Disposition filename safe
+// to interpolate into both shells and Windows Explorer when the user
+// saves the file. Anything outside `[A-Za-z0-9_-]` is replaced with an
+// underscore so a hostile organization_id can't smuggle in a quote
+// character that breaks the header.
+func sanitizeFilenameSegment(s string) string {
+	if s == "" {
+		return "_"
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z':
+			b.WriteRune(r)
+		case r >= 'A' && r <= 'Z':
+			b.WriteRune(r)
+		case r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case r == '-' || r == '_':
+			b.WriteRune(r)
+		default:
+			b.WriteRune('_')
+		}
+	}
+	return b.String()
 }
 
 func (h *Handlers) energySummary(w http.ResponseWriter, r *http.Request) {

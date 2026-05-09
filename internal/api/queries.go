@@ -693,6 +693,92 @@ func (s *Store) DAMPrices(ctx context.Context, zone int, from, to time.Time) (DA
 	return out, nil
 }
 
+// Samples streams raw `telemetry_samples` rows in chronological order
+// for one organization, restricted to the requested metric keys and
+// the half-open interval [from, to]. The caller's `emit` decides how
+// to render each row (the HTTP handler writes them as CSV); returning
+// an error from `emit` aborts iteration cleanly without consuming the
+// rest of the cursor.
+//
+// `limit` caps the number of emitted rows. The query reads
+// `limit + 1` rows so we can detect truncation: when the underlying
+// data has more rows than the cap, we stop after `limit` and report
+// `truncated = true` so the caller can flag the export as partial. We
+// don't run a separate `COUNT(*)` because per-poll exports can hit
+// hundreds of thousands of rows on production data and an extra
+// scan would double the latency for the common (non-truncated) case.
+//
+// Rows are ordered by `time ASC, metric_key ASC` so a multi-metric
+// export interleaves the samples in real time, which is what an
+// analyst exploring an outage cares about. The (organization_id,
+// metric_key, time DESC) index covers the WHERE clause; the planner
+// rewrites the ORDER BY to walk the index in reverse.
+func (s *Store) Samples(
+	ctx context.Context,
+	organizationID string,
+	metricKeys []string,
+	from, to time.Time,
+	limit int,
+	emit func(SampleRow) error,
+) (rowsEmitted int, truncated bool, err error) {
+	if len(metricKeys) == 0 {
+		return 0, false, fmt.Errorf("metric_keys is required")
+	}
+	if from.IsZero() || to.IsZero() {
+		return 0, false, fmt.Errorf("from and to are required")
+	}
+	if !to.After(from) {
+		return 0, false, fmt.Errorf("to must be after from")
+	}
+	if limit <= 0 {
+		return 0, false, fmt.Errorf("limit must be > 0")
+	}
+
+	rows, err := s.pool.Query(ctx, `
+		SELECT time, metric_key, value, labels
+		FROM telemetry_samples
+		WHERE organization_id = $1
+			AND metric_key = ANY($2)
+			AND time >= $3
+			AND time <  $4
+		ORDER BY time ASC, metric_key ASC
+		LIMIT $5
+	`, organizationID, metricKeys, from.UTC(), to.UTC(), int64(limit)+1)
+	if err != nil {
+		return 0, false, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		if rowsEmitted >= limit {
+			truncated = true
+			break
+		}
+		var r SampleRow
+		var rawLabels []byte
+		if err := rows.Scan(&r.Time, &r.MetricKey, &r.Value, &rawLabels); err != nil {
+			return rowsEmitted, truncated, err
+		}
+		if len(rawLabels) > 0 {
+			labels := map[string]string{}
+			if err := json.Unmarshal(rawLabels, &labels); err != nil {
+				return rowsEmitted, truncated, err
+			}
+			if len(labels) > 0 {
+				r.Labels = labels
+			}
+		}
+		if err := emit(r); err != nil {
+			return rowsEmitted, truncated, err
+		}
+		rowsEmitted++
+	}
+	if err := rows.Err(); err != nil {
+		return rowsEmitted, truncated, err
+	}
+	return rowsEmitted, truncated, nil
+}
+
 func (s *Store) Ready(ctx context.Context) error {
 	return s.pool.Ping(ctx)
 }

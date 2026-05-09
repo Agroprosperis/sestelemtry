@@ -458,6 +458,24 @@
   font-size: 13px;
 }
 
+.export-dialog-note {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.export-dialog-note code {
+  background: rgba(29, 78, 216, 0.08);
+  padding: 0 4px;
+  border-radius: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+
 .export-dialog-foot {
   display: flex;
   justify-content: flex-end;

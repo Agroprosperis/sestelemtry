@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -31,6 +32,16 @@ type mockStore struct {
 	summaryFrom time.Time
 	summaryTo   time.Time
 	summaryKeys []string
+
+	samplesRows      []SampleRow
+	samplesTruncated bool
+	samplesErr       error
+
+	samplesOrg   string
+	samplesKeys  []string
+	samplesFrom  time.Time
+	samplesTo    time.Time
+	samplesLimit int
 }
 
 func (m *mockStore) Current(_ context.Context, _ string, _ []string, at time.Time) (CurrentResponse, error) {
@@ -50,6 +61,26 @@ func (m *mockStore) EnergySummary(_ context.Context, _ string, metricKeys []stri
 func (m *mockStore) DAMPrices(_ context.Context, zone int, from, to time.Time) (DAMPricesResponse, error) {
 	m.damZone, m.damFrom, m.damTo = zone, from, to
 	return m.damResp, m.damErr
+}
+
+func (m *mockStore) Samples(_ context.Context, orgID string, keys []string, from, to time.Time, limit int, emit func(SampleRow) error) (int, bool, error) {
+	m.samplesOrg = orgID
+	m.samplesKeys = append([]string(nil), keys...)
+	m.samplesFrom, m.samplesTo, m.samplesLimit = from, to, limit
+	if m.samplesErr != nil {
+		return 0, false, m.samplesErr
+	}
+	emitted := 0
+	for _, r := range m.samplesRows {
+		if emitted >= limit {
+			return emitted, true, nil
+		}
+		if err := emit(r); err != nil {
+			return emitted, false, err
+		}
+		emitted++
+	}
+	return emitted, m.samplesTruncated, nil
 }
 
 func (m *mockStore) Ready(_ context.Context) error {
@@ -302,6 +333,161 @@ func TestCurrentHidesInternalError(t *testing.T) {
 	}
 	if strings.Contains(body, "sql: no rows") {
 		t.Fatalf("expected internal error to be hidden, got %q", body)
+	}
+}
+
+// TestSamplesStreamsCsv verifies the happy path: header row, BOM, one
+// CSV row per emitted SampleRow, labels rendered as JSON strings.
+func TestSamplesStreamsCsv(t *testing.T) {
+	store := &mockStore{
+		samplesRows: []SampleRow{
+			{
+				Time:      time.Date(2026, 5, 9, 10, 0, 0, 0, time.UTC),
+				MetricKey: "active_pv_power_kw",
+				Value:     12.345,
+			},
+			{
+				Time:      time.Date(2026, 5, 9, 10, 0, 1, 0, time.UTC),
+				MetricKey: "soc_percent",
+				Value:     86.5,
+				Labels:    map[string]string{"unit_id": "ess-1"},
+			},
+		},
+	}
+	h := NewHandlers(store, "*")
+	url := "/api/v1/samples?organization_id=org-a&metric_keys=active_pv_power_kw,soc_percent" +
+		"&from=2026-05-09T00:00:00Z&to=2026-05-10T00:00:00Z"
+	req := httptest.NewRequest(http.MethodGet, url, nil)
+	rec := httptest.NewRecorder()
+	h.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200 got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Content-Type"); !strings.HasPrefix(got, "text/csv") {
+		t.Fatalf("expected text/csv, got %q", got)
+	}
+	cd := rec.Header().Get("Content-Disposition")
+	if !strings.Contains(cd, "samples_org-a_") || !strings.HasSuffix(cd, ".csv\"") {
+		t.Fatalf("unexpected Content-Disposition: %q", cd)
+	}
+	body := rec.Body.String()
+	if !strings.HasPrefix(body, "\xef\xbb\xbf") {
+		t.Fatalf("expected UTF-8 BOM prefix")
+	}
+	body = strings.TrimPrefix(body, "\xef\xbb\xbf")
+	want := "time,metric_key,value,labels\r\n" +
+		"2026-05-09T10:00:00Z,active_pv_power_kw,12.345,\r\n" +
+		"2026-05-09T10:00:01Z,soc_percent,86.5,\"{\"\"unit_id\"\":\"\"ess-1\"\"}\"\r\n"
+	if body != want {
+		t.Fatalf("body mismatch\n got %q\nwant %q", body, want)
+	}
+	if store.samplesOrg != "org-a" {
+		t.Fatalf("org mismatch: %q", store.samplesOrg)
+	}
+	if len(store.samplesKeys) != 2 || store.samplesKeys[0] != "active_pv_power_kw" {
+		t.Fatalf("keys mismatch: %#v", store.samplesKeys)
+	}
+	if store.samplesLimit != defaultSamplesLimit {
+		t.Fatalf("default limit mismatch: %d", store.samplesLimit)
+	}
+}
+
+// TestSamplesAppendsTruncationSentinel verifies that when the store
+// reports truncated=true (more rows than limit) the handler writes a
+// final `__TRUNCATED__,...` row so the frontend can warn the user.
+func TestSamplesAppendsTruncationSentinel(t *testing.T) {
+	store := &mockStore{
+		samplesRows: []SampleRow{
+			{Time: time.Date(2026, 5, 9, 10, 0, 0, 0, time.UTC), MetricKey: "soc_percent", Value: 80},
+			{Time: time.Date(2026, 5, 9, 10, 0, 1, 0, time.UTC), MetricKey: "soc_percent", Value: 81},
+			{Time: time.Date(2026, 5, 9, 10, 0, 2, 0, time.UTC), MetricKey: "soc_percent", Value: 82},
+		},
+	}
+	h := NewHandlers(store, "*")
+	url := "/api/v1/samples?organization_id=org-a&metric_keys=soc_percent" +
+		"&from=2026-05-09T00:00:00Z&to=2026-05-10T00:00:00Z&limit=2"
+	req := httptest.NewRequest(http.MethodGet, url, nil)
+	rec := httptest.NewRecorder()
+	h.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200 got %d", rec.Code)
+	}
+	body := strings.TrimPrefix(rec.Body.String(), "\xef\xbb\xbf")
+	lines := strings.Split(strings.TrimRight(body, "\r\n"), "\r\n")
+	if len(lines) != 4 {
+		t.Fatalf("expected 4 lines (header + 2 rows + sentinel), got %d: %#v", len(lines), lines)
+	}
+	if !strings.HasPrefix(lines[3], "__TRUNCATED__,") {
+		t.Fatalf("expected truncation sentinel, got %q", lines[3])
+	}
+}
+
+// TestSamplesValidatesInputs locks in the bad-request paths so a
+// future regression can't accidentally accept a 6-month range or a
+// limit of 50_000_000 rows.
+func TestSamplesValidatesInputs(t *testing.T) {
+	cases := []struct {
+		name string
+		url  string
+	}{
+		{
+			name: "missing organization_id",
+			url:  "/api/v1/samples?metric_keys=soc_percent&from=2026-05-09T00:00:00Z&to=2026-05-10T00:00:00Z",
+		},
+		{
+			name: "missing metric_keys",
+			url:  "/api/v1/samples?organization_id=org-a&from=2026-05-09T00:00:00Z&to=2026-05-10T00:00:00Z",
+		},
+		{
+			name: "missing from",
+			url:  "/api/v1/samples?organization_id=org-a&metric_keys=soc_percent&to=2026-05-10T00:00:00Z",
+		},
+		{
+			name: "to before from",
+			url:  "/api/v1/samples?organization_id=org-a&metric_keys=soc_percent&from=2026-05-10T00:00:00Z&to=2026-05-09T00:00:00Z",
+		},
+		{
+			name: "range over 31 days",
+			url:  "/api/v1/samples?organization_id=org-a&metric_keys=soc_percent&from=2026-01-01T00:00:00Z&to=2026-03-01T00:00:00Z",
+		},
+		{
+			name: "limit not an integer",
+			url:  "/api/v1/samples?organization_id=org-a&metric_keys=soc_percent&from=2026-05-09T00:00:00Z&to=2026-05-10T00:00:00Z&limit=many",
+		},
+		{
+			name: "limit above hard cap",
+			url:  "/api/v1/samples?organization_id=org-a&metric_keys=soc_percent&from=2026-05-09T00:00:00Z&to=2026-05-10T00:00:00Z&limit=2000000",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := NewHandlers(&mockStore{}, "*")
+			req := httptest.NewRequest(http.MethodGet, tc.url, nil)
+			rec := httptest.NewRecorder()
+			h.Router().ServeHTTP(rec, req)
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("want 400 got %d body=%s", rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
+
+// TestSamplesRejectsTooManyMetrics ensures the per-request metric
+// fan-out stays bounded so a single export can't hammer the index
+// for hundreds of keys at once.
+func TestSamplesRejectsTooManyMetrics(t *testing.T) {
+	keys := make([]string, maxSamplesMetricKeys+1)
+	for i := range keys {
+		keys[i] = fmt.Sprintf("metric_%d", i)
+	}
+	url := "/api/v1/samples?organization_id=org-a&from=2026-05-09T00:00:00Z&to=2026-05-10T00:00:00Z&metric_keys=" +
+		strings.Join(keys, ",")
+	h := NewHandlers(&mockStore{}, "*")
+	req := httptest.NewRequest(http.MethodGet, url, nil)
+	rec := httptest.NewRecorder()
+	h.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("want 400 got %d", rec.Code)
 	}
 }
 

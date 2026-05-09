@@ -2,6 +2,7 @@ package api
 
 import (
 	"math"
+	"net/http/httptest"
 	"testing"
 )
 
@@ -114,6 +115,67 @@ func TestApplyApplianceConsumptionRule(t *testing.T) {
 			_ = before
 			if math.Abs(got-tc.want) > 1e-9 {
 				t.Fatalf("consumption = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestParseLimit covers the validation rules for /api/v1/samples'
+// `limit` query param: empty → default, valid in-range integer →
+// passes through, anything else → error so the dialog surfaces a 400.
+func TestParseLimit(t *testing.T) {
+	cases := []struct {
+		raw     string
+		want    int
+		wantErr bool
+	}{
+		{raw: "", want: 100},
+		{raw: "1", want: 1},
+		{raw: "100", want: 100},
+		{raw: "1000", want: 1000},
+		{raw: "0", wantErr: true},
+		{raw: "-5", wantErr: true},
+		{raw: "abc", wantErr: true},
+		{raw: "1001", wantErr: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.raw, func(t *testing.T) {
+			r := httptest.NewRequest("GET", "/?limit="+tc.raw, nil)
+			got, err := parseLimit(r, 100, 1000)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected error for %q, got %d", tc.raw, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error for %q: %v", tc.raw, err)
+			}
+			if got != tc.want {
+				t.Fatalf("limit %q -> %d, want %d", tc.raw, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestSanitizeFilenameSegment locks in the safe-character allow-list
+// used by the /api/v1/samples Content-Disposition header. Anything
+// outside [A-Za-z0-9_-] becomes underscore so a hostile organization
+// id can't smuggle a quote into the response header.
+func TestSanitizeFilenameSegment(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"", "_"},
+		{"org-a", "org-a"},
+		{"org_a", "org_a"},
+		{"org/a", "org_a"},
+		{`org"; rm -rf /`, "org___rm_-rf__"},
+		{"организація", "___________"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.in, func(t *testing.T) {
+			got := sanitizeFilenameSegment(tc.in)
+			if got != tc.want {
+				t.Fatalf("got %q want %q", got, tc.want)
 			}
 		})
 	}

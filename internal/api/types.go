@@ -147,3 +147,20 @@ type EnergySummaryResponse struct {
 	To             time.Time          `json:"to"`
 	Totals         map[string]float64 `json:"totals"`
 }
+
+// SampleRow is one raw `telemetry_samples` record exposed by
+// /api/v1/samples. The endpoint streams these rows as CSV so the
+// dashboard's "Експорт даних → Сирі дані" path can hand the analyst
+// per-poll values rather than the bucketed aggregates the regular
+// timeseries endpoint produces.
+//
+// `Labels` is the deserialized JSONB column. Empty maps are emitted
+// as nil so the CSV writer can render an empty cell instead of "{}",
+// which matches what users expect when the inverter returns no extra
+// dimensions for a sample.
+type SampleRow struct {
+	Time      time.Time
+	MetricKey string
+	Value     float64
+	Labels    map[string]string
+}

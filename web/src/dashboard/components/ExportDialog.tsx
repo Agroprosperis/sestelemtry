@@ -1,9 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { fetchRawSamplesCsv } from '../../api'
 import { downloadCsv, rowsToCsv } from '../csv'
 import {
   autoBucket,
   customExportFilename,
   fetchCustomExportData,
+  rawExportMetricKeys,
+  RAW_SAMPLES_LIMIT,
+  RAW_SAMPLES_MAX_DAYS,
   type CustomExportBucket,
   type CustomExportColumns,
 } from '../customExport'
@@ -17,6 +21,7 @@ type Props = {
 
 const BUCKET_OPTIONS: Array<{ value: CustomExportBucket | 'auto'; label: string }> = [
   { value: 'auto', label: 'Авто' },
+  { value: 'raw', label: 'Сирі дані (telemetry_samples)' },
   { value: '5 minutes', label: '5 хвилин' },
   { value: '1 hour', label: '1 година' },
   { value: '1 day', label: '1 день' },
@@ -119,7 +124,15 @@ export function ExportDialog({ organizationID, initialAnchor, onClose }: Props) 
   }, [bucketChoice, fromDate, toExclusive])
 
   const hasElevator = elevatorCodeFor(organizationID) !== null
-  const anyColumn = Object.values(columns).some(Boolean)
+  const isRaw = computedBucket === 'raw'
+  // Raw mode only exposes columns that map to actual `telemetry_samples`
+  // metrics (energy / soc / power). The DAM price comes from the
+  // market-data table and the PV forecast comes from n8n, so neither
+  // has raw rows to stream.
+  const rawAllowedColumns = isRaw
+    ? { ...columns, price: false, forecast: false }
+    : columns
+  const anyColumn = Object.values(rawAllowedColumns).some(Boolean)
   const validRange = !!fromDate && !!toExclusive && fromDate.getTime() < toExclusive.getTime()
   const todayMax = useMemo(() => toDateInputValue(new Date()), [])
   // Forecast only makes sense for a single-day, 5-minute export of an
@@ -128,7 +141,18 @@ export function ExportDialog({ organizationID, initialAnchor, onClose }: Props) 
     !!fromDate &&
     !!toExclusive &&
     toExclusive.getTime() - fromDate.getTime() === 24 * 60 * 60 * 1000
-  const forecastEnabled = computedBucket === '5 minutes' && isSingleDay && hasElevator
+  const forecastEnabled = !isRaw && computedBucket === '5 minutes' && isSingleDay && hasElevator
+  const priceEnabled = !isRaw
+
+  // Raw mode is rate-limited on the server (range <= 31 days). The
+  // dropdown lets users pick `raw` regardless of range so they get an
+  // explicit explanation rather than a silently disabled option, but
+  // we surface the constraint as an inline error to gate submission.
+  const rangeDays =
+    !!fromDate && !!toExclusive
+      ? (toExclusive.getTime() - fromDate.getTime()) / (24 * 60 * 60 * 1000)
+      : 0
+  const rawRangeOk = !isRaw || rangeDays <= RAW_SAMPLES_MAX_DAYS
 
   function toggleColumn(id: keyof CustomExportColumns) {
     setColumns((prev) => ({ ...prev, [id]: !prev[id] }))
@@ -139,6 +163,44 @@ export function ExportDialog({ organizationID, initialAnchor, onClose }: Props) 
     setBusy(true)
     setError(null)
     try {
+      if (computedBucket === 'raw') {
+        if (!rawRangeOk) {
+          setError(
+            `Сирі дані обмежені діапазоном ${RAW_SAMPLES_MAX_DAYS} діб — звузьте період.`,
+          )
+          return
+        }
+        const metricKeys = rawExportMetricKeys(rawAllowedColumns)
+        if (metricKeys.length === 0) {
+          setError('Виберіть принаймні одну метрику з telemetry_samples.')
+          return
+        }
+        const result = await fetchRawSamplesCsv({
+          organizationID,
+          metricKeys,
+          from: fromDate.toISOString(),
+          to: toExclusive.toISOString(),
+          limit: RAW_SAMPLES_LIMIT,
+        })
+        if (result.rows === 0 && !result.truncated) {
+          setError('У вибраному діапазоні немає сирих даних — спробуйте інший період або метрики.')
+          return
+        }
+        // Server already serializes the body (header + BOM); we hand
+        // the bytes to the same Blob downloader the bucketed path uses.
+        // downloadCsv prepends another BOM, so strip the server's first
+        // to avoid two BOMs in the saved file.
+        const text = result.text.replace(/^\ufeff/, '')
+        downloadCsv(result.filename, text)
+        if (result.truncated) {
+          setError(
+            `Експорт обмежено ${RAW_SAMPLES_LIMIT.toLocaleString('uk-UA')} рядками — звузьте діапазон або зменште кількість метрик.`,
+          )
+          return
+        }
+        onClose()
+        return
+      }
       const table = await fetchCustomExportData({
         organizationID,
         from: fromDate,
@@ -241,8 +303,9 @@ export function ExportDialog({ organizationID, initialAnchor, onClose }: Props) 
           <fieldset className="export-dialog-columns">
             <legend>Колонки</legend>
             {COLUMN_OPTIONS.map((opt) => {
-              const isForecast = opt.id === 'forecast'
-              const disabled = isForecast && !forecastEnabled
+              let disabled = false
+              if (opt.id === 'forecast') disabled = !forecastEnabled
+              if (opt.id === 'price') disabled = !priceEnabled
               return (
                 <label
                   key={opt.id}
@@ -263,6 +326,15 @@ export function ExportDialog({ organizationID, initialAnchor, onClose }: Props) 
             })}
           </fieldset>
 
+          {isRaw && (
+            <p className="export-dialog-note">
+              Сирі дані — кожен зразок із <code>telemetry_samples</code> (крок ~1с/15с/30с).
+              Експорт обмежений {RAW_SAMPLES_MAX_DAYS} добами та{' '}
+              {RAW_SAMPLES_LIMIT.toLocaleString('uk-UA')} рядками. Колонки «Ціна РДН» та «Прогноз
+              СЕС» вимкнені — у цих джерел немає сирих рядків.
+            </p>
+          )}
+
           {error && (
             <p role="alert" className="export-dialog-error">
               {error}
@@ -277,7 +349,7 @@ export function ExportDialog({ organizationID, initialAnchor, onClose }: Props) 
           <button
             type="submit"
             className="export-dialog-primary"
-            disabled={!validRange || !anyColumn || busy}
+            disabled={!validRange || !anyColumn || !rawRangeOk || busy}
           >
             {busy ? 'Готуємо…' : 'Завантажити CSV'}
           </button>

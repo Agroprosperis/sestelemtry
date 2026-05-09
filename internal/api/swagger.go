@@ -161,6 +161,81 @@ paths:
               schema:
                 type: string
                 example: internal server error
+  /api/v1/samples:
+    get:
+      summary: Raw telemetry_samples export (CSV)
+      operationId: getSamples
+      description: |
+        Streams the raw per-poll rows from telemetry_samples that match
+        the request as a CSV file (text/csv; charset=utf-8 with a
+        leading UTF-8 BOM). Used by the dashboard's "Сирі дані" export
+        mode when an analyst needs the un-bucketed sample stream
+        rather than the aggregates from /api/v1/timeseries.
+
+        The body is a header row time,metric_key,value,labels followed
+        by one row per sample. labels is a JSON object when the sample
+        carries label dimensions and empty otherwise. Rows are ordered
+        by time ASC, metric_key ASC.
+
+        Hard limits keep a misclick from streaming gigabytes:
+          * range must be <= 31 days,
+          * at most 20 metric_keys per request,
+          * at most 1_000_000 rows per request (default 100_000).
+
+        When the matched data exceeds limit the body ends with a
+        sentinel row __TRUNCATED__,,<limit>,{...} so the dashboard
+        can detect the partial export and warn the user. The HTTP
+        Fetch API does not surface trailers, so signaling truncation
+        in the body is the only channel that survives reliably.
+      parameters:
+        - name: organization_id
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: metric_keys
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Comma-separated list of metric keys (max 20)
+        - name: from
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date-time
+          description: Inclusive lower bound (RFC3339)
+        - name: to
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date-time
+          description: Exclusive upper bound (RFC3339); to-from must be ≤ 31 days
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000000
+            default: 100000
+          description: Maximum rows to return; the response is truncated when more data matches.
+      responses:
+        "200":
+          description: CSV stream of telemetry_samples rows
+          content:
+            text/csv:
+              schema:
+                type: string
+        "400":
+          description: Invalid or missing query parameters
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: range must be <= 744h0m0s
   /api/v1/timeseries:
     get:
       summary: Timeseries for chart graphics
