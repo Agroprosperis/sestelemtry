@@ -11,6 +11,7 @@ import {
   type CustomExportBucket,
   type CustomExportColumns,
 } from '../customExport'
+import { pivotRawCsvToWide } from '../pivotRaw'
 import { elevatorCodeFor } from '../transforms/pvForecast'
 
 type Props = {
@@ -198,12 +199,28 @@ export function ExportDialog({ organizationID, initialAnchor, onClose }: Props) 
           setError('У вибраному діапазоні немає сирих даних — спробуйте інший період або метрики.')
           return
         }
-        // Server already serializes the body (header + BOM); we hand
-        // the bytes to the same Blob downloader the bucketed path uses.
-        // downloadCsv prepends another BOM, so strip the server's first
-        // to avoid two BOMs in the saved file.
-        const text = result.text.replace(/^\ufeff/, '')
-        downloadCsv(result.filename, text)
+        // Pull the metric_key → register address map for header
+        // annotation parity with the bucketed wide export. Failures
+        // are non-fatal: we just fall back to plain headers.
+        let registerAddresses: Record<string, number> | undefined
+        try {
+          const reg = await fetchRegisters()
+          registerAddresses = Object.fromEntries(
+            Object.entries(reg.metadata).map(([k, v]) => [k, v.address]),
+          )
+        } catch {
+          registerAddresses = undefined
+        }
+        // Pivot long → wide on the client. The user explicitly
+        // asked for the "one row per moment, metrics as columns"
+        // layout (matches the spreadsheet they ship into) instead
+        // of the long-format the API streams.
+        const pivot = pivotRawCsvToWide({
+          longCsv: result.text,
+          metricKeys,
+          registerAddresses,
+        })
+        downloadCsv(result.filename, pivot.csv)
         if (result.truncated) {
           setError(
             `Експорт обмежено ${RAW_SAMPLES_LIMIT.toLocaleString('uk-UA')} рядками — звузьте діапазон або зменште кількість метрик.`,
