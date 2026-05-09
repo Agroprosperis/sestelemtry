@@ -1,0 +1,159 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import * as api from '../api'
+import {
+  autoBucket,
+  customExportFilename,
+  fetchCustomExportData,
+} from './customExport'
+
+describe('autoBucket', () => {
+  it('picks 5-minute resolution for short ranges', () => {
+    const from = new Date(2026, 4, 7)
+    const to = new Date(2026, 4, 9) // 2 days
+    expect(autoBucket(from, to)).toBe('5 minutes')
+  })
+
+  it('switches to hourly for ranges over 2 days', () => {
+    const from = new Date(2026, 4, 1)
+    const to = new Date(2026, 4, 8) // 7 days
+    expect(autoBucket(from, to)).toBe('1 hour')
+  })
+
+  it('switches to daily for ranges over 35 days', () => {
+    const from = new Date(2026, 0, 1)
+    const to = new Date(2026, 2, 1) // ~59 days
+    expect(autoBucket(from, to)).toBe('1 day')
+  })
+
+  it('switches to monthly for ranges over a year', () => {
+    const from = new Date(2024, 0, 1)
+    const to = new Date(2026, 0, 1) // ~2 years
+    expect(autoBucket(from, to)).toBe('1 month')
+  })
+})
+
+describe('customExportFilename', () => {
+  it('renders inclusive end and bucket suffix for analysts to skim', () => {
+    expect(
+      customExportFilename({
+        organizationID: 'pe',
+        from: new Date(2026, 4, 1),
+        to: new Date(2026, 4, 8), // exclusive
+        bucket: '1 hour',
+      }),
+    ).toBe('export_pe_2026-05-01_2026-05-07_1hour.csv')
+  })
+})
+
+describe('fetchCustomExportData', () => {
+  beforeEach(() => {
+    vi.spyOn(api, 'fetchTimeseries').mockImplementation(async (input) => ({
+      organization_id: input.organizationID,
+      metric_keys: input.metricKeys,
+      bucket: input.bucket,
+      from: input.from,
+      to: input.to,
+      points: input.metricKeys.flatMap((mk) => {
+        if (mk === 'soc_percent') {
+          return [
+            { time: '2026-05-07T00:00:00.000Z', metric_key: mk, value: 50 },
+            { time: '2026-05-07T01:00:00.000Z', metric_key: mk, value: 60 },
+          ]
+        }
+        if (mk === 'accumulated_pv_energy_yield_kwh') {
+          return [
+            { time: '2026-05-07T00:00:00.000Z', metric_key: mk, value: 10 },
+            { time: '2026-05-07T01:00:00.000Z', metric_key: mk, value: 25 },
+          ]
+        }
+        return [
+          { time: '2026-05-07T00:00:00.000Z', metric_key: mk, value: 1 },
+          { time: '2026-05-07T01:00:00.000Z', metric_key: mk, value: 2 },
+        ]
+      }),
+    }))
+    vi.spyOn(api, 'fetchDAMPrices').mockResolvedValue({
+      zone: 2,
+      from: '2026-05-07',
+      to: '2026-05-07',
+      prices: [
+        { delivery_date: '2026-05-07', hour: 1, zone: 2, price_uah_per_mwh: 1500 },
+        { delivery_date: '2026-05-07', hour: 2, zone: 2, price_uah_per_mwh: 2500 },
+      ],
+    })
+    vi.spyOn(api, 'fetchPvForecast').mockResolvedValue([])
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('returns only the selected columns and skips the network when nothing is checked', async () => {
+    const table = await fetchCustomExportData({
+      organizationID: 'pe',
+      from: new Date(2026, 4, 7),
+      to: new Date(2026, 4, 8),
+      bucket: '1 hour',
+      columns: {
+        energy: false,
+        price: false,
+        soc: false,
+        power: false,
+        forecast: false,
+      },
+    })
+    expect(table.rows).toEqual([])
+    expect(table.headers).toEqual(['time'])
+    expect(api.fetchTimeseries).not.toHaveBeenCalled()
+  })
+
+  it('joins energy, soc, and power columns by bucket-start timestamp', async () => {
+    const table = await fetchCustomExportData({
+      organizationID: 'pe',
+      from: new Date(2026, 4, 7),
+      to: new Date(2026, 4, 8),
+      bucket: '1 hour',
+      columns: {
+        energy: true,
+        price: false,
+        soc: true,
+        power: true,
+        forecast: false,
+      },
+    })
+    expect(table.headers).toContain('accumulated_pv_energy_yield_kwh')
+    expect(table.headers).toContain('soc_percent')
+    expect(table.headers).toContain('active_pv_power_kw')
+    expect(table.headers).not.toContain('dam_price_uah_per_mwh')
+    expect(table.rows.length).toBeGreaterThan(0)
+    // Both series share the same point timestamps so they must join onto
+    // a single row each, regardless of the host machine's local timezone.
+    const first = table.rows[0]
+    expect(first.accumulated_pv_energy_yield_kwh).toBe(10)
+    expect(first.soc_percent).toBe(50)
+    expect(first.active_pv_power_kw).toBe(1)
+  })
+
+  it('skips network calls for unselected columns', async () => {
+    await fetchCustomExportData({
+      organizationID: 'pe',
+      from: new Date(2026, 4, 7),
+      to: new Date(2026, 4, 8),
+      bucket: '1 hour',
+      columns: {
+        energy: false,
+        price: false,
+        soc: true,
+        power: false,
+        forecast: false,
+      },
+    })
+    expect(api.fetchTimeseries).toHaveBeenCalledTimes(1)
+    expect(api.fetchTimeseries).toHaveBeenCalledWith(
+      expect.objectContaining({ metricKeys: ['soc_percent'], aggregation: 'avg' }),
+      undefined,
+    )
+    expect(api.fetchDAMPrices).not.toHaveBeenCalled()
+    expect(api.fetchPvForecast).not.toHaveBeenCalled()
+  })
+})

@@ -15,9 +15,17 @@ const RevenueChart = lazy(() =>
   import('./components/RevenueChart').then((mod) => ({ default: mod.RevenueChart })),
 )
 
+// ExportDialog is also below-the-fold (it only renders when the user
+// clicks "Експорт даних"); lazy import keeps its form + custom-export
+// fetch helpers out of the initial bundle.
+const ExportDialog = lazy(() =>
+  import('./components/ExportDialog').then((mod) => ({ default: mod.ExportDialog })),
+)
+
 export function Dashboard() {
   const { preset, anchor, setPreset, setAnchor } = useRangeParams()
   const [metricsAt, setMetricsAt] = useState<Date | null>(null)
+  const [exportOpen, setExportOpen] = useState(false)
   const { organizationID, options, change: onOrganizationChange } = useOrganizationParam()
 
   const {
@@ -49,6 +57,7 @@ export function Dashboard() {
         onPresetChange={setPreset}
         anchor={anchor}
         onAnchorChange={setAnchor}
+        onExportClick={() => setExportOpen(true)}
       />
 
       {error && (
@@ -101,6 +110,16 @@ export function Dashboard() {
           </Suspense>
         </div>
       </div>
+
+      {exportOpen && (
+        <Suspense fallback={null}>
+          <ExportDialog
+            organizationID={organizationID}
+            initialAnchor={anchor}
+            onClose={() => setExportOpen(false)}
+          />
+        </Suspense>
+      )}
     </main>
   )
 }
