@@ -18,6 +18,38 @@ const DAM_PRICE_KEY = 'dam_price_uah_per_mwh'
 const SOC_KEY = 'soc_percent'
 const PV_FORECAST_KEY = 'planned_ac_kw'
 
+// Anything closer to zero than this is treated as "idle" — both the
+// ESS and the grid meter routinely sit at ±tens of watts even when
+// nothing is happening (inverter standby losses), and flipping the
+// label between Заряд/Розряд / Імпорт/Експорт on every poll noise
+// just makes the tooltip flicker. 50 W is small enough to call
+// "idle" without hiding genuine activity.
+const IDLE_KW = 0.05
+
+// directionalLabel produces a sign-aware tooltip name for the two
+// metrics whose direction matters operationally: ESS (charge vs
+// discharge) and the grid meter (import vs export). The convention
+// matches the production SmartLogger firmware on PE/ZE — positive
+// values are "energy flows INTO the system being measured":
+//   * active_ess_power_kw > 0 → battery is taking power in (charging)
+//   * grid_connected_active_power_kw > 0 → site is pulling power
+//     from the external grid (import / купівля)
+// Around zero we fall back to a neutral label so the tooltip doesn't
+// flicker between charge/discharge on inverter standby noise.
+function directionalLabel(metricKey: string, value: number): string | null {
+  if (metricKey === 'active_ess_power_kw') {
+    if (value > IDLE_KW) return 'Заряд УЗЕ'
+    if (value < -IDLE_KW) return 'Розряд УЗЕ'
+    return 'УЗЕ в очікуванні'
+  }
+  if (metricKey === 'grid_connected_active_power_kw') {
+    if (value > IDLE_KW) return 'Імпорт з мережі'
+    if (value < -IDLE_KW) return 'Експорт у мережу'
+    return 'Точка приєднання (без обміну)'
+  }
+  return null
+}
+
 export function PowerTooltip({ active, label, payload }: Props) {
   if (!active || !payload || payload.length === 0) {
     return null
@@ -49,7 +81,17 @@ export function PowerTooltip({ active, label, payload }: Props) {
           const entry = byKey.get(key)
           const raw = Number(entry?.value)
           const value = Number.isFinite(raw) ? raw : null
-          const name = entry?.name ? String(entry.name) : (DAY_POWER_METRIC_LABELS[key] ?? key)
+          // Sign-aware metrics get a direction-specific label and the
+          // displayed magnitude is the absolute value — analysts read
+          // "Заряд УЗЕ: 0.82 кВт" much faster than "УЗЕ: -0.82 kW"
+          // and don't have to remember the firmware's sign rule.
+          // Other metrics (PV active power, load) are inherently
+          // unsigned and keep their original label / signed value.
+          const dirLabel = value !== null ? directionalLabel(key, value) : null
+          const name =
+            dirLabel ??
+            (entry?.name ? String(entry.name) : (DAY_POWER_METRIC_LABELS[key] ?? key))
+          const displayed = value === null ? null : dirLabel ? Math.abs(value) : value
           return (
             <div key={key} className="energy-tooltip-row">
               <span
@@ -58,7 +100,7 @@ export function PowerTooltip({ active, label, payload }: Props) {
               />
               <span className="energy-tooltip-name">{name}</span>
               <span className="energy-tooltip-value">
-                {value === null ? '--' : `${formatChartNumber(value)} kW`}
+                {displayed === null ? '--' : `${formatChartNumber(displayed)} kW`}
               </span>
             </div>
           )
