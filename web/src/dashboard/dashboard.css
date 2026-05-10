@@ -1064,9 +1064,9 @@
 }
 
 .energy-flow-live-card.is-compact .energy-flow-live-stage {
-  aspect-ratio: 7 / 5;
-  min-height: 220px;
-  max-height: 280px;
+  aspect-ratio: 6 / 5;
+  min-height: 280px;
+  max-height: 360px;
 }
 
 .energy-flow-live-card.is-compact .energy-flow-live-node {
