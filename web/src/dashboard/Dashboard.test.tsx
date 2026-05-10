@@ -1,6 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { Dashboard } from './Dashboard'
+import { EMPTY_FLOWS } from './transforms/flows'
 
 vi.mock('./hooks/useDashboardData', () => ({
   useDashboardData: vi.fn(() => ({
@@ -40,6 +41,7 @@ vi.mock('./hooks/useDashboardData', () => ({
       loadFromGridPct: 0,
       selfSufficiencyPct: 0,
     },
+    energyFlows: EMPTY_FLOWS,
     loading: false,
     cardsLoading: false,
     error: null,

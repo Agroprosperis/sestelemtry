@@ -22,6 +22,7 @@ import {
   type PvForecastHourlyRow,
 } from '../transforms/pvForecast'
 import { socChartRows, type SOCChartRow } from '../transforms/soc'
+import { flowsFromTotals, EMPTY_FLOWS, type EnergyFlows } from '../transforms/flows'
 import {
   energySummaryFromSeries,
   energySummaryFromTotals,
@@ -30,8 +31,16 @@ import {
 import { usePvForecast } from './usePvForecast'
 
 // Metrics whose period totals back the dashboard summary cards (the
-// "spent / produced / from PV" breakdown). Mirrors
-// `EnergySummaryAccumulators` on the backend.
+// "spent / produced / from PV" breakdown) and the energy-flow Sankey
+// diagram. Mirrors `EnergySummaryAccumulators` on the backend.
+//
+// The four `*_to_*_kwh` entries are synthetic counters emitted by
+// the collector's energyflow aggregator — they live in
+// telemetry_samples next to the SmartLogger accumulators, so the
+// existing /api/v1/energy-summary endpoint serves them through the
+// same `last(end) - last(seed)` lookup. Older deployments without
+// the aggregator will return zero for these keys, which the
+// flowsFromTotals transform handles gracefully.
 const ENERGY_SUMMARY_METRIC_KEYS = [
   'accumulated_pv_energy_yield_kwh',
   'accumulated_electricity_sold_kwh',
@@ -39,6 +48,10 @@ const ENERGY_SUMMARY_METRIC_KEYS = [
   'accumulated_power_consumption_kwh',
   'total_energy_charged_kwh',
   'total_energy_discharged_kwh',
+  'pv_to_ess_kwh',
+  'grid_to_ess_kwh',
+  'ess_to_load_kwh',
+  'ess_to_grid_kwh',
 ]
 
 export type DashboardData = {
@@ -46,6 +59,7 @@ export type DashboardData = {
   current: CurrentResponse | null
   energySeries: EnergyRow[]
   energySummary: EnergySummary
+  energyFlows: EnergyFlows
   damSeries: DAMChartRow[]
   socSeries: SOCChartRow[]
   powerSeries: PowerChartRow[]
@@ -87,6 +101,7 @@ export function useDashboardData(input: {
   const [energySummary, setEnergySummary] = useState<EnergySummary>(() =>
     energySummaryFromTotals({}),
   )
+  const [energyFlows, setEnergyFlows] = useState<EnergyFlows>(EMPTY_FLOWS)
   const [damSeries, setDamSeries] = useState<DAMChartRow[]>([])
   const [socSeries, setSocSeries] = useState<SOCChartRow[]>([])
   const [powerSeries, setPowerSeries] = useState<PowerChartRow[]>([])
@@ -255,7 +270,16 @@ export function useDashboardData(input: {
         // mid-period clamps to zero, which the dashboard intentionally
         // surfaces as "no usable data" instead of inventing a number
         // from corrupted samples.
-        const needsServerSummary = preset !== 'day'
+        //
+        // We always fetch the summary, including for the day preset,
+        // because the energy-flow Sankey diagram needs the four
+        // synthetic counters (pv_to_ess_kwh, grid_to_ess_kwh,
+        // ess_to_load_kwh, ess_to_grid_kwh) and those are only emitted
+        // as cumulative samples — they have no per-bucket delta to
+        // reconstruct from energySeries. The day preset still uses the
+        // series-derived summary for its cards so the existing
+        // bucket-clamp behaviour is preserved.
+        const needsServerSummary = true
 
         const [energy, soc, power, dam, summaryResp] = await Promise.all([
           fetchTimeseries(
@@ -323,11 +347,22 @@ export function useDashboardData(input: {
           anchorDate,
           now,
         )
-        const summary = summaryResp
-          ? energySummaryFromTotals(summaryResp.totals)
-          : energySummaryFromSeries(series)
+        // Day preset keeps its series-derived summary so the cards
+        // share the same clamp semantics as the chart bars; month/year
+        // presets use the server-side cumulative summary. The Sankey
+        // flows always come from the server summary because the
+        // synthetic counters are emitted as cumulative samples with
+        // no per-bucket delta to reconstruct on the client.
+        const summary =
+          preset === 'day'
+            ? energySummaryFromSeries(series)
+            : summaryResp
+              ? energySummaryFromTotals(summaryResp.totals)
+              : energySummaryFromSeries(series)
+        const flows = summaryResp ? flowsFromTotals(summaryResp.totals) : EMPTY_FLOWS
         setEnergySeries(series)
         setEnergySummary(summary)
+        setEnergyFlows(flows)
         setSocSeries(soc ? socChartRows(soc.points, 'day', anchorDate) : [])
         setPowerSeries(
           power ? powerChartRows(power.points, DAY_POWER_METRIC_KEYS, anchorDate, now) : [],
@@ -355,6 +390,7 @@ export function useDashboardData(input: {
     current,
     energySeries,
     energySummary,
+    energyFlows,
     damSeries,
     socSeries,
     powerSeries,

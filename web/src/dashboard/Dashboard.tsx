@@ -2,6 +2,7 @@ import { lazy, Suspense, useState } from 'react'
 import './dashboard.css'
 import { DashboardHeader } from './components/DashboardHeader'
 import { EnergyChart } from './components/EnergyChart'
+import { EnergyFlowSankey } from './components/EnergyFlowSankey'
 import { MetricsPanel } from './components/MetricsPanel'
 import { WeatherCard } from './components/WeatherCard'
 import { useDashboardData } from './hooks/useDashboardData'
@@ -34,6 +35,7 @@ export function Dashboard() {
     current,
     energySeries,
     energySummary,
+    energyFlows,
     damSeries,
     socSeries,
     powerSeries,
@@ -94,6 +96,7 @@ export function Dashboard() {
             powerSeries={powerSeries}
             pvForecastSeries={pvForecastSeries}
           />
+          <EnergyFlowSankey flows={energyFlows} loading={loading} />
           <Suspense
             fallback={
               <div className="chart-card">
