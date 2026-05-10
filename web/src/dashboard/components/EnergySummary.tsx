@@ -51,8 +51,10 @@ export function EnergySummary({ summary }: Props) {
         </div>
         <div className="energy-summary-rows">
           <div className="energy-summary-row">
-            <span>Від ФЕ</span>
-            <strong>{formatEnergyCompactKWh(summary.fromPV)}</strong>
+            <span>Від ФЕ та УЗЕ</span>
+            <strong>
+              {formatEnergyCompactKWh(summary.fromPV + summary.fromBattery)}
+            </strong>
           </div>
           <div className="energy-summary-row">
             <span>З електромережі</span>
