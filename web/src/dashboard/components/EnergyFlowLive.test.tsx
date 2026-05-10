@@ -35,9 +35,9 @@ describe('EnergyFlowLive', () => {
     })
     render(<EnergyFlowLive allocation={allocation} />)
 
-    expect(screen.getByText('СЕС (PV)')).toBeInTheDocument()
+    expect(screen.getByText('СЕС')).toBeInTheDocument()
     expect(screen.getByText('Споживання')).toBeInTheDocument()
-    expect(screen.getByText('Батарея (УЗЕ)')).toBeInTheDocument()
+    expect(screen.getByText('УЗЕ')).toBeInTheDocument()
     expect(screen.getByText('Мережа')).toBeInTheDocument()
     expect(screen.getByText(/SOC 84%/)).toBeInTheDocument()
     expect(screen.getByText(/експорт у мережу/i)).toBeInTheDocument()
@@ -70,9 +70,11 @@ describe('EnergyFlowLive', () => {
   })
 
   it('renders no_data state without crashing', () => {
-    render(<EnergyFlowLive allocation={NO_DATA_ALLOCATION} />)
-    expect(screen.getByText(/Немає даних/)).toBeInTheDocument()
-    expect(screen.getByText(/Дані відсутні/)).toBeInTheDocument()
+    const { container } = render(<EnergyFlowLive allocation={NO_DATA_ALLOCATION} />)
+    expect(container.querySelector('.energy-flow-live-status.is-stale')).toBeTruthy()
+    expect(container.querySelector('.energy-flow-live-hub.is-stale')).toBeTruthy()
+    expect(screen.getAllByText(/Немає даних/).length).toBeGreaterThan(0)
+    expect(screen.getByText(/очікуємо опитування/i)).toBeInTheDocument()
   })
 
   it('shows importing balance when grid pulls energy', () => {

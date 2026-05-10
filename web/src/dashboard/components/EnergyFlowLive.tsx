@@ -8,7 +8,13 @@ import {
   SunDim,
 } from '@phosphor-icons/react'
 import { formatChartNumber } from '../format'
-import type { LiveAllocation } from '../transforms/liveAllocation'
+import type {
+  LiveAllocation,
+  LiveEssState,
+  LiveGridState,
+  LiveLoadState,
+  LivePvState,
+} from '../transforms/liveAllocation'
 
 // EnergyFlowLive renders a real-time site-wide power flow diagram.
 // Four corner nodes (PV / Load / Battery / Grid) connect to a
@@ -46,14 +52,11 @@ type EdgeShape = {
   // direction flips).
   d: string
   dReverse: string
-  // labelPos is the rough midpoint where the kW value sits.
-  labelX: number
-  labelY: number
-  // textAnchor for the label so it doesn't overlap the curve.
-  textAnchor: 'start' | 'middle' | 'end'
 }
 
-// Coordinates assume viewBox 0 0 1000 500. Card edges are at:
+// Path coordinates assume viewBox 0 0 1000 500 with
+// preserveAspectRatio="none" so anchor points scale 1:1 with
+// the stage's percentage-positioned cards. Card edges:
 //   PV   right=300,  Y=140
 //   Load left =700,  Y=140
 //   ESS  right=300,  Y=360
@@ -63,30 +66,18 @@ const EDGE_SHAPES: Record<EdgeId, EdgeShape> = {
   pv: {
     d: 'M 300 140 C 360 140, 380 230, 440 230',
     dReverse: 'M 440 230 C 380 230, 360 140, 300 140',
-    labelX: 370,
-    labelY: 168,
-    textAnchor: 'middle',
   },
   load: {
     d: 'M 700 140 C 640 140, 620 230, 560 230',
     dReverse: 'M 560 230 C 620 230, 640 140, 700 140',
-    labelX: 630,
-    labelY: 168,
-    textAnchor: 'middle',
   },
   ess: {
     d: 'M 300 360 C 360 360, 380 270, 440 270',
     dReverse: 'M 440 270 C 380 270, 360 360, 300 360',
-    labelX: 370,
-    labelY: 332,
-    textAnchor: 'middle',
   },
   grid: {
     d: 'M 700 360 C 640 360, 620 270, 560 270',
     dReverse: 'M 560 270 C 620 270, 640 360, 700 360',
-    labelX: 630,
-    labelY: 332,
-    textAnchor: 'middle',
   },
 }
 
@@ -109,6 +100,11 @@ const COLORS = {
 // ghosted but visible, so the topology always reads even when
 // every source is offline.
 const IDLE_OPACITY = 0.18
+
+// Size of the corner-card Phosphor icons. Picked to balance
+// visual weight against the kW number — both should read in
+// roughly one glance without either dominating the card.
+const ICON_SIZE = 22
 
 function clampSpeed(kw: number): number {
   // Map kW magnitude → animation-duration in seconds. Lower
@@ -233,7 +229,7 @@ export function EnergyFlowLive({ allocation }: Props) {
       aria-label="Перетік потужності в реальному часі"
     >
       <header className="energy-flow-live-header">
-        <h2>Перетік потужності (зараз)</h2>
+        <h2>Перетік потужності зараз</h2>
         <span
           className={`energy-flow-live-status${
             allocation.status === 'no_data' ? ' is-stale' : ''
@@ -242,7 +238,7 @@ export function EnergyFlowLive({ allocation }: Props) {
         >
           <span className="energy-flow-live-dot" aria-hidden="true" />
           {allocation.status === 'no_data'
-            ? 'Дані відсутні'
+            ? 'Немає даних'
             : ageSeconds === null
               ? 'Оновлення…'
               : `Оновлено ${formatSeconds(ageSeconds)} тому`}
@@ -252,7 +248,7 @@ export function EnergyFlowLive({ allocation }: Props) {
         <svg
           viewBox="0 0 1000 500"
           className="energy-flow-live-svg"
-          preserveAspectRatio="xMidYMid meet"
+          preserveAspectRatio="none"
           role="img"
           aria-label="Діаграма потужностей"
         >
@@ -261,14 +257,15 @@ export function EnergyFlowLive({ allocation }: Props) {
               <path
                 d={edge.d}
                 stroke={edge.color}
-                strokeWidth={6}
+                strokeWidth={4}
                 fill="none"
-                opacity={edge.active ? 0.25 : IDLE_OPACITY}
+                opacity={edge.active ? 0.3 : IDLE_OPACITY}
+                vectorEffect="non-scaling-stroke"
               />
               <path
                 d={edge.d}
                 stroke={edge.color}
-                strokeWidth={6}
+                strokeWidth={4}
                 fill="none"
                 strokeLinecap="round"
                 className={`energy-flow-live-path${
@@ -277,50 +274,45 @@ export function EnergyFlowLive({ allocation }: Props) {
                 style={{ animationDuration: `${edge.speedSec}s` }}
                 data-edge={edge.id}
                 data-active={edge.active ? '1' : '0'}
+                vectorEffect="non-scaling-stroke"
               />
-              <text
-                x={EDGE_SHAPES[edge.id].labelX}
-                y={EDGE_SHAPES[edge.id].labelY}
-                className="energy-flow-live-label"
-                textAnchor={EDGE_SHAPES[edge.id].textAnchor}
-                opacity={edge.active ? 1 : IDLE_OPACITY * 2}
-              >
-                {formatKw(kwForEdge(edge.id, allocation))}
-              </text>
             </g>
           ))}
         </svg>
 
         <NodeCard
           variant="pv"
+          state={allocation.pvState}
           icon={
             allocation.pvState === 'generating' ? (
-              <Sun size={28} weight="duotone" color={COLORS.pv} />
+              <Sun size={ICON_SIZE} weight="duotone" color={COLORS.pv} />
             ) : (
-              <SunDim size={28} weight="duotone" color={COLORS.pvIdle} />
+              <SunDim size={ICON_SIZE} weight="duotone" color={COLORS.pvIdle} />
             )
           }
-          title="СЕС (PV)"
+          title="СЕС"
           kw={allocation.pvKw}
-          status={allocation.pvState === 'generating' ? 'Генерує' : 'Очікування'}
+          status={allocation.pvState === 'generating' ? 'Генерує' : 'Очікує'}
           active={allocation.pvState === 'generating'}
         />
         <NodeCard
           variant="load"
-          icon={<Buildings size={28} weight="duotone" color={COLORS.load} />}
+          state={allocation.loadState}
+          icon={<Buildings size={ICON_SIZE} weight="duotone" color={COLORS.load} />}
           title="Споживання"
           kw={allocation.loadKw}
-          status={allocation.loadState === 'consuming' ? 'Споживає' : 'Очікування'}
+          status={allocation.loadState === 'consuming' ? 'Споживає' : 'Очікує'}
           active={allocation.loadState === 'consuming'}
         />
         <NodeCard
           variant="ess"
+          state={allocation.essState}
           icon={
             allocation.essState === 'charging' ? (
-              <BatteryCharging size={28} weight="duotone" color={COLORS.essCharge} />
+              <BatteryCharging size={ICON_SIZE} weight="duotone" color={COLORS.essCharge} />
             ) : (
               <BatteryFull
-                size={28}
+                size={ICON_SIZE}
                 weight="duotone"
                 color={
                   allocation.essState === 'discharging'
@@ -330,14 +322,14 @@ export function EnergyFlowLive({ allocation }: Props) {
               />
             )
           }
-          title="Батарея (УЗЕ)"
+          title="УЗЕ"
           kw={allocation.essKw}
           status={
             allocation.essState === 'charging'
-              ? 'Заряджається'
+              ? 'Заряд'
               : allocation.essState === 'discharging'
-                ? 'Розряджається'
-                : 'Очікування'
+                ? 'Розряд'
+                : 'Очікує'
           }
           active={allocation.essState !== 'idle'}
           soc={allocation.socPercent}
@@ -349,9 +341,10 @@ export function EnergyFlowLive({ allocation }: Props) {
         />
         <NodeCard
           variant="grid"
+          state={allocation.gridState}
           icon={
             <Lightning
-              size={28}
+              size={ICON_SIZE}
               weight="duotone"
               color={
                 allocation.gridState === 'importing'
@@ -369,7 +362,7 @@ export function EnergyFlowLive({ allocation }: Props) {
               ? 'Імпорт'
               : allocation.gridState === 'exporting'
                 ? 'Експорт'
-                : 'Очікування'
+                : 'Очікує'
           }
           active={allocation.gridState !== 'idle'}
         />
@@ -412,21 +405,13 @@ function describeBalance(a: LiveAllocation): { kw: string; text: string } {
   return { kw: '0 kW', text: 'обмін з мережею відсутній' }
 }
 
-function kwForEdge(id: EdgeId, a: LiveAllocation): number {
-  switch (id) {
-    case 'pv':
-      return a.pvKw
-    case 'load':
-      return a.loadKw
-    case 'ess':
-      return a.essKw
-    case 'grid':
-      return a.gridKw
-  }
-}
-
 type NodeCardProps = {
   variant: EdgeId
+  // state drives the data-state attribute so CSS can paint a
+  // tinted background per active mode (PV generating, ESS
+  // charging vs discharging, grid importing vs exporting). Idle
+  // states fall through to the neutral surface.
+  state: LivePvState | LiveLoadState | LiveEssState | LiveGridState
   icon: React.ReactNode
   title: string
   kw: number
@@ -438,6 +423,7 @@ type NodeCardProps = {
 
 function NodeCard({
   variant,
+  state,
   icon,
   title,
   kw,
@@ -451,6 +437,7 @@ function NodeCard({
       className={`energy-flow-live-node energy-flow-live-node--${variant}${
         active ? '' : ' is-idle'
       }`}
+      data-state={state}
       role="group"
       aria-label={`${title}: ${formatKw(kw)} (${status})`}
     >
@@ -462,6 +449,7 @@ function NodeCard({
       <span className="energy-flow-live-node-status">{status}</span>
       {typeof soc === 'number' && Number.isFinite(soc) && (
         <div className="energy-flow-live-soc" aria-label={`SOC ${soc.toFixed(0)}%`}>
+          <span className="energy-flow-live-soc-label">SOC {soc.toFixed(0)}%</span>
           <div className="energy-flow-live-soc-track">
             <span
               className="energy-flow-live-soc-fill"
@@ -471,7 +459,6 @@ function NodeCard({
               }}
             />
           </div>
-          <span className="energy-flow-live-soc-label">SOC {soc.toFixed(0)}%</span>
         </div>
       )}
     </div>
