@@ -191,6 +191,84 @@
   line-height: 1.4;
 }
 
+/* The "with-flow" snapshot card adds a third column for the
+   per-row marching-dashes rail. Other narrative components keep
+   the original two-column layout. */
+.daily-narrative--with-flow .daily-narrative-list li {
+  grid-template-columns: 24px 1fr 40px;
+}
+
+.daily-narrative--with-flow .daily-narrative-label {
+  min-width: 0;
+}
+
+.live-row-flow {
+  width: 36px;
+  height: 8px;
+  display: block;
+  justify-self: end;
+}
+
+.live-row-flow-path {
+  stroke-dasharray: 4 4;
+  animation-name: live-flow-march;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+
+.live-row-flow.is-idle .live-row-flow-path {
+  animation: none;
+  stroke-dasharray: 1 3;
+  opacity: 0.5;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .live-row-flow-path {
+    animation: none;
+  }
+}
+
+.current-snapshot-balance {
+  margin: 8px 0 0;
+  padding: 6px 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  align-self: flex-start;
+  width: fit-content;
+}
+
+.current-snapshot-balance-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.current-snapshot-balance--idle {
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.current-snapshot-balance--export {
+  background: #ecfdf5;
+  color: #15803d;
+}
+
+.current-snapshot-balance--import {
+  background: #fffbeb;
+  color: #b45309;
+}
+
+.current-snapshot-balance--stale {
+  background: #f1f5f9;
+  color: #64748b;
+}
+
 .daily-narrative-list strong {
   color: #0f172a;
   font-weight: 600;

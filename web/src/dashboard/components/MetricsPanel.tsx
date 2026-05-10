@@ -1,6 +1,7 @@
 import type { CurrentResponse } from '../../types'
 import type { RangePreset } from '../range'
 import type { EnergyFlows } from '../transforms/flows'
+import type { LiveAllocation } from '../transforms/liveAllocation'
 import type { EnergySummary } from '../transforms/summary'
 import { AccumulatedSnapshotNarrative } from './AccumulatedSnapshotNarrative'
 import { CurrentSnapshotNarrative } from './CurrentSnapshotNarrative'
@@ -11,6 +12,7 @@ import { TodayCountersNarrative } from './TodayCountersNarrative'
 
 type Props = {
   current: CurrentResponse | null
+  liveAllocation: LiveAllocation
   loading: boolean
   metricsAt: Date | null
   onMetricsAtChange: (next: Date | null) => void
@@ -32,6 +34,7 @@ function formatSnapshotLabel(at: Date): string {
 
 export function MetricsPanel({
   current,
+  liveAllocation,
   loading,
   metricsAt,
   onMetricsAtChange,
@@ -49,7 +52,11 @@ export function MetricsPanel({
           Показники станом на <strong>{formatSnapshotLabel(metricsAt)}</strong>
         </p>
       )}
-      <CurrentSnapshotNarrative current={current} loading={loading} />
+      <CurrentSnapshotNarrative
+        current={current}
+        liveAllocation={liveAllocation}
+        loading={loading}
+      />
       <TodayCountersNarrative current={current} loading={loading} />
       <DailySummaryNarrative summary={summary} preset={preset} />
       <EnergyFlowPeriodSummary flows={flows} />

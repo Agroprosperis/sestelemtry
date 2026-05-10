@@ -73,6 +73,7 @@ export function Dashboard() {
       <div className="dashboard-content">
         <MetricsPanel
           current={current}
+          liveAllocation={liveAllocation}
           loading={cardsLoading}
           metricsAt={metricsAt}
           onMetricsAtChange={setMetricsAt}
