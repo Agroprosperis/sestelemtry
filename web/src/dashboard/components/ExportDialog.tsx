@@ -131,6 +131,14 @@ export function ExportDialog({ organizationID, initialAnchor, onClose }: Props) 
   }, [])
 
   useEffect(() => {
+    // Reset mountedRef on every mount, not just on initial useRef
+    // construction. React 18+ StrictMode runs setup/cleanup/setup in
+    // dev, which previously latched mountedRef.current = false after
+    // the first cleanup and never flipped it back — the next user
+    // click would silently bail out of every "if (!mountedRef.current)
+    // return" gate and the CSV download would never trigger. Same
+    // class of bug as 2d57111 (useOrganizations).
+    mountedRef.current = true
     return () => {
       mountedRef.current = false
       abortRef.current?.abort()

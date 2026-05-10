@@ -468,11 +468,23 @@ export function customExportFilename(input: {
 // the metric_keys list /api/v1/samples expects. Forecast and DAM
 // price columns are intentionally absent: those data sources don't
 // live in `telemetry_samples` and therefore have no raw rows.
+//
+// `local_time_epoch_s` is force-included whenever any other metric
+// is selected: the wide pivot uses it to render the human-readable
+// `local_time` column that the export contract guarantees, and an
+// analyst won't reliably remember to tick the "Час пристрою" box
+// every time. The metric is tiny (one UINT32 per poll), so the cost
+// of always shipping it is negligible compared to the diagnostic
+// value of always seeing the SmartLogger's wall clock alongside its
+// readings.
 export function rawExportMetricKeys(columns: CustomExportColumns): string[] {
   const keys: string[] = []
   if (columns.energy) keys.push(...ENERGY_EXPORT_METRICS)
   if (columns.soc) keys.push('soc_percent')
   if (columns.power) keys.push(...POWER_EXPORT_METRICS)
   if (columns.device) keys.push(...DEVICE_EXPORT_METRICS)
+  if (keys.length > 0 && !keys.includes('local_time_epoch_s')) {
+    keys.push('local_time_epoch_s')
+  }
   return keys
 }

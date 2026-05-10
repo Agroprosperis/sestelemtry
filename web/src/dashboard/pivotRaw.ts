@@ -91,15 +91,73 @@ function parseCsvLine(line: string): string[] {
   return out
 }
 
-function deviceHostFromLabels(labelsJson: string): string {
+// labelStringFromLabels pulls a single string-valued field out of the
+// labels JSON column. The collector emits labels as a flat
+// `Record<string,string>`, but we still narrow defensively because the
+// CSV path doesn't validate the JSON schema and an unexpected nested
+// object should produce an empty cell rather than `[object Object]`.
+function labelStringFromLabels(labelsJson: string, key: string): string {
   if (!labelsJson) return ''
   try {
     const parsed = JSON.parse(labelsJson) as Record<string, unknown>
-    const v = parsed?.device_host
+    const v = parsed?.[key]
     return typeof v === 'string' ? v : ''
   } catch {
     return ''
   }
+}
+
+// LOCAL_TIME_METRIC is the metric_key for the SmartLogger 40009
+// register (epoch seconds, gain=1). We single it out in the pivot so
+// the wide CSV can show analysts a human-readable timestamp next to
+// every row instead of a 10-digit Unix counter — the wall-clock
+// reading from the device itself is the whole point of polling that
+// register, after all.
+const LOCAL_TIME_METRIC = 'local_time_epoch_s'
+
+// DEFAULT_DEVICE_TYPE is the vendor classification we stamp onto wide
+// CSV rows when the labels JSON doesn't carry an explicit
+// `device_type` field. The collector currently ships only the
+// `registers/huawei_smartlogger.yaml` catalog, so any sample reaching
+// the export originated on a SmartLogger — saying so out loud in the
+// CSV spares analysts from cross-referencing the IP against the YAML.
+// If a future deployment adds a different vendor catalog and starts
+// emitting `device_type` from the collector, that label takes over
+// automatically (we only fall back to this default when the label is
+// genuinely absent).
+const DEFAULT_DEVICE_TYPE = 'smartlogger'
+
+// formatEpochSecondsLocal turns a string-encoded UNIX timestamp into
+// an ISO-8601 calendar string formatted in the SmartLogger's reported
+// timezone. We deliberately skip `toISOString()` because that always
+// renders UTC and would defeat the purpose of polling a "local time"
+// register: the operator wants to see the wall clock the device
+// thinks it has, not the same instant re-projected back to UTC.
+//
+// Returns '' when the value is absent, malformed, or fails Date
+// construction so a single bogus sample doesn't poison the whole
+// column. We pad each component manually rather than calling
+// Date.toLocaleString — the latter is locale-dependent (en-US format
+// vs ru-RU vs uk-UA all render differently) and would make the CSV
+// non-deterministic across operator workstations.
+export function formatEpochSecondsLocal(value: string): string {
+  const trimmed = value.trim()
+  if (!trimmed) return ''
+  const seconds = Number(trimmed)
+  if (!Number.isFinite(seconds)) return ''
+  // The SmartLogger stores wall-clock seconds as if the epoch (1970-01-01
+  // 00:00:00) sat in its own local timezone. We treat the value as if
+  // it were UTC and pull components via the UTC accessors so the output
+  // mirrors the device's local clock byte-for-byte regardless of the
+  // analyst's browser timezone — the export must read the same on a
+  // laptop in Kyiv as it does on a server in Frankfurt.
+  const d = new Date(seconds * 1000)
+  if (Number.isNaN(d.getTime())) return ''
+  const pad = (n: number) => (n < 10 ? `0${n}` : String(n))
+  return (
+    `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ` +
+    `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`
+  )
 }
 
 export function pivotRawCsvToWide(input: PivotInput): PivotResult {
@@ -116,7 +174,12 @@ export function pivotRawCsvToWide(input: PivotInput): PivotResult {
   let i = 0
   if (lines[i] && lines[i].startsWith('time,')) i++
 
-  type WideRow = { time: string; deviceHost: string; values: Record<string, string> }
+  type WideRow = {
+    time: string
+    deviceHost: string
+    deviceType: string
+    values: Record<string, string>
+  }
   const wideRows: WideRow[] = []
   let current: WideRow | null = null
   let truncationLine = ''
@@ -142,13 +205,23 @@ export function pivotRawCsvToWide(input: PivotInput): PivotResult {
     const time = cells[0] ?? ''
     const metricKey = cells[1] ?? ''
     const value = cells[5] ?? ''
-    const deviceHost = deviceHostFromLabels(cells[6] ?? '')
+    const labelsCell = cells[6] ?? ''
+    const deviceHost = labelStringFromLabels(labelsCell, 'device_host')
+    // device_type currently isn't stamped by the collector — the
+    // labels JSON only carries site_id / device_id / device_host. We
+    // synthesize the column client-side because the only catalog the
+    // project ships with is the Huawei SmartLogger map; falling back
+    // to the literal "smartlogger" gives the analyst a meaningful
+    // value without requiring a schema change to telemetry_samples.
+    const deviceType =
+      labelStringFromLabels(labelsCell, 'device_type') || DEFAULT_DEVICE_TYPE
     if (
       !current ||
       current.time !== time ||
-      current.deviceHost !== deviceHost
+      current.deviceHost !== deviceHost ||
+      current.deviceType !== deviceType
     ) {
-      current = { time, deviceHost, values: {} }
+      current = { time, deviceHost, deviceType, values: {} }
       wideRows.push(current)
     }
     current.values[metricKey] = value
@@ -156,11 +229,29 @@ export function pivotRawCsvToWide(input: PivotInput): PivotResult {
   }
 
   const annotatedHeaders = metricKeys.map((k) => annotateMetricHeader(k, registerAddresses))
-  const headers: string[] = ['time', 'device_host', ...annotatedHeaders]
+  // local_time is a synthetic column derived from local_time_epoch_s
+  // when that metric is part of the export. We always emit it once
+  // the SmartLogger clock register was selected so the analyst sees
+  // a calendar timestamp instead of a 10-digit epoch counter — the
+  // raw `local_time_epoch_s` column is preserved for downstream
+  // tooling that wants the underlying integer.
+  const includeLocalTime = metricKeys.includes(LOCAL_TIME_METRIC)
+  const headers: string[] = [
+    'time',
+    'device_type',
+    'device_host',
+    ...(includeLocalTime ? ['local_time'] : []),
+    ...annotatedHeaders,
+  ]
   const wideRecords = wideRows.map((row) => {
+    const localTimeRaw = includeLocalTime ? row.values[LOCAL_TIME_METRIC] ?? '' : ''
     const out: Record<string, string> = {
       time: row.time,
+      device_type: row.deviceType,
       device_host: row.deviceHost,
+    }
+    if (includeLocalTime) {
+      out.local_time = formatEpochSecondsLocal(localTimeRaw)
     }
     metricKeys.forEach((key, idx) => {
       const header = annotatedHeaders[idx]

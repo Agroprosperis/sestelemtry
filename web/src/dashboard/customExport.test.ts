@@ -287,6 +287,35 @@ describe('rawExportMetricKeys', () => {
       }),
     ).toEqual([])
   })
+
+  it('auto-includes local_time_epoch_s alongside any selected telemetry metric', () => {
+    // The synthetic local_time column in the wide CSV is derived
+    // from this register; without it the column would always be
+    // empty regardless of how the pivot reshapes the rows.
+    const keys = rawExportMetricKeys({
+      energy: false,
+      price: false,
+      soc: true,
+      power: false,
+      device: false,
+      forecast: false,
+    })
+    expect(keys).toContain('soc_percent')
+    expect(keys).toContain('local_time_epoch_s')
+  })
+
+  it('does not duplicate local_time_epoch_s when the device group is also selected', () => {
+    const keys = rawExportMetricKeys({
+      energy: false,
+      price: false,
+      soc: false,
+      power: false,
+      device: true,
+      forecast: false,
+    })
+    const occurrences = keys.filter((k) => k === 'local_time_epoch_s').length
+    expect(occurrences).toBe(1)
+  })
 })
 
 describe('raw export limits', () => {
