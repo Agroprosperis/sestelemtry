@@ -1,3 +1,10 @@
+import {
+  ArrowDownLeft,
+  ArrowUpRight,
+  BatteryFull,
+  Buildings,
+  Sun,
+} from '@phosphor-icons/react'
 import type { RangePreset } from '../range'
 import type { EnergySummary } from '../transforms/summary'
 import { formatEnergyCompactKWhUk } from '../format'
@@ -14,6 +21,7 @@ const TITLES: Record<RangePreset, string> = {
 }
 
 const formatKWhUk = formatEnergyCompactKWhUk
+const ICON_SIZE = 20
 
 export function DailySummaryNarrative({ summary, preset }: Props) {
   const exportIsTiny = summary.gridExport > 0 && summary.gridExport < 1
@@ -28,7 +36,7 @@ export function DailySummaryNarrative({ summary, preset }: Props) {
       <ul className="daily-narrative-list">
         <li>
           <span className="daily-narrative-icon" aria-hidden="true">
-            ☀
+            <Sun size={ICON_SIZE} weight="duotone" color="#f59e0b" />
           </span>
           <span>
             СЕС згенерувала: <strong>{formatKWhUk(summary.pvProduced)}</strong>
@@ -36,7 +44,7 @@ export function DailySummaryNarrative({ summary, preset }: Props) {
         </li>
         <li>
           <span className="daily-narrative-icon" aria-hidden="true">
-            ⚡
+            <Buildings size={ICON_SIZE} weight="duotone" color="#7c3aed" />
           </span>
           <span>
             Споживання приладами:{' '}
@@ -45,7 +53,7 @@ export function DailySummaryNarrative({ summary, preset }: Props) {
         </li>
         <li>
           <span className="daily-narrative-icon" aria-hidden="true">
-            🔌
+            <ArrowDownLeft size={ICON_SIZE} weight="bold" color="#3b82f6" />
           </span>
           <span>
             Взяли з мережі: <strong>{formatKWhUk(summary.fromGrid)}</strong>
@@ -53,7 +61,7 @@ export function DailySummaryNarrative({ summary, preset }: Props) {
         </li>
         <li>
           <span className="daily-narrative-icon" aria-hidden="true">
-            🌐
+            <ArrowUpRight size={ICON_SIZE} weight="bold" color="#22c55e" />
           </span>
           <span>
             Віддали в мережу:{' '}
@@ -65,7 +73,7 @@ export function DailySummaryNarrative({ summary, preset }: Props) {
         </li>
         <li>
           <span className="daily-narrative-icon" aria-hidden="true">
-            🔋
+            <BatteryFull size={ICON_SIZE} weight="duotone" color="#22c55e" />
           </span>
           <span>
             Батарея: заряд{' '}

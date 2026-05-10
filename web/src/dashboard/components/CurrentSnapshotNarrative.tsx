@@ -1,9 +1,16 @@
+import {
+  BatteryFull,
+  Buildings,
+  Gauge,
+  Lightning,
+  Sun,
+} from '@phosphor-icons/react'
 import type { CurrentResponse } from '../../types'
 import { formatChartNumber } from '../format'
 
 type Row = {
   key: string
-  icon: string
+  icon: React.ReactNode
   label: string
   unit: string
 }
@@ -25,12 +32,39 @@ const PV_KEY = 'active_pv_power_kw'
 const GRID_KEY = 'grid_connected_active_power_kw'
 const ESS_KEY = 'active_ess_power_kw'
 
+const ICON_SIZE = 20
+
 const ROWS: Row[] = [
-  { key: PV_KEY, icon: '☀', label: 'СЕС', unit: 'кВт' },
-  { key: ESS_KEY, icon: '🔋', label: 'УЗЕ', unit: 'кВт' },
-  { key: LOAD_KEY, icon: '⚡', label: 'Навантаження', unit: 'кВт' },
-  { key: GRID_KEY, icon: '🔌', label: 'Точка приєднання', unit: 'кВт' },
-  { key: 'soc_percent', icon: '📊', label: 'SOC', unit: '%' },
+  {
+    key: PV_KEY,
+    icon: <Sun size={ICON_SIZE} weight="duotone" color="#f59e0b" />,
+    label: 'СЕС',
+    unit: 'кВт',
+  },
+  {
+    key: ESS_KEY,
+    icon: <BatteryFull size={ICON_SIZE} weight="duotone" color="#22c55e" />,
+    label: 'УЗЕ',
+    unit: 'кВт',
+  },
+  {
+    key: LOAD_KEY,
+    icon: <Buildings size={ICON_SIZE} weight="duotone" color="#7c3aed" />,
+    label: 'Навантаження',
+    unit: 'кВт',
+  },
+  {
+    key: GRID_KEY,
+    icon: <Lightning size={ICON_SIZE} weight="duotone" color="#f59e0b" />,
+    label: 'Точка приєднання',
+    unit: 'кВт',
+  },
+  {
+    key: 'soc_percent',
+    icon: <Gauge size={ICON_SIZE} weight="duotone" color="#6366f1" />,
+    label: 'SOC',
+    unit: '%',
+  },
 ]
 
 type Props = {

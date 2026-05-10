@@ -3,7 +3,6 @@ import './dashboard.css'
 import { DashboardHeader } from './components/DashboardHeader'
 import { EnergyChart } from './components/EnergyChart'
 import { EnergyFlowLive } from './components/EnergyFlowLive'
-import { EnergyFlowPeriodSummary } from './components/EnergyFlowPeriodSummary'
 import { MetricsPanel } from './components/MetricsPanel'
 import { WeatherCard } from './components/WeatherCard'
 import { useDashboardData } from './hooks/useDashboardData'
@@ -78,6 +77,7 @@ export function Dashboard() {
           metricsAt={metricsAt}
           onMetricsAtChange={setMetricsAt}
           summary={energySummary}
+          flows={energyFlows}
           preset={preset}
         />
 
@@ -99,7 +99,6 @@ export function Dashboard() {
             pvForecastSeries={pvForecastSeries}
           />
           <EnergyFlowLive allocation={liveAllocation} />
-          <EnergyFlowPeriodSummary flows={energyFlows} />
           <Suspense
             fallback={
               <div className="chart-card">

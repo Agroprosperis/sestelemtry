@@ -20,16 +20,28 @@ describe('EnergyFlowPeriodSummary', () => {
     })
     render(<EnergyFlowPeriodSummary flows={flows} />)
 
-    expect(screen.getByText('УЗЕ зарядилось від сонця')).toBeInTheDocument()
-    expect(screen.getByText('УЗЕ зарядилось від мережі')).toBeInTheDocument()
-    expect(screen.getByText('УЗЕ віддало на споживання')).toBeInTheDocument()
-    expect(screen.getByText('УЗЕ віддало в мережу')).toBeInTheDocument()
+    expect(screen.getByText(/УЗЕ зарядилось від сонця/)).toBeInTheDocument()
+    expect(screen.getByText(/УЗЕ зарядилось від мережі/)).toBeInTheDocument()
+    expect(screen.getByText(/УЗЕ віддало на споживання/)).toBeInTheDocument()
+    expect(screen.getByText(/УЗЕ віддало в мережу/)).toBeInTheDocument()
 
     // Compact Ukrainian formatter: 20 кВт·год.
     expect(screen.getByText(/20\s*кВт·год/)).toBeInTheDocument()
     expect(screen.getByText(/5\s*кВт·год/)).toBeInTheDocument()
     expect(screen.getByText(/40\s*кВт·год/)).toBeInTheDocument()
     expect(screen.getByText(/10\s*кВт·год/)).toBeInTheDocument()
+  })
+
+  it('renders inside the metrics-group container so it stacks with other left-panel cards', () => {
+    const flows = flowsFromTotals({
+      total_energy_charged_kwh: 5,
+      total_energy_discharged_kwh: 5,
+      pv_to_ess_kwh: 5,
+      ess_to_load_kwh: 5,
+    })
+    const { container } = render(<EnergyFlowPeriodSummary flows={flows} />)
+    expect(container.querySelector('section.metrics-group')).not.toBeNull()
+    expect(container.querySelector('ul.daily-narrative-list')).not.toBeNull()
   })
 
   it('shows the missing-aggregator hint when no synthetic samples are present', () => {

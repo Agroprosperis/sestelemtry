@@ -1,9 +1,11 @@
 import type { CurrentResponse } from '../../types'
 import type { RangePreset } from '../range'
+import type { EnergyFlows } from '../transforms/flows'
 import type { EnergySummary } from '../transforms/summary'
 import { AccumulatedSnapshotNarrative } from './AccumulatedSnapshotNarrative'
 import { CurrentSnapshotNarrative } from './CurrentSnapshotNarrative'
 import { DailySummaryNarrative } from './DailySummaryNarrative'
+import { EnergyFlowPeriodSummary } from './EnergyFlowPeriodSummary'
 import { MetricsAtPicker } from './MetricsAtPicker'
 import { TodayCountersNarrative } from './TodayCountersNarrative'
 
@@ -13,6 +15,7 @@ type Props = {
   metricsAt: Date | null
   onMetricsAtChange: (next: Date | null) => void
   summary: EnergySummary
+  flows: EnergyFlows
   preset: RangePreset
 }
 
@@ -33,6 +36,7 @@ export function MetricsPanel({
   metricsAt,
   onMetricsAtChange,
   summary,
+  flows,
   preset,
 }: Props) {
   return (
@@ -48,6 +52,7 @@ export function MetricsPanel({
       <CurrentSnapshotNarrative current={current} loading={loading} />
       <TodayCountersNarrative current={current} loading={loading} />
       <DailySummaryNarrative summary={summary} preset={preset} />
+      <EnergyFlowPeriodSummary flows={flows} />
       <AccumulatedSnapshotNarrative current={current} loading={loading} />
     </div>
   )

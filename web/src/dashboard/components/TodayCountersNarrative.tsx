@@ -1,11 +1,22 @@
+import {
+  ArrowDownLeft,
+  ArrowUpRight,
+  BatteryCharging,
+  BatteryFull,
+  Buildings,
+  Plug,
+  Sun,
+} from '@phosphor-icons/react'
 import type { CurrentResponse } from '../../types'
 import { formatEnergyCompactKWhUk } from '../format'
 
 type Row = {
   key: string
-  icon: string
+  icon: React.ReactNode
   label: string
 }
+
+const ICON_SIZE = 20
 
 // Per-day counters reported directly by the inverter (registers
 // 40438/40444/40468/40470/40509/40511/40513). They reset to zero at
@@ -13,13 +24,41 @@ type Row = {
 // recomputing deltas client-side. Listed in source/sink order so the
 // column reads top-to-bottom: produced -> consumed -> grid -> battery.
 const ROWS: Row[] = [
-  { key: 'pv_energy_yield_day_kwh', icon: '☀', label: 'Виробіток СЕС за день' },
-  { key: 'power_consumption_day_kwh', icon: '⚡', label: 'Споживання елеватора за день' },
-  { key: 'electricity_purchased_day_kwh', icon: '🔌', label: 'Імпорт з мережі за день' },
-  { key: 'electricity_sold_day_kwh', icon: '🌐', label: 'Експорт в мережу за день' },
-  { key: 'power_supply_from_grid_day_kwh', icon: '⚙', label: 'Постачання з мережі за день' },
-  { key: 'energy_charged_day_kwh', icon: '🔋', label: 'Заряд УЗЕ за день' },
-  { key: 'energy_discharged_day_kwh', icon: '🪫', label: 'Розряд УЗЕ за день' },
+  {
+    key: 'pv_energy_yield_day_kwh',
+    icon: <Sun size={ICON_SIZE} weight="duotone" color="#f59e0b" />,
+    label: 'Виробіток СЕС за день',
+  },
+  {
+    key: 'power_consumption_day_kwh',
+    icon: <Buildings size={ICON_SIZE} weight="duotone" color="#7c3aed" />,
+    label: 'Споживання елеватора за день',
+  },
+  {
+    key: 'electricity_purchased_day_kwh',
+    icon: <ArrowDownLeft size={ICON_SIZE} weight="bold" color="#3b82f6" />,
+    label: 'Імпорт з мережі за день',
+  },
+  {
+    key: 'electricity_sold_day_kwh',
+    icon: <ArrowUpRight size={ICON_SIZE} weight="bold" color="#22c55e" />,
+    label: 'Експорт в мережу за день',
+  },
+  {
+    key: 'power_supply_from_grid_day_kwh',
+    icon: <Plug size={ICON_SIZE} weight="duotone" color="#475569" />,
+    label: 'Постачання з мережі за день',
+  },
+  {
+    key: 'energy_charged_day_kwh',
+    icon: <BatteryCharging size={ICON_SIZE} weight="duotone" color="#3b82f6" />,
+    label: 'Заряд УЗЕ за день',
+  },
+  {
+    key: 'energy_discharged_day_kwh',
+    icon: <BatteryFull size={ICON_SIZE} weight="duotone" color="#22c55e" />,
+    label: 'Розряд УЗЕ за день',
+  },
 ]
 
 type Props = {

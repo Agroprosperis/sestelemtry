@@ -1,3 +1,11 @@
+import {
+  ArrowDownLeft,
+  ArrowUpRight,
+  BatteryFull,
+  Buildings,
+  Plug,
+  Sun,
+} from '@phosphor-icons/react'
 import type { CurrentResponse } from '../../types'
 import { formatEnergyCompactKWhUk } from '../format'
 
@@ -5,6 +13,8 @@ type Props = {
   current: CurrentResponse | null
   loading: boolean
 }
+
+const ICON_SIZE = 20
 
 function reading(current: CurrentResponse | null, key: string): number | null {
   const v = current?.metrics?.[key]?.value
@@ -37,7 +47,7 @@ export function AccumulatedSnapshotNarrative({ current, loading }: Props) {
       <ul className="daily-narrative-list">
         <li>
           <span className="daily-narrative-icon" aria-hidden="true">
-            ☀
+            <Sun size={ICON_SIZE} weight="duotone" color="#f59e0b" />
           </span>
           <span>
             Виробіток СЕС: <strong>{formatTotal(pv, loading)}</strong>
@@ -45,7 +55,7 @@ export function AccumulatedSnapshotNarrative({ current, loading }: Props) {
         </li>
         <li>
           <span className="daily-narrative-icon" aria-hidden="true">
-            ⚡
+            <Buildings size={ICON_SIZE} weight="duotone" color="#7c3aed" />
           </span>
           <span>
             Споживання приладами:{' '}
@@ -54,7 +64,7 @@ export function AccumulatedSnapshotNarrative({ current, loading }: Props) {
         </li>
         <li>
           <span className="daily-narrative-icon" aria-hidden="true">
-            🔌
+            <ArrowDownLeft size={ICON_SIZE} weight="bold" color="#3b82f6" />
           </span>
           <span>
             Куплено з мережі:{' '}
@@ -63,7 +73,7 @@ export function AccumulatedSnapshotNarrative({ current, loading }: Props) {
         </li>
         <li>
           <span className="daily-narrative-icon" aria-hidden="true">
-            🌐
+            <ArrowUpRight size={ICON_SIZE} weight="bold" color="#22c55e" />
           </span>
           <span>
             Відпущено в мережу: <strong>{formatTotal(sold, loading)}</strong>
@@ -71,7 +81,7 @@ export function AccumulatedSnapshotNarrative({ current, loading }: Props) {
         </li>
         <li>
           <span className="daily-narrative-icon" aria-hidden="true">
-            🔋
+            <BatteryFull size={ICON_SIZE} weight="duotone" color="#22c55e" />
           </span>
           <span>
             Батарея: заряд <strong>{formatTotal(charged, loading)}</strong>,
@@ -80,7 +90,7 @@ export function AccumulatedSnapshotNarrative({ current, loading }: Props) {
         </li>
         <li>
           <span className="daily-narrative-icon" aria-hidden="true">
-            ⚙
+            <Plug size={ICON_SIZE} weight="duotone" color="#475569" />
           </span>
           <span>
             Постачання з мережі (загальне):{' '}

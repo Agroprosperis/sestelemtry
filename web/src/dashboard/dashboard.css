@@ -197,6 +197,9 @@
 }
 
 .daily-narrative-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   text-align: center;
   font-size: 16px;
   line-height: 1;
@@ -1016,51 +1019,6 @@
   margin-top: 2px;
 }
 
-.energy-flow-period-card {
-  display: grid;
-  gap: 10px;
-}
-
-.energy-flow-period-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  gap: 6px;
-}
-
-.energy-flow-period-row {
-  display: grid;
-  grid-template-columns: 24px 1fr auto;
-  align-items: center;
-  gap: 10px;
-  padding: 6px 8px;
-  border-radius: 8px;
-  background: #f8fafc;
-  font-size: 13px;
-  color: #334155;
-}
-
-.energy-flow-period-row strong {
-  color: #0f172a;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-}
-
-.energy-flow-period-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.energy-flow-period-hint {
-  font-size: 12px;
-  color: #b45309;
-  background: #fef3c7;
-  border: 1px solid #fcd34d;
-  border-radius: 6px;
-  padding: 4px 8px;
-}
 
 .dam-card {
   margin-top: 14px;

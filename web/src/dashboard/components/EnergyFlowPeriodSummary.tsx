@@ -2,7 +2,7 @@ import {
   ArrowDownLeft,
   ArrowUpRight,
   Lightning,
-  SunDim,
+  Sun,
 } from '@phosphor-icons/react'
 import { formatEnergyCompactKWhUk } from '../format'
 import type { EnergyFlows } from '../transforms/flows'
@@ -12,72 +12,68 @@ import type { EnergyFlows } from '../transforms/flows'
 // counters that `flowsFromTotals` already computes for the selected
 // period, so the dashboard surfaces a plain-Ukrainian summary of
 // "how the battery was used" without forcing the operator to read
-// a Sankey. When the synthetic counters are missing (collector
-// hasn't emitted any energyflow samples yet) the card falls back
-// to a single hint row instead of four zero values.
+// a Sankey. Rendered in the left metrics panel, sharing the
+// `metrics-group` / `daily-narrative-list` styling with the other
+// narrative cards (DailySummaryNarrative, AccumulatedSnapshotNarrative,
+// etc.) so all left-panel groups read as a single column.
 
 type Props = {
   flows: EnergyFlows
 }
 
-type Row = {
-  id: 'pv_to_ess' | 'grid_to_ess' | 'ess_to_load' | 'ess_to_grid'
-  label: string
-  value: number
-  icon: React.ReactNode
-}
-
-const ICON_SIZE = 18
+const ICON_SIZE = 20
 
 export function EnergyFlowPeriodSummary({ flows }: Props) {
-  const rows: Row[] = [
-    {
-      id: 'pv_to_ess',
-      label: 'УЗЕ зарядилось від сонця',
-      value: flows.pvToEssKwh,
-      icon: <SunDim size={ICON_SIZE} weight="duotone" color="#f59e0b" />,
-    },
-    {
-      id: 'grid_to_ess',
-      label: 'УЗЕ зарядилось від мережі',
-      value: flows.gridToEssKwh,
-      icon: <ArrowDownLeft size={ICON_SIZE} weight="bold" color="#3b82f6" />,
-    },
-    {
-      id: 'ess_to_load',
-      label: 'УЗЕ віддало на споживання',
-      value: flows.essToLoadKwh,
-      icon: <Lightning size={ICON_SIZE} weight="duotone" color="#7c3aed" />,
-    },
-    {
-      id: 'ess_to_grid',
-      label: 'УЗЕ віддало в мережу',
-      value: flows.essToGridKwh,
-      icon: <ArrowUpRight size={ICON_SIZE} weight="bold" color="#22c55e" />,
-    },
-  ]
-
   return (
     <section
-      className="chart-card energy-flow-period-card"
-      aria-label="Перетік енергії за період"
+      className="metrics-group daily-narrative"
+      aria-labelledby="energy-flow-period-title"
     >
-      <h2>Перетік за період</h2>
+      <h2 id="energy-flow-period-title" className="metrics-group-title">
+        Перетік за період
+      </h2>
       {!flows.hasEnergyFlowSamples && (
-        <p className="energy-flow-period-hint" role="note">
+        <p className="daily-narrative-note" role="note">
           Дані з лічильників УЗЕ ще не зібрані за вибраний період.
         </p>
       )}
-      <ul className="energy-flow-period-list">
-        {rows.map((row) => (
-          <li key={row.id} className="energy-flow-period-row">
-            <span className="energy-flow-period-icon" aria-hidden="true">
-              {row.icon}
-            </span>
-            <span>{row.label}</span>
-            <strong>{formatEnergyCompactKWhUk(row.value)}</strong>
-          </li>
-        ))}
+      <ul className="daily-narrative-list">
+        <li>
+          <span className="daily-narrative-icon" aria-hidden="true">
+            <Sun size={ICON_SIZE} weight="duotone" color="#f59e0b" />
+          </span>
+          <span>
+            УЗЕ зарядилось від сонця:{' '}
+            <strong>{formatEnergyCompactKWhUk(flows.pvToEssKwh)}</strong>
+          </span>
+        </li>
+        <li>
+          <span className="daily-narrative-icon" aria-hidden="true">
+            <ArrowDownLeft size={ICON_SIZE} weight="bold" color="#3b82f6" />
+          </span>
+          <span>
+            УЗЕ зарядилось від мережі:{' '}
+            <strong>{formatEnergyCompactKWhUk(flows.gridToEssKwh)}</strong>
+          </span>
+        </li>
+        <li>
+          <span className="daily-narrative-icon" aria-hidden="true">
+            <Lightning size={ICON_SIZE} weight="duotone" color="#7c3aed" />
+          </span>
+          <span>
+            УЗЕ віддало на споживання:{' '}
+            <strong>{formatEnergyCompactKWhUk(flows.essToLoadKwh)}</strong>
+          </span>
+        </li>
+        <li>
+          <span className="daily-narrative-icon" aria-hidden="true">
+            <ArrowUpRight size={ICON_SIZE} weight="bold" color="#22c55e" />
+          </span>
+          <span>
+            УЗЕ віддало в мережу:{' '}
+            <strong>{formatEnergyCompactKWhUk(flows.essToGridKwh)}</strong>
+          </span>
+        </li>
       </ul>
     </section>
   )
