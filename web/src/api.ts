@@ -361,7 +361,7 @@ export async function fetchOpenMeteoWeather(
   )
   url.searchParams.set(
     'hourly',
-    'temperature_2m,cloud_cover,shortwave_radiation,direct_radiation,diffuse_radiation,global_tilted_irradiance_instant',
+    'temperature_2m,cloud_cover,is_day,shortwave_radiation,direct_radiation,diffuse_radiation,global_tilted_irradiance_instant',
   )
   url.searchParams.set('timezone', 'auto')
 

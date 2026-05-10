@@ -114,3 +114,54 @@ export function summarizeWeatherDay(
     condition: classifyCondition(sunshineRatio, cloudAvg),
   }
 }
+
+// HourlyWeatherSlot is one hour of the forecast as the WeatherCard's
+// hourly strip needs it. Hours that have no usable temperature/cloud
+// reading are skipped entirely (returned list may be shorter than 24
+// elements at the edges of the forecast window).
+export type HourlyWeatherSlot = {
+  hour: number
+  tempC: number
+  cloudCoverPct: number
+  isDay: boolean
+  condition: WeatherCondition
+}
+
+// hourlyWeatherForDay extracts per-hour temperature + condition for the
+// requested day. Condition is derived from `cloud_cover` alone (the
+// daily sunshine ratio that powers the day summary doesn't apply at
+// the hour level), with the night bucket flagged via `is_day=0` so
+// the renderer can swap the sun icon for a moon.
+export function hourlyWeatherForDay(
+  forecast: OpenMeteoForecast | null,
+  day: string,
+): HourlyWeatherSlot[] {
+  if (!forecast) return []
+  const time = forecast.hourly?.time ?? []
+  const temp = forecast.hourly?.temperature_2m ?? []
+  const cloud = forecast.hourly?.cloud_cover ?? []
+  const isDay = forecast.hourly?.is_day ?? []
+
+  const out: HourlyWeatherSlot[] = []
+  for (let i = 0; i < time.length; i++) {
+    if (toDateKey(time[i]) !== day) continue
+    const t = temp[i]
+    const c = cloud[i]
+    if (!Number.isFinite(t) || !Number.isFinite(c)) continue
+    // hourly time is `YYYY-MM-DDTHH:00`; pull the hour straight out
+    // of the string instead of constructing a Date (which would land
+    // in browser-local TZ and could shift across midnight when the
+    // location's TZ differs from the user's).
+    const h = Number(time[i].slice(11, 13))
+    if (!Number.isFinite(h)) continue
+    out.push({
+      hour: h,
+      tempC: t,
+      cloudCoverPct: c,
+      isDay: isDay.length > i ? isDay[i] === 1 : true,
+      condition: classifyCondition(Number.NaN, c),
+    })
+  }
+  out.sort((a, b) => a.hour - b.hour)
+  return out
+}

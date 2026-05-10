@@ -104,6 +104,11 @@ export type OpenMeteoForecast = {
     time: string[]
     temperature_2m: number[]
     cloud_cover: number[]
+    // is_day is 1 for hours after sunrise / before sunset, 0
+    // otherwise. Used to swap the sun icon for a moon at night so
+    // the hourly strip matches reality (an "100% sunny" hour at
+    // midnight reads wrong otherwise).
+    is_day?: number[]
   }
   // Daily series — one entry per day. `time[i]` is `YYYY-MM-DD` in local TZ.
   // `sunshine_duration` and `daylight_duration` are seconds; their ratio

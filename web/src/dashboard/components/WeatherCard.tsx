@@ -2,9 +2,11 @@ import type { RangePreset } from '../range'
 import { useOrganizations } from '../hooks/useOrganizations'
 import { useWeather } from '../hooks/useWeather'
 import {
+  hourlyWeatherForDay,
   locationFor,
   summarizeWeatherDay,
   weatherDayFromAnchor,
+  type HourlyWeatherSlot,
 } from '../transforms/weather'
 import type { WeatherCondition, WeatherDaySummary } from '../../types'
 
@@ -16,7 +18,7 @@ type Props = {
 
 const CONDITION_ICON: Record<WeatherCondition, string> = {
   sunny: '☀',
-  partly_cloudy: '🌤',
+  partly_cloudy: '⛅',
   cloudy: '☁',
   overcast: '🌧',
 }
@@ -28,11 +30,26 @@ const CONDITION_LABEL: Record<WeatherCondition, string> = {
   overcast: 'Похмуро',
 }
 
+// hourIcon picks an emoji per hour using cloud cover only (the daily
+// `sunshine_duration` ratio that drives the day summary is, by
+// definition, not per-hour). Night hours swap the sun for a moon so a
+// "100% clear at midnight" slot doesn't render a sun.
+function hourIcon(slot: HourlyWeatherSlot): string {
+  if (!slot.isDay) {
+    return slot.cloudCoverPct < 65 ? '🌙' : '☁'
+  }
+  if (slot.cloudCoverPct < 25) return '☀'
+  if (slot.cloudCoverPct < 65) return '⛅'
+  if (slot.cloudCoverPct < 85) return '☁'
+  return '🌧'
+}
+
 function formatTemp(c: number): string {
-  // Match the dashboard's general "round to whole degrees for display"
-  // convention; raw decimals would imply a precision Open-Meteo's
-  // hourly forecast doesn't actually claim.
   return `${Math.round(c)}°`
+}
+
+function formatHour(h: number): string {
+  return h < 10 ? `0${h}` : String(h)
 }
 
 function formatDate(day: string): string {
@@ -53,12 +70,14 @@ function formatDate(day: string): string {
 function CardShell({
   city,
   day,
+  summary,
   children,
   busy,
 }: {
   city: string
   day: string
-  children: React.ReactNode
+  summary?: WeatherDaySummary
+  children?: React.ReactNode
   busy?: boolean
 }) {
   return (
@@ -68,7 +87,27 @@ function CardShell({
       aria-busy={busy ? true : undefined}
     >
       <div className="weather-card-head">
-        <h2 id="weather-card-title">Погода — {city}</h2>
+        <div className="weather-card-summary">
+          {summary ? (
+            <span className="weather-card-icon" aria-hidden="true">
+              {CONDITION_ICON[summary.condition]}
+            </span>
+          ) : null}
+          <h2 id="weather-card-title">Погода — {city}</h2>
+          {summary ? (
+            <>
+              <span className="weather-card-condition">
+                {CONDITION_LABEL[summary.condition]}
+              </span>
+              <span className="weather-card-temp">
+                {formatTemp(summary.tempMinC)}…{formatTemp(summary.tempMaxC)}C
+              </span>
+              <span className="weather-card-cloud" title="Середня хмарність">
+                ☁ {Math.round(summary.cloudCoverAvgPct)}%
+              </span>
+            </>
+          ) : null}
+        </div>
         <span className="weather-card-date">{formatDate(day)}</span>
       </div>
       {children}
@@ -76,24 +115,36 @@ function CardShell({
   )
 }
 
-function CardBody({ summary }: { summary: WeatherDaySummary }) {
+function HourlyStrip({ hours }: { hours: HourlyWeatherSlot[] }) {
+  if (hours.length === 0) return null
   return (
-    <div className="weather-card-body">
-      <div className="weather-card-icon" aria-hidden="true">
-        {CONDITION_ICON[summary.condition]}
-      </div>
-      <div className="weather-card-stats">
-        <div className="weather-card-condition">
-          {CONDITION_LABEL[summary.condition]}
-        </div>
-        <div className="weather-card-temp">
-          {formatTemp(summary.tempMinC)}…{formatTemp(summary.tempMaxC)}C
-        </div>
-        <div className="weather-card-cloud">
-          Хмарність {Math.round(summary.cloudCoverAvgPct)}%
-        </div>
-      </div>
-    </div>
+    <ol
+      className="weather-hourly"
+      aria-label="Погодинний прогноз"
+      // 24 columns when the data is complete; if the API returns a
+      // partial day (start/end of the forecast window) we still want
+      // each slot to keep the same width as a full-day strip rather
+      // than stretching to fill, so we use the actual count here.
+      style={{ gridTemplateColumns: `repeat(${hours.length}, minmax(28px, 1fr))` }}
+    >
+      {hours.map((slot) => (
+        <li
+          key={slot.hour}
+          className={
+            slot.isDay
+              ? 'weather-hourly-slot'
+              : 'weather-hourly-slot weather-hourly-slot--night'
+          }
+          title={`${formatHour(slot.hour)}:00 · ${formatTemp(slot.tempC)} · хмарність ${Math.round(slot.cloudCoverPct)}%`}
+        >
+          <span className="weather-hourly-time">{formatHour(slot.hour)}</span>
+          <span className="weather-hourly-icon" aria-hidden="true">
+            {hourIcon(slot)}
+          </span>
+          <span className="weather-hourly-temp">{formatTemp(slot.tempC)}</span>
+        </li>
+      ))}
+    </ol>
   )
 }
 
@@ -118,6 +169,7 @@ export function WeatherCard({ organizationID, anchor, preset }: Props) {
 
   const day = weatherDayFromAnchor(anchor)
   const summary = summarizeWeatherDay(data, day)
+  const hours = hourlyWeatherForDay(data, day)
   const city = location.city || organizationID
 
   if (loading) {
@@ -146,8 +198,8 @@ export function WeatherCard({ organizationID, anchor, preset }: Props) {
     )
   }
   return (
-    <CardShell city={city} day={day}>
-      <CardBody summary={summary} />
+    <CardShell city={city} day={day} summary={summary}>
+      <HourlyStrip hours={hours} />
     </CardShell>
   )
 }

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { OpenMeteoForecast, OrganizationInfo } from '../../types'
 import {
   classifyCondition,
+  hourlyWeatherForDay,
   locationFor,
   summarizeWeatherDay,
   weatherDayFromAnchor,
@@ -148,5 +149,76 @@ describe('summarizeWeatherDay', () => {
 
   it('handles null forecast input', () => {
     expect(summarizeWeatherDay(null, '2026-05-10')).toBeNull()
+  })
+})
+
+describe('hourlyWeatherForDay', () => {
+  it('returns one slot per hour with derived condition and is_day', () => {
+    const fc = forecast({
+      hourly: {
+        time: [
+          '2026-05-10T00:00',
+          '2026-05-10T06:00',
+          '2026-05-10T12:00',
+          '2026-05-10T20:00',
+          '2026-05-11T00:00',
+        ],
+        temperature_2m: [5, 8, 18, 14, 4],
+        cloud_cover: [80, 60, 20, 40, 100],
+        is_day: [0, 1, 1, 0, 0],
+      },
+    })
+    const out = hourlyWeatherForDay(fc, '2026-05-10')
+    expect(out.map((s) => s.hour)).toEqual([0, 6, 12, 20])
+    expect(out[0]).toEqual({
+      hour: 0,
+      tempC: 5,
+      cloudCoverPct: 80,
+      isDay: false,
+      condition: 'cloudy',
+    })
+    expect(out[2].condition).toBe('sunny')
+    expect(out[2].isDay).toBe(true)
+    expect(out[3].isDay).toBe(false)
+  })
+
+  it('skips hours with non-finite temperature or cloud values', () => {
+    const fc = forecast({
+      hourly: {
+        time: ['2026-05-10T00:00', '2026-05-10T01:00', '2026-05-10T02:00'],
+        temperature_2m: [Number.NaN, 10, 12],
+        cloud_cover: [50, Number.NaN, 30],
+        is_day: [0, 0, 0],
+      },
+    })
+    expect(hourlyWeatherForDay(fc, '2026-05-10').map((s) => s.hour)).toEqual([2])
+  })
+
+  it('returns empty list when day has no hourly samples', () => {
+    const fc = forecast({
+      hourly: {
+        time: ['2026-05-09T12:00'],
+        temperature_2m: [20],
+        cloud_cover: [10],
+      },
+    })
+    expect(hourlyWeatherForDay(fc, '2026-05-10')).toEqual([])
+  })
+
+  it('defaults isDay=true when is_day field is missing', () => {
+    const fc = forecast({
+      hourly: {
+        time: ['2026-05-10T12:00'],
+        temperature_2m: [20],
+        cloud_cover: [10],
+      },
+    })
+    const out = hourlyWeatherForDay(fc, '2026-05-10')
+    expect(out).toHaveLength(1)
+    expect(out[0].isDay).toBe(true)
+  })
+
+  it('handles null forecast input', () => {
+    expect(hourlyWeatherForDay(null, '2026-05-10')).toEqual([])
   })
 })
