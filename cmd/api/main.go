@@ -13,6 +13,7 @@ import (
 
 	"github.com/nesh/sestelemetry/internal/api"
 	"github.com/nesh/sestelemetry/internal/config"
+	"github.com/nesh/sestelemetry/internal/energyflow"
 	"github.com/nesh/sestelemetry/internal/storage"
 )
 
@@ -73,6 +74,7 @@ func main() {
 			log.Warn("api_config_load", "path", cfgPath, "err", err)
 		} else {
 			svc.SetOrganizations(toOrganizationInfos(cfg.Organizations))
+			svc.SetEnergyFlowOrgs(toEnergyFlowOrgs(cfg.Organizations))
 			log.Info("api_config_loaded", "path", cfgPath, "organizations", len(cfg.Organizations))
 		}
 	}
@@ -106,6 +108,37 @@ func main() {
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		log.Error("shutdown", "err", err)
 	}
+}
+
+// toEnergyFlowOrgs projects the YAML config's Organization entries
+// into the energy-flow recompute shape (ID, ess_discharge_sign, per
+// device host → role mapping). The mapping mirrors the collector's
+// startup classification so a backfill replays the exact role
+// assignment a live poll cycle would have produced. Orgs that don't
+// cover both PV and ESS accumulators are still included — the
+// handler tolerates them and just produces no flow output rather
+// than failing — because they may have switched topology over time
+// and historical samples for the older topology are still valid
+// inputs.
+func toEnergyFlowOrgs(orgs []config.Organization) []api.EnergyFlowOrg {
+	out := make([]api.EnergyFlowOrg, 0, len(orgs))
+	for _, o := range orgs {
+		devices := o.Devices()
+		mapped := make([]api.EnergyFlowDevice, 0, len(devices))
+		for _, d := range devices {
+			role := energyflow.DetectRole(d.MetricKeys)
+			mapped = append(mapped, api.EnergyFlowDevice{
+				Host: strings.TrimSpace(d.Host),
+				Role: string(role),
+			})
+		}
+		out = append(out, api.EnergyFlowOrg{
+			ID:               o.ID,
+			EssDischargeSign: o.EssDischargeSign,
+			Devices:          mapped,
+		})
+	}
+	return out
 }
 
 // toOrganizationInfos projects the YAML config's Organization entries

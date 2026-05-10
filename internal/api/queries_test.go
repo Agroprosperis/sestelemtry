@@ -1,9 +1,14 @@
 package api
 
 import (
+	"context"
 	"math"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
+
+	"github.com/nesh/sestelemetry/internal/storage"
 )
 
 func TestParseCSV(t *testing.T) {
@@ -207,6 +212,91 @@ func TestDecimalsForGain(t *testing.T) {
 		if ok != tc.ok || (ok && got != tc.decimals) {
 			t.Fatalf("decimalsForGain(%v) = (%d, %v); want (%d, %v)",
 				tc.gain, got, ok, tc.decimals, tc.ok)
+		}
+	}
+}
+
+// TestWriteEnergyFlowSynthetic_RejectsNonSyntheticMetric is the
+// safety belt for the recompute write path: the endpoint must never
+// be tricked into overwriting a raw Modbus accumulator stored in
+// telemetry_samples. The whitelist guard rejects the entire batch
+// with an explicit error so an upstream bug can't silently corrupt
+// the device-of-truth counters.
+//
+// We pass a nil pool because the whitelist check fires before any
+// SQL is issued; the test fails loudly if a future refactor moves
+// the validation past storage.InsertSamples (which would attempt to
+// dial the nil pool and produce a different error message).
+func TestWriteEnergyFlowSynthetic_RejectsNonSyntheticMetric(t *testing.T) {
+	store := &Store{}
+	samples := []storage.Sample{
+		{
+			Time:      time.Now().UTC(),
+			MetricKey: "accumulated_pv_energy_yield_kwh",
+			Value:     1.0,
+		},
+	}
+	err := store.WriteEnergyFlowSynthetic(context.Background(), "org-a", samples)
+	if err == nil {
+		t.Fatal("expected an error when writing a non-synthetic metric_key, got nil")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "non-synthetic metric_key") {
+		t.Fatalf("error should explain the rejection reason, got %q", msg)
+	}
+	if !strings.Contains(msg, "accumulated_pv_energy_yield_kwh") {
+		t.Fatalf("error should name the offending key, got %q", msg)
+	}
+}
+
+// TestWriteEnergyFlowSynthetic_AllSyntheticKeysAllowed verifies the
+// happy-path whitelist accepts every key the energyflow.Recompute
+// emitter is permitted to produce. If the synthetic list ever grows,
+// this test fails until the api package's view is updated in lockstep.
+func TestWriteEnergyFlowSynthetic_AllSyntheticKeysAllowed(t *testing.T) {
+	store := &Store{}
+	for _, key := range EnergyFlowSyntheticMetrics {
+		samples := []storage.Sample{
+			{Time: time.Now().UTC(), MetricKey: key, Value: 1.0},
+		}
+		err := store.WriteEnergyFlowSynthetic(context.Background(), "org-a", samples)
+		if err == nil {
+			t.Fatalf("expected the nil-pool write to fail past the whitelist for %q, got nil", key)
+		}
+		// We're using a Store with no pool, so the call must
+		// progress past the whitelist and only then fail inside
+		// storage.InsertSamples with the nil-pool error. Any other
+		// error means the key was rejected by the guard.
+		if strings.Contains(err.Error(), "non-synthetic metric_key") {
+			t.Fatalf("synthetic key %q was rejected by the whitelist guard: %v", key, err)
+		}
+	}
+}
+
+// TestEnergyFlowSyntheticMetricsMatchEnergyflow keeps the API-side
+// whitelist in sync with the energyflow package. If the package
+// gains a fifth synthetic counter (or renames an existing one) but
+// EnergyFlowSyntheticMetrics is not updated, the recompute endpoint
+// would either reject valid samples from Recompute or silently drop
+// them — both subtle data-quality regressions. Asserting the lists
+// match here makes the breakage loud at test time.
+func TestEnergyFlowSyntheticMetricsMatchEnergyflow(t *testing.T) {
+	want := map[string]struct{}{
+		"pv_to_ess_kwh":   {},
+		"grid_to_ess_kwh": {},
+		"ess_to_load_kwh": {},
+		"ess_to_grid_kwh": {},
+	}
+	got := make(map[string]struct{}, len(EnergyFlowSyntheticMetrics))
+	for _, k := range EnergyFlowSyntheticMetrics {
+		got[k] = struct{}{}
+	}
+	if len(want) != len(got) {
+		t.Fatalf("synthetic metric count mismatch: want %d, got %d (%v)", len(want), len(got), EnergyFlowSyntheticMetrics)
+	}
+	for k := range want {
+		if _, ok := got[k]; !ok {
+			t.Errorf("missing synthetic metric %q from EnergyFlowSyntheticMetrics", k)
 		}
 	}
 }

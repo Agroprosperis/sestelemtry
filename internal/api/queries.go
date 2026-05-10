@@ -788,6 +788,189 @@ func (s *Store) Ready(ctx context.Context) error {
 	return s.pool.Ping(ctx)
 }
 
+// EnergyFlowSources streams the source-counter rows the recompute
+// pipeline needs for [from, to], inclusive at both ends. The window is
+// padded by `lookback` so the very first bucket can find a "previous"
+// snapshot to subtract against; without that the first interval of a
+// freshly recomputed period would be silently dropped.
+//
+// Rows are ordered by (time ASC, metric_key ASC) so the bucketing
+// inside energyflow.Recompute can rely on monotonic input. The
+// device_host label is unpacked from the labels JSONB so the handler
+// can resolve each row to a configured Role without re-querying.
+//
+// The metric_keys catalogue is fixed (EnergyFlowRecomputeSourceMetrics)
+// — accepting an arbitrary list here would let a caller drive the
+// allocator with the wrong inputs and produce wildly off totals.
+func (s *Store) EnergyFlowSources(
+	ctx context.Context,
+	organizationID string,
+	from, to time.Time,
+	lookback time.Duration,
+) ([]EnergyFlowRawRow, error) {
+	if organizationID == "" {
+		return nil, fmt.Errorf("organization_id is required")
+	}
+	if from.IsZero() || to.IsZero() {
+		return nil, fmt.Errorf("from and to are required")
+	}
+	if !to.After(from) {
+		return nil, fmt.Errorf("to must be after from")
+	}
+	if lookback < 0 {
+		lookback = 0
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT
+			time,
+			metric_key,
+			value,
+			COALESCE(labels->>'device_host', '') AS device_host
+		FROM telemetry_samples
+		WHERE organization_id = $1
+			AND metric_key = ANY($2)
+			AND time >= $3
+			AND time <= $4
+		ORDER BY time ASC, metric_key ASC
+	`, organizationID, EnergyFlowRecomputeSourceMetrics, from.UTC().Add(-lookback), to.UTC())
+	if err != nil {
+		return nil, fmt.Errorf("energy_flow sources: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]EnergyFlowRawRow, 0, 1024)
+	for rows.Next() {
+		var r EnergyFlowRawRow
+		if err := rows.Scan(&r.Time, &r.MetricKey, &r.Value, &r.DeviceHost); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// EnergyFlowSeed returns the last cumulative value for each synthetic
+// energy-flow metric strictly before `before`. Used by the recompute
+// handler so the emitted cumulative timeline picks up exactly where
+// the live aggregator left off, keeping monotonicity across the join
+// between recomputed and live samples. Missing metrics are absent
+// from the returned map (rather than zero-valued) so the caller can
+// distinguish "no prior history" from "prior history was zero".
+func (s *Store) EnergyFlowSeed(
+	ctx context.Context,
+	organizationID string,
+	before time.Time,
+) (map[string]float64, error) {
+	if organizationID == "" {
+		return nil, fmt.Errorf("organization_id is required")
+	}
+	if before.IsZero() {
+		return map[string]float64{}, nil
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT DISTINCT ON (metric_key)
+			metric_key, value
+		FROM telemetry_samples
+		WHERE organization_id = $1
+			AND metric_key = ANY($2)
+			AND time < $3
+		ORDER BY metric_key, time DESC
+	`, organizationID, EnergyFlowSyntheticMetrics, before.UTC())
+	if err != nil {
+		return nil, fmt.Errorf("energy_flow seed: %w", err)
+	}
+	defer rows.Close()
+
+	out := make(map[string]float64, len(EnergyFlowSyntheticMetrics))
+	for rows.Next() {
+		var key string
+		var v float64
+		if err := rows.Scan(&key, &v); err != nil {
+			return nil, err
+		}
+		out[key] = v
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// DeleteEnergyFlowSynthetic removes any previously-emitted synthetic
+// cumulative samples in [from, to] for the four flow metrics so
+// re-running the recompute endpoint produces a clean replacement
+// rather than stacking duplicate rows on top of each other.
+//
+// The metric_key list is hardcoded here (rather than accepted as an
+// argument) precisely so no future caller can repurpose the helper
+// to drop raw Modbus accumulators. Passing the list as a literal
+// from one well-audited place keeps the blast radius of this method
+// to "the four synthetic flow counters and nothing else".
+func (s *Store) DeleteEnergyFlowSynthetic(
+	ctx context.Context,
+	organizationID string,
+	from, to time.Time,
+) (int64, error) {
+	return storage.DeleteSamplesInRange(
+		ctx,
+		s.pool,
+		organizationID,
+		EnergyFlowSyntheticMetrics,
+		from, to,
+	)
+}
+
+// WriteEnergyFlowSynthetic bulk-inserts the cumulative samples
+// produced by energyflow.Recompute. The labels mirror the live
+// aggregator (`synthetic=energy_flow`) so downstream filters that
+// hide synthetic rows in operator dashboards keep working without a
+// schema change.
+//
+// As a safety belt the method whitelists every sample's metric_key
+// against EnergyFlowSyntheticMetrics: the recompute pipeline is the
+// only write path the API server exposes into telemetry_samples, and
+// it must never touch the raw Modbus accumulators it reads as input.
+// A future bug that leaks an `accumulated_pv_energy_yield_kwh` row
+// through this path would corrupt the device-of-truth counter the
+// rest of the platform relies on, so we reject the entire batch with
+// an explicit error rather than silently filtering — the caller's
+// expectations need to be re-checked too.
+func (s *Store) WriteEnergyFlowSynthetic(
+	ctx context.Context,
+	organizationID string,
+	samples []storage.Sample,
+) error {
+	if len(samples) == 0 {
+		return nil
+	}
+	allowed := make(map[string]struct{}, len(EnergyFlowSyntheticMetrics))
+	for _, k := range EnergyFlowSyntheticMetrics {
+		allowed[k] = struct{}{}
+	}
+	out := make([]storage.Sample, len(samples))
+	for i, in := range samples {
+		if _, ok := allowed[in.MetricKey]; !ok {
+			return fmt.Errorf(
+				"energy_flow write: refused to write non-synthetic metric_key %q (only %v are permitted)",
+				in.MetricKey, EnergyFlowSyntheticMetrics,
+			)
+		}
+		row := in
+		row.OrganizationID = organizationID
+		if row.Labels == nil {
+			row.Labels = map[string]string{}
+		}
+		if _, ok := row.Labels["synthetic"]; !ok {
+			row.Labels["synthetic"] = "energy_flow"
+		}
+		out[i] = row
+	}
+	return storage.InsertSamples(ctx, s.pool, out)
+}
+
 func ParseCSV(input string) []string {
 	if strings.TrimSpace(input) == "" {
 		return nil

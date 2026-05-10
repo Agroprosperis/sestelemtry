@@ -46,6 +46,8 @@ vi.mock('./hooks/useDashboardData', () => ({
     liveAllocation: { ...NO_DATA_ALLOCATION, socPercent: 88 },
     loading: false,
     cardsLoading: false,
+    flowsRefreshing: false,
+    refreshFlows: vi.fn(),
     error: null,
   })),
 }))

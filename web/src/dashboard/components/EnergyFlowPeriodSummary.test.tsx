@@ -1,13 +1,16 @@
-import { cleanup, render, screen } from '@testing-library/react'
-import { afterEach, describe, expect, it } from 'vitest'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { EnergyFlowPeriodSummary } from './EnergyFlowPeriodSummary'
 import { EMPTY_FLOWS, flowsFromTotals } from '../transforms/flows'
 
 afterEach(cleanup)
 
-describe('EnergyFlowPeriodSummary', () => {
-  it('renders the four narrative rows with kWh values from flowsFromTotals', () => {
-    const flows = flowsFromTotals({
+function renderCard(
+  override: Partial<React.ComponentProps<typeof EnergyFlowPeriodSummary>> = {},
+) {
+  const flows =
+    override.flows ??
+    flowsFromTotals({
       accumulated_pv_energy_yield_kwh: 100,
       accumulated_electricity_purchased_kwh: 30,
       accumulated_electricity_sold_kwh: 20,
@@ -18,7 +21,19 @@ describe('EnergyFlowPeriodSummary', () => {
       ess_to_load_kwh: 40,
       ess_to_grid_kwh: 10,
     })
-    render(<EnergyFlowPeriodSummary flows={flows} />)
+  const props = {
+    flows,
+    preset: 'day' as const,
+    refreshing: false,
+    onRefresh: vi.fn(),
+    ...override,
+  }
+  return { ...render(<EnergyFlowPeriodSummary {...props} />), props }
+}
+
+describe('EnergyFlowPeriodSummary', () => {
+  it('renders the four narrative rows with kWh values from flowsFromTotals', () => {
+    renderCard()
 
     expect(screen.getByText(/УЗЕ зарядилось від сонця/)).toBeInTheDocument()
     expect(screen.getByText(/УЗЕ зарядилось від мережі/)).toBeInTheDocument()
@@ -33,34 +48,58 @@ describe('EnergyFlowPeriodSummary', () => {
   })
 
   it('renders inside the metrics-group container so it stacks with other left-panel cards', () => {
-    const flows = flowsFromTotals({
-      total_energy_charged_kwh: 5,
-      total_energy_discharged_kwh: 5,
-      pv_to_ess_kwh: 5,
-      ess_to_load_kwh: 5,
+    const { container } = renderCard({
+      flows: flowsFromTotals({
+        total_energy_charged_kwh: 5,
+        total_energy_discharged_kwh: 5,
+        pv_to_ess_kwh: 5,
+        ess_to_load_kwh: 5,
+      }),
     })
-    const { container } = render(<EnergyFlowPeriodSummary flows={flows} />)
     expect(container.querySelector('section.metrics-group')).not.toBeNull()
     expect(container.querySelector('ul.daily-narrative-list')).not.toBeNull()
   })
 
   it('shows the missing-aggregator hint when no synthetic samples are present', () => {
-    render(<EnergyFlowPeriodSummary flows={EMPTY_FLOWS} />)
+    renderCard({ flows: EMPTY_FLOWS })
     expect(
       screen.getByText(/Дані з лічильників УЗЕ ще не зібрані/),
     ).toBeInTheDocument()
   })
 
   it('does not show the hint when the synthetic counters are present', () => {
-    const flows = flowsFromTotals({
-      total_energy_charged_kwh: 5,
-      total_energy_discharged_kwh: 5,
-      pv_to_ess_kwh: 5,
-      ess_to_load_kwh: 5,
+    renderCard({
+      flows: flowsFromTotals({
+        total_energy_charged_kwh: 5,
+        total_energy_discharged_kwh: 5,
+        pv_to_ess_kwh: 5,
+        ess_to_load_kwh: 5,
+      }),
     })
-    render(<EnergyFlowPeriodSummary flows={flows} />)
     expect(
       screen.queryByText(/Дані з лічильників УЗЕ ще не зібрані/),
     ).not.toBeInTheDocument()
+  })
+
+  it('renders a period-aware title from the preset', () => {
+    renderCard({ preset: 'month' })
+    expect(screen.getByText('Перетік за місяць')).toBeInTheDocument()
+  })
+
+  it('calls onRefresh when the refresh button is clicked', () => {
+    const onRefresh = vi.fn()
+    renderCard({ onRefresh })
+    fireEvent.click(screen.getByRole('button', { name: /Оновити перетік/i }))
+    expect(onRefresh).toHaveBeenCalledTimes(1)
+  })
+
+  it('disables the refresh button and marks it spinning while refreshing', () => {
+    const onRefresh = vi.fn()
+    renderCard({ refreshing: true, onRefresh })
+    const button = screen.getByRole('button', { name: /Оновити перетік/i })
+    expect(button).toBeDisabled()
+    expect(button.className).toMatch(/is-spinning/)
+    fireEvent.click(button)
+    expect(onRefresh).not.toHaveBeenCalled()
   })
 })

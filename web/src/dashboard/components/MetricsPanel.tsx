@@ -19,6 +19,8 @@ type Props = {
   summary: EnergySummary
   flows: EnergyFlows
   preset: RangePreset
+  flowsRefreshing: boolean
+  onRefreshFlows: () => void
 }
 
 function formatSnapshotLabel(at: Date): string {
@@ -41,6 +43,8 @@ export function MetricsPanel({
   summary,
   flows,
   preset,
+  flowsRefreshing,
+  onRefreshFlows,
 }: Props) {
   return (
     <div className="metrics-panel-stack">
@@ -58,7 +62,12 @@ export function MetricsPanel({
       />
       <TodayCountersNarrative current={current} loading={loading} />
       <DailySummaryNarrative summary={summary} preset={preset} />
-      <EnergyFlowPeriodSummary flows={flows} />
+      <EnergyFlowPeriodSummary
+        flows={flows}
+        preset={preset}
+        refreshing={flowsRefreshing}
+        onRefresh={onRefreshFlows}
+      />
       <AccumulatedSnapshotNarrative current={current} loading={loading} />
     </div>
   )

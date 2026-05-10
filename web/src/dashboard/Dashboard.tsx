@@ -42,6 +42,8 @@ export function Dashboard() {
     pvForecastSeries,
     loading,
     cardsLoading,
+    flowsRefreshing,
+    refreshFlows,
     error,
   } = useDashboardData({
     organizationID,
@@ -79,6 +81,8 @@ export function Dashboard() {
           summary={energySummary}
           flows={energyFlows}
           preset={preset}
+          flowsRefreshing={flowsRefreshing}
+          onRefreshFlows={() => void refreshFlows()}
         />
 
         <div className="dashboard-charts">

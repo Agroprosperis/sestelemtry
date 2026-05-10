@@ -87,6 +87,52 @@ func InsertSamples(ctx context.Context, pool *pgxpool.Pool, samples []Sample) er
 	return err
 }
 
+// DeleteSamplesInRange removes every row of telemetry_samples that
+// matches the (organization_id, metric_key ∈ metricKeys, [from, to])
+// predicate and returns the number of deleted rows. Used by the
+// energy-flow backfill endpoint to make recompute idempotent: dropping
+// the previously-emitted synthetic samples in the window before
+// inserting the fresh ones avoids two cumulative samples at the same
+// timestamp drifting apart on repeated clicks.
+//
+// The bound is right-closed (time <= to). It mirrors the
+// energy-summary lookup so a recompute over [from, to] cleans exactly
+// the same range the next summary query will read against.
+func DeleteSamplesInRange(
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	organizationID string,
+	metricKeys []string,
+	from, to time.Time,
+) (int64, error) {
+	if pool == nil {
+		return 0, fmt.Errorf("storage: nil pool")
+	}
+	if organizationID == "" {
+		return 0, fmt.Errorf("storage: organization_id is required")
+	}
+	if len(metricKeys) == 0 {
+		return 0, fmt.Errorf("storage: metric_keys is required")
+	}
+	if from.IsZero() || to.IsZero() {
+		return 0, fmt.Errorf("storage: from and to are required")
+	}
+	if !to.After(from) {
+		return 0, fmt.Errorf("storage: to must be after from")
+	}
+	tag, err := pool.Exec(ctx, `
+		DELETE FROM telemetry_samples
+		WHERE organization_id = $1
+			AND metric_key = ANY($2)
+			AND time >= $3
+			AND time <= $4
+	`, organizationID, metricKeys, from.UTC(), to.UTC())
+	if err != nil {
+		return 0, fmt.Errorf("storage: delete samples in range: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
 func toCopyRows(samples []Sample) ([][]any, error) {
 	rows := make([][]any, len(samples))
 	for i, s := range samples {

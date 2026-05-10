@@ -1,10 +1,12 @@
 import {
   ArrowDownLeft,
+  ArrowsClockwise,
   ArrowUpRight,
   Lightning,
   Sun,
 } from '@phosphor-icons/react'
 import { formatEnergyCompactKWhUk } from '../format'
+import type { RangePreset } from '../range'
 import type { EnergyFlows } from '../transforms/flows'
 
 // EnergyFlowPeriodSummary is the four-line narrative companion to the
@@ -16,22 +18,56 @@ import type { EnergyFlows } from '../transforms/flows'
 // `metrics-group` / `daily-narrative-list` styling with the other
 // narrative cards (DailySummaryNarrative, AccumulatedSnapshotNarrative,
 // etc.) so all left-panel groups read as a single column.
+//
+// The title mirrors the global RangePreset (`Перетік за
+// день/місяць/рік`) so it scans next to "Підсумок за …" without
+// requiring an operator to remember which period the dashboard is
+// on. The "Оновити" button re-runs the period flow fetch on
+// demand — handy after the operator notices a fresh sample
+// landed but the chart's auto-refetch is still on cooldown.
 
 type Props = {
   flows: EnergyFlows
+  preset: RangePreset
+  onRefresh: () => void
+  refreshing: boolean
 }
 
 const ICON_SIZE = 20
 
-export function EnergyFlowPeriodSummary({ flows }: Props) {
+const TITLES: Record<RangePreset, string> = {
+  day: 'Перетік за день',
+  month: 'Перетік за місяць',
+  year: 'Перетік за рік',
+}
+
+export function EnergyFlowPeriodSummary({
+  flows,
+  preset,
+  onRefresh,
+  refreshing,
+}: Props) {
   return (
     <section
       className="metrics-group daily-narrative"
       aria-labelledby="energy-flow-period-title"
+      aria-busy={refreshing}
     >
-      <h2 id="energy-flow-period-title" className="metrics-group-title">
-        Перетік за період
-      </h2>
+      <header className="metrics-group-header">
+        <h2 id="energy-flow-period-title" className="metrics-group-title">
+          {TITLES[preset]}
+        </h2>
+        <button
+          type="button"
+          className={`metrics-group-refresh${refreshing ? ' is-spinning' : ''}`}
+          onClick={onRefresh}
+          disabled={refreshing}
+          title="Оновити перетік"
+          aria-label="Оновити перетік"
+        >
+          <ArrowsClockwise size={16} weight="bold" />
+        </button>
+      </header>
       {!flows.hasEnergyFlowSamples && (
         <p className="daily-narrative-note" role="note">
           Дані з лічильників УЗЕ ще не зібрані за вибраний період.

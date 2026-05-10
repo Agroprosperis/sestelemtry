@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   fetchCurrent,
   fetchDAMPrices,
   fetchDashboardConfig,
   fetchEnergySummary,
   fetchTimeseries,
+  recomputeEnergyFlow,
 } from '../../api'
 import type { CurrentResponse, DashboardConfig } from '../../types'
 import {
@@ -74,6 +75,19 @@ export type DashboardData = {
   // `cardsLoading` flag so they don't go blank between live ticks.
   loading: boolean
   cardsLoading: boolean
+  // flowsRefreshing flips while the user-triggered `refreshFlows`
+  // call is in flight. The period-flow card uses it to disable
+  // its "Оновити" button and spin the icon — distinct from the
+  // initial `loading` so explicit refresh actions don't blank
+  // the surrounding charts.
+  flowsRefreshing: boolean
+  // refreshFlows re-fetches /api/v1/energy-summary for the
+  // currently selected preset/anchor and refreshes the period
+  // flow numbers (plus the cumulative-summary cards on month/
+  // year presets). Returns once the request settles so callers
+  // can await it; never throws — errors surface through the
+  // existing `error` channel.
+  refreshFlows: () => Promise<void>
   error: string | null
 }
 
@@ -112,7 +126,13 @@ export function useDashboardData(input: {
   const [powerSeries, setPowerSeries] = useState<PowerChartRow[]>([])
   const [loading, setLoading] = useState(true)
   const [cardsLoading, setCardsLoading] = useState(true)
+  const [flowsRefreshing, setFlowsRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // flowsRefreshController keeps the AbortController for the
+  // in-flight user-triggered refresh so a rapid second click (or
+  // a preset/anchor change mid-flight) cancels the stale request
+  // before its result clobbers fresh state.
+  const flowsRefreshController = useRef<AbortController | null>(null)
 
   // liveAllocation is the per-poll fan-out of /current into the seven
   // directional kW edges that drive `EnergyFlowLive`. Recomputed on
@@ -399,6 +419,109 @@ export function useDashboardData(input: {
     }
   }, [organizationID, preset, anchorTime])
 
+  // refreshFlows triggers a backend backfill for the current period
+  // so missing historical data can be filled in on demand. The flow
+  // is:
+  //
+  //  1. Ask the server to recompute the four synthetic counters from
+  //     the raw source counters for [from, to). The server replaces
+  //     any previously-emitted synthetic rows in that window with the
+  //     freshly computed ones (idempotent on repeat clicks).
+  //  2. Refetch /energy-summary so the dashboard immediately reflects
+  //     the new cumulative values.
+  //
+  // The recompute step is clamped to `(now - 3 min)` because the
+  // server refuses to recompute up to "now" — that would race the
+  // live aggregator's in-flight bucket and corrupt the cumulative
+  // timeline. For day-preset clicks that produce a recompute window
+  // narrower than 60 s after clamping (i.e. the request fired right
+  // after midnight against the same day), we skip the recompute and
+  // only refetch — there is no historical data to backfill in that
+  // sliver and the live aggregator's tick will pick it up shortly.
+  //
+  // A recompute failure does not block the refetch: the user clicked
+  // "Оновити" expecting the panel to redraw, so we always end on a
+  // summary fetch and surface the recompute error via setError().
+  const refreshFlows = useCallback(async () => {
+    if (flowsRefreshController.current) {
+      flowsRefreshController.current.abort()
+    }
+    const controller = new AbortController()
+    flowsRefreshController.current = controller
+    setFlowsRefreshing(true)
+    try {
+      const anchorDate = new Date(anchorTime)
+      const now = new Date()
+      const minReliable = MIN_RELIABLE_DATA_AT.getTime()
+      const rawRange = rangeParams(preset, anchorDate, now)
+      const energyFrom = new Date(
+        Math.max(new Date(rawRange.from).getTime(), minReliable),
+      )
+      const baseRange = { ...rawRange, from: energyFrom.toISOString() }
+
+      // Step 1: backend recompute. Clamp `to` against the server's
+      // safety margin so a day-preset click against today still
+      // backfills everything up to ~3 minutes ago instead of
+      // bouncing with a 400. The 3 min figure leaves one minute of
+      // headroom over the server's 2 min cutoff for clock skew /
+      // request travel time.
+      const SAFETY_MARGIN_MS = 3 * 60 * 1000
+      const fromMs = new Date(baseRange.from).getTime()
+      const toMs = Math.min(
+        new Date(baseRange.to).getTime(),
+        now.getTime() - SAFETY_MARGIN_MS,
+      )
+      let recomputeWarning: string | null = null
+      if (toMs - fromMs > 60_000) {
+        try {
+          await recomputeEnergyFlow(
+            {
+              organizationID,
+              from: new Date(fromMs).toISOString(),
+              to: new Date(toMs).toISOString(),
+            },
+            controller.signal,
+          )
+        } catch (e) {
+          if (controller.signal.aborted || isAbortError(e)) return
+          recomputeWarning = e instanceof Error ? e.message : 'Recompute failed'
+        }
+      }
+      if (controller.signal.aborted) return
+
+      // Step 2: refetch the cumulative summary so the UI shows the
+      // freshly recomputed values (and falls through to whatever
+      // exists in the DB if the recompute call failed above).
+      const summaryResp = await fetchEnergySummary(
+        {
+          organizationID,
+          from: baseRange.from,
+          to: baseRange.to,
+          metricKeys: ENERGY_SUMMARY_METRIC_KEYS,
+        },
+        controller.signal,
+      )
+      if (controller.signal.aborted) return
+      setEnergyFlows(flowsFromTotals(summaryResp.totals))
+      if (preset !== 'day') {
+        setEnergySummary(energySummaryFromTotals(summaryResp.totals))
+      }
+      if (recomputeWarning) {
+        setError(recomputeWarning)
+      } else {
+        setError(null)
+      }
+    } catch (e) {
+      if (controller.signal.aborted || isAbortError(e)) return
+      setError(e instanceof Error ? e.message : 'Failed to refresh period flows')
+    } finally {
+      if (flowsRefreshController.current === controller) {
+        flowsRefreshController.current = null
+      }
+      setFlowsRefreshing(false)
+    }
+  }, [organizationID, preset, anchorTime])
+
   return {
     config,
     current,
@@ -412,6 +535,8 @@ export function useDashboardData(input: {
     pvForecastSeries,
     loading,
     cardsLoading,
+    flowsRefreshing,
+    refreshFlows,
     error,
   }
 }

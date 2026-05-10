@@ -184,6 +184,92 @@ type OrganizationsResponse struct {
 	Organizations []OrganizationInfo `json:"organizations"`
 }
 
+// EnergyFlowDevice describes one physical Modbus device's role
+// assignment for the backfill recompute endpoint. The API uses
+// `Host` to match raw rows in telemetry_samples (whose `device_host`
+// label was written by the collector's labelsForDevice) and `Role` to
+// classify those rows into the energy-flow allocator's PV / ESS /
+// single buckets. Empty Host means "no per-device label was written"
+// — i.e. the legacy single-device YAML — and matches rows with no
+// device_host label.
+type EnergyFlowDevice struct {
+	Host string
+	Role string
+}
+
+// EnergyFlowOrg is the org-level metadata the recompute handler needs
+// beyond the public OrganizationInfo. It carries the per-device role
+// mapping (so dual SmartLogger sites still merge PV and ESS rows
+// correctly) and the ess_discharge_sign override that flips the sign
+// convention on inverters reporting charge as positive. Populated by
+// cmd/api/main.go from the same config the collector reads.
+type EnergyFlowOrg struct {
+	ID               string
+	EssDischargeSign int
+	Devices          []EnergyFlowDevice
+}
+
+// EnergyFlowRecomputeResponse summarises one POST
+// /api/v1/energy-flow/recompute run. Totals is the four-flow kWh map
+// for the window; SamplesWritten is the count of synthetic cumulative
+// rows the handler inserted into telemetry_samples; SamplesDeleted is
+// the rows it removed before insert (idempotency); ProcessedIntervals
+// / SkippedIntervals come straight from the energyflow.Recompute
+// result. Warnings carries the bounded warning tail so the dashboard
+// can render a "decoded with X warnings" hint without re-running.
+type EnergyFlowRecomputeResponse struct {
+	OrganizationID     string             `json:"organization_id"`
+	From               time.Time          `json:"from"`
+	To                 time.Time          `json:"to"`
+	Totals             map[string]float64 `json:"totals"`
+	SamplesWritten     int                `json:"samples_written"`
+	SamplesDeleted     int64              `json:"samples_deleted"`
+	ProcessedIntervals int                `json:"processed_intervals"`
+	SkippedIntervals   int                `json:"skipped_intervals"`
+	BucketsConsidered  int                `json:"buckets_considered"`
+	BucketsDropped     int                `json:"buckets_dropped"`
+	Warnings           []string           `json:"warnings,omitempty"`
+}
+
+// EnergyFlowRecomputeSourceMetrics is the set of source counter keys
+// the recompute pipeline reads from telemetry_samples to drive the
+// allocation algorithm. Mirrors energyflow.{PVRequiredMetrics +
+// ESSRequiredMetrics}; centralised here so the handler and the store
+// both reference one list and the catalogue can extend in lockstep.
+var EnergyFlowRecomputeSourceMetrics = []string{
+	"accumulated_pv_energy_yield_kwh",
+	"accumulated_electricity_purchased_kwh",
+	"accumulated_electricity_sold_kwh",
+	"total_energy_charged_kwh",
+	"total_energy_discharged_kwh",
+	"active_pv_power_kw",
+	"active_ess_power_kw",
+	"load_power_kw",
+	"grid_connected_active_power_kw",
+	"soc_percent",
+}
+
+// EnergyFlowSyntheticMetrics duplicates energyflow.SyntheticMetricKeys
+// at the API boundary so handler-level code does not have to import
+// the energyflow package transitively from packages that just need to
+// know which rows are "the four flow counters".
+var EnergyFlowSyntheticMetrics = []string{
+	"pv_to_ess_kwh",
+	"grid_to_ess_kwh",
+	"ess_to_load_kwh",
+	"ess_to_grid_kwh",
+}
+
+// EnergyFlowRawRow is one input row pulled from telemetry_samples by
+// the recompute store helper. device_host is read from the labels
+// JSONB and used by the handler to look up the device's role.
+type EnergyFlowRawRow struct {
+	Time       time.Time
+	MetricKey  string
+	Value      float64
+	DeviceHost string
+}
+
 // SampleRow is one raw `telemetry_samples` record exposed by
 // /api/v1/samples. The endpoint streams these rows as CSV so the
 // dashboard's "Експорт даних → Сирі дані" path can hand the analyst
