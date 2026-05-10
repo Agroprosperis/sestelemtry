@@ -38,8 +38,14 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgres://postgres:postgres@timescaledb:5432/telemetry?sslmode=disable
+    # Mount the same YAML the collector reads so the API can populate
+    # /api/v1/organizations (org id, display name, location). Without
+    # the mount + -config flag the endpoint returns an empty list and
+    # frontend features that depend on it (e.g. weather widget) hide.
+    volumes:
+      - ${SESTELEMETRY_HOST_CONFIG_PATH:-/etc/sestelemetry/config.yaml}:/etc/sestelemetry/config.yaml:ro
     entrypoint: ["/usr/local/bin/api"]
-    command: ["-listen", ":8080", "-allow-origin", "*"]
+    command: ["-listen", ":8080", "-allow-origin", "*", "-config", "/etc/sestelemetry/config.yaml"]
     ports:
       - "8080:8080"
 
