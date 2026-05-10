@@ -8,7 +8,6 @@
 // Sign convention (matches Huawei SmartLogger firmware on PE/ZE,
 // confirmed against live readings; mirrored in PowerTooltip.tsx):
 //   * active_pv_power_kw         > 0 → PV is generating
-//   * load_power_kw              > 0 → site is consuming
 //   * grid_connected_active_power_kw > 0 → site is importing from grid;
 //                                       < 0 → exporting
 //   * active_ess_power_kw        > 0 → battery discharging;
@@ -18,6 +17,19 @@
 // whose firmware reports the opposite sign. The default is 1; when
 // the org config sets ess_discharge_sign: -1 we flip the reading
 // so "positive = discharge" still holds downstream.
+//
+// Site load is derived from the bus-balance identity instead of
+// being read from the SmartLogger's `load_power_kw` register
+// (Modbus 40503): that register tracks only the inverter's
+// "Backup load" branch and is unreliable under normal grid-tied
+// operation — in some modes it overstates load (e.g. reads 86 kW
+// while the true site load is 12 kW), in others it undercounts.
+// Mirrors the day-chart derivation in `transforms/power.ts` and
+// the cards card derivation in `CurrentSnapshotNarrative.tsx`:
+//   site_load = |pv + grid + ess|   (with ESS in normalized
+//                                    "positive = discharge" sign)
+// Raw `load_power_kw` is consulted only as a fallback when one of
+// the three bus inputs is missing entirely.
 //
 // Edges are clamped at zero — the algorithm fans inputs out to
 // outputs in priority order (load first, ESS second, grid third)
@@ -101,6 +113,24 @@ function readOptionalNumber(metric: CurrentMetric | undefined): number | null {
   return Number.isFinite(n) ? n : null
 }
 
+// derivedLoadKw computes site-wide load from the bus-balance
+// identity. Returns null when any of the three bus inputs is
+// missing — a partial sum would mislead, in which case the
+// caller falls back to the raw `load_power_kw` register reading.
+// `Math.abs` matches `CurrentSnapshotNarrative.derivedLoadKw` and
+// handles the rare case where rounding leaves the sum slightly
+// negative (e.g. inverter standby noise).
+function derivedLoadKw(
+  metrics: CurrentResponse['metrics'],
+  essDischargeSign: 1 | -1,
+): number | null {
+  const pv = readOptionalNumber(metrics.active_pv_power_kw)
+  const grid = readOptionalNumber(metrics.grid_connected_active_power_kw)
+  const ess = readOptionalNumber(metrics.active_ess_power_kw)
+  if (pv === null || grid === null || ess === null) return null
+  return Math.abs(pv + grid + essDischargeSign * ess)
+}
+
 function freshestTimestamp(metrics: Iterable<CurrentMetric | undefined>): Date | null {
   let latest: number | null = null
   for (const m of metrics) {
@@ -120,9 +150,12 @@ export function liveAllocationFromCurrent(
 
   const m = current.metrics
   const pvKw = readNumber(m.active_pv_power_kw)
-  const loadKw = readNumber(m.load_power_kw)
   const gridKw = readNumber(m.grid_connected_active_power_kw)
   const essKw = essDischargeSign * readNumber(m.active_ess_power_kw)
+  // Prefer bus-balance derivation; raw 40503 is a backup-load-only
+  // reading that misrepresents site-wide consumption in many modes.
+  const loadKw =
+    derivedLoadKw(m, essDischargeSign) ?? readNumber(m.load_power_kw)
   const socPercent = readOptionalNumber(m.soc_percent)
 
   const observedAt = freshestTimestamp([

@@ -184,7 +184,7 @@
 .daily-narrative-list li {
   display: grid;
   grid-template-columns: 24px 1fr;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
   font-size: 13px;
   color: #334155;
@@ -200,6 +200,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  height: 1.4em;
   text-align: center;
   font-size: 16px;
   line-height: 1;

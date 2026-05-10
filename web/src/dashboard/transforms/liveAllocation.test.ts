@@ -171,6 +171,45 @@ describe('liveAllocationFromCurrent', () => {
     expect(out.observedAt?.toISOString()).toBe('2026-05-10T12:34:56.000Z')
   })
 
+  it("ignores a misleading load_power_kw reading and derives load from the bus balance", () => {
+    // Real production snapshot from the screenshot bug report:
+    // SmartLogger's 40503 register reports 86.97 kW (backup-load
+    // branch only) while the actual site load is just 12.28 kW.
+    // The bus balance pv + grid + ess = 85.29 + 1.68 + (-74.69)
+    // = 12.28 kW, matching what the cards card and day chart show.
+    const out = liveAllocationFromCurrent(
+      buildCurrent({
+        active_pv_power_kw: 85.29,
+        load_power_kw: 86.97,
+        grid_connected_active_power_kw: 1.68,
+        active_ess_power_kw: -74.69,
+      }),
+    )
+    expect(out.loadKw).toBeCloseTo(12.28, 2)
+    expect(out.pvToLoadKw).toBeCloseTo(12.28, 2)
+    // PV surplus charges the battery; ess_charge = 74.69, pv left
+    // after load = 73.01 → pv_to_ess = 73.01.
+    expect(out.pvToEssKw).toBeCloseTo(73.01, 2)
+    // Grid import covers the remaining 1.68 kW of charge demand.
+    expect(out.gridToEssKw).toBeCloseTo(1.68, 2)
+    expect(out.essState).toBe('charging')
+    expect(out.gridState).toBe('importing')
+  })
+
+  it('falls back to raw load_power_kw when any of the bus inputs is missing', () => {
+    // Only load + one bus input reported; derivation must abort
+    // (partial sums mislead) and use the raw register so the
+    // diagram still has something to render.
+    const out = liveAllocationFromCurrent(
+      buildCurrent({
+        load_power_kw: 4,
+        active_pv_power_kw: 4,
+        // grid + ess missing
+      }),
+    )
+    expect(out.loadKw).toBe(4)
+  })
+
   it('clamps a small negative load to 0 (sensor noise)', () => {
     const out = liveAllocationFromCurrent(
       buildCurrent({
