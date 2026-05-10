@@ -69,6 +69,13 @@ func main() {
 		// in logs and Watchtower-style monitors can flag it.
 		log.Warn("db_caggs", "err", err)
 	}
+	if err := storage.InitCompression(ctx, pool); err != nil {
+		// Non-fatal: without compression the hypertable grows roughly
+		// 1 GB/day at production cadence but reads and writes still work.
+		// Logging the error lets Watchtower-style monitors flag a
+		// degraded but functional deployment.
+		log.Warn("db_compression", "err", err)
+	}
 
 	log.Info("collector_start", "orgs", len(cfg.Organizations), "metrics", len(resolved))
 
