@@ -259,6 +259,51 @@ Huawei цей регістр повертає 0 — у такому разі і 
   фронтенді (`web/src/dashboard/transforms/buckets.ts`,
   `web/src/dashboard/transforms/summary.ts`).
 
+### 4.1. Синтетичні лічильники перетоків енергії
+
+Чотири `*_to_*_kwh` метрики обчислюються `collector` сервісом
+(`internal/energyflow`) і пишуться в `telemetry_samples` як
+кумулятивні лічильники в кВт·год. Modbus-регістрів за ними немає —
+це похідні величини, побудовані з накопичувальних лічильників СЕС
+та УЗЕ за алгоритмом ТЗ (`Allocate` у
+`internal/energyflow/allocate.go`). Агрегатор оновлює їх кожні
+60 секунд (`allocation_window_seconds`); після рестарту процеса
+totals автоматично "посідають" від останнього значення в БД, тому
+період до перезапуску в дашборді не пропадає.
+
+| `metric_key`        | UA-переклад                | EN                  | Од.  |
+| ------------------- | -------------------------- | ------------------- | ---- |
+| `pv_to_ess_kwh`     | СЕС → УЗЕ                  | PV to ESS charge    | kWh  |
+| `grid_to_ess_kwh`   | Мережа → УЗЕ               | Grid to ESS charge  | kWh  |
+| `ess_to_load_kwh`   | УЗЕ → Споживання           | ESS to load         | kWh  |
+| `ess_to_grid_kwh`   | УЗЕ → Мережа               | ESS to grid         | kWh  |
+
+Усі чотири експонуються через `/api/v1/energy-summary` нарівні з
+`accumulated_*_kwh` (див. `EnergySummaryAccumulators` у
+`internal/api/types.go`). Дашборд читає їх із `summary.totals` і
+будує Sankey-діаграму у компоненті `EnergyFlowSankey.tsx`.
+
+#### Вимоги до конфігурації для роботи перетоків
+
+- На рівні організації `metric_keys` whitelist має покривати **PV-набір**
+(`accumulated_pv_energy_yield_kwh`, `accumulated_electricity_purchased_kwh`,
+`accumulated_electricity_sold_kwh`) хоча б на одному `modbus_devices[]`
+та **ESS-набір** (`total_energy_charged_kwh`,
+`total_energy_discharged_kwh`) хоча б на одному. Один SmartLogger,
+що віддає обидва набори, → `single_smartlogger`; два окремі
+девайси → `dual_smartlogger`. Топологія визначається автоматично з
+whitelist (`energyflow.DetectRole` у `internal/energyflow/metrics.go`).
+- Якщо whitelist неповний, у логах `collector` з'явиться
+`energy_flow_disabled_for_org` — синтетичні метрики не пишуться,
+картка Sankey показує підказку "Дані з лічильників УЗЕ ще не
+зібрані".
+- Опційне поле `ess_discharge_sign` (`1` за замовчуванням, або `-1`)
+у конфігурації організації перевертає знак для діагностичної
+перевірки `active_ess_power_kw` — використовується тільки коли
+прошивка інвертора звітує заряд як додатню потужність УЗЕ.
+Накопичувальні лічильники `total_energy_charged/discharged_kwh`
+від цього не залежать.
+
 ## 5. Особливості накопичувальних лічильників
 
 - Усі `INT64`/`UINT64` з gain `0.01`: лічильник у регістрі — це

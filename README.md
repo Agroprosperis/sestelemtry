@@ -86,6 +86,88 @@ Notes:
 - The collector spawns one goroutine and one TCP session per device;
   device-A failures do not stall device-B.
 
+## Energy flow (PV / Grid / ESS / Load)
+
+The collector computes four directional energy flows as cumulative
+kWh counters and writes them back to `telemetry_samples` next to
+the SmartLogger accumulators. The dashboard reads them through the
+same `/api/v1/energy-summary` endpoint and renders a Sankey diagram.
+
+| `metric_key`        | meaning                                    |
+| ------------------- | ------------------------------------------ |
+| `pv_to_ess_kwh`     | PV energy that charged the ESS             |
+| `grid_to_ess_kwh`   | Grid imports that charged the ESS          |
+| `ess_to_load_kwh`   | ESS discharge that fed the load            |
+| `ess_to_grid_kwh`   | ESS discharge that exported to the grid    |
+
+The values are produced by `internal/energyflow.Aggregator`: every
+`allocation_window_seconds` (default 60 s) it computes per-window
+deltas from the SmartLogger accumulators
+(`accumulated_pv_energy_yield_kwh`, `accumulated_electricity_purchased_kwh`,
+`accumulated_electricity_sold_kwh`, `total_energy_charged_kwh`,
+`total_energy_discharged_kwh`) and runs the spec allocation rule
+(`Allocate` in `internal/energyflow/allocate.go`). The four totals
+survive a process restart — on startup the aggregator reseeds itself
+from the last value in `telemetry_samples`.
+
+### Topology auto-detection
+
+The site topology (single SmartLogger covering both PV and ESS, or
+two SmartLoggers split by role) is detected automatically from each
+device's `metric_keys` whitelist. There is no separate YAML field —
+just declare which metrics each device polls:
+
+- A device whose whitelist covers all three PV accumulators **and**
+  both ESS accumulators is classified as `RoleSingle`.
+- A device whose whitelist covers only the PV accumulators is the
+  PV side of a dual deployment (`RolePV`).
+- A device whose whitelist covers only the ESS accumulators is the
+  ESS side (`RoleESS`).
+- An organization that does not cover both PV and ESS across all
+  its devices logs `energy_flow_disabled_for_org` and emits no
+  synthetic samples; the dashboard surfaces a hint instead of an
+  empty Sankey card.
+
+For the `ze` deployment to enable energy flow, expand the existing
+whitelists, e.g.:
+
+```yaml
+modbus_devices:
+  - host: 10.28.40.101            # PV / load smartlogger
+    metric_keys:
+      - active_pv_power_kw
+      - load_power_kw
+      - grid_connected_active_power_kw
+      - accumulated_pv_energy_yield_kwh
+      - accumulated_electricity_purchased_kwh
+      - accumulated_electricity_sold_kwh
+      - accumulated_power_consumption_kwh
+  - host: 10.28.40.102            # ESS smartlogger
+    metric_keys:
+      - active_ess_power_kw
+      - soc_percent
+      - total_energy_charged_kwh
+      - total_energy_discharged_kwh
+```
+
+### Optional: `ess_discharge_sign`
+
+By convention `active_ess_power_kw > 0` means the battery is
+discharging. Some inverter firmwares invert that — set
+`ess_discharge_sign: -1` on the organization to silence the
+diagnostic warning. The cumulative `total_energy_charged_kwh` /
+`total_energy_discharged_kwh` accumulators are not affected by this
+flag, so the four flow totals stay correct regardless.
+
+```yaml
+organizations:
+  - id: ze
+    ess_discharge_sign: -1     # firmware reports charge as positive
+```
+
+Allowed values: `0` (= default 1), `1`, `-1`. Any other value
+fails validation at startup.
+
 ## Day-Ahead Market collector (RDN)
 
 `dam-collector` downloads the OREE DAM XLS once per day and upserts hourly
