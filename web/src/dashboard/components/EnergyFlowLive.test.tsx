@@ -40,7 +40,7 @@ describe('EnergyFlowLive', () => {
     expect(screen.getByText('УЗЕ')).toBeInTheDocument()
     expect(screen.getByText('Мережа')).toBeInTheDocument()
     expect(screen.getByText(/SOC 84%/)).toBeInTheDocument()
-    expect(screen.getByText(/експорт у мережу/i)).toBeInTheDocument()
+    expect(screen.getAllByText(/^експорт$/i).length).toBeGreaterThan(0)
   })
 
   it('renders four animated edges', () => {
@@ -74,7 +74,7 @@ describe('EnergyFlowLive', () => {
     expect(container.querySelector('.energy-flow-live-status.is-stale')).toBeTruthy()
     expect(container.querySelector('.energy-flow-live-hub.is-stale')).toBeTruthy()
     expect(screen.getAllByText(/Немає даних/).length).toBeGreaterThan(0)
-    expect(screen.getByText(/очікуємо опитування/i)).toBeInTheDocument()
+    expect(screen.getByText(/без даних/i)).toBeInTheDocument()
   })
 
   it('shows importing balance when grid pulls energy', () => {
@@ -85,7 +85,6 @@ describe('EnergyFlowLive', () => {
       active_ess_power_kw: 0,
     })
     render(<EnergyFlowLive allocation={allocation} />)
-    expect(screen.getByText(/імпорт з мережі/i)).toBeInTheDocument()
-    expect(screen.getByText(/Імпорт/)).toBeInTheDocument()
+    expect(screen.getAllByText(/імпорт/i).length).toBeGreaterThan(0)
   })
 })

@@ -1017,6 +1017,11 @@
   transform: translate(-50%, -50%);
   width: 18%;
   min-width: 108px;
+  /* Locking height (and forcing nowrap on the text rows below)
+     keeps the hub a constant size — the bezier paths anchor to
+     its centre so any reflow used to nudge them around as the
+     status text changed. */
+  height: 78px;
   background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
   color: #f8fafc;
   border-radius: 10px;
@@ -1028,6 +1033,7 @@
   text-align: center;
   box-shadow: 0 4px 14px rgba(15, 23, 42, 0.22);
   gap: 1px;
+  white-space: nowrap;
 }
 
 .energy-flow-live-hub.is-stale {
@@ -1110,6 +1116,7 @@
 .energy-flow-live-card.is-compact .energy-flow-live-hub {
   width: 22%;
   min-width: 78px;
+  height: 64px;
   padding: 5px 6px;
   border-radius: 8px;
 }

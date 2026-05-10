@@ -428,21 +428,25 @@ export function EnergyFlowLive({
   )
 }
 
+// describeBalance returns short, single-line labels so the hub
+// box keeps a constant height regardless of state — long phrases
+// like "обмін з мережею відсутній" used to wrap into 4 lines and
+// jolt the surrounding bezier paths each render.
 function describeBalance(a: LiveAllocation): { kw: string; text: string } {
-  if (a.status === 'no_data') return { kw: '--', text: 'очікуємо опитування' }
+  if (a.status === 'no_data') return { kw: '--', text: 'без даних' }
   if (a.netExportKw > 0.05) {
     return {
       kw: `+${formatChartNumber(a.netExportKw)} kW`,
-      text: 'експорт у мережу',
+      text: 'експорт',
     }
   }
   if (a.netExportKw < -0.05) {
     return {
       kw: `−${formatChartNumber(Math.abs(a.netExportKw))} kW`,
-      text: 'імпорт з мережі',
+      text: 'імпорт',
     }
   }
-  return { kw: '0 kW', text: 'обмін з мережею відсутній' }
+  return { kw: '0 kW', text: 'без обміну' }
 }
 
 type NodeCardProps = {
