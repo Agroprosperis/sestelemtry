@@ -16,11 +16,15 @@ type Props = {
   preset: RangePreset
 }
 
+// The trailing U+FE0F (Variation Selector-16) flips the legacy
+// monochrome glyphs (☀ U+2600, ☁ U+2601) into their colored emoji
+// presentation; without it most browsers fall back to plain-text and
+// render them as a black sun/cloud.
 const CONDITION_ICON: Record<WeatherCondition, string> = {
-  sunny: '☀',
-  partly_cloudy: '⛅',
-  cloudy: '☁',
-  overcast: '🌧',
+  sunny: '☀\uFE0F',
+  partly_cloudy: '⛅\uFE0F',
+  cloudy: '☁\uFE0F',
+  overcast: '🌧\uFE0F',
 }
 
 const CONDITION_LABEL: Record<WeatherCondition, string> = {
@@ -36,12 +40,12 @@ const CONDITION_LABEL: Record<WeatherCondition, string> = {
 // "100% clear at midnight" slot doesn't render a sun.
 function hourIcon(slot: HourlyWeatherSlot): string {
   if (!slot.isDay) {
-    return slot.cloudCoverPct < 65 ? '🌙' : '☁'
+    return slot.cloudCoverPct < 65 ? '🌙\uFE0F' : '☁\uFE0F'
   }
-  if (slot.cloudCoverPct < 25) return '☀'
-  if (slot.cloudCoverPct < 65) return '⛅'
-  if (slot.cloudCoverPct < 85) return '☁'
-  return '🌧'
+  if (slot.cloudCoverPct < 25) return '☀\uFE0F'
+  if (slot.cloudCoverPct < 65) return '⛅\uFE0F'
+  if (slot.cloudCoverPct < 85) return '☁\uFE0F'
+  return '🌧\uFE0F'
 }
 
 function formatTemp(c: number): string {
