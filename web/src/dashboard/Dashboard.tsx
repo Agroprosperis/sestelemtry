@@ -2,7 +2,8 @@ import { lazy, Suspense, useState } from 'react'
 import './dashboard.css'
 import { DashboardHeader } from './components/DashboardHeader'
 import { EnergyChart } from './components/EnergyChart'
-import { EnergyFlowSankey } from './components/EnergyFlowSankey'
+import { EnergyFlowLive } from './components/EnergyFlowLive'
+import { EnergyFlowPeriodSummary } from './components/EnergyFlowPeriodSummary'
 import { MetricsPanel } from './components/MetricsPanel'
 import { WeatherCard } from './components/WeatherCard'
 import { useDashboardData } from './hooks/useDashboardData'
@@ -33,6 +34,7 @@ export function Dashboard() {
   const {
     config,
     current,
+    liveAllocation,
     energySeries,
     energySummary,
     energyFlows,
@@ -96,7 +98,8 @@ export function Dashboard() {
             powerSeries={powerSeries}
             pvForecastSeries={pvForecastSeries}
           />
-          <EnergyFlowSankey flows={energyFlows} loading={loading} />
+          <EnergyFlowLive allocation={liveAllocation} />
+          <EnergyFlowPeriodSummary flows={energyFlows} />
           <Suspense
             fallback={
               <div className="chart-card">

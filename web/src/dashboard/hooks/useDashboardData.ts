@@ -24,6 +24,10 @@ import {
 import { socChartRows, type SOCChartRow } from '../transforms/soc'
 import { flowsFromTotals, EMPTY_FLOWS, type EnergyFlows } from '../transforms/flows'
 import {
+  liveAllocationFromCurrent,
+  type LiveAllocation,
+} from '../transforms/liveAllocation'
+import {
   energySummaryFromSeries,
   energySummaryFromTotals,
   type EnergySummary,
@@ -31,8 +35,8 @@ import {
 import { usePvForecast } from './usePvForecast'
 
 // Metrics whose period totals back the dashboard summary cards (the
-// "spent / produced / from PV" breakdown) and the energy-flow Sankey
-// diagram. Mirrors `EnergySummaryAccumulators` on the backend.
+// "spent / produced / from PV" breakdown) and the energy-flow period
+// summary. Mirrors `EnergySummaryAccumulators` on the backend.
 //
 // The four `*_to_*_kwh` entries are synthetic counters emitted by
 // the collector's energyflow aggregator — they live in
@@ -57,6 +61,7 @@ const ENERGY_SUMMARY_METRIC_KEYS = [
 export type DashboardData = {
   config: DashboardConfig
   current: CurrentResponse | null
+  liveAllocation: LiveAllocation
   energySeries: EnergyRow[]
   energySummary: EnergySummary
   energyFlows: EnergyFlows
@@ -108,6 +113,15 @@ export function useDashboardData(input: {
   const [loading, setLoading] = useState(true)
   const [cardsLoading, setCardsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+
+  // liveAllocation is the per-poll fan-out of /current into the seven
+  // directional kW edges that drive `EnergyFlowLive`. Recomputed on
+  // every `current` tick — the transform itself is a few math ops,
+  // cheaper than memoizing more aggressively.
+  const liveAllocation = useMemo<LiveAllocation>(
+    () => liveAllocationFromCurrent(current /* essDischargeSign: hard-coded 1 for now */),
+    [current],
+  )
 
   // Forecast lives outside the main /timeseries effect so a slow n8n call
   // doesn't gate the rest of the day chart. For organizations without a
@@ -272,7 +286,7 @@ export function useDashboardData(input: {
         // from corrupted samples.
         //
         // We always fetch the summary, including for the day preset,
-        // because the energy-flow Sankey diagram needs the four
+        // because the energy-flow period summary needs the four
         // synthetic counters (pv_to_ess_kwh, grid_to_ess_kwh,
         // ess_to_load_kwh, ess_to_grid_kwh) and those are only emitted
         // as cumulative samples — they have no per-bucket delta to
@@ -349,7 +363,7 @@ export function useDashboardData(input: {
         )
         // Day preset keeps its series-derived summary so the cards
         // share the same clamp semantics as the chart bars; month/year
-        // presets use the server-side cumulative summary. The Sankey
+        // presets use the server-side cumulative summary. The period
         // flows always come from the server summary because the
         // synthetic counters are emitted as cumulative samples with
         // no per-bucket delta to reconstruct on the client.
@@ -388,6 +402,7 @@ export function useDashboardData(input: {
   return {
     config,
     current,
+    liveAllocation,
     energySeries,
     energySummary,
     energyFlows,
