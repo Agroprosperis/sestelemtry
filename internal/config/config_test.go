@@ -115,10 +115,10 @@ organizations:
 
 func TestParseRunAt(t *testing.T) {
 	cases := []struct {
-		in       string
-		hour     int
-		minute   int
-		ok       bool
+		in     string
+		hour   int
+		minute int
+		ok     bool
 	}{
 		{"14:00", 14, 0, true},
 		{"00:00", 0, 0, true},
@@ -339,6 +339,48 @@ organizations:
 			}
 			if _, err := Load(path); err == nil {
 				t.Fatalf("expected validation error, got nil")
+			}
+		})
+	}
+}
+
+func TestLoadParsesEssDischargeSign(t *testing.T) {
+	dir := t.TempDir()
+	cases := map[string]struct {
+		raw       string
+		want      int
+		expectErr bool
+	}{
+		"omitted defaults to 0": {"", 0, false},
+		"explicit 1":            {"    ess_discharge_sign: 1\n", 1, false},
+		"explicit -1":           {"    ess_discharge_sign: -1\n", -1, false},
+		"invalid 2 rejected":    {"    ess_discharge_sign: 2\n", 0, true},
+		"invalid -2 rejected":   {"    ess_discharge_sign: -2\n", 0, true},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(dir, name+".yaml")
+			content := `register_catalog: registers/huawei_smartlogger.yaml
+organizations:
+  - id: org-a
+    modbus:
+      host: 127.0.0.1
+` + c.raw
+			if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := Load(path)
+			if c.expectErr {
+				if err == nil {
+					t.Fatalf("expected validation error for %s", name)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Load error: %v", err)
+			}
+			if got := cfg.Organizations[0].EssDischargeSign; got != c.want {
+				t.Errorf("EssDischargeSign: got %d want %d", got, c.want)
 			}
 		})
 	}

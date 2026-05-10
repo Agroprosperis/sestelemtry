@@ -17,6 +17,7 @@ import (
 	"github.com/nesh/sestelemetry/internal/bootstrap"
 	"github.com/nesh/sestelemetry/internal/config"
 	"github.com/nesh/sestelemetry/internal/decode"
+	"github.com/nesh/sestelemetry/internal/energyflow"
 	"github.com/nesh/sestelemetry/internal/modbusclient"
 	"github.com/nesh/sestelemetry/internal/registers"
 	"github.com/nesh/sestelemetry/internal/storage"
@@ -91,6 +92,13 @@ var dialFunc = modbusclient.Dial
 // runOrg spawns one goroutine per Modbus device declared on the organization.
 // Single-device orgs (legacy `modbus:` block) get a one-element device slice
 // from `org.Devices()`, so the call site stays identical for both shapes.
+//
+// In addition to the per-device pollers, runOrg starts one
+// energyflow.Aggregator per organization when the device whitelist
+// covers both the PV and ESS accumulators. The aggregator runs on
+// its own goroutine, ticks every allocation_window_seconds, and
+// emits four cumulative-counter samples (pv_to_ess_kwh, …) into
+// telemetry_samples each tick.
 func runOrg(
 	ctx context.Context,
 	log *slog.Logger,
@@ -99,18 +107,37 @@ func runOrg(
 	resolved []registers.ResolvedEntry,
 	pool *pgxpool.Pool,
 ) {
+	agg := buildEnergyFlowAggregator(ctx, log, org, pool)
+	var aggDone chan struct{}
+	if agg != nil {
+		aggDone = make(chan struct{})
+		go func() {
+			defer close(aggDone)
+			agg.Run(ctx)
+		}()
+	}
+
 	devices := org.Devices()
+	roles := make([]energyflow.Role, len(devices))
+	for i, dev := range devices {
+		roles[i] = energyflow.DetectRole(dev.MetricKeys)
+	}
+
 	var wg sync.WaitGroup
 	for i, dev := range devices {
 		dev := dev
 		i := i
+		role := roles[i]
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			runDevice(ctx, log, cfg, org, dev, i, resolved, pool)
+			runDevice(ctx, log, cfg, org, dev, i, resolved, pool, agg, role)
 		}()
 	}
 	wg.Wait()
+	if aggDone != nil {
+		<-aggDone
+	}
 }
 
 // runDevice is the per-device polling loop. It filters the global resolved
@@ -127,8 +154,15 @@ func runDevice(
 	devIndex int,
 	resolvedAll []registers.ResolvedEntry,
 	pool *pgxpool.Pool,
+	agg *energyflow.Aggregator,
+	role energyflow.Role,
 ) {
-	log = log.With("organization_id", org.ID, "device_host", dev.Host, "device_index", devIndex)
+	log = log.With(
+		"organization_id", org.ID,
+		"device_host", dev.Host,
+		"device_index", devIndex,
+		"energy_flow_role", string(role),
+	)
 
 	resolved, err := registers.Subset(resolvedAll, dev.MetricKeys)
 	if err != nil {
@@ -170,7 +204,7 @@ func runDevice(
 			dialFailures = 0
 		}
 
-		if err := pollAndStore(ctx, log, cfg, org, dev, sess, resolved, chunks, pool); err != nil {
+		if err := pollAndStore(ctx, log, cfg, org, dev, sess, resolved, chunks, pool, agg, role); err != nil {
 			if errors.Is(err, context.Canceled) {
 				return
 			}
@@ -197,6 +231,8 @@ func pollAndStore(
 	resolved []registers.ResolvedEntry,
 	chunks []modbusclient.ReadChunk,
 	pool *pgxpool.Pool,
+	agg *energyflow.Aggregator,
+	role energyflow.Role,
 ) error {
 	readCtx, cancel := context.WithTimeout(ctx, readBudgetForPoll(dev.RequestTimeout, len(chunks)))
 	defer cancel()
@@ -215,6 +251,19 @@ func pollAndStore(
 		return err
 	}
 	log.Info("poll_ok", "samples", len(samples))
+
+	// Forward the same decoded values to the per-org energy-flow
+	// aggregator so the next allocation_window flush sees the latest
+	// snapshot from this device. Submit is non-blocking and never
+	// returns an error: a bad reading is filtered inside the
+	// aggregator and counted in its diagnostics.
+	if agg != nil && role != energyflow.RoleNone {
+		values := make(map[string]float64, len(samples))
+		for _, s := range samples {
+			values[s.MetricKey] = s.Value
+		}
+		agg.Submit(role, ts, values)
+	}
 	return nil
 }
 
@@ -349,4 +398,123 @@ func max(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// buildEnergyFlowAggregator returns a configured aggregator for the
+// organization, or nil when the org's device whitelist does not cover
+// both the PV and ESS accumulator sets. The detection is based on the
+// auto-detect rule selected for this project (plan §Топологія):
+// each device declares which metric_keys it polls, and the package's
+// DetectRole helper classifies each whitelist into RolePV/RoleESS/
+// RoleSingle/RoleNone. When at least one device covers PV and at
+// least one covers ESS (possibly the same device), energy flow is
+// enabled for the org.
+//
+// On startup the aggregator is reseeded from the latest values
+// already present in telemetry_samples so cumulative totals survive
+// a process restart. A missing or unreadable seed degrades to
+// "start from zero" with a warning rather than aborting.
+func buildEnergyFlowAggregator(
+	ctx context.Context,
+	log *slog.Logger,
+	org config.Organization,
+	pool *pgxpool.Pool,
+) *energyflow.Aggregator {
+	devices := org.Devices()
+	var coversPV, coversESS bool
+	for _, dev := range devices {
+		switch energyflow.DetectRole(dev.MetricKeys) {
+		case energyflow.RoleSingle:
+			coversPV, coversESS = true, true
+		case energyflow.RolePV:
+			coversPV = true
+		case energyflow.RoleESS:
+			coversESS = true
+		}
+	}
+	if !(coversPV && coversESS) {
+		log.Info("energy_flow_disabled_for_org",
+			"organization_id", org.ID,
+			"covers_pv", coversPV,
+			"covers_ess", coversESS,
+			"hint", "extend modbus_devices.metric_keys with the PV and ESS accumulators",
+		)
+		return nil
+	}
+
+	emit := func(ctx context.Context, samples []energyflow.EmittedSample) error {
+		if pool == nil || len(samples) == 0 {
+			return nil
+		}
+		out := make([]storage.Sample, 0, len(samples))
+		for _, s := range samples {
+			out = append(out, storage.Sample{
+				Time:           s.Time.UTC(),
+				OrganizationID: org.ID,
+				MetricKey:      s.MetricKey,
+				Value:          s.Value,
+				Labels:         map[string]string{"synthetic": "energy_flow"},
+			})
+		}
+		return insertSamples(ctx, pool, out)
+	}
+	opts := energyflow.Options{EssDischargeSign: org.EssDischargeSign}
+	agg := energyflow.New(org.ID, opts, emit, log)
+	if pool != nil {
+		seedCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		seeds, err := loadEnergyFlowSeeds(seedCtx, pool, org.ID)
+		if err != nil {
+			log.Warn("energy_flow_seed_load",
+				"organization_id", org.ID,
+				"err", err,
+			)
+		} else if len(seeds) > 0 {
+			agg.Reseed(seeds)
+			log.Info("energy_flow_reseeded",
+				"organization_id", org.ID,
+				"keys", len(seeds),
+			)
+		}
+	}
+	log.Info("energy_flow_enabled_for_org",
+		"organization_id", org.ID,
+		"devices", len(devices),
+	)
+	return agg
+}
+
+// loadEnergyFlowSeeds queries the latest cumulative value for each
+// synthetic energy-flow metric. Used once at startup so the
+// aggregator can resume the running totals from where the previous
+// process left them.
+func loadEnergyFlowSeeds(ctx context.Context, pool *pgxpool.Pool, orgID string) (map[string]float64, error) {
+	if pool == nil {
+		return nil, nil
+	}
+	rows, err := pool.Query(ctx, `
+		SELECT DISTINCT ON (metric_key)
+			metric_key, value
+		FROM telemetry_samples
+		WHERE organization_id = $1
+			AND metric_key = ANY($2)
+		ORDER BY metric_key, time DESC
+	`, orgID, energyflow.SyntheticMetricKeys)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[string]float64, len(energyflow.SyntheticMetricKeys))
+	for rows.Next() {
+		var key string
+		var value float64
+		if err := rows.Scan(&key, &value); err != nil {
+			return nil, err
+		}
+		out[key] = value
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
 }

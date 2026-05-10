@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/nesh/sestelemetry/internal/config"
+	"github.com/nesh/sestelemetry/internal/energyflow"
 	"github.com/nesh/sestelemetry/internal/modbusclient"
 	"github.com/nesh/sestelemetry/internal/registers"
 	"github.com/nesh/sestelemetry/internal/storage"
@@ -82,7 +83,7 @@ func TestPollAndStoreHoldingSuccess(t *testing.T) {
 	}
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	err := pollAndStore(context.Background(), logger, cfg, org, dev, reader, resolved, chunks, nil)
+	err := pollAndStore(context.Background(), logger, cfg, org, dev, reader, resolved, chunks, nil, nil, energyflow.RoleNone)
 	if err != nil {
 		t.Fatalf("pollAndStore error: %v", err)
 	}
@@ -123,7 +124,7 @@ func TestPollAndStoreUsesInputMap(t *testing.T) {
 	reader := &mockModbusReader{input: map[uint16][]byte{0: {0x03, 0x5c}}}
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	if err := pollAndStore(context.Background(), logger, cfg, org, dev, reader, resolved, chunks, nil); err != nil {
+	if err := pollAndStore(context.Background(), logger, cfg, org, dev, reader, resolved, chunks, nil, nil, energyflow.RoleNone); err != nil {
 		t.Fatalf("pollAndStore error: %v", err)
 	}
 	if reader.holdingCalls != 0 || reader.inputCalls != 1 {
@@ -146,7 +147,7 @@ func TestPollAndStoreMissingSlice(t *testing.T) {
 	chunks := []modbusclient.ReadChunk{{Start: 0, Quantity: 1}}
 	reader := &mockModbusReader{holding: map[uint16][]byte{0: {0x00, 0x01}}}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	err := pollAndStore(context.Background(), logger, cfg, org, dev, reader, resolved, chunks, nil)
+	err := pollAndStore(context.Background(), logger, cfg, org, dev, reader, resolved, chunks, nil, nil, energyflow.RoleNone)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -274,6 +275,74 @@ func TestRunOrgFanOutPerDevice(t *testing.T) {
 	}
 	if keys["c"] == 0 {
 		t.Fatalf("device 2 should produce samples for c: %+v", keys)
+	}
+}
+
+// TestPollAndStoreFeedsEnergyFlow verifies that decoded samples are
+// forwarded to the energy-flow aggregator when the device has a role.
+// We use a single SmartLogger (RoleSingle) carrying a minimal
+// accumulator set, run two polls one window apart and assert the
+// aggregator emits a sample on the second flush.
+func TestPollAndStoreFeedsEnergyFlow(t *testing.T) {
+	prevInsert := insertSamples
+	insertSamples = func(_ context.Context, _ *pgxpool.Pool, _ []storage.Sample) error { return nil }
+	t.Cleanup(func() { insertSamples = prevInsert })
+
+	cfg := &config.Root{ModbusRegisterMap: config.MapHolding}
+	org := config.Organization{ID: "org-a"}
+	dev := config.ModbusDevice{Modbus: config.Modbus{RequestTimeout: time.Second}}
+
+	resolved := []registers.ResolvedEntry{
+		{Entry: registers.Entry{MetricKey: energyflow.SrcAccumulatedPVYieldKwh, DataType: registers.DTInt64, Gain: 0.01}, PDUStart: 0, WordCount: 4, PDUEnd: 3},
+		{Entry: registers.Entry{MetricKey: energyflow.SrcAccumulatedPurchasedKwh, DataType: registers.DTInt64, Gain: 0.01}, PDUStart: 4, WordCount: 4, PDUEnd: 7},
+		{Entry: registers.Entry{MetricKey: energyflow.SrcAccumulatedSoldKwh, DataType: registers.DTInt64, Gain: 0.01}, PDUStart: 8, WordCount: 4, PDUEnd: 11},
+		{Entry: registers.Entry{MetricKey: energyflow.SrcTotalEssChargedKwh, DataType: registers.DTInt64, Gain: 0.01}, PDUStart: 12, WordCount: 4, PDUEnd: 15},
+		{Entry: registers.Entry{MetricKey: energyflow.SrcTotalEssDischargedKwh, DataType: registers.DTUint64, Gain: 0.01}, PDUStart: 16, WordCount: 4, PDUEnd: 19},
+	}
+	chunks := []modbusclient.ReadChunk{{Start: 0, Quantity: 20}}
+
+	// Fixed payloads encoding 0/0/0/0/0 and then 100/0/0/0/200
+	// (raw register values; gain 0.01 → 1.0 kWh / 2.0 kWh).
+	zero := make([]byte, 40)
+	first := make([]byte, 40)
+	first[7] = 100  // accumulated_pv_energy_yield raw = 100 → 1.0 kWh
+	first[39] = 200 // total_energy_discharged raw = 200 → 2.0 kWh
+
+	reader := &mockModbusReader{holding: map[uint16][]byte{0: zero}}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	emitted := make(chan []energyflow.EmittedSample, 4)
+	emit := func(_ context.Context, samples []energyflow.EmittedSample) error {
+		emitted <- samples
+		return nil
+	}
+	agg := energyflow.New(org.ID, energyflow.Options{
+		AllocationWindowSeconds: 1,
+		MaxGapSeconds:           5,
+	}, emit, logger)
+
+	if err := pollAndStore(context.Background(), logger, cfg, org, dev, reader, resolved, chunks, nil, agg, energyflow.RoleSingle); err != nil {
+		t.Fatalf("pollAndStore err: %v", err)
+	}
+	if err := agg.Flush(context.Background()); err != nil {
+		t.Fatalf("first flush err: %v", err)
+	}
+
+	reader.holding[0] = first
+	if err := pollAndStore(context.Background(), logger, cfg, org, dev, reader, resolved, chunks, nil, agg, energyflow.RoleSingle); err != nil {
+		t.Fatalf("pollAndStore err: %v", err)
+	}
+	if err := agg.Flush(context.Background()); err != nil {
+		t.Fatalf("second flush err: %v", err)
+	}
+
+	select {
+	case got := <-emitted:
+		if len(got) != len(energyflow.SyntheticMetricKeys) {
+			t.Fatalf("emitted %d samples, want %d", len(got), len(energyflow.SyntheticMetricKeys))
+		}
+	case <-time.After(time.Second):
+		t.Fatal("no samples emitted by aggregator")
 	}
 }
 

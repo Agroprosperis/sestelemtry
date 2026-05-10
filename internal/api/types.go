@@ -103,14 +103,14 @@ type TimeseriesResponse struct {
 // DAMPrice is one hourly Day-Ahead Market record exposed via the API.
 // Numeric fields are pointers because the source XLS may omit cells.
 type DAMPrice struct {
-	DeliveryDate                time.Time `json:"delivery_date"`
-	Hour                        int       `json:"hour"`
-	Zone                        int       `json:"zone"`
-	PriceUAHPerMWh              *float64  `json:"price_uah_per_mwh,omitempty"`
-	SaleVolumeMWh               *float64  `json:"sale_volume_mwh,omitempty"`
-	PurchaseVolumeMWh           *float64  `json:"purchase_volume_mwh,omitempty"`
-	DeclaredSaleVolumeMWh       *float64  `json:"declared_sale_volume_mwh,omitempty"`
-	DeclaredPurchaseVolumeMWh   *float64  `json:"declared_purchase_volume_mwh,omitempty"`
+	DeliveryDate              time.Time `json:"delivery_date"`
+	Hour                      int       `json:"hour"`
+	Zone                      int       `json:"zone"`
+	PriceUAHPerMWh            *float64  `json:"price_uah_per_mwh,omitempty"`
+	SaleVolumeMWh             *float64  `json:"sale_volume_mwh,omitempty"`
+	PurchaseVolumeMWh         *float64  `json:"purchase_volume_mwh,omitempty"`
+	DeclaredSaleVolumeMWh     *float64  `json:"declared_sale_volume_mwh,omitempty"`
+	DeclaredPurchaseVolumeMWh *float64  `json:"declared_purchase_volume_mwh,omitempty"`
 }
 
 type DAMPricesResponse struct {
@@ -121,9 +121,14 @@ type DAMPricesResponse struct {
 }
 
 // EnergySummaryAccumulators are the cumulative counters used by the
-// monthly/yearly summary cards. The list is intentionally narrow: these
-// six values are everything `energySummaryFromTotals` on the frontend
-// needs to render the source/sink/percentage breakdown.
+// monthly/yearly summary cards and by the energy-flow Sankey diagram.
+// The first six entries back `energySummaryFromTotals` on the
+// frontend; the four `*_to_*_kwh` entries are synthetic counters
+// produced by the collector's energyflow package and consumed by
+// `flowsFromTotals` in [web/src/dashboard/transforms/flows.ts]. They
+// share the same `last(end) - last(seed)` lookup as the catalog
+// metrics — synthetic counters are written cumulatively, so the
+// existing summary SQL works for them without a schema change.
 var EnergySummaryAccumulators = []string{
 	"accumulated_pv_energy_yield_kwh",
 	"accumulated_electricity_sold_kwh",
@@ -131,6 +136,10 @@ var EnergySummaryAccumulators = []string{
 	"accumulated_power_consumption_kwh",
 	"total_energy_charged_kwh",
 	"total_energy_discharged_kwh",
+	"pv_to_ess_kwh",
+	"grid_to_ess_kwh",
+	"ess_to_load_kwh",
+	"ess_to_grid_kwh",
 }
 
 // EnergySummaryResponse returns the per-period accumulator deltas used

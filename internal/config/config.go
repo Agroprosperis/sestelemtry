@@ -58,6 +58,16 @@ type Organization struct {
 	PollInterval  time.Duration  `yaml:"poll_interval"`
 	Modbus        Modbus         `yaml:"modbus"`
 	ModbusDevices []ModbusDevice `yaml:"modbus_devices"`
+
+	// EssDischargeSign overrides the convention that
+	// `active_ess_power_kw > 0` means "ESS discharging". Set to -1
+	// for inverters that report charge as positive ESS power.
+	// Allowed values: 0 (= default 1), 1, -1. The default never
+	// rejects a sample; it only flips the energy-flow allocator's
+	// instantaneous-power sign sanity check, since the cumulative
+	// energy_charged / energy_discharged accumulators are sign-
+	// invariant.
+	EssDischargeSign int `yaml:"ess_discharge_sign"`
 }
 
 // Devices returns the effective list of Modbus endpoints for this
@@ -282,6 +292,11 @@ func (c *Root) validate() error {
 			if o.Location.Longitude < -180 || o.Location.Longitude > 180 {
 				return fmt.Errorf("config: org %q location.longitude out of range [-180,180]: %g", id, o.Location.Longitude)
 			}
+		}
+		switch o.EssDischargeSign {
+		case 0, 1, -1:
+		default:
+			return fmt.Errorf("config: org %q ess_discharge_sign must be 1 or -1, got %d", id, o.EssDischargeSign)
 		}
 	}
 	return nil
