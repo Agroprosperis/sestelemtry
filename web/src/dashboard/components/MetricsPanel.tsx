@@ -19,6 +19,7 @@ type Props = {
   summary: EnergySummary
   flows: EnergyFlows
   preset: RangePreset
+  anchor: Date
   flowsRefreshing: boolean
   onRefreshFlows: () => void
 }
@@ -43,6 +44,7 @@ export function MetricsPanel({
   summary,
   flows,
   preset,
+  anchor,
   flowsRefreshing,
   onRefreshFlows,
 }: Props) {
@@ -61,10 +63,11 @@ export function MetricsPanel({
         loading={loading}
       />
       <TodayCountersNarrative current={current} loading={loading} />
-      <DailySummaryNarrative summary={summary} preset={preset} />
+      <DailySummaryNarrative summary={summary} preset={preset} anchor={anchor} />
       <EnergyFlowPeriodSummary
         flows={flows}
         preset={preset}
+        anchor={anchor}
         refreshing={flowsRefreshing}
         onRefresh={onRefreshFlows}
       />

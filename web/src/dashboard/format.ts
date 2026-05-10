@@ -37,6 +37,33 @@ export function formatEnergyCompactKWhUk(valueKWh: number): string {
   return `${formatChartNumber(valueKWh)} кВт·год`
 }
 
+// formatPeriodLabel renders the concrete period a Підсумок / Перетік
+// card is currently showing — handy beside the static "за день /
+// місяць / рік" titles so the operator can tell at a glance whether
+// they're looking at today, last month, or 2025 without bouncing to
+// the date picker. The output is locale-stable (`uk-UA`) because the
+// rest of the dashboard mixes Ukrainian copy and English numerics
+// and we want the period label to read as Ukrainian prose:
+//   day   → "10 травня 2026"   (родовий відмінок місяця)
+//   month → "травень 2026"     (називний)
+//   year  → "2026"
+export function formatPeriodLabel(preset: RangePreset, anchor: Date): string {
+  if (preset === 'year') {
+    return new Intl.DateTimeFormat('uk-UA', { year: 'numeric' }).format(anchor)
+  }
+  if (preset === 'month') {
+    return new Intl.DateTimeFormat('uk-UA', {
+      month: 'long',
+      year: 'numeric',
+    }).format(anchor)
+  }
+  return new Intl.DateTimeFormat('uk-UA', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  }).format(anchor)
+}
+
 export function formatTimeLabel(date: Date, preset: RangePreset): string {
   if (preset === 'year') {
     return date.toLocaleDateString(undefined, { month: 'short' })

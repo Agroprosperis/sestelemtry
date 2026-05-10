@@ -7,11 +7,12 @@ import {
 } from '@phosphor-icons/react'
 import type { RangePreset } from '../range'
 import type { EnergySummary } from '../transforms/summary'
-import { formatEnergyCompactKWhUk } from '../format'
+import { formatEnergyCompactKWhUk, formatPeriodLabel } from '../format'
 
 type Props = {
   summary: EnergySummary
   preset: RangePreset
+  anchor: Date
 }
 
 const TITLES: Record<RangePreset, string> = {
@@ -23,8 +24,9 @@ const TITLES: Record<RangePreset, string> = {
 const formatKWhUk = formatEnergyCompactKWhUk
 const ICON_SIZE = 20
 
-export function DailySummaryNarrative({ summary, preset }: Props) {
+export function DailySummaryNarrative({ summary, preset, anchor }: Props) {
   const exportIsTiny = summary.gridExport > 0 && summary.gridExport < 1
+  const periodLabel = formatPeriodLabel(preset, anchor)
   return (
     <section
       className="metrics-group daily-narrative"
@@ -32,6 +34,7 @@ export function DailySummaryNarrative({ summary, preset }: Props) {
     >
       <h2 id="daily-narrative-title" className="metrics-group-title">
         {TITLES[preset]}
+        <span className="metrics-group-subtitle"> · {periodLabel}</span>
       </h2>
       <ul className="daily-narrative-list">
         <li>

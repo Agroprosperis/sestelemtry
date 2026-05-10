@@ -5,7 +5,7 @@ import {
   Lightning,
   Sun,
 } from '@phosphor-icons/react'
-import { formatEnergyCompactKWhUk } from '../format'
+import { formatEnergyCompactKWhUk, formatPeriodLabel } from '../format'
 import type { RangePreset } from '../range'
 import type { EnergyFlows } from '../transforms/flows'
 
@@ -29,6 +29,7 @@ import type { EnergyFlows } from '../transforms/flows'
 type Props = {
   flows: EnergyFlows
   preset: RangePreset
+  anchor: Date
   onRefresh: () => void
   refreshing: boolean
 }
@@ -44,9 +45,11 @@ const TITLES: Record<RangePreset, string> = {
 export function EnergyFlowPeriodSummary({
   flows,
   preset,
+  anchor,
   onRefresh,
   refreshing,
 }: Props) {
+  const periodLabel = formatPeriodLabel(preset, anchor)
   return (
     <section
       className="metrics-group daily-narrative"
@@ -56,6 +59,7 @@ export function EnergyFlowPeriodSummary({
       <header className="metrics-group-header">
         <h2 id="energy-flow-period-title" className="metrics-group-title">
           {TITLES[preset]}
+          <span className="metrics-group-subtitle"> · {periodLabel}</span>
         </h2>
         <button
           type="button"

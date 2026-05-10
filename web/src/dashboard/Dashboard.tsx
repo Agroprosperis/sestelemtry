@@ -81,6 +81,7 @@ export function Dashboard() {
           summary={energySummary}
           flows={energyFlows}
           preset={preset}
+          anchor={anchor}
           flowsRefreshing={flowsRefreshing}
           onRefreshFlows={() => void refreshFlows()}
         />

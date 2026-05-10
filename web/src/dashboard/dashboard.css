@@ -173,6 +173,19 @@
   color: #0f172a;
 }
 
+/* metrics-group-subtitle decodes the concrete period the card is
+   showing (e.g. "10 травня 2026") next to the static "Підсумок за
+   день" / "Перетік за день" titles so the operator never wonders
+   which date the numbers belong to. Rendered as inline secondary
+   text so the title still scans as one line on a wide column and
+   wraps naturally on narrow ones. */
+.metrics-group-subtitle {
+  font-weight: 400;
+  color: #64748b;
+  font-size: 14px;
+  white-space: nowrap;
+}
+
 /* metrics-group-header lays a card title on the left and an
    optional action button (e.g. "Оновити") on the right. Cards
    without a refresh action keep using the bare h2 — only

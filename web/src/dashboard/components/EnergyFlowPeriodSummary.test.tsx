@@ -24,6 +24,7 @@ function renderCard(
   const props = {
     flows,
     preset: 'day' as const,
+    anchor: new Date(Date.UTC(2026, 4, 10)),
     refreshing: false,
     onRefresh: vi.fn(),
     ...override,
@@ -83,7 +84,14 @@ describe('EnergyFlowPeriodSummary', () => {
 
   it('renders a period-aware title from the preset', () => {
     renderCard({ preset: 'month' })
-    expect(screen.getByText('Перетік за місяць')).toBeInTheDocument()
+    expect(screen.getByText(/Перетік за місяць/)).toBeInTheDocument()
+  })
+
+  it('decodes the concrete anchor period in the header', () => {
+    renderCard({ preset: 'day', anchor: new Date(Date.UTC(2026, 4, 10)) })
+    // Ukrainian locale renders "10 травня 2026 р." — match the day
+    // and month name regardless of the trailing punctuation/format.
+    expect(screen.getByText(/10 травня 2026/)).toBeInTheDocument()
   })
 
   it('calls onRefresh when the refresh button is clicked', () => {
