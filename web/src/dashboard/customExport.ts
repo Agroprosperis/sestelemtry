@@ -50,6 +50,21 @@ export const DEVICE_EXPORT_METRICS = [
   'local_time_epoch_s',
 ] as const
 
+// Synthetic energy-flow counters produced by the collector's
+// `internal/energyflow` package. They share the cumulative-kWh shape
+// of the accumulators in ENERGY_EXPORT_METRICS (and are listed in
+// `EnergySummaryAccumulators` on the backend), so the bucketed export
+// uses the same `aggregation: 'delta'` path. No Modbus register backs
+// them — `annotateMetricHeader` leaves the column names un-suffixed,
+// matching the "synthetic columns keep their plain header" convention
+// already used for dam/forecast.
+export const FLOW_EXPORT_METRICS = [
+  'pv_to_ess_kwh',
+  'grid_to_ess_kwh',
+  'ess_to_load_kwh',
+  'ess_to_grid_kwh',
+] as const
+
 export type CustomExportColumns = {
   energy: boolean
   price: boolean
@@ -57,6 +72,7 @@ export type CustomExportColumns = {
   power: boolean
   forecast: boolean
   device: boolean
+  flow: boolean
 }
 
 // Bucket sizes offered by the export dialog. `raw` is special: it
@@ -205,6 +221,7 @@ export async function fetchCustomExportData(input: CustomExportInput): Promise<E
   // correspond to a Modbus register.
   const headers: string[] = ['time']
   if (columns.energy) headers.push(...ENERGY_EXPORT_METRICS.map(header))
+  if (columns.flow) headers.push(...FLOW_EXPORT_METRICS.map(header))
   if (columns.price) headers.push('dam_price_uah_per_mwh')
   if (columns.soc) headers.push(header('soc_percent'))
   if (columns.power) headers.push(...POWER_EXPORT_METRICS.map(header))
@@ -228,6 +245,7 @@ export async function fetchCustomExportData(input: CustomExportInput): Promise<E
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || undefined
 
   const energyKeys = columns.energy ? [...ENERGY_EXPORT_METRICS] : []
+  const flowKeys = columns.flow ? [...FLOW_EXPORT_METRICS] : []
   const powerKeys = columns.power ? [...POWER_EXPORT_METRICS] : []
   const deviceKeys = columns.device ? [...DEVICE_EXPORT_METRICS] : []
   const elevator = columns.forecast ? elevatorCodeFor(organizationID) : null
@@ -237,6 +255,27 @@ export async function fetchCustomExportData(input: CustomExportInput): Promise<E
         {
           organizationID,
           metricKeys: energyKeys,
+          from: fromIso,
+          to: toIso,
+          bucket,
+          tz,
+          aggregation: 'delta',
+        },
+        signal,
+      )
+    : Promise.resolve(null)
+  // Flow counters are cumulative kWh too, so the same `delta`
+  // aggregation that turns accumulator counters into per-bucket
+  // production applies. Synthetic-metric absence is treated as
+  // "feature not yet configured for this org" rather than an error:
+  // the backend returns zero points (the rows aren't in
+  // telemetry_samples until the aggregator runs) and the column
+  // ends up empty without aborting the export.
+  const flowP = flowKeys.length
+    ? fetchTimeseries(
+        {
+          organizationID,
+          metricKeys: flowKeys,
           from: fromIso,
           to: toIso,
           bucket,
@@ -324,8 +363,9 @@ export async function fetchCustomExportData(input: CustomExportInput): Promise<E
         })
       : Promise.resolve([])
 
-  const [energy, soc, power, device, dam, forecast] = await Promise.all([
+  const [energy, flow, soc, power, device, dam, forecast] = await Promise.all([
     energyP,
+    flowP,
     socP,
     powerP,
     deviceP,
@@ -356,6 +396,7 @@ export async function fetchCustomExportData(input: CustomExportInput): Promise<E
     }
   }
   take(energy?.points, energyKeys)
+  take(flow?.points, flowKeys)
   take(soc?.points, ['soc_percent'])
   take(power?.points, powerKeys)
   take(device?.points, deviceKeys)
@@ -403,6 +444,12 @@ export async function fetchCustomExportData(input: CustomExportInput): Promise<E
     // produce empty cells.
     if (columns.energy) {
       for (const key of ENERGY_EXPORT_METRICS) {
+        const v = valuesByKeyByTime.get(key)?.get(t)
+        row[header(key)] = typeof v === 'number' && Number.isFinite(v) ? v : null
+      }
+    }
+    if (columns.flow) {
+      for (const key of FLOW_EXPORT_METRICS) {
         const v = valuesByKeyByTime.get(key)?.get(t)
         row[header(key)] = typeof v === 'number' && Number.isFinite(v) ? v : null
       }
@@ -480,6 +527,7 @@ export function customExportFilename(input: {
 export function rawExportMetricKeys(columns: CustomExportColumns): string[] {
   const keys: string[] = []
   if (columns.energy) keys.push(...ENERGY_EXPORT_METRICS)
+  if (columns.flow) keys.push(...FLOW_EXPORT_METRICS)
   if (columns.soc) keys.push('soc_percent')
   if (columns.power) keys.push(...POWER_EXPORT_METRICS)
   if (columns.device) keys.push(...DEVICE_EXPORT_METRICS)

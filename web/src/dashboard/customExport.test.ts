@@ -100,6 +100,7 @@ describe('fetchCustomExportData', () => {
       bucket: '1 hour',
       columns: {
         energy: false,
+        flow: false,
         price: false,
         soc: false,
         power: false,
@@ -120,6 +121,7 @@ describe('fetchCustomExportData', () => {
       bucket: '1 hour',
       columns: {
         energy: true,
+        flow: false,
         price: false,
         soc: true,
         power: true,
@@ -151,6 +153,7 @@ describe('fetchCustomExportData', () => {
         // of the timeseries points (not a DAM-only bucket whose
         // telemetry cells would be null in any timezone).
         energy: true,
+        flow: false,
         price: false,
         soc: true,
         power: true,
@@ -192,6 +195,7 @@ describe('fetchCustomExportData', () => {
       bucket: '1 hour',
       columns: {
         energy: false,
+        flow: false,
         price: false,
         soc: true,
         power: false,
@@ -216,6 +220,7 @@ describe('fetchCustomExportData', () => {
       bucket: '1 hour',
       columns: {
         energy: false,
+        flow: false,
         price: false,
         soc: false,
         power: false,
@@ -234,6 +239,47 @@ describe('fetchCustomExportData', () => {
     expect(table.headers).toContain('local_time_epoch_s_40009')
   })
 
+  it('fetches the four synthetic flow counters with delta aggregation when the flow column is checked', async () => {
+    // Flow metrics share the cumulative-kWh shape of the
+    // accumulators, so the bucketed export must use the same delta
+    // aggregation to render per-bucket production rather than the
+    // monotonically growing raw counter.
+    const table = await fetchCustomExportData({
+      organizationID: 'pe',
+      from: new Date(2026, 4, 7),
+      to: new Date(2026, 4, 8),
+      bucket: '1 hour',
+      columns: {
+        energy: false,
+        flow: true,
+        price: false,
+        soc: false,
+        power: false,
+        device: false,
+        forecast: false,
+      },
+    })
+    expect(api.fetchTimeseries).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metricKeys: ['pv_to_ess_kwh', 'grid_to_ess_kwh', 'ess_to_load_kwh', 'ess_to_grid_kwh'],
+        aggregation: 'delta',
+      }),
+      undefined,
+    )
+    expect(table.headers).toEqual([
+      'time',
+      'pv_to_ess_kwh',
+      'grid_to_ess_kwh',
+      'ess_to_load_kwh',
+      'ess_to_grid_kwh',
+    ])
+    // Synthetic columns have no Modbus address, so the headers stay
+    // un-suffixed even when a registerAddresses map is supplied for
+    // other columns (covered by the energy/soc/power test above).
+    expect(table.rows.length).toBeGreaterThan(0)
+    expect(table.rows[0].pv_to_ess_kwh).toBe(1)
+  })
+
   it('refuses the raw bucket — that path goes through fetchRawSamplesCsv', async () => {
     await expect(
       fetchCustomExportData({
@@ -243,6 +289,7 @@ describe('fetchCustomExportData', () => {
         bucket: 'raw',
         columns: {
           energy: true,
+          flow: false,
           price: false,
           soc: false,
           power: false,
@@ -258,6 +305,7 @@ describe('rawExportMetricKeys', () => {
   it('flattens column groups into the metric_keys list /api/v1/samples expects', () => {
     const keys = rawExportMetricKeys({
       energy: true,
+      flow: true,
       price: true, // ignored — DAM prices have no raw rows
       soc: true,
       power: true,
@@ -268,6 +316,13 @@ describe('rawExportMetricKeys', () => {
     expect(keys).toContain('accumulated_pv_energy_yield_kwh')
     expect(keys).toContain('active_pv_power_kw')
     expect(keys).toContain('local_time_epoch_s')
+    // Synthetic flow counters live in telemetry_samples (written by
+    // the collector's energyflow package), so they belong in the raw
+    // export's metric_keys list alongside the catalog metrics.
+    expect(keys).toContain('pv_to_ess_kwh')
+    expect(keys).toContain('grid_to_ess_kwh')
+    expect(keys).toContain('ess_to_load_kwh')
+    expect(keys).toContain('ess_to_grid_kwh')
     // Forecast/price metric keys must not leak into the request — the
     // server would reject them since they don't live in
     // telemetry_samples, and we'd burn a round trip to find out.
@@ -279,6 +334,7 @@ describe('rawExportMetricKeys', () => {
     expect(
       rawExportMetricKeys({
         energy: false,
+        flow: false,
         price: true,
         soc: false,
         power: false,
@@ -294,6 +350,7 @@ describe('rawExportMetricKeys', () => {
     // empty regardless of how the pivot reshapes the rows.
     const keys = rawExportMetricKeys({
       energy: false,
+      flow: false,
       price: false,
       soc: true,
       power: false,
@@ -307,6 +364,7 @@ describe('rawExportMetricKeys', () => {
   it('does not duplicate local_time_epoch_s when the device group is also selected', () => {
     const keys = rawExportMetricKeys({
       energy: false,
+      flow: false,
       price: false,
       soc: false,
       power: false,
@@ -315,6 +373,27 @@ describe('rawExportMetricKeys', () => {
     })
     const occurrences = keys.filter((k) => k === 'local_time_epoch_s').length
     expect(occurrences).toBe(1)
+  })
+
+  it('emits only the four flow counters (plus local_time) when the flow group is the lone selection', () => {
+    // Operators investigating an allocation regression want a CSV of
+    // just the energy-flow rows — verify nothing else sneaks in.
+    const keys = rawExportMetricKeys({
+      energy: false,
+      flow: true,
+      price: false,
+      soc: false,
+      power: false,
+      device: false,
+      forecast: false,
+    })
+    expect(keys).toEqual([
+      'pv_to_ess_kwh',
+      'grid_to_ess_kwh',
+      'ess_to_load_kwh',
+      'ess_to_grid_kwh',
+      'local_time_epoch_s',
+    ])
   })
 })
 

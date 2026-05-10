@@ -35,6 +35,11 @@ const COLUMN_OPTIONS: Array<{ id: keyof CustomExportColumns; label: string; hint
     label: 'Енергія (kWh)',
     hint: 'PV / заряд / розряд / купівля / продаж / споживання',
   },
+  {
+    id: 'flow',
+    label: 'Перетіки енергії (kWh)',
+    hint: 'Синтетичні pv→ess / grid→ess / ess→load / ess→grid (collector energyflow)',
+  },
   { id: 'price', label: 'Ціна РДН (грн/МВт·год)' },
   { id: 'soc', label: 'Рівень заряду УЗЕ (SOC %)' },
   {
@@ -103,6 +108,7 @@ export function ExportDialog({ organizationID, initialAnchor, onClose }: Props) 
   const [bucketChoice, setBucketChoice] = useState<CustomExportBucket | 'auto'>('auto')
   const [columns, setColumns] = useState<CustomExportColumns>({
     energy: true,
+    flow: true,
     price: true,
     soc: false,
     power: false,
