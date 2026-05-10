@@ -53,7 +53,6 @@ export function MetricsPanel({
         </p>
       )}
       <CurrentSnapshotNarrative
-        current={current}
         liveAllocation={liveAllocation}
         loading={loading}
       />

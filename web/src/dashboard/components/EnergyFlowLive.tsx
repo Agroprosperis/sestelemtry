@@ -201,9 +201,24 @@ function buildEdges(allocation: LiveAllocation): EdgeRender[] {
 
 type Props = {
   allocation: LiveAllocation
+  // variant === 'compact' renders a slimmed-down version with no
+  // header and tighter card/hub sizing — designed to live inside
+  // a metrics panel column where vertical space is limited. The
+  // visual semantics (anchor coordinates, animation, edges) stay
+  // identical so operators see the same shape, just smaller.
+  variant?: 'default' | 'compact'
+  // wrapInSection controls whether to wrap the diagram in its own
+  // <section.chart-card>. When the diagram is embedded inside a
+  // sibling card (e.g. the snapshot card on the metrics panel) we
+  // skip the wrapper to avoid nested chart-card chrome.
+  wrapInSection?: boolean
 }
 
-export function EnergyFlowLive({ allocation }: Props) {
+export function EnergyFlowLive({
+  allocation,
+  variant = 'default',
+  wrapInSection = true,
+}: Props) {
   // ageSeconds drives the "Updated N seconds ago" pill in the
   // header. We re-tick every second instead of recomputing on
   // each render so the value is correct even when /current
@@ -223,27 +238,30 @@ export function EnergyFlowLive({ allocation }: Props) {
 
   const balanceLabel = describeBalance(allocation)
 
-  return (
-    <section
-      className="chart-card energy-flow-live-card"
-      aria-label="Перетік потужності в реальному часі"
-    >
-      <header className="energy-flow-live-header">
-        <h2>Перетік потужності зараз</h2>
-        <span
-          className={`energy-flow-live-status${
-            allocation.status === 'no_data' ? ' is-stale' : ''
-          }`}
-          aria-live="polite"
-        >
-          <span className="energy-flow-live-dot" aria-hidden="true" />
-          {allocation.status === 'no_data'
-            ? 'Немає даних'
-            : ageSeconds === null
-              ? 'Оновлення…'
-              : `Оновлено ${formatSeconds(ageSeconds)} тому`}
-        </span>
-      </header>
+  const isCompact = variant === 'compact'
+
+  const header = !isCompact && (
+    <header className="energy-flow-live-header">
+      <h2>Перетік потужності зараз</h2>
+      <span
+        className={`energy-flow-live-status${
+          allocation.status === 'no_data' ? ' is-stale' : ''
+        }`}
+        aria-live="polite"
+      >
+        <span className="energy-flow-live-dot" aria-hidden="true" />
+        {allocation.status === 'no_data'
+          ? 'Немає даних'
+          : ageSeconds === null
+            ? 'Оновлення…'
+            : `Оновлено ${formatSeconds(ageSeconds)} тому`}
+      </span>
+    </header>
+  )
+
+  const body = (
+    <>
+      {header}
       <div className="energy-flow-live-stage">
         <svg
           viewBox="0 0 1000 500"
@@ -384,6 +402,28 @@ export function EnergyFlowLive({ allocation }: Props) {
           </div>
         </div>
       </div>
+    </>
+  )
+
+  if (!wrapInSection) {
+    return (
+      <div
+        className={`energy-flow-live-card${isCompact ? ' is-compact' : ''}`}
+        aria-label="Перетік потужності в реальному часі"
+      >
+        {body}
+      </div>
+    )
+  }
+
+  return (
+    <section
+      className={`chart-card energy-flow-live-card${
+        isCompact ? ' is-compact' : ''
+      }`}
+      aria-label="Перетік потужності в реальному часі"
+    >
+      {body}
     </section>
   )
 }

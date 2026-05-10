@@ -43,7 +43,7 @@ vi.mock('./hooks/useDashboardData', () => ({
       selfSufficiencyPct: 0,
     },
     energyFlows: EMPTY_FLOWS,
-    liveAllocation: NO_DATA_ALLOCATION,
+    liveAllocation: { ...NO_DATA_ALLOCATION, socPercent: 88 },
     loading: false,
     cardsLoading: false,
     error: null,
@@ -53,7 +53,10 @@ vi.mock('./hooks/useDashboardData', () => ({
 describe('Dashboard', () => {
   it('renders KPI card values from the data hook', () => {
     render(<Dashboard />)
-    expect(screen.getByText(/SOC/)).toBeInTheDocument()
-    expect(screen.getByText(/88[.,]5/)).toBeInTheDocument()
+    // SOC surfaces from the compact live-flow diagram embedded in
+    // the "Поточне енергоспоживання" card (УЗЕ corner). The big
+    // standalone diagram on the right also renders the same SOC,
+    // so we expect at least one match.
+    expect(screen.getAllByText(/SOC\s+88/).length).toBeGreaterThan(0)
   })
 })
