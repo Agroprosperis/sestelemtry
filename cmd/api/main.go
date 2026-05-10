@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/nesh/sestelemetry/internal/api"
+	"github.com/nesh/sestelemetry/internal/config"
 	"github.com/nesh/sestelemetry/internal/storage"
 )
 
@@ -19,6 +20,7 @@ func main() {
 	listenAddr := flag.String("listen", ":8080", "HTTP listen address")
 	defaultDB := flag.String("database-url", "", "PostgreSQL connection string (fallback if DATABASE_URL is unset)")
 	allowOrigin := flag.String("allow-origin", "*", "Allowed CORS origin")
+	configPath := flag.String("config", "", "YAML config path (optional; enables /api/v1/organizations)")
 	flag.Parse()
 
 	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
@@ -56,6 +58,24 @@ func main() {
 	log.Info("api_features", "daily_cagg", hasCAGG)
 
 	svc := api.NewHandlers(store, *allowOrigin)
+	// Optional: load org metadata from YAML so /api/v1/organizations
+	// can return display names + coordinates. The API server runs
+	// fine without a config (telemetry data lives in the DB), so a
+	// missing or malformed config logs a warning rather than aborting
+	// startup — the org list endpoint just returns an empty array.
+	cfgPath := strings.TrimSpace(*configPath)
+	if cfgPath == "" {
+		cfgPath = strings.TrimSpace(os.Getenv("CONFIG_PATH"))
+	}
+	if cfgPath != "" {
+		cfg, err := config.Load(cfgPath)
+		if err != nil {
+			log.Warn("api_config_load", "path", cfgPath, "err", err)
+		} else {
+			svc.SetOrganizations(toOrganizationInfos(cfg.Organizations))
+			log.Info("api_config_loaded", "path", cfgPath, "organizations", len(cfg.Organizations))
+		}
+	}
 	server := &http.Server{
 		Addr:              *listenAddr,
 		Handler:           svc.Router(),
@@ -86,4 +106,24 @@ func main() {
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		log.Error("shutdown", "err", err)
 	}
+}
+
+// toOrganizationInfos projects the YAML config's Organization entries
+// into the public, dashboard-safe shape served by /api/v1/organizations.
+// Modbus connection details are intentionally dropped — the dashboard
+// has no business knowing IPs and unit IDs.
+func toOrganizationInfos(orgs []config.Organization) []api.OrganizationInfo {
+	out := make([]api.OrganizationInfo, 0, len(orgs))
+	for _, o := range orgs {
+		info := api.OrganizationInfo{ID: o.ID, Name: o.Name}
+		if o.Location != nil {
+			info.Location = &api.LocationInfo{
+				Latitude:  o.Location.Latitude,
+				Longitude: o.Location.Longitude,
+				City:      o.Location.City,
+			}
+		}
+		out = append(out, info)
+	}
+	return out
 }

@@ -170,6 +170,74 @@ func TestDashboardConfigEndpoint(t *testing.T) {
 	}
 }
 
+func TestOrganizationsListEmpty(t *testing.T) {
+	h := NewHandlers(&mockStore{}, "*")
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/organizations", nil)
+	rec := httptest.NewRecorder()
+	h.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200 got %d", rec.Code)
+	}
+	var got OrganizationsResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Organizations == nil {
+		t.Fatalf("expected non-nil slice (even if empty), got nil")
+	}
+	if len(got.Organizations) != 0 {
+		t.Fatalf("expected empty slice, got %+v", got.Organizations)
+	}
+}
+
+func TestOrganizationsListReturnsSetEntries(t *testing.T) {
+	h := NewHandlers(&mockStore{}, "*")
+	h.SetOrganizations([]OrganizationInfo{
+		{
+			ID:   "ze",
+			Name: "ZE",
+			Location: &LocationInfo{
+				Latitude:  49.0191004,
+				Longitude: 28.1260144,
+				City:      "Жмеринка",
+			},
+		},
+		{ID: "demo-org", Name: "Demo organization"},
+	})
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/organizations", nil)
+	rec := httptest.NewRecorder()
+	h.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200 got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var got OrganizationsResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Organizations) != 2 {
+		t.Fatalf("want 2 orgs, got %d", len(got.Organizations))
+	}
+	if got.Organizations[0].ID != "ze" || got.Organizations[0].Location == nil {
+		t.Fatalf("ze entry missing location: %+v", got.Organizations[0])
+	}
+	if got.Organizations[0].Location.City != "Жмеринка" {
+		t.Fatalf("city mismatch: %q", got.Organizations[0].Location.City)
+	}
+	if got.Organizations[1].Location != nil {
+		t.Fatalf("demo-org should have no location, got %+v", got.Organizations[1].Location)
+	}
+}
+
+func TestOrganizationsListRejectsNonGet(t *testing.T) {
+	h := NewHandlers(&mockStore{}, "*")
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/organizations", nil)
+	rec := httptest.NewRecorder()
+	h.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("want 405 got %d", rec.Code)
+	}
+}
+
 func TestReadyzSuccess(t *testing.T) {
 	h := NewHandlers(&mockStore{}, "*")
 	req := httptest.NewRequest(http.MethodGet, "/readyz", nil)

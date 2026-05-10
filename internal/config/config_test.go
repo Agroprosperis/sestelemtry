@@ -279,6 +279,71 @@ organizations:
 	}
 }
 
+func TestLoadParsesLocation(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	content := `register_catalog: registers/huawei_smartlogger.yaml
+organizations:
+  - id: ze
+    location:
+      latitude: 49.0191004
+      longitude: 28.1260144
+      city: "Zhmerynka"
+    modbus:
+      host: 127.0.0.1
+  - id: demo-org
+    modbus:
+      host: 127.0.0.2
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load error: %v", err)
+	}
+	loc := cfg.Organizations[0].Location
+	if loc == nil {
+		t.Fatal("expected location for ze, got nil")
+	}
+	if loc.Latitude != 49.0191004 || loc.Longitude != 28.1260144 || loc.City != "Zhmerynka" {
+		t.Fatalf("unexpected location: %+v", loc)
+	}
+	if cfg.Organizations[1].Location != nil {
+		t.Fatalf("demo-org should have no location, got %+v", cfg.Organizations[1].Location)
+	}
+}
+
+func TestLoadRejectsBadLocation(t *testing.T) {
+	dir := t.TempDir()
+	cases := map[string]string{
+		"bad latitude": `      latitude: 95
+      longitude: 0
+`,
+		"bad longitude": `      latitude: 0
+      longitude: 200
+`,
+	}
+	for name, loc := range cases {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(dir, name+".yaml")
+			content := `register_catalog: registers/huawei_smartlogger.yaml
+organizations:
+  - id: org-a
+    location:
+` + loc + `    modbus:
+      host: 127.0.0.1
+`
+			if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := Load(path); err == nil {
+				t.Fatalf("expected validation error, got nil")
+			}
+		})
+	}
+}
+
 func TestLoadRejectsDuplicateOrgID(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")

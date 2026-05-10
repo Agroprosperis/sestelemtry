@@ -59,6 +59,24 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/DashboardConfig"
+  /api/v1/organizations:
+    get:
+      summary: Public organization metadata
+      operationId: listOrganizations
+      description: |
+        Returns the list of configured organizations with their public
+        metadata (id, display name, optional location). Sourced from
+        the server YAML config; Modbus connection details are
+        intentionally omitted. The dashboard uses this to populate the
+        organization switcher and to look up coordinates for per-site
+        features such as the weather widget.
+      responses:
+        "200":
+          description: Organizations list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrganizationsResponse"
   /api/v1/current:
     get:
       summary: Current metric values
@@ -389,6 +407,41 @@ components:
           items:
             $ref: "#/components/schemas/DashboardMetric"
       required: [cards, power_chart, energy_chart]
+    LocationInfo:
+      type: object
+      properties:
+        latitude:
+          type: number
+          format: double
+          example: 49.0191004
+        longitude:
+          type: number
+          format: double
+          example: 28.1260144
+        city:
+          type: string
+          example: Жмеринка
+      required: [latitude, longitude, city]
+    OrganizationInfo:
+      type: object
+      properties:
+        id:
+          type: string
+          example: ze
+        name:
+          type: string
+          example: ZE
+        location:
+          $ref: "#/components/schemas/LocationInfo"
+      required: [id]
+    OrganizationsResponse:
+      type: object
+      properties:
+        organizations:
+          type: array
+          items:
+            $ref: "#/components/schemas/OrganizationInfo"
+      required: [organizations]
     CurrentMetric:
       type: object
       properties:

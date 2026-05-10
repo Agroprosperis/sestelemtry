@@ -35,11 +35,26 @@ type ModbusDevice struct {
 	MetricKeys []string `yaml:"metric_keys"`
 }
 
+// Location is the geographic site of an organization. Consumed by the
+// API server to expose coordinates to clients (e.g. the dashboard's
+// weather widget). Optional: organizations without a `location` block
+// are returned with `Location == nil` and any UI feature that needs a
+// position simply hides itself.
+type Location struct {
+	Latitude  float64 `yaml:"latitude"`
+	Longitude float64 `yaml:"longitude"`
+	// City is a short human-readable label (e.g. "Жмеринка") shown
+	// alongside the data. Optional; empty values are passed through
+	// to the client unchanged.
+	City string `yaml:"city"`
+}
+
 type Organization struct {
 	ID            string         `yaml:"id"`
 	Name          string         `yaml:"name"`
 	SiteID        string         `yaml:"site_id"`
 	DeviceID      string         `yaml:"device_id"`
+	Location      *Location      `yaml:"location,omitempty"`
 	PollInterval  time.Duration  `yaml:"poll_interval"`
 	Modbus        Modbus         `yaml:"modbus"`
 	ModbusDevices []ModbusDevice `yaml:"modbus_devices"`
@@ -258,6 +273,14 @@ func (c *Root) validate() error {
 		for j, d := range o.ModbusDevices {
 			if strings.TrimSpace(d.Host) == "" {
 				return fmt.Errorf("config: org %q modbus_devices[%d].host is required", id, j)
+			}
+		}
+		if o.Location != nil {
+			if o.Location.Latitude < -90 || o.Location.Latitude > 90 {
+				return fmt.Errorf("config: org %q location.latitude out of range [-90,90]: %g", id, o.Location.Latitude)
+			}
+			if o.Location.Longitude < -180 || o.Location.Longitude > 180 {
+				return fmt.Errorf("config: org %q location.longitude out of range [-180,180]: %g", id, o.Location.Longitude)
 			}
 		}
 	}

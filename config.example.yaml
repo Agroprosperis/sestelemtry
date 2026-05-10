@@ -14,6 +14,14 @@ organizations:
     site_id: site-a
     device_id: smartlogger-1
     poll_interval: 15s
+    # `location` is optional and is exposed to the dashboard via
+    # /api/v1/organizations. The weather widget uses it to query
+    # Open-Meteo for the right coordinates; orgs without a location
+    # block simply hide the widget.
+    location:
+      latitude: 50.4501
+      longitude: 30.5234
+      city: "Київ"
     modbus:
       host: 192.168.1.50
       port: 502

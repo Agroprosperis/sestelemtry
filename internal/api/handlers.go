@@ -14,9 +14,10 @@ import (
 )
 
 type Handlers struct {
-	store       storeReader
-	allowOrigin string
-	log         *slog.Logger
+	store         storeReader
+	allowOrigin   string
+	log           *slog.Logger
+	organizations []OrganizationInfo
 }
 
 type storeReader interface {
@@ -49,11 +50,26 @@ func NewHandlers(store storeReader, allowOrigin string) *Handlers {
 	}
 }
 
+// SetOrganizations replaces the organization metadata served by
+// /api/v1/organizations. The slice is shallow-copied so the caller
+// can mutate the source without affecting in-flight requests; nil /
+// empty input means the endpoint returns `{"organizations": []}`.
+func (h *Handlers) SetOrganizations(orgs []OrganizationInfo) {
+	if len(orgs) == 0 {
+		h.organizations = nil
+		return
+	}
+	out := make([]OrganizationInfo, len(orgs))
+	copy(out, orgs)
+	h.organizations = out
+}
+
 func (h *Handlers) Router() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", h.healthz)
 	mux.HandleFunc("/readyz", h.readyz)
 	mux.HandleFunc("/api/v1/dashboard-config", h.dashboardConfig)
+	mux.HandleFunc("/api/v1/organizations", h.organizationsList)
 	mux.HandleFunc("/api/v1/current", h.current)
 	mux.HandleFunc("/api/v1/timeseries", h.timeseries)
 	mux.HandleFunc("/api/v1/samples", h.samples)
@@ -91,6 +107,25 @@ func (h *Handlers) dashboardConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, DefaultDashboardConfig)
+}
+
+// organizationsList returns the public metadata for every configured
+// organization (id, display name, optional location). The dashboard
+// uses this to populate the org switcher and to look up coordinates
+// for per-site features (e.g. the weather widget) without hard-coding
+// them in the frontend.
+func (h *Handlers) organizationsList(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	resp := OrganizationsResponse{Organizations: h.organizations}
+	if resp.Organizations == nil {
+		// Always emit an explicit empty array so JSON consumers can
+		// iterate without a nil-check.
+		resp.Organizations = []OrganizationInfo{}
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // registers serves the static metric_key → Modbus register map used

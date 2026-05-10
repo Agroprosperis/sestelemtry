@@ -148,6 +148,33 @@ type EnergySummaryResponse struct {
 	Totals         map[string]float64 `json:"totals"`
 }
 
+// LocationInfo is the geographic site of an organization, exposed via
+// /api/v1/organizations. Mirrors `config.Location` minus its YAML tags.
+// Empty `City` is preserved as an empty string (not omitted) so the
+// JSON shape stays predictable for clients.
+type LocationInfo struct {
+	Latitude  float64 `json:"latitude"`
+	Longitude float64 `json:"longitude"`
+	City      string  `json:"city"`
+}
+
+// OrganizationInfo is the public, dashboard-safe view of an
+// organization. Modbus connection details are deliberately *not*
+// included — the API only exposes information the UI needs to render
+// (id, display name, optional location).
+type OrganizationInfo struct {
+	ID       string        `json:"id"`
+	Name     string        `json:"name,omitempty"`
+	Location *LocationInfo `json:"location,omitempty"`
+}
+
+// OrganizationsResponse is the body of GET /api/v1/organizations.
+// Wrapped in an object (rather than a bare array) so we can add
+// pagination / metadata fields later without breaking clients.
+type OrganizationsResponse struct {
+	Organizations []OrganizationInfo `json:"organizations"`
+}
+
 // SampleRow is one raw `telemetry_samples` record exposed by
 // /api/v1/samples. The endpoint streams these rows as CSV so the
 // dashboard's "Експорт даних → Сирі дані" path can hand the analyst

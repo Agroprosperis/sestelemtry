@@ -20,6 +20,13 @@ organizations:
   - id: ze
     name: ZE
     poll_interval: 1s
+    # Coordinates are exposed to the dashboard via /api/v1/organizations
+    # so the weather widget can fetch the local forecast without
+    # hard-coding lat/lon in the frontend.
+    location:
+      latitude: 49.0191004
+      longitude: 28.1260144
+      city: "Жмеринка"
     modbus_devices:
       - host: 10.28.40.102          # UZE / ESS smartlogger
         port: 502

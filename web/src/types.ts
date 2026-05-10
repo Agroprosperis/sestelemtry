@@ -69,6 +69,71 @@ export type RegistersResponse = {
   metadata: Record<string, RegisterMeta>
 }
 
+// OrganizationLocation mirrors the backend's `LocationInfo`. Both
+// fields are required when present; the wrapping `location` is itself
+// optional on `OrganizationInfo` (orgs without a configured location
+// just don't ship the field).
+export type OrganizationLocation = {
+  latitude: number
+  longitude: number
+  city: string
+}
+
+// OrganizationInfo is the per-org metadata the dashboard receives from
+// /api/v1/organizations. We deliberately keep this narrow — the API
+// strips Modbus connection details before serializing — so the
+// frontend never accidentally renders an internal IP.
+export type OrganizationInfo = {
+  id: string
+  name?: string
+  location?: OrganizationLocation
+}
+
+export type OrganizationsResponse = {
+  organizations: OrganizationInfo[]
+}
+
+// OpenMeteoForecast is the subset of the api.open-meteo.com /v1/forecast
+// response that the weather widget consumes. Only the fields we actually
+// read are typed; the upstream payload contains many more keys (radiation
+// breakdowns, units metadata, timezone offsets, etc.) which we ignore.
+export type OpenMeteoForecast = {
+  // Local-TZ ISO timestamps without offsets, e.g. `2026-05-10T13:00`.
+  // Each `hourly[k][i]` shares the same index `i` as `hourly.time[i]`.
+  hourly: {
+    time: string[]
+    temperature_2m: number[]
+    cloud_cover: number[]
+  }
+  // Daily series — one entry per day. `time[i]` is `YYYY-MM-DD` in local TZ.
+  // `sunshine_duration` and `daylight_duration` are seconds; their ratio
+  // drives the condition bucket in summarizeWeatherDay.
+  daily: {
+    time: string[]
+    sunshine_duration: number[]
+    daylight_duration: number[]
+  }
+}
+
+// WeatherCondition is the discrete bucket the WeatherCard renders an icon
+// for. Derived from the daily sunshine/daylight ratio (and average cloud
+// cover as a tiebreaker), since the supplied API URL does not include any
+// precipitation field.
+export type WeatherCondition = 'sunny' | 'partly_cloudy' | 'cloudy' | 'overcast'
+
+// WeatherDaySummary collapses the hourly + daily series into the four
+// numbers the dashboard card actually shows. Returned by
+// summarizeWeatherDay; null when the requested day is outside the
+// forecast window.
+export type WeatherDaySummary = {
+  // YYYY-MM-DD in the location's local TZ.
+  day: string
+  tempMinC: number
+  tempMaxC: number
+  cloudCoverAvgPct: number
+  condition: WeatherCondition
+}
+
 // PvForecastPoint mirrors a single record returned by the n8n PV forecast
 // webhook. Each record describes one panel orientation × one hour-of-day in
 // local Kyiv time (the n8n flow already converts from UTC). For a single

@@ -2,6 +2,8 @@ import type {
   CurrentResponse,
   DAMPricesResponse,
   DashboardConfig,
+  OpenMeteoForecast,
+  OrganizationsResponse,
   PvForecastPoint,
   RegistersResponse,
   TimeseriesResponse,
@@ -29,6 +31,37 @@ export async function fetchDashboardConfig(signal?: AbortSignal): Promise<Dashbo
     throw new Error(`dashboard-config request failed: ${res.status}`)
   }
   return res.json()
+}
+
+let organizationsCache: Promise<OrganizationsResponse> | null = null
+
+// fetchOrganizations returns the public org metadata (id, display
+// name, optional location). Memoized at module level because the
+// backend serves a static list derived from YAML config — no need to
+// re-fetch on every dashboard mount or every weather card render. A
+// failed first attempt clears the cache so a transient hiccup at boot
+// doesn't poison every later request.
+export async function fetchOrganizations(signal?: AbortSignal): Promise<OrganizationsResponse> {
+  if (organizationsCache) return organizationsCache
+  organizationsCache = (async () => {
+    const res = await fetch(withBase('/api/v1/organizations'), { signal })
+    if (!res.ok) {
+      throw new Error(`organizations request failed: ${res.status}`)
+    }
+    return (await res.json()) as OrganizationsResponse
+  })().catch((e) => {
+    organizationsCache = null
+    throw e
+  })
+  return organizationsCache
+}
+
+// resetOrganizationsCache is used by the test suite to drop the
+// memoized response between cases. Production code should never call
+// this — refreshing the static map mid-session has no observable
+// benefit.
+export function resetOrganizationsCache(): void {
+  organizationsCache = null
 }
 
 let registersCache: Promise<RegistersResponse> | null = null
@@ -304,4 +337,58 @@ export async function fetchPvForecast(
   throw lastError instanceof Error
     ? lastError
     : new Error('pv-forecast request failed')
+}
+
+const OPEN_METEO_FORECAST_URL = 'https://api.open-meteo.com/v1/forecast'
+// Same backoff schedule as the n8n forecast — Open-Meteo is third-party,
+// so a single transient hiccup shouldn't blank the weather card.
+const OPEN_METEO_RETRY_DELAYS_MS = [200, 600]
+
+// fetchOpenMeteoWeather calls the public Open-Meteo /v1/forecast endpoint
+// with the exact `daily=` / `hourly=` shape the dashboard PV pipeline uses
+// elsewhere, so caching CDNs see the same canonical URL. The browser hits
+// Open-Meteo directly (no backend proxy), mirroring fetchPvForecast.
+export async function fetchOpenMeteoWeather(
+  input: { latitude: number; longitude: number },
+  signal?: AbortSignal,
+): Promise<OpenMeteoForecast> {
+  const url = new URL(OPEN_METEO_FORECAST_URL)
+  url.searchParams.set('latitude', String(input.latitude))
+  url.searchParams.set('longitude', String(input.longitude))
+  url.searchParams.set(
+    'daily',
+    'sunrise,sunset,daylight_duration,sunshine_duration,shortwave_radiation_sum',
+  )
+  url.searchParams.set(
+    'hourly',
+    'temperature_2m,cloud_cover,shortwave_radiation,direct_radiation,diffuse_radiation,global_tilted_irradiance_instant',
+  )
+  url.searchParams.set('timezone', 'auto')
+
+  let lastError: unknown = null
+  for (let attempt = 0; attempt <= OPEN_METEO_RETRY_DELAYS_MS.length; attempt++) {
+    if (signal?.aborted) {
+      throw new DOMException('Aborted', 'AbortError')
+    }
+    try {
+      const res = await fetch(url.toString(), { signal })
+      if (!res.ok) {
+        throw new Error(`open-meteo request failed: ${res.status}`)
+      }
+      return (await res.json()) as OpenMeteoForecast
+    } catch (e) {
+      if (isAbortError(e)) throw e
+      lastError = e
+      const isTransient =
+        e instanceof TypeError ||
+        (e instanceof Error && /open-meteo request failed: 5\d\d/.test(e.message))
+      if (!isTransient) throw e
+      const nextDelay = OPEN_METEO_RETRY_DELAYS_MS[attempt]
+      if (nextDelay === undefined) break
+      await delay(nextDelay, signal)
+    }
+  }
+  throw lastError instanceof Error
+    ? lastError
+    : new Error('open-meteo request failed')
 }

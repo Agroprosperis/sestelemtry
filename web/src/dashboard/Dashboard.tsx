@@ -3,6 +3,7 @@ import './dashboard.css'
 import { DashboardHeader } from './components/DashboardHeader'
 import { EnergyChart } from './components/EnergyChart'
 import { MetricsPanel } from './components/MetricsPanel'
+import { WeatherCard } from './components/WeatherCard'
 import { useDashboardData } from './hooks/useDashboardData'
 import { useOrganizationParam } from './hooks/useOrganizationParam'
 import { useRangeParams } from './hooks/useRangeParams'
@@ -77,6 +78,11 @@ export function Dashboard() {
         />
 
         <div className="dashboard-charts">
+          <WeatherCard
+            organizationID={organizationID}
+            anchor={anchor}
+            preset={preset}
+          />
           <EnergyChart
             metrics={config.energy_chart}
             series={energySeries}
