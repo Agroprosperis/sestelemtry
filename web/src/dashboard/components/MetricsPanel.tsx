@@ -81,13 +81,15 @@ export function MetricsPanel({
         debug={debug}
         registers={registers}
       />
-      <EnergyFlowPeriodSummary
-        flows={flows}
-        preset={preset}
-        anchor={anchor}
-        refreshing={flowsRefreshing}
-        onRefresh={onRefreshFlows}
-      />
+      {preset === 'day' && (
+        <EnergyFlowPeriodSummary
+          flows={flows}
+          preset={preset}
+          anchor={anchor}
+          refreshing={flowsRefreshing}
+          onRefresh={onRefreshFlows}
+        />
+      )}
       <AccumulatedSnapshotNarrative
         current={current}
         loading={loading}

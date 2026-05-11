@@ -39,25 +39,36 @@ import { usePvForecast } from './usePvForecast'
 // "spent / produced / from PV" breakdown) and the energy-flow period
 // summary. Mirrors `EnergySummaryAccumulators` on the backend.
 //
-// The four `*_to_*_kwh` entries are synthetic counters emitted by
-// the collector's energyflow aggregator — they live in
-// telemetry_samples next to the SmartLogger accumulators, so the
-// existing /api/v1/energy-summary endpoint serves them through the
-// same `last(end) - last(seed)` lookup. Older deployments without
-// the aggregator will return zero for these keys, which the
-// flowsFromTotals transform handles gracefully.
-const ENERGY_SUMMARY_METRIC_KEYS = [
+// The four `*_to_*_kwh` synthetic keys are listed separately because
+// the API computes them on the fly via `energyflow.Recompute` over
+// raw Modbus samples for the requested window. That allocator is
+// O(samples-in-window), so we only ask for it on the `day` preset.
+// Month/year presets hide the period-flow card entirely until we
+// ship a daily-rollup cache, so requesting those keys for a year
+// would spend several seconds of CPU per refresh for data the UI
+// would not display.
+const BASE_ENERGY_SUMMARY_METRIC_KEYS = [
   'accumulated_pv_energy_yield_kwh',
   'accumulated_electricity_sold_kwh',
   'accumulated_electricity_purchased_kwh',
   'accumulated_power_consumption_kwh',
   'total_energy_charged_kwh',
   'total_energy_discharged_kwh',
+]
+
+const SYNTHETIC_FLOW_METRIC_KEYS = [
   'pv_to_ess_kwh',
   'grid_to_ess_kwh',
   'ess_to_load_kwh',
   'ess_to_grid_kwh',
 ]
+
+function energySummaryMetricKeys(preset: RangePreset): string[] {
+  if (preset === 'day') {
+    return [...BASE_ENERGY_SUMMARY_METRIC_KEYS, ...SYNTHETIC_FLOW_METRIC_KEYS]
+  }
+  return BASE_ENERGY_SUMMARY_METRIC_KEYS
+}
 
 export type DashboardData = {
   config: DashboardConfig
@@ -363,7 +374,7 @@ export function useDashboardData(input: {
                   organizationID,
                   from: baseRange.from,
                   to: baseRange.to,
-                  metricKeys: ENERGY_SUMMARY_METRIC_KEYS,
+                  metricKeys: energySummaryMetricKeys(preset),
                 },
                 controller.signal,
               ).catch((e) => {
@@ -394,7 +405,13 @@ export function useDashboardData(input: {
             : summaryResp
               ? energySummaryFromTotals(summaryResp.totals)
               : energySummaryFromSeries(series)
-        const flows = summaryResp ? flowsFromTotals(summaryResp.totals) : EMPTY_FLOWS
+        // Period-flow totals are only meaningful on the `day`
+        // preset right now (see energySummaryMetricKeys). For
+        // month/year we deliberately don't ask the API to run the
+        // on-the-fly allocator, so flows collapse to EMPTY_FLOWS
+        // and the period-flow card hides itself.
+        const flows =
+          preset === 'day' && summaryResp ? flowsFromTotals(summaryResp.totals) : EMPTY_FLOWS
         setEnergySeries(series)
         setEnergySummary(summary)
         setEnergyFlows(flows)
@@ -447,10 +464,10 @@ export function useDashboardData(input: {
   // raw data" and always produces the same numbers for the same
   // window.
   //
-  // For month/year presets we also refresh the cumulative
-  // `energySummary` from the same response. The day preset keeps
-  // its series-derived summary so cards stay byte-identical to the
-  // chart bucket deltas.
+  // The on-the-fly allocator is gated to the `day` preset to keep
+  // a refresh cheap; month/year requests refresh the cumulative
+  // `energySummary` totals but leave `energyFlows` as EMPTY_FLOWS
+  // and the period-flow card hidden.
   const refreshFlows = useCallback(async () => {
     if (flowsRefreshController.current) {
       flowsRefreshController.current.abort()
@@ -473,13 +490,15 @@ export function useDashboardData(input: {
           organizationID,
           from: baseRange.from,
           to: baseRange.to,
-          metricKeys: ENERGY_SUMMARY_METRIC_KEYS,
+          metricKeys: energySummaryMetricKeys(preset),
         },
         controller.signal,
       )
       if (controller.signal.aborted) return
-      setEnergyFlows(flowsFromTotals(summaryResp.totals))
-      if (preset !== 'day') {
+      if (preset === 'day') {
+        setEnergyFlows(flowsFromTotals(summaryResp.totals))
+      } else {
+        setEnergyFlows(EMPTY_FLOWS)
         setEnergySummary(energySummaryFromTotals(summaryResp.totals))
       }
       setError(null)

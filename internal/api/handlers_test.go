@@ -906,6 +906,54 @@ func TestEnergySummaryFlowDegradesOnEmptyData(t *testing.T) {
 	}
 }
 
+// TestEnergySummaryFlowSkipsWideWindow verifies the temporary
+// day-only guard inside EnergySummary: a request whose window is
+// wider than `maxEnergyFlowWindow` must NOT pull raw rows or run
+// the allocator, and synthetic keys come back as a stable zero.
+// This keeps month/year refreshes from blocking on a multi-second
+// allocator pass while we ship a proper daily-rollup cache.
+func TestEnergySummaryFlowSkipsWideWindow(t *testing.T) {
+	from := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
+	to := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	store := &mockStore{
+		summaryResp: EnergySummaryResponse{
+			OrganizationID: "org-a",
+			From:           from,
+			To:             to,
+			Totals:         map[string]float64{"accumulated_pv_energy_yield_kwh": 12345},
+		},
+	}
+	h := NewHandlers(store, "*")
+	h.SetEnergyFlowOrgs([]EnergyFlowOrg{{ID: "org-a"}})
+
+	url := fmt.Sprintf("/api/v1/energy-summary?organization_id=org-a&metric_keys=accumulated_pv_energy_yield_kwh,pv_to_ess_kwh&from=%s&to=%s",
+		from.Format(time.RFC3339), to.Format(time.RFC3339))
+	req := httptest.NewRequest(http.MethodGet, url, nil)
+	rec := httptest.NewRecorder()
+	h.Router().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200 got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if store.flowSourcesOrg != "" {
+		t.Errorf("EnergyFlowSources should not have been called for a wide window, was called with %q", store.flowSourcesOrg)
+	}
+	var resp EnergySummaryResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	for _, k := range EnergyFlowSyntheticMetrics {
+		if got, ok := resp.Totals[k]; !ok {
+			t.Errorf("totals missing zero placeholder for %q", k)
+		} else if got != 0 {
+			t.Errorf("totals[%q]=%g, want 0 for skipped wide window", k, got)
+		}
+	}
+	if got := resp.Totals["accumulated_pv_energy_yield_kwh"]; got != 12345 {
+		t.Errorf("raw counter total clobbered: got %g, want 12345", got)
+	}
+}
+
 // TestEnergyFlowRecomputeEndpointGone is a tiny regression guard
 // that future re-introductions of the persisted-cumulative pipeline
 // won't accidentally bring the dead /energy-flow/recompute route

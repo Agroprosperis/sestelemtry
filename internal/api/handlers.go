@@ -46,6 +46,16 @@ const (
 	maxSamplesMetricKeys = 20
 )
 
+// maxEnergyFlowWindow caps how wide a window the on-the-fly
+// energy-flow allocator is allowed to chew through inside a single
+// /energy-summary request. We temporarily restrict it to day-sized
+// windows (with slack for the longest local-time → UTC offset and
+// week-boundary cases) because re-running the per-minute allocator
+// across a full month or year synchronously takes several seconds
+// and would block the API worker for every dashboard refresh. When
+// we ship the daily-flow cache this guard can be raised or removed.
+const maxEnergyFlowWindow = 36 * time.Hour
+
 func NewHandlers(store storeReader, allowOrigin string) *Handlers {
 	return &Handlers{
 		store:       store,
@@ -542,6 +552,36 @@ func (h *Handlers) energySummary(w http.ResponseWriter, r *http.Request) {
 		effectiveKeys = EnergySummaryAccumulators
 	}
 	if syntheticKeysRequested(effectiveKeys) {
+		if to.Sub(from) > maxEnergyFlowWindow {
+			// Wider-than-day windows skip the on-the-fly
+			// computation: until we add a daily-rollup cache,
+			// re-running the allocator on a month/year of raw
+			// rows would block the request for seconds. The
+			// dashboard hides the period-flow card for these
+			// presets, so the zeros never reach the UI; direct
+			// API consumers get a stable zero + an info log.
+			h.log.Info("api_energy_summary_flow_skipped_wide_window",
+				"organization_id", orgID,
+				"window", to.Sub(from).String(),
+				"max_window", maxEnergyFlowWindow.String(),
+			)
+			if resp.Totals == nil {
+				resp.Totals = make(map[string]float64, len(EnergyFlowSyntheticMetrics))
+			}
+			for _, k := range EnergyFlowSyntheticMetrics {
+				if _, ok := resp.Totals[k]; !ok {
+					resp.Totals[k] = 0
+				}
+			}
+			h.log.Info("api_energy_summary_ok",
+				"organization_id", orgID,
+				"metric_keys", metricKeys,
+				"totals", len(resp.Totals),
+				"duration_ms", time.Since(start).Milliseconds(),
+			)
+			writeJSON(w, http.StatusOK, resp)
+			return
+		}
 		flowStart := time.Now()
 		flows, ferr := h.computeEnergyFlowTotals(r.Context(), orgID, from, to)
 		if ferr != nil {
