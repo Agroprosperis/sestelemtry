@@ -25,10 +25,10 @@ import type { EnergyFlows } from '../transforms/flows'
 // on. The "Оновити" button re-runs the period flow fetch on
 // demand — useful between background auto-refreshes (every
 // DASHBOARD_CHART_REFRESH_MS) when the operator wants to see the
-// latest cumulative state right now. It is a pure refetch, never a
-// write: backfilling historical periods is an ops task done via
-// curl against `POST /api/v1/energy-flow/recompute`, not from the
-// dashboard, so the live aggregator's tail stays uncorruptible.
+// latest state right now. It is a pure refetch: the API computes
+// flow totals on the fly from raw Modbus accumulators, so a refresh
+// is just "re-run the allocator over the current raw data" and
+// historical periods are recomputed by the same path.
 
 type Props = {
   flows: EnergyFlows

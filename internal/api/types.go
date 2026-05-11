@@ -121,14 +121,14 @@ type DAMPricesResponse struct {
 }
 
 // EnergySummaryAccumulators are the cumulative counters used by the
-// monthly/yearly summary cards and by the energy-flow Sankey diagram.
-// The first six entries back `energySummaryFromTotals` on the
-// frontend; the four `*_to_*_kwh` entries are synthetic counters
-// produced by the collector's energyflow package and consumed by
-// `flowsFromTotals` in [web/src/dashboard/transforms/flows.ts]. They
-// share the same `last(end) - last(seed)` lookup as the catalog
-// metrics — synthetic counters are written cumulatively, so the
-// existing summary SQL works for them without a schema change.
+// monthly/yearly summary cards and by the energy-flow narrative.
+// The first six entries are raw Modbus accumulators served by the
+// `last(end) - last(seed)` summary SQL; the trailing four
+// `*_to_*_kwh` entries are derived flow counters that the API
+// computes on the fly from those same Modbus accumulators inside the
+// EnergySummary handler (see computeEnergyFlowTotals). The dashboard
+// consumes both shapes from one /energy-summary response via
+// `flowsFromTotals` in [web/src/dashboard/transforms/flows.ts].
 var EnergySummaryAccumulators = []string{
 	"accumulated_pv_energy_yield_kwh",
 	"accumulated_electricity_sold_kwh",
@@ -185,7 +185,7 @@ type OrganizationsResponse struct {
 }
 
 // EnergyFlowDevice describes one physical Modbus device's role
-// assignment for the backfill recompute endpoint. The API uses
+// assignment for the on-the-fly energy-flow compute. The API uses
 // `Host` to match raw rows in telemetry_samples (whose `device_host`
 // label was written by the collector's labelsForDevice) and `Role` to
 // classify those rows into the energy-flow allocator's PV / ESS /
@@ -197,42 +197,21 @@ type EnergyFlowDevice struct {
 	Role string
 }
 
-// EnergyFlowOrg is the org-level metadata the recompute handler needs
-// beyond the public OrganizationInfo. It carries the per-device role
-// mapping (so dual SmartLogger sites still merge PV and ESS rows
-// correctly) and the ess_discharge_sign override that flips the sign
-// convention on inverters reporting charge as positive. Populated by
-// cmd/api/main.go from the same config the collector reads.
+// EnergyFlowOrg is the org-level metadata the on-the-fly summary
+// needs beyond the public OrganizationInfo. It carries the
+// per-device role mapping (so dual SmartLogger sites still merge PV
+// and ESS rows correctly) and the ess_discharge_sign override that
+// flips the sign convention on inverters reporting charge as
+// positive. Populated by cmd/api/main.go from the same config the
+// collector reads.
 type EnergyFlowOrg struct {
 	ID               string
 	EssDischargeSign int
 	Devices          []EnergyFlowDevice
 }
 
-// EnergyFlowRecomputeResponse summarises one POST
-// /api/v1/energy-flow/recompute run. Totals is the four-flow kWh map
-// for the window; SamplesWritten is the count of synthetic cumulative
-// rows the handler inserted into telemetry_samples; SamplesDeleted is
-// the rows it removed before insert (idempotency); ProcessedIntervals
-// / SkippedIntervals come straight from the energyflow.Recompute
-// result. Warnings carries the bounded warning tail so the dashboard
-// can render a "decoded with X warnings" hint without re-running.
-type EnergyFlowRecomputeResponse struct {
-	OrganizationID     string             `json:"organization_id"`
-	From               time.Time          `json:"from"`
-	To                 time.Time          `json:"to"`
-	Totals             map[string]float64 `json:"totals"`
-	SamplesWritten     int                `json:"samples_written"`
-	SamplesDeleted     int64              `json:"samples_deleted"`
-	ProcessedIntervals int                `json:"processed_intervals"`
-	SkippedIntervals   int                `json:"skipped_intervals"`
-	BucketsConsidered  int                `json:"buckets_considered"`
-	BucketsDropped     int                `json:"buckets_dropped"`
-	Warnings           []string           `json:"warnings,omitempty"`
-}
-
 // EnergyFlowRecomputeSourceMetrics is the set of source counter keys
-// the recompute pipeline reads from telemetry_samples to drive the
+// the on-the-fly compute reads from telemetry_samples to drive the
 // allocation algorithm. Mirrors energyflow.{PVRequiredMetrics +
 // ESSRequiredMetrics}; centralised here so the handler and the store
 // both reference one list and the catalogue can extend in lockstep.

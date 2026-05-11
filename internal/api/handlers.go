@@ -10,21 +10,17 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/nesh/sestelemetry/internal/energyflow"
-	"github.com/nesh/sestelemetry/internal/storage"
 )
 
 type Handlers struct {
-	store             storeReader
-	allowOrigin       string
-	log               *slog.Logger
-	organizations     []OrganizationInfo
-	energyFlowOrgs    map[string]EnergyFlowOrg
-	recomputeOrgs     sync.Mutex
-	recomputeInFlight map[string]struct{}
+	store          storeReader
+	allowOrigin    string
+	log            *slog.Logger
+	organizations  []OrganizationInfo
+	energyFlowOrgs map[string]EnergyFlowOrg
 }
 
 type storeReader interface {
@@ -34,9 +30,6 @@ type storeReader interface {
 	DAMPrices(ctx context.Context, zone int, from, to time.Time) (DAMPricesResponse, error)
 	Samples(ctx context.Context, organizationID string, metricKeys []string, from, to time.Time, limit int, emit func(SampleRow) error) (int, bool, error)
 	EnergyFlowSources(ctx context.Context, organizationID string, from, to time.Time, lookback time.Duration) ([]EnergyFlowRawRow, error)
-	EnergyFlowSeed(ctx context.Context, organizationID string, before time.Time) (map[string]float64, error)
-	DeleteEnergyFlowSynthetic(ctx context.Context, organizationID string, from, to time.Time) (int64, error)
-	WriteEnergyFlowSynthetic(ctx context.Context, organizationID string, samples []storage.Sample) error
 	Ready(ctx context.Context) error
 }
 
@@ -55,23 +48,24 @@ const (
 
 func NewHandlers(store storeReader, allowOrigin string) *Handlers {
 	return &Handlers{
-		store:             store,
-		allowOrigin:       allowOrigin,
-		log:               slog.Default(),
-		recomputeInFlight: make(map[string]struct{}),
+		store:       store,
+		allowOrigin: allowOrigin,
+		log:         slog.Default(),
 	}
 }
 
 // SetEnergyFlowOrgs registers the per-org device→role mapping the
-// recompute handler needs to classify raw rows from telemetry_samples
-// back into PV / ESS / single buckets. cmd/api/main.go calls this
-// after loading the YAML config so the API server can match each
-// row's device_host label to a configured Modbus endpoint and apply
-// the same DetectRole rule the collector used at poll time.
+// on-the-fly energy-flow summary uses to classify raw rows from
+// telemetry_samples back into PV / ESS / single buckets.
+// cmd/api/main.go calls this after loading the YAML config so the
+// API server can match each row's device_host label to a configured
+// Modbus endpoint and apply the same DetectRole rule the collector
+// used at poll time.
 //
-// Orgs missing from the map fall through to "no configuration" and
-// the handler returns 404 — refusing to guess prevents a partially
-// configured deployment from emitting nonsensical totals.
+// Orgs missing from the map fall through to "no device map" which
+// the on-the-fly compute treats as a single SmartLogger — rows with
+// an empty device_host label still pass through as RoleSingle so
+// legacy single-device deployments keep working without a config.
 func (h *Handlers) SetEnergyFlowOrgs(orgs []EnergyFlowOrg) {
 	if len(orgs) == 0 {
 		h.energyFlowOrgs = nil
@@ -109,7 +103,6 @@ func (h *Handlers) Router() http.Handler {
 	mux.HandleFunc("/api/v1/samples", h.samples)
 	mux.HandleFunc("/api/v1/registers", h.registers)
 	mux.HandleFunc("/api/v1/energy-summary", h.energySummary)
-	mux.HandleFunc("/api/v1/energy-flow/recompute", h.energyFlowRecompute)
 	mux.HandleFunc("/api/v1/dam-prices", h.damPrices)
 	mux.HandleFunc("/swagger", h.swaggerUI)
 	mux.HandleFunc("/swagger/", h.swaggerUI)
@@ -529,24 +522,130 @@ func (h *Handlers) energySummary(w http.ResponseWriter, r *http.Request) {
 	}
 	start := time.Now()
 	resp, err := h.store.EnergySummary(r.Context(), orgID, metricKeys, from, to)
-	dur := time.Since(start)
 	if err != nil {
 		h.log.Error("api_energy_summary",
 			"organization_id", orgID,
 			"metric_keys", metricKeys,
-			"duration_ms", dur.Milliseconds(),
+			"duration_ms", time.Since(start).Milliseconds(),
 			"err", err,
 		)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
+	// Effective set of metrics the caller asked for. The store
+	// substitutes the default catalog for an empty list, but the
+	// response only carries totals it actually saw; we still need to
+	// know whether any synthetic flow key is in scope so we can
+	// compute it on the fly below.
+	effectiveKeys := metricKeys
+	if len(effectiveKeys) == 0 {
+		effectiveKeys = EnergySummaryAccumulators
+	}
+	if syntheticKeysRequested(effectiveKeys) {
+		flowStart := time.Now()
+		flows, ferr := h.computeEnergyFlowTotals(r.Context(), orgID, from, to)
+		if ferr != nil {
+			// On-the-fly compute failures degrade gracefully:
+			// the rest of the summary (raw counters) is still
+			// useful, and synthetic keys fall back to zero. We
+			// log so the operator sees the misconfig but the
+			// dashboard does not blank out.
+			h.log.Warn("api_energy_summary_flow_compute",
+				"organization_id", orgID, "err", ferr,
+				"duration_ms", time.Since(flowStart).Milliseconds(),
+			)
+			if resp.Totals == nil {
+				resp.Totals = make(map[string]float64, len(EnergyFlowSyntheticMetrics))
+			}
+			for _, k := range EnergyFlowSyntheticMetrics {
+				if _, ok := resp.Totals[k]; !ok {
+					resp.Totals[k] = 0
+				}
+			}
+		} else {
+			if resp.Totals == nil {
+				resp.Totals = make(map[string]float64, len(flows))
+			}
+			for k, v := range flows {
+				resp.Totals[k] = v
+			}
+			h.log.Info("api_energy_summary_flow_compute_ok",
+				"organization_id", orgID,
+				"duration_ms", time.Since(flowStart).Milliseconds(),
+			)
+		}
+	}
 	h.log.Info("api_energy_summary_ok",
 		"organization_id", orgID,
 		"metric_keys", metricKeys,
 		"totals", len(resp.Totals),
-		"duration_ms", dur.Milliseconds(),
+		"duration_ms", time.Since(start).Milliseconds(),
 	)
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// syntheticKeysRequested reports whether the caller's metric_keys
+// list contains at least one of the four synthetic energy-flow
+// counters. Used by the EnergySummary handler to decide whether to
+// run the on-the-fly allocation pipeline.
+func syntheticKeysRequested(keys []string) bool {
+	want := make(map[string]struct{}, len(EnergyFlowSyntheticMetrics))
+	for _, k := range EnergyFlowSyntheticMetrics {
+		want[k] = struct{}{}
+	}
+	for _, k := range keys {
+		if _, ok := want[k]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+// computeEnergyFlowTotals re-runs the allocation rule against the raw
+// Modbus counters stored in telemetry_samples for [from, to] and
+// returns the four period flow totals (kWh). It replaces the old
+// "live aggregator writes synthetic cumulative samples, dashboard
+// reads end-minus-seed" pipeline: synthetic samples are no longer
+// persisted, every dashboard read computes from raw on the fly.
+//
+// The benefit is that there is no shared cumulative state to
+// corrupt: rewriting an old period is just "click refresh", and
+// missing periods (e.g. before the energy-flow feature shipped) are
+// computed identically to fresh ones with no manual ops work.
+//
+// We accept the modest CPU cost: a day query is ~1.4k 60s buckets,
+// a month ~43k, a year ~520k. Each bucket is a handful of float
+// multiplications inside energyflow.Allocate, so worst-case (year)
+// runs in a few seconds; faster presets are sub-second.
+func (h *Handlers) computeEnergyFlowTotals(
+	ctx context.Context,
+	orgID string,
+	from, to time.Time,
+) (map[string]float64, error) {
+	rows, err := h.store.EnergyFlowSources(ctx, orgID, from, to, 0)
+	if err != nil {
+		return nil, fmt.Errorf("energy_flow sources: %w", err)
+	}
+	if len(rows) == 0 {
+		return emptyFlowTotals(), nil
+	}
+	// Org config is optional: legacy single-device deployments do
+	// not register a device→role map, and buildRawSamples maps any
+	// row with an empty device_host label to RoleSingle in that
+	// case. Multi-SmartLogger orgs need the config to attribute
+	// rows to the correct role.
+	cfg := h.energyFlowOrgs[orgID]
+	rawSamples := buildRawSamples(rows, cfg)
+	rec := energyflow.Recompute(rawSamples, nil, energyflow.Options{
+		EssDischargeSign:        cfg.EssDischargeSign,
+		AllocationWindowSeconds: 60,
+		MaxGapSeconds:           0, // disabled — same logic as backfill
+	})
+	out := make(map[string]float64, len(EnergyFlowSyntheticMetrics))
+	for _, k := range EnergyFlowSyntheticMetrics {
+		out[k] = rec.Totals[k]
+	}
+	return out, nil
 }
 
 func (h *Handlers) damPrices(w http.ResponseWriter, r *http.Request) {
@@ -732,225 +831,12 @@ func parseRange(r *http.Request) (from time.Time, to time.Time, bucket, tz strin
 	return from, to, bucket, tz, nil
 }
 
-// energyFlowRecompute backfills the four synthetic energy-flow
-// counters for a historical window by re-running the live aggregator's
-// allocation rule over the raw source counters already stored in
-// telemetry_samples. Operators use this when a period (last month,
-// last year) has no synthetic rows because the collector was off-line,
-// the period predates the energy-flow feature, or the org started
-// reporting after the aggregator had been running elsewhere.
-//
-// Contract:
-//
-//   - POST /api/v1/energy-flow/recompute?organization_id=...&from=...&to=...
-//     RFC3339 timestamps; `to` must be strictly after `from`.
-//   - The org must appear in the energy-flow config registered via
-//     SetEnergyFlowOrgs. Unknown orgs receive 404 rather than a 200
-//     with empty totals so a misconfigured deployment fails loudly.
-//   - The window is right-clamped to (now − safety margin) so the run
-//     never overlaps the live aggregator's in-flight buckets. We
-//     refuse the request rather than silently shrinking the range
-//     when `to` is in the future.
-//   - The handler serialises concurrent requests per org so two
-//     overlapping clicks don't race on the delete-then-insert path.
-//
-// On success the response carries the period totals, counts of
-// inserted/deleted rows, processed / skipped interval stats, and a
-// bounded warning tail. Failures return 500 with an opaque message;
-// the server log carries the full error chain.
-func (h *Handlers) energyFlowRecompute(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodOptions {
-		w.WriteHeader(http.StatusNoContent)
-		return
-	}
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	orgID := strings.TrimSpace(r.URL.Query().Get("organization_id"))
-	if orgID == "" {
-		http.Error(w, "organization_id is required", http.StatusBadRequest)
-		return
-	}
-	from, to, _, _, err := parseRange(r)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	if from.IsZero() || to.IsZero() {
-		http.Error(w, "from and to are required", http.StatusBadRequest)
-		return
-	}
-	if !to.After(from) {
-		http.Error(w, "to must be after from", http.StatusBadRequest)
-		return
-	}
-	// liveAggregatorReservedWindow is the tail of "right now" the
-	// recompute is forbidden to touch. The live aggregator maintains
-	// its cumulative state in-memory and flushes the four synthetic
-	// counters on a ~1 minute cadence; if recompute deletes synthetic
-	// samples inside this window and rewrites them with its own (less
-	// granular, slightly different-rounded) trajectory, the next live
-	// flush either re-overwrites our output or — if the collector
-	// restarts and reseeds — adopts the recompute's lower endpoint and
-	// drags subsequent values backward (the operator-visible bug
-	// observed on 2026-05-11 where today's `ess_to_load_kwh` jumped
-	// from ~144 down to ~141 after a refresh click).
-	//
-	// The frontend's refresh button mirrors this guard
-	// (`useDashboardData.refreshFlows`) so day/month/year-on-current
-	// clicks skip recompute entirely. This server-side check is the
-	// belt-and-suspenders so a stray curl or third-party caller
-	// cannot corrupt the live tail either.
-	const liveAggregatorReservedWindow = 10 * time.Minute
-	now := time.Now().UTC()
-	if to.After(now.Add(-liveAggregatorReservedWindow)) {
-		http.Error(w, fmt.Sprintf("to must be at least %s in the past so the live aggregator's window stays untouched", liveAggregatorReservedWindow), http.StatusConflict)
-		return
-	}
-
-	orgCfg, ok := h.energyFlowOrgs[orgID]
-	if !ok {
-		http.Error(w, "energy_flow configuration not found for organization", http.StatusNotFound)
-		return
-	}
-
-	if !h.tryLockRecompute(orgID) {
-		http.Error(w, "another energy-flow recompute is already running for this organization", http.StatusConflict)
-		return
-	}
-	defer h.unlockRecompute(orgID)
-
-	ctx := r.Context()
-	start := time.Now()
-
-	const lookback = 10 * time.Minute
-	rows, err := h.store.EnergyFlowSources(ctx, orgID, from, to, lookback)
-	if err != nil {
-		h.log.Error("api_energy_flow_recompute_sources",
-			"organization_id", orgID, "err", err,
-		)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
-		return
-	}
-	if len(rows) == 0 {
-		writeJSON(w, http.StatusOK, EnergyFlowRecomputeResponse{
-			OrganizationID: orgID,
-			From:           from.UTC(),
-			To:             to.UTC(),
-			Totals:         emptyFlowTotals(),
-		})
-		return
-	}
-
-	seed, err := h.store.EnergyFlowSeed(ctx, orgID, from)
-	if err != nil {
-		h.log.Error("api_energy_flow_recompute_seed",
-			"organization_id", orgID, "err", err,
-		)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
-		return
-	}
-
-	rawSamples := buildRawSamples(rows, orgCfg)
-
-	rec := energyflow.Recompute(rawSamples, seed, energyflow.Options{
-		EssDischargeSign:        orgCfg.EssDischargeSign,
-		AllocationWindowSeconds: 60,
-		MaxGapSeconds:           0, // disabled for backfill — see Recompute docs
-	})
-
-	emitted := filterEmittedToWindow(rec.Emitted, from, to)
-	storageSamples := make([]storage.Sample, 0, len(emitted))
-	for _, e := range emitted {
-		storageSamples = append(storageSamples, storage.Sample{
-			Time:           e.Time.UTC(),
-			OrganizationID: orgID,
-			MetricKey:      e.MetricKey,
-			Value:          e.Value,
-			Labels:         map[string]string{"synthetic": "energy_flow", "source": "recompute"},
-		})
-	}
-
-	deleted, err := h.store.DeleteEnergyFlowSynthetic(ctx, orgID, from, to)
-	if err != nil {
-		h.log.Error("api_energy_flow_recompute_delete",
-			"organization_id", orgID, "err", err,
-		)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
-		return
-	}
-	if err := h.store.WriteEnergyFlowSynthetic(ctx, orgID, storageSamples); err != nil {
-		h.log.Error("api_energy_flow_recompute_write",
-			"organization_id", orgID, "err", err,
-		)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
-		return
-	}
-
-	resp := EnergyFlowRecomputeResponse{
-		OrganizationID:     orgID,
-		From:               from.UTC(),
-		To:                 to.UTC(),
-		Totals:             rec.Totals,
-		SamplesWritten:     len(storageSamples),
-		SamplesDeleted:     deleted,
-		ProcessedIntervals: rec.ProcessedIntervals,
-		SkippedIntervals:   rec.SkippedIntervals,
-		BucketsConsidered:  rec.BucketsConsidered,
-		BucketsDropped:     rec.BucketsDropped,
-		Warnings:           rec.Warnings,
-	}
-	if resp.Totals == nil {
-		resp.Totals = emptyFlowTotals()
-	}
-	h.log.Info("api_energy_flow_recompute_ok",
-		"organization_id", orgID,
-		"from", from.UTC(),
-		"to", to.UTC(),
-		"rows_read", len(rows),
-		"buckets_considered", rec.BucketsConsidered,
-		"buckets_dropped", rec.BucketsDropped,
-		"processed_intervals", rec.ProcessedIntervals,
-		"skipped_intervals", rec.SkippedIntervals,
-		"samples_written", len(storageSamples),
-		"samples_deleted", deleted,
-		"duration_ms", time.Since(start).Milliseconds(),
-	)
-	writeJSON(w, http.StatusOK, resp)
-}
-
-// tryLockRecompute attempts to claim the recompute mutex for one
-// organization. Returns false when another request is already running
-// — the handler responds with 409 in that case so the client retries
-// after the in-flight run finishes. The lock lives in memory, so a
-// restart releases it instantly; in practice each recompute completes
-// in seconds to minutes so a wedged lock is not a concern.
-func (h *Handlers) tryLockRecompute(orgID string) bool {
-	h.recomputeOrgs.Lock()
-	defer h.recomputeOrgs.Unlock()
-	if h.recomputeInFlight == nil {
-		h.recomputeInFlight = make(map[string]struct{})
-	}
-	if _, ok := h.recomputeInFlight[orgID]; ok {
-		return false
-	}
-	h.recomputeInFlight[orgID] = struct{}{}
-	return true
-}
-
-func (h *Handlers) unlockRecompute(orgID string) {
-	h.recomputeOrgs.Lock()
-	defer h.recomputeOrgs.Unlock()
-	delete(h.recomputeInFlight, orgID)
-}
-
 // buildRawSamples groups telemetry rows into energyflow.RawSample by
 // (time, device_host). The device_host label is mapped to a Role via
 // the org config; unknown hosts default to RoleSingle which is the
 // safest classification for legacy single-device deployments (no
 // device_host label) and avoids dropping data when an operator
-// renames a SmartLogger between collection and recompute.
+// renames a SmartLogger between collection and on-the-fly compute.
 func buildRawSamples(rows []EnergyFlowRawRow, cfg EnergyFlowOrg) []energyflow.RawSample {
 	roleByHost := make(map[string]energyflow.Role, len(cfg.Devices))
 	for _, d := range cfg.Devices {
@@ -992,25 +878,6 @@ func buildRawSamples(rows []EnergyFlowRawRow, cfg EnergyFlowOrg) []energyflow.Ra
 			Role:   role,
 			Values: grouped[k],
 		})
-	}
-	return out
-}
-
-// filterEmittedToWindow drops emitted samples that fall outside the
-// requested [from, to] range. energyflow.Recompute can produce a
-// sample for a bucket that starts inside the lookback window but
-// closes outside `to` if the source range happens to straddle the
-// last boundary; right-closed clamping keeps the persisted rows in
-// the period the operator asked for.
-func filterEmittedToWindow(emitted []energyflow.EmittedSample, from, to time.Time) []energyflow.EmittedSample {
-	out := make([]energyflow.EmittedSample, 0, len(emitted))
-	fromU, toU := from.UTC(), to.UTC()
-	for _, e := range emitted {
-		t := e.Time.UTC()
-		if t.Before(fromU) || t.After(toU) {
-			continue
-		}
-		out = append(out, e)
 	}
 	return out
 }

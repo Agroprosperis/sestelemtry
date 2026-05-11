@@ -168,16 +168,14 @@ export async function fetchEnergySummary(
   return res.json()
 }
 
-// The dashboard intentionally does NOT export a wrapper for
-// `POST /api/v1/energy-flow/recompute`. The collector's live
-// aggregator is the authoritative writer for `pv_to_ess_kwh` /
-// `grid_to_ess_kwh` / `ess_to_load_kwh` / `ess_to_grid_kwh`; the UI
-// must only ever READ these counters. Backfilling missing historical
-// periods is an ops task — call the endpoint directly via curl with
-// `to` at least 10 minutes in the past so the live aggregator's
-// reserved tail stays untouched. See
-// `internal/api/handlers.go:energyFlowRecompute` for the contract
-// and the server-side guard.
+// The four synthetic `*_to_*_kwh` keys (pv_to_ess, grid_to_ess,
+// ess_to_load, ess_to_grid) are NOT stored in the database. The
+// `/api/v1/energy-summary` handler computes them on the fly from the
+// raw Modbus accumulators for every request, so there is no
+// "recompute" endpoint and no DB state to drift: re-querying any
+// historical period always returns the same numbers, and a fresh
+// deployment renders flows immediately without an operator restart
+// or backfill. See `internal/api/handlers.go:computeEnergyFlowTotals`.
 
 export type RawSamplesResult = {
   // Pre-formatted CSV body, including the UTF-8 BOM and trailing

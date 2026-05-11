@@ -1,7 +1,6 @@
 package api
 
 import (
-	"bytes"
 	"context"
 	"encoding/csv"
 	"encoding/json"
@@ -12,8 +11,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/nesh/sestelemetry/internal/storage"
 )
 
 type mockStore struct {
@@ -47,19 +44,11 @@ type mockStore struct {
 	samplesTo    time.Time
 	samplesLimit int
 
-	flowSources        []EnergyFlowRawRow
-	flowSourcesErr     error
-	flowSeed           map[string]float64
-	flowSeedErr        error
-	flowDeleted        int64
-	flowDeleteErr      error
-	flowWriteErr       error
-	flowWrittenOrg     string
-	flowWrittenSamples []storage.Sample
-	flowSourcesOrg     string
-	flowSourcesFrom    time.Time
-	flowSourcesTo      time.Time
-	flowSeedBefore     time.Time
+	flowSources     []EnergyFlowRawRow
+	flowSourcesErr  error
+	flowSourcesOrg  string
+	flowSourcesFrom time.Time
+	flowSourcesTo   time.Time
 }
 
 func (m *mockStore) Current(_ context.Context, _ string, _ []string, at time.Time) (CurrentResponse, error) {
@@ -109,30 +98,6 @@ func (m *mockStore) EnergyFlowSources(_ context.Context, orgID string, from, to 
 		return nil, m.flowSourcesErr
 	}
 	return m.flowSources, nil
-}
-
-func (m *mockStore) EnergyFlowSeed(_ context.Context, _ string, before time.Time) (map[string]float64, error) {
-	m.flowSeedBefore = before
-	if m.flowSeedErr != nil {
-		return nil, m.flowSeedErr
-	}
-	return m.flowSeed, nil
-}
-
-func (m *mockStore) DeleteEnergyFlowSynthetic(_ context.Context, _ string, _, _ time.Time) (int64, error) {
-	if m.flowDeleteErr != nil {
-		return 0, m.flowDeleteErr
-	}
-	return m.flowDeleted, nil
-}
-
-func (m *mockStore) WriteEnergyFlowSynthetic(_ context.Context, orgID string, samples []storage.Sample) error {
-	if m.flowWriteErr != nil {
-		return m.flowWriteErr
-	}
-	m.flowWrittenOrg = orgID
-	m.flowWrittenSamples = append(m.flowWrittenSamples, samples...)
-	return nil
 }
 
 func (m *mockStore) Ready(_ context.Context) error {
@@ -801,22 +766,33 @@ func TestTimeseriesHidesInternalError(t *testing.T) {
 	}
 }
 
-// TestEnergyFlowRecompute_HappyPath drives the backfill endpoint with
-// two raw single-SmartLogger snapshots 60 seconds apart and verifies
-// the handler:
+// TestEnergySummaryComputesSyntheticOnTheFly is the integration
+// test for the new on-the-fly energy-flow pipeline. The store
+// returns raw Modbus accumulator rows (no synthetic
+// `*_to_*_kwh` rows persisted anywhere), and the handler must run
+// energyflow.Recompute internally to fill the four synthetic keys
+// in the response.
 //
-//  1. Reads the raw rows + the prior synthetic seed.
-//  2. Runs energyflow.Recompute through to a non-zero pv_to_ess.
-//  3. Deletes any existing synthetic rows in the window.
-//  4. Writes one cumulative sample per synthetic metric back to the
-//     store, with the seed value carried forward.
-//
-// The mock store records every call so the assertion can read the
-// emitted samples back without going through a real DB.
-func TestEnergyFlowRecompute_HappyPath(t *testing.T) {
+// We pick a scenario where one minute interval has 6 kWh of PV
+// yield and 5 kWh of ESS charge: with no grid import, the allocator
+// must attribute the entire 5 kWh charge delta to pv_to_ess_kwh.
+// That number — produced exclusively by the new on-the-fly path —
+// is the proof that the handler stopped reading synthetic samples
+// from the store and started computing them itself.
+func TestEnergySummaryComputesSyntheticOnTheFly(t *testing.T) {
 	from := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
 	to := from.Add(2 * time.Minute)
 	store := &mockStore{
+		summaryResp: EnergySummaryResponse{
+			OrganizationID: "org-a",
+			From:           from,
+			To:             to,
+			Totals: map[string]float64{
+				"accumulated_pv_energy_yield_kwh": 6,
+				// Synthetic keys deliberately ABSENT from the store
+				// totals — the handler must add them itself.
+			},
+		},
 		flowSources: []EnergyFlowRawRow{
 			{Time: from, MetricKey: "accumulated_pv_energy_yield_kwh", Value: 100, DeviceHost: ""},
 			{Time: from, MetricKey: "accumulated_electricity_purchased_kwh", Value: 50, DeviceHost: ""},
@@ -829,132 +805,121 @@ func TestEnergyFlowRecompute_HappyPath(t *testing.T) {
 			{Time: from.Add(time.Minute), MetricKey: "total_energy_charged_kwh", Value: 25, DeviceHost: ""},
 			{Time: from.Add(time.Minute), MetricKey: "total_energy_discharged_kwh", Value: 5, DeviceHost: ""},
 		},
-		flowSeed: map[string]float64{
-			"pv_to_ess_kwh":   1.0,
-			"grid_to_ess_kwh": 2.0,
-			"ess_to_load_kwh": 3.0,
-			"ess_to_grid_kwh": 4.0,
-		},
-		flowDeleted: 7,
 	}
 	h := NewHandlers(store, "*")
 	h.SetEnergyFlowOrgs([]EnergyFlowOrg{{ID: "org-a"}})
 
-	url := fmt.Sprintf("/api/v1/energy-flow/recompute?organization_id=org-a&from=%s&to=%s",
+	url := fmt.Sprintf("/api/v1/energy-summary?organization_id=org-a&metric_keys=pv_to_ess_kwh,grid_to_ess_kwh,ess_to_load_kwh,ess_to_grid_kwh&from=%s&to=%s",
 		from.Format(time.RFC3339), to.Format(time.RFC3339))
-	req := httptest.NewRequest(http.MethodPost, url, nil)
+	req := httptest.NewRequest(http.MethodGet, url, nil)
 	rec := httptest.NewRecorder()
 	h.Router().ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("want 200 got %d body=%s", rec.Code, rec.Body.String())
 	}
-	var resp EnergyFlowRecomputeResponse
+	var resp EnergySummaryResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if resp.OrganizationID != "org-a" {
-		t.Errorf("organization_id = %q want org-a", resp.OrganizationID)
-	}
-	if resp.ProcessedIntervals < 1 {
-		t.Errorf("processed_intervals = %d, want >= 1", resp.ProcessedIntervals)
-	}
 	if got := resp.Totals["pv_to_ess_kwh"]; got <= 0 {
-		t.Errorf("totals.pv_to_ess_kwh = %g, want > 0", got)
+		t.Errorf("totals.pv_to_ess_kwh = %g, want > 0 (computed on the fly)", got)
 	}
-	if resp.SamplesDeleted != 7 {
-		t.Errorf("samples_deleted = %d want 7 (mock value)", resp.SamplesDeleted)
-	}
-	if resp.SamplesWritten == 0 {
-		t.Errorf("samples_written = 0, want at least one batch")
-	}
-	if len(store.flowWrittenSamples) != resp.SamplesWritten {
-		t.Errorf("store recorded %d written samples, response says %d", len(store.flowWrittenSamples), resp.SamplesWritten)
-	}
-	for _, s := range store.flowWrittenSamples {
-		if s.OrganizationID != "org-a" {
-			t.Errorf("written sample OrganizationID = %q", s.OrganizationID)
+	for _, k := range EnergyFlowSyntheticMetrics {
+		if _, ok := resp.Totals[k]; !ok {
+			t.Errorf("totals missing synthetic key %q", k)
 		}
-		if s.Labels["synthetic"] != "energy_flow" {
-			t.Errorf("written sample missing synthetic=energy_flow label: %v", s.Labels)
-		}
+	}
+	if store.flowSourcesOrg != "org-a" {
+		t.Errorf("EnergyFlowSources not called with the right org; got %q", store.flowSourcesOrg)
 	}
 }
 
-// TestEnergyFlowRecompute_UnknownOrg confirms the endpoint refuses to
-// run for an organization that has no energy-flow configuration. A
-// silent success with zero totals would mask the misconfiguration.
-func TestEnergyFlowRecompute_UnknownOrg(t *testing.T) {
-	h := NewHandlers(&mockStore{}, "*")
+// TestEnergySummaryNoFlowComputeWhenSyntheticNotRequested verifies
+// the fast path: if the caller never asks for a synthetic key the
+// handler must NOT pay the cost of pulling raw rows and re-running
+// the allocator. Catches a future regression that always runs the
+// flow compute even when only raw counters were requested.
+func TestEnergySummaryNoFlowComputeWhenSyntheticNotRequested(t *testing.T) {
 	from := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
-	to := from.Add(2 * time.Minute)
-	url := fmt.Sprintf("/api/v1/energy-flow/recompute?organization_id=ghost&from=%s&to=%s",
-		from.Format(time.RFC3339), to.Format(time.RFC3339))
-	req := httptest.NewRequest(http.MethodPost, url, nil)
-	rec := httptest.NewRecorder()
-	h.Router().ServeHTTP(rec, req)
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("want 404 got %d", rec.Code)
+	to := from.Add(time.Hour)
+	store := &mockStore{
+		summaryResp: EnergySummaryResponse{
+			OrganizationID: "org-a",
+			From:           from,
+			To:             to,
+			Totals:         map[string]float64{"accumulated_pv_energy_yield_kwh": 7},
+		},
 	}
-}
-
-// TestEnergyFlowRecompute_RecentWindowRejected blocks requests whose
-// `to` falls inside the live aggregator's reserved tail. The server
-// must refuse them because the live aggregator owns the cumulative
-// timeline for "right now" — a recompute that touched it would either
-// be overwritten on the next live flush or, worse, get adopted as a
-// stale seed after a collector restart and drag values backwards (the
-// 2026-05-11 ess_to_load_kwh regression). The frontend already skips
-// these clicks; this is the belt-and-suspenders for direct callers.
-func TestEnergyFlowRecompute_RecentWindowRejected(t *testing.T) {
-	h := NewHandlers(&mockStore{}, "*")
-	h.SetEnergyFlowOrgs([]EnergyFlowOrg{{ID: "org-a"}})
-	now := time.Now().UTC()
-	from := now.Add(-30 * time.Minute)
-	to := now.Add(-2 * time.Minute) // well inside the 10-minute reserved window
-	url := fmt.Sprintf("/api/v1/energy-flow/recompute?organization_id=org-a&from=%s&to=%s",
-		from.Format(time.RFC3339), to.Format(time.RFC3339))
-	req := httptest.NewRequest(http.MethodPost, url, nil)
-	rec := httptest.NewRecorder()
-	h.Router().ServeHTTP(rec, req)
-	if rec.Code != http.StatusConflict {
-		t.Fatalf("want 409 got %d body=%s", rec.Code, rec.Body.String())
-	}
-}
-
-// TestEnergyFlowRecompute_NoData returns an empty totals JSON when
-// the source range has zero rows, rather than failing or running the
-// allocator over nothing. The endpoint is meant to be safe to click
-// when the operator isn't sure whether data exists.
-func TestEnergyFlowRecompute_NoData(t *testing.T) {
-	store := &mockStore{flowSources: nil}
 	h := NewHandlers(store, "*")
 	h.SetEnergyFlowOrgs([]EnergyFlowOrg{{ID: "org-a"}})
-	from := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
-	to := from.Add(2 * time.Minute)
-	url := fmt.Sprintf("/api/v1/energy-flow/recompute?organization_id=org-a&from=%s&to=%s",
+
+	url := fmt.Sprintf("/api/v1/energy-summary?organization_id=org-a&metric_keys=accumulated_pv_energy_yield_kwh&from=%s&to=%s",
 		from.Format(time.RFC3339), to.Format(time.RFC3339))
-	req := httptest.NewRequest(http.MethodPost, url, nil)
+	req := httptest.NewRequest(http.MethodGet, url, nil)
 	rec := httptest.NewRecorder()
 	h.Router().ServeHTTP(rec, req)
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("want 200 got %d body=%s", rec.Code, rec.Body.String())
 	}
-	if !bytes.Contains(rec.Body.Bytes(), []byte(`"pv_to_ess_kwh":0`)) {
-		t.Errorf("response should expose zero totals, got %s", rec.Body.String())
+	if store.flowSourcesOrg != "" {
+		t.Errorf("EnergyFlowSources should not have been called, was called with %q", store.flowSourcesOrg)
 	}
 }
 
-// TestEnergyFlowRecompute_RejectsGet defends against accidental GETs
-// from a browser sending the URL: the endpoint is a write so it must
-// require POST. CORS preflight (OPTIONS) is still allowed.
-func TestEnergyFlowRecompute_RejectsGet(t *testing.T) {
-	h := NewHandlers(&mockStore{}, "*")
+// TestEnergySummaryFlowDegradesOnEmptyData covers the "no raw rows
+// for the requested window" case. The on-the-fly compute returns a
+// zero map rather than failing, so a dashboard browsing a period
+// before the deployment started polling still renders cleanly with
+// pv_to_ess=0 etc. instead of a 500.
+func TestEnergySummaryFlowDegradesOnEmptyData(t *testing.T) {
+	from := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	to := from.Add(time.Hour)
+	store := &mockStore{
+		summaryResp: EnergySummaryResponse{
+			OrganizationID: "org-a",
+			From:           from,
+			To:             to,
+			Totals:         map[string]float64{},
+		},
+		flowSources: nil,
+	}
+	h := NewHandlers(store, "*")
 	h.SetEnergyFlowOrgs([]EnergyFlowOrg{{ID: "org-a"}})
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/energy-flow/recompute?organization_id=org-a", nil)
+
+	url := fmt.Sprintf("/api/v1/energy-summary?organization_id=org-a&metric_keys=pv_to_ess_kwh&from=%s&to=%s",
+		from.Format(time.RFC3339), to.Format(time.RFC3339))
+	req := httptest.NewRequest(http.MethodGet, url, nil)
 	rec := httptest.NewRecorder()
 	h.Router().ServeHTTP(rec, req)
-	if rec.Code != http.StatusMethodNotAllowed {
-		t.Fatalf("want 405 got %d", rec.Code)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200 got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var resp EnergySummaryResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got := resp.Totals["pv_to_ess_kwh"]; got != 0 {
+		t.Errorf("totals.pv_to_ess_kwh = %g, want 0 for an empty window", got)
+	}
+}
+
+// TestEnergyFlowRecomputeEndpointGone is a tiny regression guard
+// that future re-introductions of the persisted-cumulative pipeline
+// won't accidentally bring the dead /energy-flow/recompute route
+// back without a fresh design review.
+func TestEnergyFlowRecomputeEndpointGone(t *testing.T) {
+	h := NewHandlers(&mockStore{}, "*")
+	for _, method := range []string{http.MethodPost, http.MethodGet, http.MethodOptions} {
+		req := httptest.NewRequest(method, "/api/v1/energy-flow/recompute?organization_id=org-a&from=2026-05-01T00:00:00Z&to=2026-05-01T01:00:00Z", nil)
+		rec := httptest.NewRecorder()
+		h.Router().ServeHTTP(rec, req)
+		if rec.Code != http.StatusNotFound && rec.Code != http.StatusNoContent {
+			// 404 is what we want; 204 is the CORS preflight
+			// shortcut wrapping every unknown route in withCORS.
+			t.Errorf("method=%s want 404/204 got %d body=%s", method, rec.Code, rec.Body.String())
+		}
 	}
 }

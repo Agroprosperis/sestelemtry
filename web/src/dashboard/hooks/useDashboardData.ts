@@ -439,14 +439,13 @@ export function useDashboardData(input: {
 
   // refreshFlows refetches /energy-summary for the currently selected
   // preset / anchor and rebuilds the period-flow numbers from the
-  // returned totals. The live aggregator in the collector is the
-  // authoritative writer for the four synthetic `*_to_*_kwh`
-  // counters, so the dashboard only ever READS the DB — there is no
-  // recompute / mutate path from the UI. (Backfilling missing
-  // historical periods is an ops task done through the standalone
-  // `POST /api/v1/energy-flow/recompute` endpoint via curl; the
-  // server's 10-minute live-aggregator guard there prevents that
-  // endpoint from corrupting the current tail either.)
+  // returned totals. The API computes the synthetic
+  // `pv_to_ess_kwh` / `grid_to_ess_kwh` / `ess_to_load_kwh` /
+  // `ess_to_grid_kwh` counters on the fly from raw Modbus
+  // accumulators, so there is no shared cumulative state to drift —
+  // a refresh is literally "re-run the allocator on the current
+  // raw data" and always produces the same numbers for the same
+  // window.
   //
   // For month/year presets we also refresh the cumulative
   // `energySummary` from the same response. The day preset keeps
