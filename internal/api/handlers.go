@@ -11,8 +11,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/nesh/sestelemetry/internal/energyflow"
 )
 
 type Handlers struct {
@@ -45,16 +43,6 @@ const (
 	maxSamplesRange      = 31 * 24 * time.Hour
 	maxSamplesMetricKeys = 20
 )
-
-// maxEnergyFlowWindow caps how wide a window the on-the-fly
-// energy-flow allocator is allowed to chew through inside a single
-// /energy-summary request. We temporarily restrict it to day-sized
-// windows (with slack for the longest local-time → UTC offset and
-// week-boundary cases) because re-running the per-minute allocator
-// across a full month or year synchronously takes several seconds
-// and would block the API worker for every dashboard refresh. When
-// we ship the daily-flow cache this guard can be raised or removed.
-const maxEnergyFlowWindow = 36 * time.Hour
 
 func NewHandlers(store storeReader, allowOrigin string) *Handlers {
 	return &Handlers{
@@ -543,149 +531,22 @@ func (h *Handlers) energySummary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Effective set of metrics the caller asked for. The store
-	// substitutes the default catalog for an empty list, but the
-	// response only carries totals it actually saw; we still need to
-	// know whether any synthetic flow key is in scope so we can
-	// compute it on the fly below.
+	// substitutes the default catalog for an empty list, but we
+	// still need to know whether any synthetic flow key is in scope
+	// to decide whether to populate resp.Flows.
 	effectiveKeys := metricKeys
 	if len(effectiveKeys) == 0 {
 		effectiveKeys = EnergySummaryAccumulators
 	}
-	if syntheticKeysRequested(effectiveKeys) {
-		if to.Sub(from) > maxEnergyFlowWindow {
-			// Wider-than-day windows skip the on-the-fly
-			// computation: until we add a daily-rollup cache,
-			// re-running the allocator on a month/year of raw
-			// rows would block the request for seconds. The
-			// dashboard hides the period-flow card for these
-			// presets, so the zeros never reach the UI; direct
-			// API consumers get a stable zero + an info log.
-			h.log.Info("api_energy_summary_flow_skipped_wide_window",
-				"organization_id", orgID,
-				"window", to.Sub(from).String(),
-				"max_window", maxEnergyFlowWindow.String(),
-			)
-			if resp.Totals == nil {
-				resp.Totals = make(map[string]float64, len(EnergyFlowSyntheticMetrics))
-			}
-			for _, k := range EnergyFlowSyntheticMetrics {
-				if _, ok := resp.Totals[k]; !ok {
-					resp.Totals[k] = 0
-				}
-			}
-			h.log.Info("api_energy_summary_ok",
-				"organization_id", orgID,
-				"metric_keys", metricKeys,
-				"totals", len(resp.Totals),
-				"duration_ms", time.Since(start).Milliseconds(),
-			)
-			writeJSON(w, http.StatusOK, resp)
-			return
-		}
-		flowStart := time.Now()
-		flows, ferr := h.computeEnergyFlowTotals(r.Context(), orgID, from, to)
-		if ferr != nil {
-			// On-the-fly compute failures degrade gracefully:
-			// the rest of the summary (raw counters) is still
-			// useful, and synthetic keys fall back to zero. We
-			// log so the operator sees the misconfig but the
-			// dashboard does not blank out.
-			h.log.Warn("api_energy_summary_flow_compute",
-				"organization_id", orgID, "err", ferr,
-				"duration_ms", time.Since(flowStart).Milliseconds(),
-			)
-			if resp.Totals == nil {
-				resp.Totals = make(map[string]float64, len(EnergyFlowSyntheticMetrics))
-			}
-			for _, k := range EnergyFlowSyntheticMetrics {
-				if _, ok := resp.Totals[k]; !ok {
-					resp.Totals[k] = 0
-				}
-			}
-		} else {
-			if resp.Totals == nil {
-				resp.Totals = make(map[string]float64, len(flows))
-			}
-			for k, v := range flows {
-				resp.Totals[k] = v
-			}
-			h.log.Info("api_energy_summary_flow_compute_ok",
-				"organization_id", orgID,
-				"duration_ms", time.Since(flowStart).Milliseconds(),
-			)
-		}
-	}
+	h.maybeAttachEnergyFlow(r.Context(), &resp, orgID, from, to, effectiveKeys)
 	h.log.Info("api_energy_summary_ok",
 		"organization_id", orgID,
 		"metric_keys", metricKeys,
 		"totals", len(resp.Totals),
+		"flows", resp.Flows != nil,
 		"duration_ms", time.Since(start).Milliseconds(),
 	)
 	writeJSON(w, http.StatusOK, resp)
-}
-
-// syntheticKeysRequested reports whether the caller's metric_keys
-// list contains at least one of the four synthetic energy-flow
-// counters. Used by the EnergySummary handler to decide whether to
-// run the on-the-fly allocation pipeline.
-func syntheticKeysRequested(keys []string) bool {
-	want := make(map[string]struct{}, len(EnergyFlowSyntheticMetrics))
-	for _, k := range EnergyFlowSyntheticMetrics {
-		want[k] = struct{}{}
-	}
-	for _, k := range keys {
-		if _, ok := want[k]; ok {
-			return true
-		}
-	}
-	return false
-}
-
-// computeEnergyFlowTotals re-runs the allocation rule against the raw
-// Modbus counters stored in telemetry_samples for [from, to] and
-// returns the four period flow totals (kWh). It replaces the old
-// "live aggregator writes synthetic cumulative samples, dashboard
-// reads end-minus-seed" pipeline: synthetic samples are no longer
-// persisted, every dashboard read computes from raw on the fly.
-//
-// The benefit is that there is no shared cumulative state to
-// corrupt: rewriting an old period is just "click refresh", and
-// missing periods (e.g. before the energy-flow feature shipped) are
-// computed identically to fresh ones with no manual ops work.
-//
-// We accept the modest CPU cost: a day query is ~1.4k 60s buckets,
-// a month ~43k, a year ~520k. Each bucket is a handful of float
-// multiplications inside energyflow.Allocate, so worst-case (year)
-// runs in a few seconds; faster presets are sub-second.
-func (h *Handlers) computeEnergyFlowTotals(
-	ctx context.Context,
-	orgID string,
-	from, to time.Time,
-) (map[string]float64, error) {
-	rows, err := h.store.EnergyFlowSources(ctx, orgID, from, to, 0)
-	if err != nil {
-		return nil, fmt.Errorf("energy_flow sources: %w", err)
-	}
-	if len(rows) == 0 {
-		return emptyFlowTotals(), nil
-	}
-	// Org config is optional: legacy single-device deployments do
-	// not register a device→role map, and buildRawSamples maps any
-	// row with an empty device_host label to RoleSingle in that
-	// case. Multi-SmartLogger orgs need the config to attribute
-	// rows to the correct role.
-	cfg := h.energyFlowOrgs[orgID]
-	rawSamples := buildRawSamples(rows, cfg)
-	rec := energyflow.Recompute(rawSamples, nil, energyflow.Options{
-		EssDischargeSign:        cfg.EssDischargeSign,
-		AllocationWindowSeconds: 60,
-		MaxGapSeconds:           0, // disabled — same logic as backfill
-	})
-	out := make(map[string]float64, len(EnergyFlowSyntheticMetrics))
-	for _, k := range EnergyFlowSyntheticMetrics {
-		out[k] = rec.Totals[k]
-	}
-	return out, nil
 }
 
 func (h *Handlers) damPrices(w http.ResponseWriter, r *http.Request) {
@@ -869,65 +730,6 @@ func parseRange(r *http.Request) (from time.Time, to time.Time, bucket, tz strin
 		}
 	}
 	return from, to, bucket, tz, nil
-}
-
-// buildRawSamples groups telemetry rows into energyflow.RawSample by
-// (time, device_host). The device_host label is mapped to a Role via
-// the org config; unknown hosts default to RoleSingle which is the
-// safest classification for legacy single-device deployments (no
-// device_host label) and avoids dropping data when an operator
-// renames a SmartLogger between collection and on-the-fly compute.
-func buildRawSamples(rows []EnergyFlowRawRow, cfg EnergyFlowOrg) []energyflow.RawSample {
-	roleByHost := make(map[string]energyflow.Role, len(cfg.Devices))
-	for _, d := range cfg.Devices {
-		roleByHost[d.Host] = energyflow.Role(d.Role)
-	}
-	type key struct {
-		t    int64
-		host string
-	}
-	grouped := make(map[key]map[string]float64, len(rows)/3+1)
-	order := make([]key, 0, len(rows)/3+1)
-	for _, r := range rows {
-		k := key{t: r.Time.UnixNano(), host: r.DeviceHost}
-		bucket, ok := grouped[k]
-		if !ok {
-			bucket = make(map[string]float64, 5)
-			grouped[k] = bucket
-			order = append(order, k)
-		}
-		bucket[r.MetricKey] = r.Value
-	}
-	out := make([]energyflow.RawSample, 0, len(order))
-	for _, k := range order {
-		role, ok := roleByHost[k.host]
-		if !ok {
-			if len(cfg.Devices) == 0 {
-				role = energyflow.RoleSingle
-			} else if k.host == "" {
-				role = energyflow.RoleSingle
-			} else {
-				continue
-			}
-		}
-		if role == energyflow.RoleNone {
-			continue
-		}
-		out = append(out, energyflow.RawSample{
-			Time:   time.Unix(0, k.t).UTC(),
-			Role:   role,
-			Values: grouped[k],
-		})
-	}
-	return out
-}
-
-func emptyFlowTotals() map[string]float64 {
-	out := make(map[string]float64, len(EnergyFlowSyntheticMetrics))
-	for _, k := range EnergyFlowSyntheticMetrics {
-		out[k] = 0
-	}
-	return out
 }
 
 func (h *Handlers) withCORS(next http.Handler) http.Handler {

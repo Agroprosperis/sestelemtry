@@ -36,17 +36,16 @@ import {
 import { usePvForecast } from './usePvForecast'
 
 // Metrics whose period totals back the dashboard summary cards (the
-// "spent / produced / from PV" breakdown) and the energy-flow period
-// summary. Mirrors `EnergySummaryAccumulators` on the backend.
+// "spent / produced / from PV" breakdown). Mirrors
+// `EnergySummaryAccumulators` on the backend.
 //
-// The four `*_to_*_kwh` synthetic keys are listed separately because
-// the API computes them on the fly via `energyflow.Recompute` over
-// raw Modbus samples for the requested window. That allocator is
-// O(samples-in-window), so we only ask for it on the `day` preset.
-// Month/year presets hide the period-flow card entirely until we
-// ship a daily-rollup cache, so requesting those keys for a year
-// would spend several seconds of CPU per refresh for data the UI
-// would not display.
+// The four directional flow counters (pv_to_ess_kwh / grid_to_ess_kwh
+// / ess_to_load_kwh / ess_to_grid_kwh) are NOT listed here — they
+// arrive on `response.flows` instead, populated by the API's
+// on-the-fly allocator. We opt into the compute by appending the
+// synthetic keys to `metric_keys` only on the `day` preset; the
+// dashboard hides the period-flow card on month/year so requesting
+// the compute for wider windows would just burn CPU.
 const BASE_ENERGY_SUMMARY_METRIC_KEYS = [
   'accumulated_pv_energy_yield_kwh',
   'accumulated_electricity_sold_kwh',
@@ -56,7 +55,10 @@ const BASE_ENERGY_SUMMARY_METRIC_KEYS = [
   'total_energy_discharged_kwh',
 ]
 
-const SYNTHETIC_FLOW_METRIC_KEYS = [
+// Mirrors energyflow.SyntheticMetricKeys on the backend. Included in
+// the request only when the user is on the day preset so the API
+// runs the allocator and returns response.flows.
+const FLOW_METRIC_KEYS = [
   'pv_to_ess_kwh',
   'grid_to_ess_kwh',
   'ess_to_load_kwh',
@@ -65,7 +67,7 @@ const SYNTHETIC_FLOW_METRIC_KEYS = [
 
 function energySummaryMetricKeys(preset: RangePreset): string[] {
   if (preset === 'day') {
-    return [...BASE_ENERGY_SUMMARY_METRIC_KEYS, ...SYNTHETIC_FLOW_METRIC_KEYS]
+    return [...BASE_ENERGY_SUMMARY_METRIC_KEYS, ...FLOW_METRIC_KEYS]
   }
   return BASE_ENERGY_SUMMARY_METRIC_KEYS
 }
@@ -411,7 +413,9 @@ export function useDashboardData(input: {
         // on-the-fly allocator, so flows collapse to EMPTY_FLOWS
         // and the period-flow card hides itself.
         const flows =
-          preset === 'day' && summaryResp ? flowsFromTotals(summaryResp.totals) : EMPTY_FLOWS
+          preset === 'day' && summaryResp
+            ? flowsFromTotals(summaryResp.totals, summaryResp.flows ?? null)
+            : EMPTY_FLOWS
         setEnergySeries(series)
         setEnergySummary(summary)
         setEnergyFlows(flows)
@@ -496,7 +500,7 @@ export function useDashboardData(input: {
       )
       if (controller.signal.aborted) return
       if (preset === 'day') {
-        setEnergyFlows(flowsFromTotals(summaryResp.totals))
+        setEnergyFlows(flowsFromTotals(summaryResp.totals, summaryResp.flows ?? null))
       } else {
         setEnergyFlows(EMPTY_FLOWS)
         setEnergySummary(energySummaryFromTotals(summaryResp.totals))

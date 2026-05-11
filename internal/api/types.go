@@ -1,6 +1,10 @@
 package api
 
-import "time"
+import (
+	"time"
+
+	"github.com/nesh/sestelemetry/internal/energyflow"
+)
 
 var DefaultDashboardMetrics = []string{
 	"active_pv_power_kw",
@@ -120,15 +124,13 @@ type DAMPricesResponse struct {
 	Prices []DAMPrice `json:"prices"`
 }
 
-// EnergySummaryAccumulators are the cumulative counters used by the
-// monthly/yearly summary cards and by the energy-flow narrative.
-// The first six entries are raw Modbus accumulators served by the
-// `last(end) - last(seed)` summary SQL; the trailing four
-// `*_to_*_kwh` entries are derived flow counters that the API
-// computes on the fly from those same Modbus accumulators inside the
-// EnergySummary handler (see computeEnergyFlowTotals). The dashboard
-// consumes both shapes from one /energy-summary response via
-// `flowsFromTotals` in [web/src/dashboard/transforms/flows.ts].
+// EnergySummaryAccumulators are the raw cumulative Modbus counters
+// served by the EnergySummary store via `last(end) - last(seed)`.
+// The four directional flow counters (pv_to_ess_kwh, grid_to_ess_kwh,
+// ess_to_load_kwh, ess_to_grid_kwh) are NOT listed here — they are
+// computed on the fly by the API handler and surface in the
+// dedicated `flows` field of EnergySummaryResponse rather than in
+// `totals`.
 var EnergySummaryAccumulators = []string{
 	"accumulated_pv_energy_yield_kwh",
 	"accumulated_electricity_sold_kwh",
@@ -136,25 +138,36 @@ var EnergySummaryAccumulators = []string{
 	"accumulated_power_consumption_kwh",
 	"total_energy_charged_kwh",
 	"total_energy_discharged_kwh",
-	"pv_to_ess_kwh",
-	"grid_to_ess_kwh",
-	"ess_to_load_kwh",
-	"ess_to_grid_kwh",
 }
 
-// EnergySummaryResponse returns the per-period accumulator deltas used
-// by the dashboard's summary cards. Each value is `last(value, time
-// before to) - last(value, time before from)`, clamped to >= 0. When
-// the counter is genuinely accumulative this matches what an operator
-// would expect ("show me how much X grew this month"); when an
-// inverter glitch drops the register mid-period the result clamps to
-// zero, which is the explicit signal we want — the dashboard refuses
-// to invent numbers from corrupted data.
+// EnergyFlowTotals carries the four synthetic flow counters computed
+// on the fly by the EnergySummary handler. The struct is the typed
+// shape of the response's `flows` field — split out from the raw
+// `totals` map so the dashboard can tell apart "we didn't run the
+// allocator" (flows == nil) from "we ran it and the period has no
+// usable data" (flows pointer with zero fields).
+type EnergyFlowTotals struct {
+	PVToESSKwh   float64 `json:"pv_to_ess_kwh"`
+	GridToESSKwh float64 `json:"grid_to_ess_kwh"`
+	ESSToLoadKwh float64 `json:"ess_to_load_kwh"`
+	ESSToGridKwh float64 `json:"ess_to_grid_kwh"`
+}
+
+// EnergySummaryResponse returns the per-period accumulator deltas
+// used by the dashboard's summary cards plus the optional
+// directional flow totals. Each value in `Totals` is
+// `last(value, time before to) - last(value, time before from)`,
+// clamped to >= 0; counter rollbacks land as zero so the dashboard
+// flags "no usable data" rather than inventing a number from
+// corrupted samples. `Flows` is populated only when the caller
+// requested at least one synthetic key and the window falls inside
+// the on-the-fly compute budget (see maxEnergyFlowWindow).
 type EnergySummaryResponse struct {
 	OrganizationID string             `json:"organization_id"`
 	From           time.Time          `json:"from"`
 	To             time.Time          `json:"to"`
 	Totals         map[string]float64 `json:"totals"`
+	Flows          *EnergyFlowTotals  `json:"flows,omitempty"`
 }
 
 // LocationInfo is the geographic site of an organization, exposed via
@@ -228,16 +241,12 @@ var EnergyFlowRecomputeSourceMetrics = []string{
 	"soc_percent",
 }
 
-// EnergyFlowSyntheticMetrics duplicates energyflow.SyntheticMetricKeys
-// at the API boundary so handler-level code does not have to import
-// the energyflow package transitively from packages that just need to
-// know which rows are "the four flow counters".
-var EnergyFlowSyntheticMetrics = []string{
-	"pv_to_ess_kwh",
-	"grid_to_ess_kwh",
-	"ess_to_load_kwh",
-	"ess_to_grid_kwh",
-}
+// EnergyFlowSyntheticMetrics is the canonical list of synthetic flow
+// metric_keys used by the API handler to detect when a caller has
+// opted into the on-the-fly compute. Aliased to
+// energyflow.SyntheticMetricKeys so there is a single source of
+// truth across the api and energyflow packages.
+var EnergyFlowSyntheticMetrics = energyflow.SyntheticMetricKeys
 
 // EnergyFlowRawRow is one input row pulled from telemetry_samples by
 // the recompute store helper. device_host is read from the labels

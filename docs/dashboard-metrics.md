@@ -261,15 +261,15 @@ Huawei цей регістр повертає 0 — у такому разі і 
 
 ### 4.1. Синтетичні лічильники перетоків енергії
 
-Чотири `*_to_*_kwh` метрики обчислюються `collector` сервісом
-(`internal/energyflow`) і пишуться в `telemetry_samples` як
-кумулятивні лічильники в кВт·год. Modbus-регістрів за ними немає —
-це похідні величини, побудовані з накопичувальних лічильників СЕС
-та УЗЕ за алгоритмом ТЗ (`Allocate` у
-`internal/energyflow/allocate.go`). Агрегатор оновлює їх кожні
-60 секунд (`allocation_window_seconds`); після рестарту процеса
-totals автоматично "посідають" від останнього значення в БД, тому
-період до перезапуску в дашборді не пропадає.
+Чотири `*_to_*_kwh` метрики є **похідними** від накопичувальних
+лічильників СЕС/УЗЕ. Modbus-регістрів за ними немає, і в
+`telemetry_samples` вони більше не записуються. Замість цього API
+сервіс рахує їх «на льоту» в обробнику `/api/v1/energy-summary`
+(`internal/api/energyflow.go → computeEnergyFlowTotals`):
+підтягує сирі рядки накопичувачів за період [from, to], віддає в
+`energyflow.Recompute` (`internal/energyflow/recompute.go`), і
+повертає чотири суми в окремому полі `flows` відповіді. Сам
+алгоритм розподілу — `Allocate` у `internal/energyflow/allocate.go`.
 
 | `metric_key`        | UA-переклад                | EN                  | Од.  |
 | ------------------- | -------------------------- | ------------------- | ---- |
@@ -278,13 +278,16 @@ totals автоматично "посідають" від останнього �
 | `ess_to_load_kwh`   | УЗЕ → Споживання           | ESS to load         | kWh  |
 | `ess_to_grid_kwh`   | УЗЕ → Мережа               | ESS to grid         | kWh  |
 
-Усі чотири експонуються через `/api/v1/energy-summary` нарівні з
-`accumulated_*_kwh` (див. `EnergySummaryAccumulators` у
-`internal/api/types.go`). Дашборд читає їх із `summary.totals` і
-відображає у компоненті `EnergyFlowPeriodSummary.tsx` (4-рядковий
-текстовий блок «Перетік за період»). Поточну миттєву діаграму
-потужностей (`EnergyFlowLive.tsx`) живить /api/v1/current — synthetic
-лічильники участі в ній не беруть.
+Дашборд робить запит до `/api/v1/energy-summary` з вказаними
+synthetic-ключами лише на пресеті «день» — поточний бюджет on-the-fly
+обчислення (`maxEnergyFlowWindow`, 36 годин) не дозволяє місячні/річні
+вікна без денного кеша. На день у відповіді з’являється поле
+`flows: { pv_to_ess_kwh, grid_to_ess_kwh, ess_to_load_kwh,
+ess_to_grid_kwh }`, яке `flowsFromTotals`
+(`web/src/dashboard/transforms/flows.ts`) перетворює у графік. Картка
+`EnergyFlowPeriodSummary.tsx` («Перетік за період») показується тільки
+для дня; жива діаграма `EnergyFlowLive.tsx` живиться `/api/v1/current`
+і synthetic-ключів не використовує.
 
 #### Вимоги до конфігурації для роботи перетоків
 
@@ -296,10 +299,9 @@ totals автоматично "посідають" від останнього �
 що віддає обидва набори, → `single_smartlogger`; два окремі
 девайси → `dual_smartlogger`. Топологія визначається автоматично з
 whitelist (`energyflow.DetectRole` у `internal/energyflow/metrics.go`).
-- Якщо whitelist неповний, у логах `collector` з'явиться
-`energy_flow_disabled_for_org` — синтетичні метрики не пишуться,
-картка «Перетік за період» показує підказку "Дані з лічильників УЗЕ
-ще не зібрані".
+- Якщо whitelist неповний, on-the-fly обчислення не знайде потрібних
+рядків і поверне нулі у `flows`. Дашборд у такому випадку показує
+порожній стан картки «Перетік за період» (`EnergyFlowPeriodSummary`).
 - Опційне поле `ess_discharge_sign` (`1` за замовчуванням, або `-1`)
 у конфігурації організації перевертає знак для діагностичної
 перевірки `active_ess_power_kw` — використовується тільки коли

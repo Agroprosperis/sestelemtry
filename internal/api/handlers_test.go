@@ -767,17 +767,16 @@ func TestTimeseriesHidesInternalError(t *testing.T) {
 }
 
 // TestEnergySummaryComputesSyntheticOnTheFly is the integration
-// test for the new on-the-fly energy-flow pipeline. The store
-// returns raw Modbus accumulator rows (no synthetic
-// `*_to_*_kwh` rows persisted anywhere), and the handler must run
-// energyflow.Recompute internally to fill the four synthetic keys
-// in the response.
+// test for the on-the-fly energy-flow pipeline. The store returns
+// raw Modbus accumulator rows (no synthetic `*_to_*_kwh` rows
+// persisted anywhere), and the handler must run
+// energyflow.Recompute internally to fill resp.Flows.
 //
 // We pick a scenario where one minute interval has 6 kWh of PV
 // yield and 5 kWh of ESS charge: with no grid import, the allocator
 // must attribute the entire 5 kWh charge delta to pv_to_ess_kwh.
-// That number — produced exclusively by the new on-the-fly path —
-// is the proof that the handler stopped reading synthetic samples
+// That number — produced exclusively by the on-the-fly path — is
+// the proof that the handler stopped reading synthetic samples
 // from the store and started computing them itself.
 func TestEnergySummaryComputesSyntheticOnTheFly(t *testing.T) {
 	from := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
@@ -789,8 +788,6 @@ func TestEnergySummaryComputesSyntheticOnTheFly(t *testing.T) {
 			To:             to,
 			Totals: map[string]float64{
 				"accumulated_pv_energy_yield_kwh": 6,
-				// Synthetic keys deliberately ABSENT from the store
-				// totals — the handler must add them itself.
 			},
 		},
 		flowSources: []EnergyFlowRawRow{
@@ -822,13 +819,14 @@ func TestEnergySummaryComputesSyntheticOnTheFly(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if got := resp.Totals["pv_to_ess_kwh"]; got <= 0 {
-		t.Errorf("totals.pv_to_ess_kwh = %g, want > 0 (computed on the fly)", got)
+	if resp.Flows == nil {
+		t.Fatalf("resp.Flows is nil, want populated by on-the-fly compute")
 	}
-	for _, k := range EnergyFlowSyntheticMetrics {
-		if _, ok := resp.Totals[k]; !ok {
-			t.Errorf("totals missing synthetic key %q", k)
-		}
+	if resp.Flows.PVToESSKwh <= 0 {
+		t.Errorf("flows.pv_to_ess_kwh = %g, want > 0 (computed on the fly)", resp.Flows.PVToESSKwh)
+	}
+	if _, ok := resp.Totals["pv_to_ess_kwh"]; ok {
+		t.Errorf("synthetic key leaked into resp.Totals; should only appear in resp.Flows")
 	}
 	if store.flowSourcesOrg != "org-a" {
 		t.Errorf("EnergyFlowSources not called with the right org; got %q", store.flowSourcesOrg)
@@ -838,8 +836,8 @@ func TestEnergySummaryComputesSyntheticOnTheFly(t *testing.T) {
 // TestEnergySummaryNoFlowComputeWhenSyntheticNotRequested verifies
 // the fast path: if the caller never asks for a synthetic key the
 // handler must NOT pay the cost of pulling raw rows and re-running
-// the allocator. Catches a future regression that always runs the
-// flow compute even when only raw counters were requested.
+// the allocator, and resp.Flows must come back nil so the client
+// can distinguish "no compute" from "computed and got zero".
 func TestEnergySummaryNoFlowComputeWhenSyntheticNotRequested(t *testing.T) {
 	from := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
 	to := from.Add(time.Hour)
@@ -866,13 +864,20 @@ func TestEnergySummaryNoFlowComputeWhenSyntheticNotRequested(t *testing.T) {
 	if store.flowSourcesOrg != "" {
 		t.Errorf("EnergyFlowSources should not have been called, was called with %q", store.flowSourcesOrg)
 	}
+	var resp EnergySummaryResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Flows != nil {
+		t.Errorf("resp.Flows = %+v, want nil when synthetic keys were not requested", resp.Flows)
+	}
 }
 
 // TestEnergySummaryFlowDegradesOnEmptyData covers the "no raw rows
 // for the requested window" case. The on-the-fly compute returns a
-// zero map rather than failing, so a dashboard browsing a period
-// before the deployment started polling still renders cleanly with
-// pv_to_ess=0 etc. instead of a 500.
+// non-nil pointer with zero fields rather than failing, so a
+// dashboard browsing a period before the deployment started polling
+// still renders cleanly with pv_to_ess=0 etc. instead of a 500.
 func TestEnergySummaryFlowDegradesOnEmptyData(t *testing.T) {
 	from := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 	to := from.Add(time.Hour)
@@ -901,17 +906,24 @@ func TestEnergySummaryFlowDegradesOnEmptyData(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if got := resp.Totals["pv_to_ess_kwh"]; got != 0 {
-		t.Errorf("totals.pv_to_ess_kwh = %g, want 0 for an empty window", got)
+	if resp.Flows == nil {
+		t.Fatalf("resp.Flows is nil, want non-nil pointer with all-zero fields")
+	}
+	if resp.Flows.PVToESSKwh != 0 ||
+		resp.Flows.GridToESSKwh != 0 ||
+		resp.Flows.ESSToLoadKwh != 0 ||
+		resp.Flows.ESSToGridKwh != 0 {
+		t.Errorf("resp.Flows = %+v, want all-zero struct for an empty window", resp.Flows)
 	}
 }
 
 // TestEnergySummaryFlowSkipsWideWindow verifies the temporary
 // day-only guard inside EnergySummary: a request whose window is
 // wider than `maxEnergyFlowWindow` must NOT pull raw rows or run
-// the allocator, and synthetic keys come back as a stable zero.
-// This keeps month/year refreshes from blocking on a multi-second
-// allocator pass while we ship a proper daily-rollup cache.
+// the allocator, and resp.Flows must come back nil so the client
+// knows the compute was skipped. This keeps month/year refreshes
+// from blocking on a multi-second allocator pass while we ship a
+// proper daily-rollup cache.
 func TestEnergySummaryFlowSkipsWideWindow(t *testing.T) {
 	from := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
 	to := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
@@ -942,12 +954,8 @@ func TestEnergySummaryFlowSkipsWideWindow(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	for _, k := range EnergyFlowSyntheticMetrics {
-		if got, ok := resp.Totals[k]; !ok {
-			t.Errorf("totals missing zero placeholder for %q", k)
-		} else if got != 0 {
-			t.Errorf("totals[%q]=%g, want 0 for skipped wide window", k, got)
-		}
+	if resp.Flows != nil {
+		t.Errorf("resp.Flows = %+v, want nil for skipped wide window", resp.Flows)
 	}
 	if got := resp.Totals["accumulated_pv_energy_yield_kwh"]; got != 12345 {
 		t.Errorf("raw counter total clobbered: got %g, want 12345", got)

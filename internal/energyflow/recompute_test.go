@@ -8,13 +8,10 @@ import (
 
 // TestRecompute_DualBucketsHappyPath drives Recompute with two
 // 60-second buckets across a dual SmartLogger and verifies the four
-// flow totals match the spec hand-calculation. PV delta (yields +6,
-// app load +1) leaves a +5 surplus over the period; the ESS charge
-// delta is +5 so the surplus is fully absorbed → pv_to_ess=5,
-// grid_to_ess=0. Discharge delta is zero so ess_to_load and
-// ess_to_grid are both zero. The emitted batch should carry one
-// cumulative sample per synthetic metric, seeded onto the cumulative
-// totals handed in.
+// flow totals match the spec hand-calculation. PV delta (yield +6)
+// leaves a +6 surplus over the period; the ESS charge delta is +5,
+// so the surplus is absorbed → pv_to_ess=5, grid_to_ess=0. Discharge
+// delta is zero, so ess_to_load and ess_to_grid are both zero.
 func TestRecompute_DualBucketsHappyPath(t *testing.T) {
 	t0 := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
 	t1 := t0.Add(60 * time.Second)
@@ -40,13 +37,7 @@ func TestRecompute_DualBucketsHappyPath(t *testing.T) {
 		}},
 	}
 
-	seed := map[string]float64{
-		MetricPVToESSKwh:   1.0,
-		MetricGridToESSKwh: 2.0,
-		MetricESSToLoadKwh: 3.0,
-		MetricESSToGridKwh: 4.0,
-	}
-	res := Recompute(rows, seed, Options{AllocationWindowSeconds: 60})
+	res := Recompute(rows, Options{AllocationWindowSeconds: 60})
 
 	if res.ProcessedIntervals != 1 {
 		t.Fatalf("processed intervals = %d, want 1", res.ProcessedIntervals)
@@ -66,28 +57,13 @@ func TestRecompute_DualBucketsHappyPath(t *testing.T) {
 	if !floatNear(res.Totals[MetricESSToGridKwh], 0.0, 1e-9) {
 		t.Fatalf("ess_to_grid = %g, want 0", res.Totals[MetricESSToGridKwh])
 	}
-
-	if len(res.Emitted) != len(SyntheticMetricKeys) {
-		t.Fatalf("emitted = %d, want %d", len(res.Emitted), len(SyntheticMetricKeys))
-	}
-	gotByKey := make(map[string]float64, len(res.Emitted))
-	for _, e := range res.Emitted {
-		gotByKey[e.MetricKey] = e.Value
-	}
-	if !floatNear(gotByKey[MetricPVToESSKwh], seed[MetricPVToESSKwh]+5.0, 1e-9) {
-		t.Errorf("cumulative pv_to_ess = %g, want %g", gotByKey[MetricPVToESSKwh], seed[MetricPVToESSKwh]+5.0)
-	}
-	if !floatNear(gotByKey[MetricGridToESSKwh], seed[MetricGridToESSKwh], 1e-9) {
-		t.Errorf("cumulative grid_to_ess = %g, want %g", gotByKey[MetricGridToESSKwh], seed[MetricGridToESSKwh])
-	}
 }
 
-// TestRecompute_SentinelFiltered makes sure the same UINT32 sentinel
-// filter the live aggregator applies in Submit also runs in Recompute.
-// A bogus 4294967.295 in one of the source counters would otherwise
-// silently dominate the delta; the test verifies the bucket is
-// dropped (cannot Allocate without all five accumulators) and the
-// run produces no flow output.
+// TestRecompute_SentinelFiltered makes sure the UINT32 sentinel
+// filter runs in Recompute. A bogus 4294967.295 in one of the source
+// counters would otherwise silently dominate the delta; the test
+// verifies the bucket is dropped (cannot Allocate without all five
+// accumulators) and the run produces no flow output.
 func TestRecompute_SentinelFiltered(t *testing.T) {
 	t0 := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
 	t1 := t0.Add(60 * time.Second)
@@ -108,12 +84,9 @@ func TestRecompute_SentinelFiltered(t *testing.T) {
 			SrcTotalEssDischargedKwh:   5,
 		}},
 	}
-	res := Recompute(rows, nil, Options{AllocationWindowSeconds: 60})
+	res := Recompute(rows, Options{AllocationWindowSeconds: 60})
 	if res.ProcessedIntervals != 0 {
 		t.Fatalf("processed intervals = %d, want 0 (sentinel should drop the bucket)", res.ProcessedIntervals)
-	}
-	if len(res.Emitted) != 0 {
-		t.Fatalf("emitted = %d, want 0", len(res.Emitted))
 	}
 	for _, k := range SyntheticMetricKeys {
 		if res.Totals[k] != 0 {
@@ -124,7 +97,7 @@ func TestRecompute_SentinelFiltered(t *testing.T) {
 
 // TestRecompute_GapTolerated verifies that with MaxGapSeconds=0 the
 // algorithm still spans long gaps between consecutive buckets. This
-// matters for historical backfill where a collector outage of hours
+// matters for historical compute where a collector outage of hours
 // between two snapshots is common; rejecting those intervals would
 // erase the real counter delta that accumulated across the outage.
 func TestRecompute_GapTolerated(t *testing.T) {
@@ -147,7 +120,7 @@ func TestRecompute_GapTolerated(t *testing.T) {
 			SrcTotalEssDischargedKwh:   0,
 		}},
 	}
-	res := Recompute(rows, nil, Options{
+	res := Recompute(rows, Options{
 		AllocationWindowSeconds: 60,
 		MaxGapSeconds:           0,
 	})
@@ -194,7 +167,7 @@ func TestRecompute_LatestPerBucketWins(t *testing.T) {
 			SrcTotalEssDischargedKwh:   5,
 		}},
 	}
-	res := Recompute(rows, nil, Options{AllocationWindowSeconds: 60})
+	res := Recompute(rows, Options{AllocationWindowSeconds: 60})
 	if res.ProcessedIntervals < 1 {
 		t.Fatalf("processed intervals = %d, want >= 1", res.ProcessedIntervals)
 	}

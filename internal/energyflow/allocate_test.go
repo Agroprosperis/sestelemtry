@@ -160,7 +160,7 @@ func TestAllocate_DtExceedsMaxGap(t *testing.T) {
 }
 
 // 10. The 0xFFFFFFFF sentinel reading. Tests the IsInvalidUint32Scaled
-// helper directly — Allocate trusts its inputs and the aggregator is
+// helper directly — Allocate trusts its inputs and the caller is
 // responsible for filtering sentinel readings before they reach the
 // allocator.
 func TestIsInvalidUint32Scaled(t *testing.T) {

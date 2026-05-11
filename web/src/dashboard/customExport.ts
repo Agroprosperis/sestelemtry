@@ -266,11 +266,12 @@ export async function fetchCustomExportData(input: CustomExportInput): Promise<E
     : Promise.resolve(null)
   // Flow counters are cumulative kWh too, so the same `delta`
   // aggregation that turns accumulator counters into per-bucket
-  // production applies. Synthetic-metric absence is treated as
-  // "feature not yet configured for this org" rather than an error:
-  // the backend returns zero points (the rows aren't in
-  // telemetry_samples until the aggregator runs) and the column
-  // ends up empty without aborting the export.
+  // production applies. The synthetic flow keys aren't stored in
+  // telemetry_samples anymore — they are computed on the fly inside
+  // /api/v1/energy-summary — so a timeseries request for them
+  // currently returns zero points. The column ends up empty without
+  // aborting the export, which is the desired behaviour until we
+  // wire the export through the on-the-fly compute path.
   const flowP = flowKeys.length
     ? fetchTimeseries(
         {

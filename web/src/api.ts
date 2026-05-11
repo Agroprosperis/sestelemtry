@@ -139,11 +139,25 @@ export async function fetchTimeseries(
   return res.json()
 }
 
+// EnergyFlowTotals mirrors `internal/api/types.go:EnergyFlowTotals`.
+// The API returns this object as `flows` only when the caller
+// requested at least one synthetic flow key AND the [from, to]
+// window is inside the on-the-fly compute budget (currently
+// day-sized). When the field is absent the dashboard knows the
+// allocator did not run — distinct from "ran and got zero".
+export type EnergyFlowTotals = {
+  pv_to_ess_kwh: number
+  grid_to_ess_kwh: number
+  ess_to_load_kwh: number
+  ess_to_grid_kwh: number
+}
+
 export type EnergySummaryResponse = {
   organization_id: string
   from: string
   to: string
   totals: Record<string, number>
+  flows?: EnergyFlowTotals | null
 }
 
 export async function fetchEnergySummary(

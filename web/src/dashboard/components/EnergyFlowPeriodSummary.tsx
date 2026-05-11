@@ -9,26 +9,21 @@ import { formatEnergyCompactKWhUk, formatPeriodLabel } from '../format'
 import type { RangePreset } from '../range'
 import type { EnergyFlows } from '../transforms/flows'
 
-// EnergyFlowPeriodSummary is the four-line narrative companion to the
-// live power diagram. It reads off the cumulative `*_to_*_kwh`
-// counters that `flowsFromTotals` already computes for the selected
-// period, so the dashboard surfaces a plain-Ukrainian summary of
-// "how the battery was used" without forcing the operator to read
-// a Sankey. Rendered in the left metrics panel, sharing the
-// `metrics-group` / `daily-narrative-list` styling with the other
-// narrative cards (DailySummaryNarrative, AccumulatedSnapshotNarrative,
-// etc.) so all left-panel groups read as a single column.
+// EnergyFlowPeriodSummary is the four-line narrative companion to
+// the live power diagram. It reads off the directional flow totals
+// the API server computed on the fly for the selected period and
+// surfaces a plain-Ukrainian summary of "how the battery was used"
+// without forcing the operator to read a Sankey. The card is
+// rendered in the left metrics panel, sharing the `metrics-group`
+// styling with the other narrative cards.
 //
-// The title mirrors the global RangePreset (`Перетік за
-// день/місяць/рік`) so it scans next to "Підсумок за …" without
-// requiring an operator to remember which period the dashboard is
-// on. The "Оновити" button re-runs the period flow fetch on
-// demand — useful between background auto-refreshes (every
-// DASHBOARD_CHART_REFRESH_MS) when the operator wants to see the
-// latest state right now. It is a pure refetch: the API computes
-// flow totals on the fly from raw Modbus accumulators, so a refresh
-// is just "re-run the allocator over the current raw data" and
-// historical periods are recomputed by the same path.
+// Today the card is only rendered for the `day` preset (the parent
+// `MetricsPanel` gates it on the global RangePreset). Month/year
+// presets hide the card because the API restricts the on-the-fly
+// allocator to day-sized windows for now. The `preset` prop is kept
+// so the title still reads as part of the same "за день / за
+// місяць / за рік" family with the other left-panel cards once we
+// lift that restriction.
 
 type Props = {
   flows: EnergyFlows
@@ -76,11 +71,6 @@ export function EnergyFlowPeriodSummary({
           <ArrowsClockwise size={16} weight="bold" />
         </button>
       </header>
-      {!flows.hasEnergyFlowSamples && (
-        <p className="daily-narrative-note" role="note">
-          Дані з лічильників УЗЕ ще не зібрані за вибраний період.
-        </p>
-      )}
       <ul className="daily-narrative-list">
         <li>
           <span className="daily-narrative-icon" aria-hidden="true">

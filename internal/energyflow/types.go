@@ -3,14 +3,21 @@
 // ess_to_grid) from the cumulative kWh counters published by Huawei
 // SmartLogger devices over Modbus.
 //
-// The package is split into a stateless allocation rule (Allocate)
-// and a stateful per-organization Aggregator. The collector feeds
-// per-poll snapshots into the aggregator; on every allocation_window
-// tick the aggregator runs Allocate against the previous flushed
-// snapshot, accumulates the per-interval deltas into running totals,
-// and emits four cumulative samples back to TimescaleDB so the API
-// layer's last(end) - last(seed) summary path can serve the values
-// without a schema change.
+// The package exposes two stateless functions:
+//
+//   - Allocate runs the allocation rule on a single (prev, curr)
+//     pair of merged accumulator snapshots and returns the four flow
+//     kWh deltas for that interval plus a diagnostic Result.
+//   - Recompute takes a slice of role-tagged RawSamples for an
+//     arbitrary window, buckets them on AllocationWindowSeconds, and
+//     iterates Allocate across consecutive merged buckets. The four
+//     flow totals are the sum of all non-skipped intervals.
+//
+// Neither function holds state across calls: the API server invokes
+// Recompute on the raw telemetry_samples rows for each
+// /energy-summary request, so historical periods always reproduce
+// byte-identical numbers and there is nothing to "reseed" on a
+// process restart.
 package energyflow
 
 import "time"
@@ -65,7 +72,7 @@ type Result struct {
 
 // Topology classifies a site as either a single SmartLogger covering
 // both PV and ESS (`single_smartlogger`) or two SmartLoggers split by
-// role (`dual_smartlogger`). The aggregator detects the topology
+// role (`dual_smartlogger`). The collector detects the topology
 // automatically from the metric_keys whitelists declared on each
 // Modbus device — operators do not configure it explicitly.
 type Topology string

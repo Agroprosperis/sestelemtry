@@ -88,10 +88,11 @@ Notes:
 
 ## Energy flow (PV / Grid / ESS / Load)
 
-The collector computes four directional energy flows as cumulative
-kWh counters and writes them back to `telemetry_samples` next to
-the SmartLogger accumulators. The dashboard reads them through the
-same `/api/v1/energy-summary` endpoint and renders a Sankey diagram.
+The API computes four directional energy flows on the fly from the
+SmartLogger accumulators and surfaces them in
+`/api/v1/energy-summary` alongside the raw counter deltas. The
+dashboard renders them as a live diagram (kW) plus a four-line
+period summary (kWh).
 
 | `metric_key`        | meaning                                    |
 | ------------------- | ------------------------------------------ |
@@ -100,15 +101,16 @@ same `/api/v1/energy-summary` endpoint and renders a Sankey diagram.
 | `ess_to_load_kwh`   | ESS discharge that fed the load            |
 | `ess_to_grid_kwh`   | ESS discharge that exported to the grid    |
 
-The values are produced by `internal/energyflow.Aggregator`: every
-`allocation_window_seconds` (default 60 s) it computes per-window
-deltas from the SmartLogger accumulators
-(`accumulated_pv_energy_yield_kwh`, `accumulated_electricity_purchased_kwh`,
-`accumulated_electricity_sold_kwh`, `total_energy_charged_kwh`,
-`total_energy_discharged_kwh`) and runs the spec allocation rule
-(`Allocate` in `internal/energyflow/allocate.go`). The four totals
-survive a process restart — on startup the aggregator reseeds itself
-from the last value in `telemetry_samples`.
+These four values are NOT persisted in `telemetry_samples`. When the
+dashboard asks for any of the four keys, the EnergySummary handler
+(`internal/api/energyflow.go`) pulls the raw Modbus counter rows for
+[from, to] from `telemetry_samples`, hands them to
+`energyflow.Recompute` in `internal/energyflow/recompute.go`, and
+returns the totals in the response's typed `flows` field. The
+allocation rule itself lives in `internal/energyflow/allocate.go`.
+On-the-fly compute is currently gated to day-sized windows (see
+`maxEnergyFlowWindow`); month/year refreshes skip the allocator
+until we ship a daily-rollup cache.
 
 ### Topology auto-detection
 
@@ -124,9 +126,10 @@ just declare which metrics each device polls:
 - A device whose whitelist covers only the ESS accumulators is the
   ESS side (`RoleESS`).
 - An organization that does not cover both PV and ESS across all
-  its devices logs `energy_flow_disabled_for_org` and emits no
-  synthetic samples; the dashboard surfaces a hint instead of an
-  empty Sankey card.
+  its devices has no rows for the on-the-fly compute to chew on, so
+  the API returns `flows` with zero values; the dashboard hides the
+  period-flow card on the day preset only when the request didn't
+  ask for synthetic keys at all.
 
 For the `ze` deployment to enable energy flow, expand the existing
 whitelists, e.g.:

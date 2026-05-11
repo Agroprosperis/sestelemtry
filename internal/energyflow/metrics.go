@@ -1,11 +1,12 @@
 package energyflow
 
-// Synthetic metric_keys produced by the aggregator and written to
-// telemetry_samples as cumulative kWh counters. They have no Modbus
-// register backing them — the values are derived in-process from the
-// SmartLogger accumulators. The four keys are intentionally short
-// and stable: the dashboard, the Sankey diagram and the
-// /api/v1/energy-summary endpoint all reference them by name.
+// Synthetic metric_keys for the four directional energy-flow
+// counters. They have no Modbus register backing them and are NOT
+// persisted in telemetry_samples — the API computes them on the fly
+// from the SmartLogger accumulators inside computeEnergyFlowTotals.
+// The four keys are intentionally short and stable: the dashboard
+// and the /api/v1/energy-summary response all reference them by
+// name.
 const (
 	MetricPVToESSKwh   = "pv_to_ess_kwh"
 	MetricGridToESSKwh = "grid_to_ess_kwh"
@@ -13,9 +14,9 @@ const (
 	MetricESSToGridKwh = "ess_to_grid_kwh"
 )
 
-// SyntheticMetricKeys is the canonical order of the four flow metrics.
-// Used by reseed (which queries the latest cumulative value for each)
-// and by the API summary list.
+// SyntheticMetricKeys is the canonical order of the four flow
+// metrics. The API server uses it as the single source of truth for
+// "which counters does the on-the-fly compute produce".
 var SyntheticMetricKeys = []string{
 	MetricPVToESSKwh,
 	MetricGridToESSKwh,
