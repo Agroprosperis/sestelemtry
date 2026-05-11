@@ -412,6 +412,51 @@
   outline-offset: 2px;
 }
 
+.debug-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 6px 12px;
+  font: inherit;
+  font-size: 13px;
+  color: #475569;
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease,
+    color 120ms ease;
+}
+
+.debug-toggle:hover {
+  background-color: #f1f5f9;
+  border-color: #cbd5e1;
+}
+
+.debug-toggle:focus-visible {
+  outline: 2px solid #6366f1;
+  outline-offset: 2px;
+}
+
+.debug-toggle.is-active {
+  background-color: #fef3c7;
+  border-color: #f59e0b;
+  color: #92400e;
+}
+
+.debug-toggle.is-active:hover {
+  background-color: #fde68a;
+}
+
+.metric-modbus-addr {
+  margin-left: 4px;
+  color: #94a3b8;
+  font-weight: 400;
+  font-size: 0.85em;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+}
+
 .export-dialog {
   border: 0;
   border-radius: 14px;

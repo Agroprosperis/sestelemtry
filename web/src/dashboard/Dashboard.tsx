@@ -5,8 +5,10 @@ import { EnergyChart } from './components/EnergyChart'
 import { MetricsPanel } from './components/MetricsPanel'
 import { WeatherCard } from './components/WeatherCard'
 import { useDashboardData } from './hooks/useDashboardData'
+import { useDebugMode } from './hooks/useDebugMode'
 import { useOrganizationParam } from './hooks/useOrganizationParam'
 import { useRangeParams } from './hooks/useRangeParams'
+import { useRegistersWhenDebug } from './hooks/useRegistersWhenDebug'
 
 // RevenueChart sits below the fold for most users and pulls a sizable
 // recharts subgraph (AreaChart + gradients) that the energy chart
@@ -28,6 +30,8 @@ export function Dashboard() {
   const [metricsAt, setMetricsAt] = useState<Date | null>(null)
   const [exportOpen, setExportOpen] = useState(false)
   const { organizationID, options, change: onOrganizationChange } = useOrganizationParam()
+  const { debug, toggleDebug } = useDebugMode()
+  const registers = useRegistersWhenDebug(debug)
 
   const {
     config,
@@ -63,6 +67,8 @@ export function Dashboard() {
         anchor={anchor}
         onAnchorChange={setAnchor}
         onExportClick={() => setExportOpen(true)}
+        debug={debug}
+        onDebugToggle={toggleDebug}
       />
 
       {error && (
@@ -84,6 +90,8 @@ export function Dashboard() {
           anchor={anchor}
           flowsRefreshing={flowsRefreshing}
           onRefreshFlows={() => void refreshFlows()}
+          debug={debug}
+          registers={registers}
         />
 
         <div className="dashboard-charts">

@@ -7,6 +7,7 @@ import {
   Sun,
   SunDim,
 } from '@phosphor-icons/react'
+import type { RegisterMeta } from '../../types'
 import { formatChartNumber } from '../format'
 import type {
   LiveAllocation,
@@ -15,6 +16,7 @@ import type {
   LiveLoadState,
   LivePvState,
 } from '../transforms/liveAllocation'
+import { ModbusAddr } from './ModbusAddr'
 
 // EnergyFlowLive renders a real-time site-wide power flow diagram.
 // Four corner nodes (PV / Load / Battery / Grid) connect to a
@@ -212,12 +214,20 @@ type Props = {
   // sibling card (e.g. the snapshot card on the metrics panel) we
   // skip the wrapper to avoid nested chart-card chrome.
   wrapInSection?: boolean
+  // debug + registers, when both provided, surface the Modbus
+  // register address next to each node's title. Defaults are off
+  // so callers that don't care (e.g. the standalone diagram in
+  // ops tooling) don't have to thread them through.
+  debug?: boolean
+  registers?: Record<string, RegisterMeta> | null
 }
 
 export function EnergyFlowLive({
   allocation,
   variant = 'default',
   wrapInSection = true,
+  debug = false,
+  registers = null,
 }: Props) {
   // ageSeconds drives the "Updated N seconds ago" pill in the
   // header. We re-tick every second instead of recomputing on
@@ -312,6 +322,9 @@ export function EnergyFlowLive({
           kw={allocation.pvKw}
           status={allocation.pvState === 'generating' ? 'Генерує' : 'Очікує'}
           active={allocation.pvState === 'generating'}
+          debug={debug}
+          registers={registers}
+          metricKeys={['active_pv_power_kw']}
         />
         <NodeCard
           variant="load"
@@ -321,6 +334,16 @@ export function EnergyFlowLive({
           kw={allocation.loadKw}
           status={allocation.loadState === 'consuming' ? 'Споживає' : 'Очікує'}
           active={allocation.loadState === 'consuming'}
+          debug={debug}
+          registers={registers}
+          // Load is derived from the bus balance: pv + grid + ess.
+          // Surface all three input registers so an operator can
+          // trace the number back to source.
+          metricKeys={[
+            'active_pv_power_kw',
+            'grid_connected_active_power_kw',
+            'active_ess_power_kw',
+          ]}
         />
         <NodeCard
           variant="ess"
@@ -356,6 +379,9 @@ export function EnergyFlowLive({
               ? COLORS.essCharge
               : COLORS.essDischarge
           }
+          debug={debug}
+          registers={registers}
+          metricKeys={['active_ess_power_kw', 'soc_percent']}
         />
         <NodeCard
           variant="grid"
@@ -383,6 +409,9 @@ export function EnergyFlowLive({
                 : 'Очікує'
           }
           active={allocation.gridState !== 'idle'}
+          debug={debug}
+          registers={registers}
+          metricKeys={['grid_connected_active_power_kw']}
         />
 
         <div
@@ -463,6 +492,15 @@ type NodeCardProps = {
   active: boolean
   soc?: number | null
   socColor?: string
+  debug?: boolean
+  registers?: Record<string, RegisterMeta> | null
+  // metricKeys lists the underlying Modbus register keys whose
+  // address(es) annotate the node title in debug mode. Multiple
+  // keys (e.g. ESS power + SOC) render as one comma-separated
+  // suffix. Pass [] for nodes whose value is fully derived (the
+  // Load node falls back to bus-balance math, not a single
+  // register).
+  metricKeys?: string[]
 }
 
 function NodeCard({
@@ -475,6 +513,9 @@ function NodeCard({
   active,
   soc,
   socColor,
+  debug,
+  registers,
+  metricKeys,
 }: NodeCardProps) {
   return (
     <div
@@ -487,7 +528,16 @@ function NodeCard({
     >
       <div className="energy-flow-live-node-head">
         <span className="energy-flow-live-node-icon">{icon}</span>
-        <h3>{title}</h3>
+        <h3>
+          {title}
+          {metricKeys && metricKeys.length > 0 && (
+            <ModbusAddr
+              debug={!!debug}
+              registers={registers ?? null}
+              keys={metricKeys}
+            />
+          )}
+        </h3>
       </div>
       <strong className="energy-flow-live-node-kw">{formatKw(kw)}</strong>
       <span className="energy-flow-live-node-status">{status}</span>

@@ -1,4 +1,4 @@
-import type { CurrentResponse } from '../../types'
+import type { CurrentResponse, RegisterMeta } from '../../types'
 import type { RangePreset } from '../range'
 import type { EnergyFlows } from '../transforms/flows'
 import type { LiveAllocation } from '../transforms/liveAllocation'
@@ -22,6 +22,8 @@ type Props = {
   anchor: Date
   flowsRefreshing: boolean
   onRefreshFlows: () => void
+  debug: boolean
+  registers: Record<string, RegisterMeta> | null
 }
 
 function formatSnapshotLabel(at: Date): string {
@@ -47,6 +49,8 @@ export function MetricsPanel({
   anchor,
   flowsRefreshing,
   onRefreshFlows,
+  debug,
+  registers,
 }: Props) {
   return (
     <div className="metrics-panel-stack">
@@ -61,9 +65,22 @@ export function MetricsPanel({
       <CurrentSnapshotNarrative
         liveAllocation={liveAllocation}
         loading={loading}
+        debug={debug}
+        registers={registers}
       />
-      <TodayCountersNarrative current={current} loading={loading} />
-      <DailySummaryNarrative summary={summary} preset={preset} anchor={anchor} />
+      <TodayCountersNarrative
+        current={current}
+        loading={loading}
+        debug={debug}
+        registers={registers}
+      />
+      <DailySummaryNarrative
+        summary={summary}
+        preset={preset}
+        anchor={anchor}
+        debug={debug}
+        registers={registers}
+      />
       <EnergyFlowPeriodSummary
         flows={flows}
         preset={preset}
@@ -71,7 +88,12 @@ export function MetricsPanel({
         refreshing={flowsRefreshing}
         onRefresh={onRefreshFlows}
       />
-      <AccumulatedSnapshotNarrative current={current} loading={loading} />
+      <AccumulatedSnapshotNarrative
+        current={current}
+        loading={loading}
+        debug={debug}
+        registers={registers}
+      />
     </div>
   )
 }

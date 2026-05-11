@@ -6,12 +6,15 @@ import {
   Plug,
   Sun,
 } from '@phosphor-icons/react'
-import type { CurrentResponse } from '../../types'
+import type { CurrentResponse, RegisterMeta } from '../../types'
 import { formatEnergyCompactKWhUk } from '../format'
+import { ModbusAddr } from './ModbusAddr'
 
 type Props = {
   current: CurrentResponse | null
   loading: boolean
+  debug: boolean
+  registers: Record<string, RegisterMeta> | null
 }
 
 const ICON_SIZE = 20
@@ -27,7 +30,12 @@ function formatTotal(value: number | null, loading: boolean): string {
   return formatEnergyCompactKWhUk(value)
 }
 
-export function AccumulatedSnapshotNarrative({ current, loading }: Props) {
+export function AccumulatedSnapshotNarrative({
+  current,
+  loading,
+  debug,
+  registers,
+}: Props) {
   const pv = reading(current, 'accumulated_pv_energy_yield_kwh')
   const consumption = reading(current, 'accumulated_power_consumption_kwh')
   const purchased = reading(current, 'accumulated_electricity_purchased_kwh')
@@ -50,7 +58,13 @@ export function AccumulatedSnapshotNarrative({ current, loading }: Props) {
             <Sun size={ICON_SIZE} weight="duotone" color="#f59e0b" />
           </span>
           <span>
-            Виробіток СЕС: <strong>{formatTotal(pv, loading)}</strong>
+            Виробіток СЕС
+            <ModbusAddr
+              debug={debug}
+              registers={registers}
+              keys="accumulated_pv_energy_yield_kwh"
+            />
+            : <strong>{formatTotal(pv, loading)}</strong>
           </span>
         </li>
         <li>
@@ -58,8 +72,13 @@ export function AccumulatedSnapshotNarrative({ current, loading }: Props) {
             <Buildings size={ICON_SIZE} weight="duotone" color="#7c3aed" />
           </span>
           <span>
-            Споживання приладами:{' '}
-            <strong>{formatTotal(consumption, loading)}</strong>
+            Споживання приладами
+            <ModbusAddr
+              debug={debug}
+              registers={registers}
+              keys="accumulated_power_consumption_kwh"
+            />
+            : <strong>{formatTotal(consumption, loading)}</strong>
           </span>
         </li>
         <li>
@@ -67,8 +86,13 @@ export function AccumulatedSnapshotNarrative({ current, loading }: Props) {
             <ArrowDownLeft size={ICON_SIZE} weight="bold" color="#3b82f6" />
           </span>
           <span>
-            Куплено з мережі:{' '}
-            <strong>{formatTotal(purchased, loading)}</strong>
+            Куплено з мережі
+            <ModbusAddr
+              debug={debug}
+              registers={registers}
+              keys="accumulated_electricity_purchased_kwh"
+            />
+            : <strong>{formatTotal(purchased, loading)}</strong>
           </span>
         </li>
         <li>
@@ -76,7 +100,13 @@ export function AccumulatedSnapshotNarrative({ current, loading }: Props) {
             <ArrowUpRight size={ICON_SIZE} weight="bold" color="#22c55e" />
           </span>
           <span>
-            Відпущено в мережу: <strong>{formatTotal(sold, loading)}</strong>
+            Відпущено в мережу
+            <ModbusAddr
+              debug={debug}
+              registers={registers}
+              keys="accumulated_electricity_sold_kwh"
+            />
+            : <strong>{formatTotal(sold, loading)}</strong>
           </span>
         </li>
         <li>
@@ -84,8 +114,14 @@ export function AccumulatedSnapshotNarrative({ current, loading }: Props) {
             <BatteryFull size={ICON_SIZE} weight="duotone" color="#22c55e" />
           </span>
           <span>
-            Батарея: заряд <strong>{formatTotal(charged, loading)}</strong>,
-            розряд <strong>{formatTotal(discharged, loading)}</strong>
+            Батарея
+            <ModbusAddr
+              debug={debug}
+              registers={registers}
+              keys={['total_energy_charged_kwh', 'total_energy_discharged_kwh']}
+            />
+            : заряд <strong>{formatTotal(charged, loading)}</strong>, розряд{' '}
+            <strong>{formatTotal(discharged, loading)}</strong>
           </span>
         </li>
         <li>
@@ -93,8 +129,13 @@ export function AccumulatedSnapshotNarrative({ current, loading }: Props) {
             <Plug size={ICON_SIZE} weight="duotone" color="#475569" />
           </span>
           <span>
-            Постачання з мережі (загальне):{' '}
-            <strong>{formatTotal(gridSupply, loading)}</strong>
+            Постачання з мережі (загальне)
+            <ModbusAddr
+              debug={debug}
+              registers={registers}
+              keys="total_power_supply_from_grid_kwh"
+            />
+            : <strong>{formatTotal(gridSupply, loading)}</strong>
           </span>
         </li>
       </ul>

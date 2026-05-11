@@ -5,14 +5,18 @@ import {
   Buildings,
   Sun,
 } from '@phosphor-icons/react'
+import type { RegisterMeta } from '../../types'
 import type { RangePreset } from '../range'
 import type { EnergySummary } from '../transforms/summary'
 import { formatEnergyCompactKWhUk, formatPeriodLabel } from '../format'
+import { ModbusAddr } from './ModbusAddr'
 
 type Props = {
   summary: EnergySummary
   preset: RangePreset
   anchor: Date
+  debug: boolean
+  registers: Record<string, RegisterMeta> | null
 }
 
 const TITLES: Record<RangePreset, string> = {
@@ -24,7 +28,13 @@ const TITLES: Record<RangePreset, string> = {
 const formatKWhUk = formatEnergyCompactKWhUk
 const ICON_SIZE = 20
 
-export function DailySummaryNarrative({ summary, preset, anchor }: Props) {
+export function DailySummaryNarrative({
+  summary,
+  preset,
+  anchor,
+  debug,
+  registers,
+}: Props) {
   const exportIsTiny = summary.gridExport > 0 && summary.gridExport < 1
   const periodLabel = formatPeriodLabel(preset, anchor)
   return (
@@ -42,7 +52,13 @@ export function DailySummaryNarrative({ summary, preset, anchor }: Props) {
             <Sun size={ICON_SIZE} weight="duotone" color="#f59e0b" />
           </span>
           <span>
-            СЕС згенерувала: <strong>{formatKWhUk(summary.pvProduced)}</strong>
+            СЕС згенерувала
+            <ModbusAddr
+              debug={debug}
+              registers={registers}
+              keys="accumulated_pv_energy_yield_kwh"
+            />
+            : <strong>{formatKWhUk(summary.pvProduced)}</strong>
           </span>
         </li>
         <li>
@@ -50,8 +66,13 @@ export function DailySummaryNarrative({ summary, preset, anchor }: Props) {
             <Buildings size={ICON_SIZE} weight="duotone" color="#7c3aed" />
           </span>
           <span>
-            Споживання приладами:{' '}
-            <strong>{formatKWhUk(summary.consumption)}</strong>
+            Споживання приладами
+            <ModbusAddr
+              debug={debug}
+              registers={registers}
+              keys="accumulated_power_consumption_kwh"
+            />
+            : <strong>{formatKWhUk(summary.consumption)}</strong>
           </span>
         </li>
         <li>
@@ -59,7 +80,13 @@ export function DailySummaryNarrative({ summary, preset, anchor }: Props) {
             <ArrowDownLeft size={ICON_SIZE} weight="bold" color="#3b82f6" />
           </span>
           <span>
-            Взяли з мережі: <strong>{formatKWhUk(summary.fromGrid)}</strong>
+            Взяли з мережі
+            <ModbusAddr
+              debug={debug}
+              registers={registers}
+              keys="accumulated_electricity_purchased_kwh"
+            />
+            : <strong>{formatKWhUk(summary.fromGrid)}</strong>
           </span>
         </li>
         <li>
@@ -67,8 +94,13 @@ export function DailySummaryNarrative({ summary, preset, anchor }: Props) {
             <ArrowUpRight size={ICON_SIZE} weight="bold" color="#22c55e" />
           </span>
           <span>
-            Віддали в мережу:{' '}
-            <strong>{formatKWhUk(summary.gridExport)}</strong>
+            Віддали в мережу
+            <ModbusAddr
+              debug={debug}
+              registers={registers}
+              keys="accumulated_electricity_sold_kwh"
+            />
+            : <strong>{formatKWhUk(summary.gridExport)}</strong>
             {exportIsTiny && (
               <span className="daily-narrative-note"> (майже 0)</span>
             )}
@@ -79,8 +111,13 @@ export function DailySummaryNarrative({ summary, preset, anchor }: Props) {
             <BatteryFull size={ICON_SIZE} weight="duotone" color="#22c55e" />
           </span>
           <span>
-            Батарея: заряд{' '}
-            <strong>{formatKWhUk(summary.batteryCharged)}</strong>, розряд{' '}
+            Батарея
+            <ModbusAddr
+              debug={debug}
+              registers={registers}
+              keys={['total_energy_charged_kwh', 'total_energy_discharged_kwh']}
+            />
+            : заряд <strong>{formatKWhUk(summary.batteryCharged)}</strong>, розряд{' '}
             <strong>{formatKWhUk(summary.batteryDischarged)}</strong>
           </span>
         </li>

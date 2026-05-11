@@ -1,3 +1,4 @@
+import { Bug } from '@phosphor-icons/react'
 import type { RangePreset } from '../range'
 import { OrganizationSelect } from './OrganizationSelect'
 import { PeriodPicker } from './PeriodPicker'
@@ -12,6 +13,8 @@ type Props = {
   anchor: Date
   onAnchorChange: (next: Date) => void
   onExportClick?: () => void
+  debug: boolean
+  onDebugToggle: () => void
 }
 
 export function DashboardHeader({
@@ -23,6 +26,8 @@ export function DashboardHeader({
   anchor,
   onAnchorChange,
   onExportClick,
+  debug,
+  onDebugToggle,
 }: Props) {
   return (
     <header className="dashboard-header">
@@ -34,6 +39,20 @@ export function DashboardHeader({
         <OrganizationSelect value={organizationID} options={organizationOptions} onChange={onOrganizationChange} />
         <RangeSwitch value={preset} onChange={onPresetChange} />
         <PeriodPicker preset={preset} anchor={anchor} onChange={onAnchorChange} />
+        <button
+          type="button"
+          className={`debug-toggle${debug ? ' is-active' : ''}`}
+          onClick={onDebugToggle}
+          aria-pressed={debug}
+          title={
+            debug
+              ? 'Вимкнути режим діагностики (адреси Modbus)'
+              : 'Увімкнути режим діагностики (адреси Modbus)'
+          }
+        >
+          <Bug size={14} weight={debug ? 'fill' : 'regular'} />
+          <span>Debug</span>
+        </button>
         {onExportClick && (
           <button
             type="button"

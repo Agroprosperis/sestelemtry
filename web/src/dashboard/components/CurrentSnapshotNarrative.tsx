@@ -1,3 +1,4 @@
+import type { RegisterMeta } from '../../types'
 import type { LiveAllocation } from '../transforms/liveAllocation'
 import { EnergyFlowLive } from './EnergyFlowLive'
 
@@ -13,9 +14,16 @@ import { EnergyFlowLive } from './EnergyFlowLive'
 type Props = {
   liveAllocation: LiveAllocation
   loading: boolean
+  debug: boolean
+  registers: Record<string, RegisterMeta> | null
 }
 
-export function CurrentSnapshotNarrative({ liveAllocation, loading }: Props) {
+export function CurrentSnapshotNarrative({
+  liveAllocation,
+  loading,
+  debug,
+  registers,
+}: Props) {
   return (
     <section
       className="metrics-group current-snapshot-card"
@@ -29,6 +37,8 @@ export function CurrentSnapshotNarrative({ liveAllocation, loading }: Props) {
         allocation={liveAllocation}
         variant="compact"
         wrapInSection={false}
+        debug={debug}
+        registers={registers}
       />
     </section>
   )

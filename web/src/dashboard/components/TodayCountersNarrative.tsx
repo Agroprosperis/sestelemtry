@@ -7,8 +7,9 @@ import {
   Plug,
   Sun,
 } from '@phosphor-icons/react'
-import type { CurrentResponse } from '../../types'
+import type { CurrentResponse, RegisterMeta } from '../../types'
 import { formatEnergyCompactKWhUk } from '../format'
+import { ModbusAddr } from './ModbusAddr'
 
 type Row = {
   key: string
@@ -64,6 +65,8 @@ const ROWS: Row[] = [
 type Props = {
   current: CurrentResponse | null
   loading: boolean
+  debug: boolean
+  registers: Record<string, RegisterMeta> | null
 }
 
 function reading(current: CurrentResponse | null, key: string): number | null {
@@ -77,7 +80,7 @@ function formatTotal(value: number | null, loading: boolean): string {
   return formatEnergyCompactKWhUk(value)
 }
 
-export function TodayCountersNarrative({ current, loading }: Props) {
+export function TodayCountersNarrative({ current, loading, debug, registers }: Props) {
   return (
     <section
       className="metrics-group daily-narrative"
@@ -96,7 +99,9 @@ export function TodayCountersNarrative({ current, loading }: Props) {
                 {row.icon}
               </span>
               <span>
-                {row.label}: <strong>{formatTotal(value, loading)}</strong>
+                {row.label}
+                <ModbusAddr debug={debug} registers={registers} keys={row.key} />
+                : <strong>{formatTotal(value, loading)}</strong>
               </span>
             </li>
           )
