@@ -785,10 +785,27 @@ func (h *Handlers) energyFlowRecompute(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "to must be after from", http.StatusBadRequest)
 		return
 	}
-	const safetyMargin = 2 * time.Minute
+	// liveAggregatorReservedWindow is the tail of "right now" the
+	// recompute is forbidden to touch. The live aggregator maintains
+	// its cumulative state in-memory and flushes the four synthetic
+	// counters on a ~1 minute cadence; if recompute deletes synthetic
+	// samples inside this window and rewrites them with its own (less
+	// granular, slightly different-rounded) trajectory, the next live
+	// flush either re-overwrites our output or — if the collector
+	// restarts and reseeds — adopts the recompute's lower endpoint and
+	// drags subsequent values backward (the operator-visible bug
+	// observed on 2026-05-11 where today's `ess_to_load_kwh` jumped
+	// from ~144 down to ~141 after a refresh click).
+	//
+	// The frontend's refresh button mirrors this guard
+	// (`useDashboardData.refreshFlows`) so day/month/year-on-current
+	// clicks skip recompute entirely. This server-side check is the
+	// belt-and-suspenders so a stray curl or third-party caller
+	// cannot corrupt the live tail either.
+	const liveAggregatorReservedWindow = 10 * time.Minute
 	now := time.Now().UTC()
-	if to.After(now.Add(-safetyMargin)) {
-		http.Error(w, fmt.Sprintf("to must be at least %s in the past to avoid racing the live aggregator", safetyMargin), http.StatusBadRequest)
+	if to.After(now.Add(-liveAggregatorReservedWindow)) {
+		http.Error(w, fmt.Sprintf("to must be at least %s in the past so the live aggregator's window stays untouched", liveAggregatorReservedWindow), http.StatusConflict)
 		return
 	}
 

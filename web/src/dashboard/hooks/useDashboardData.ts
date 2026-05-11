@@ -5,10 +5,10 @@ import {
   fetchDashboardConfig,
   fetchEnergySummary,
   fetchTimeseries,
-  recomputeEnergyFlow,
 } from '../../api'
 import type { CurrentResponse, DashboardConfig } from '../../types'
 import {
+  DASHBOARD_CHART_REFRESH_MS,
   DASHBOARD_REFRESH_MS,
   FALLBACK_DASHBOARD_CONFIG,
   MIN_RELIABLE_DATA_AT,
@@ -233,11 +233,11 @@ export function useDashboardData(input: {
     }
   }, [organizationID, metricsAtTime])
 
-  // Charts, summary, and DAM prices fetch on mount and whenever the user
-  // changes preset or anchor; no setInterval. The user explicitly asked for
-  // live updates only on the cards — charts are heavy and the numbers
-  // don't drift visibly within a few minutes, so on-demand refresh is the
-  // right tradeoff here.
+  // Charts, summary, and DAM prices fetch on mount, whenever the user
+  // changes preset or anchor, AND every DASHBOARD_CHART_REFRESH_MS so a
+  // tab left open doesn't drift away from the live numbers. The
+  // background refresh runs with `showLoading=false` so it never
+  // blanks the panels — they just re-render when fresh data arrives.
   //
   // Both the timeseries fetches and the DAM fetch share a single effect /
   // AbortController so the chart-area `loading` flag flips false only once
@@ -247,6 +247,7 @@ export function useDashboardData(input: {
   useEffect(() => {
     let cancelled = false
     let inflight: AbortController | null = null
+    let timer: number | null = null
 
     async function tickCharts(showLoading: boolean) {
       if (cancelled) return
@@ -412,36 +413,45 @@ export function useDashboardData(input: {
     }
 
     void tickCharts(true)
+    // Historical snapshots (metricsAt != null) are immutable — no
+    // reason to poll. For live dashboards, refresh charts/summary in
+    // the background so the period flow numbers stay fresh even on
+    // a tab the operator left open since midnight.
+    if (metricsAtTime === null) {
+      timer = window.setInterval(
+        () => void tickCharts(false),
+        DASHBOARD_CHART_REFRESH_MS,
+      )
+    }
+
+    function onVisibilityChange() {
+      if (document.visibilityState === 'visible') void tickCharts(false)
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange)
 
     return () => {
       cancelled = true
       if (inflight) inflight.abort()
+      if (timer !== null) window.clearInterval(timer)
+      document.removeEventListener('visibilitychange', onVisibilityChange)
     }
-  }, [organizationID, preset, anchorTime])
+  }, [organizationID, preset, anchorTime, metricsAtTime])
 
-  // refreshFlows triggers a backend backfill for the current period
-  // so missing historical data can be filled in on demand. The flow
-  // is:
+  // refreshFlows refetches /energy-summary for the currently selected
+  // preset / anchor and rebuilds the period-flow numbers from the
+  // returned totals. The live aggregator in the collector is the
+  // authoritative writer for the four synthetic `*_to_*_kwh`
+  // counters, so the dashboard only ever READS the DB — there is no
+  // recompute / mutate path from the UI. (Backfilling missing
+  // historical periods is an ops task done through the standalone
+  // `POST /api/v1/energy-flow/recompute` endpoint via curl; the
+  // server's 10-minute live-aggregator guard there prevents that
+  // endpoint from corrupting the current tail either.)
   //
-  //  1. Ask the server to recompute the four synthetic counters from
-  //     the raw source counters for [from, to). The server replaces
-  //     any previously-emitted synthetic rows in that window with the
-  //     freshly computed ones (idempotent on repeat clicks).
-  //  2. Refetch /energy-summary so the dashboard immediately reflects
-  //     the new cumulative values.
-  //
-  // The recompute step is clamped to `(now - 3 min)` because the
-  // server refuses to recompute up to "now" — that would race the
-  // live aggregator's in-flight bucket and corrupt the cumulative
-  // timeline. For day-preset clicks that produce a recompute window
-  // narrower than 60 s after clamping (i.e. the request fired right
-  // after midnight against the same day), we skip the recompute and
-  // only refetch — there is no historical data to backfill in that
-  // sliver and the live aggregator's tick will pick it up shortly.
-  //
-  // A recompute failure does not block the refetch: the user clicked
-  // "Оновити" expecting the panel to redraw, so we always end on a
-  // summary fetch and surface the recompute error via setError().
+  // For month/year presets we also refresh the cumulative
+  // `energySummary` from the same response. The day preset keeps
+  // its series-derived summary so cards stay byte-identical to the
+  // chart bucket deltas.
   const refreshFlows = useCallback(async () => {
     if (flowsRefreshController.current) {
       flowsRefreshController.current.abort()
@@ -459,39 +469,6 @@ export function useDashboardData(input: {
       )
       const baseRange = { ...rawRange, from: energyFrom.toISOString() }
 
-      // Step 1: backend recompute. Clamp `to` against the server's
-      // safety margin so a day-preset click against today still
-      // backfills everything up to ~3 minutes ago instead of
-      // bouncing with a 400. The 3 min figure leaves one minute of
-      // headroom over the server's 2 min cutoff for clock skew /
-      // request travel time.
-      const SAFETY_MARGIN_MS = 3 * 60 * 1000
-      const fromMs = new Date(baseRange.from).getTime()
-      const toMs = Math.min(
-        new Date(baseRange.to).getTime(),
-        now.getTime() - SAFETY_MARGIN_MS,
-      )
-      let recomputeWarning: string | null = null
-      if (toMs - fromMs > 60_000) {
-        try {
-          await recomputeEnergyFlow(
-            {
-              organizationID,
-              from: new Date(fromMs).toISOString(),
-              to: new Date(toMs).toISOString(),
-            },
-            controller.signal,
-          )
-        } catch (e) {
-          if (controller.signal.aborted || isAbortError(e)) return
-          recomputeWarning = e instanceof Error ? e.message : 'Recompute failed'
-        }
-      }
-      if (controller.signal.aborted) return
-
-      // Step 2: refetch the cumulative summary so the UI shows the
-      // freshly recomputed values (and falls through to whatever
-      // exists in the DB if the recompute call failed above).
       const summaryResp = await fetchEnergySummary(
         {
           organizationID,
@@ -506,11 +483,7 @@ export function useDashboardData(input: {
       if (preset !== 'day') {
         setEnergySummary(energySummaryFromTotals(summaryResp.totals))
       }
-      if (recomputeWarning) {
-        setError(recomputeWarning)
-      } else {
-        setError(null)
-      }
+      setError(null)
     } catch (e) {
       if (controller.signal.aborted || isAbortError(e)) return
       setError(e instanceof Error ? e.message : 'Failed to refresh period flows')

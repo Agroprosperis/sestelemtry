@@ -899,22 +899,26 @@ func TestEnergyFlowRecompute_UnknownOrg(t *testing.T) {
 }
 
 // TestEnergyFlowRecompute_RecentWindowRejected blocks requests whose
-// `to` falls inside the safety margin against the live aggregator's
-// in-flight bucket. Allowing them would write synthetic samples a
-// minute ahead of the live cumulative timeline and corrupt the join.
+// `to` falls inside the live aggregator's reserved tail. The server
+// must refuse them because the live aggregator owns the cumulative
+// timeline for "right now" — a recompute that touched it would either
+// be overwritten on the next live flush or, worse, get adopted as a
+// stale seed after a collector restart and drag values backwards (the
+// 2026-05-11 ess_to_load_kwh regression). The frontend already skips
+// these clicks; this is the belt-and-suspenders for direct callers.
 func TestEnergyFlowRecompute_RecentWindowRejected(t *testing.T) {
 	h := NewHandlers(&mockStore{}, "*")
 	h.SetEnergyFlowOrgs([]EnergyFlowOrg{{ID: "org-a"}})
 	now := time.Now().UTC()
-	from := now.Add(-10 * time.Minute)
-	to := now.Add(-30 * time.Second) // inside the 2-minute safety margin
+	from := now.Add(-30 * time.Minute)
+	to := now.Add(-2 * time.Minute) // well inside the 10-minute reserved window
 	url := fmt.Sprintf("/api/v1/energy-flow/recompute?organization_id=org-a&from=%s&to=%s",
 		from.Format(time.RFC3339), to.Format(time.RFC3339))
 	req := httptest.NewRequest(http.MethodPost, url, nil)
 	rec := httptest.NewRecorder()
 	h.Router().ServeHTTP(rec, req)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("want 400 got %d body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("want 409 got %d body=%s", rec.Code, rec.Body.String())
 	}
 }
 

@@ -4,6 +4,16 @@ export const KNOWN_ORGANIZATIONS = ['demo-org', 'pe', 'ze']
 
 export const DASHBOARD_REFRESH_MS = 1000
 
+// Background re-fetch cadence for charts, summary cards, and period
+// flow numbers. We deliberately poll these less often than /current
+// (cards) because each tick triggers /timeseries (multiple metric
+// keys × full period) and /energy-summary on the backend; once a
+// minute is sufficient to keep the dashboard "live enough" without
+// piling load on the API. The previous behaviour fetched these only
+// on mount / preset change, which left an open browser tab showing
+// midnight numbers until the operator manually reloaded.
+export const DASHBOARD_CHART_REFRESH_MS = 60_000
+
 // Earliest local-time instant whose cumulative-counter readings are
 // considered reliable. Energy Summary computes period totals as
 // `end - seed` over /current?at=... lookups; on periods that include

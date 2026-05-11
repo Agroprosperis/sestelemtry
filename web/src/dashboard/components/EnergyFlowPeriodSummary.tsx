@@ -23,8 +23,12 @@ import type { EnergyFlows } from '../transforms/flows'
 // день/місяць/рік`) so it scans next to "Підсумок за …" without
 // requiring an operator to remember which period the dashboard is
 // on. The "Оновити" button re-runs the period flow fetch on
-// demand — handy after the operator notices a fresh sample
-// landed but the chart's auto-refetch is still on cooldown.
+// demand — useful between background auto-refreshes (every
+// DASHBOARD_CHART_REFRESH_MS) when the operator wants to see the
+// latest cumulative state right now. It is a pure refetch, never a
+// write: backfilling historical periods is an ops task done via
+// curl against `POST /api/v1/energy-flow/recompute`, not from the
+// dashboard, so the live aggregator's tail stays uncorruptible.
 
 type Props = {
   flows: EnergyFlows

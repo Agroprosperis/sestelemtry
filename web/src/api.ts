@@ -168,60 +168,16 @@ export async function fetchEnergySummary(
   return res.json()
 }
 
-// EnergyFlowRecomputeResponse mirrors the Go-side
-// api.EnergyFlowRecomputeResponse struct. Returned by
-// POST /api/v1/energy-flow/recompute when the operator clicks the
-// "Recalculate" button on the period-summary card.
-export type EnergyFlowRecomputeResponse = {
-  organization_id: string
-  from: string
-  to: string
-  totals: Record<string, number>
-  samples_written: number
-  samples_deleted: number
-  processed_intervals: number
-  skipped_intervals: number
-  buckets_considered: number
-  buckets_dropped: number
-  warnings?: string[]
-}
-
-// recomputeEnergyFlow triggers a backend backfill of the four
-// synthetic energy-flow counters for the given window. Unlike
-// fetchEnergySummary, this is a write: the server reads the raw
-// source counters for [from, to], runs the same allocation rule the
-// live collector uses, deletes any stale synthetic rows in the
-// window, and inserts the recomputed cumulative samples. The dashboard
-// calls it from the period-summary card's "Recalculate" button so
-// historical periods that pre-date the live aggregator (or fell in
-// collector outages) can be filled in on demand.
-//
-// The server clamps `to` to (now - 2 minutes) safety margin against
-// the live aggregator's in-flight bucket; passing a more recent
-// boundary returns 400 with a human-readable reason. The handler also
-// rejects overlapping concurrent requests for the same organization
-// with 409 so the dashboard can surface a "вже виконується" hint
-// instead of racing on the delete-then-insert path.
-export async function recomputeEnergyFlow(
-  input: {
-    organizationID: string
-    from: string
-    to: string
-  },
-  signal?: AbortSignal,
-): Promise<EnergyFlowRecomputeResponse> {
-  const url = buildURL('/api/v1/energy-flow/recompute', {
-    organization_id: input.organizationID,
-    from: input.from,
-    to: input.to,
-  })
-  const res = await fetch(url, { method: 'POST', signal })
-  if (!res.ok) {
-    const text = (await res.text().catch(() => '')).trim()
-    throw new Error(text || `energy-flow recompute failed: ${res.status}`)
-  }
-  return res.json()
-}
+// The dashboard intentionally does NOT export a wrapper for
+// `POST /api/v1/energy-flow/recompute`. The collector's live
+// aggregator is the authoritative writer for `pv_to_ess_kwh` /
+// `grid_to_ess_kwh` / `ess_to_load_kwh` / `ess_to_grid_kwh`; the UI
+// must only ever READ these counters. Backfilling missing historical
+// periods is an ops task — call the endpoint directly via curl with
+// `to` at least 10 minutes in the past so the live aggregator's
+// reserved tail stays untouched. See
+// `internal/api/handlers.go:energyFlowRecompute` for the contract
+// and the server-side guard.
 
 export type RawSamplesResult = {
   // Pre-formatted CSV body, including the UTF-8 BOM and trailing
