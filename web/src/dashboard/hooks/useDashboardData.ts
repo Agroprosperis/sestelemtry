@@ -319,15 +319,18 @@ export function useDashboardData(input: {
         // surfaces as "no usable data" instead of inventing a number
         // from corrupted samples.
         //
-        // We always fetch the summary, including for the day preset,
-        // because the energy-flow period summary needs the four
-        // synthetic counters (pv_to_ess_kwh, grid_to_ess_kwh,
-        // ess_to_load_kwh, ess_to_grid_kwh) and those are only emitted
-        // as cumulative samples — they have no per-bucket delta to
-        // reconstruct from energySeries. The day preset still uses the
-        // series-derived summary for its cards so the existing
-        // bucket-clamp behaviour is preserved.
-        const needsServerSummary = true
+        // Day preset does NOT include the summary in the critical
+        // Promise.all because the daily counter cards are derived from
+        // `energySeries` (via `energySummaryFromSeries`) and don't
+        // depend on summaryResp at all. The synthetic flow counters
+        // are the only consumer of summaryResp on the day preset, and
+        // their on-the-fly compute can take several seconds — we
+        // refuse to block the rest of the dashboard on it. The flow
+        // request fires below as an independent async pipeline that
+        // updates `energyFlows` whenever it resolves; the period-flow
+        // card surfaces its own `flowsRefreshing` spinner so the user
+        // can tell the numbers are catching up.
+        const needsServerSummary = preset !== 'day'
 
         const [energy, soc, power, dam, summaryResp] = await Promise.all([
           fetchTimeseries(
@@ -397,28 +400,22 @@ export function useDashboardData(input: {
         )
         // Day preset keeps its series-derived summary so the cards
         // share the same clamp semantics as the chart bars; month/year
-        // presets use the server-side cumulative summary. The period
-        // flows always come from the server summary because the
-        // synthetic counters are emitted as cumulative samples with
-        // no per-bucket delta to reconstruct on the client.
+        // presets use the server-side cumulative summary.
         const summary =
           preset === 'day'
             ? energySummaryFromSeries(series)
             : summaryResp
               ? energySummaryFromTotals(summaryResp.totals)
               : energySummaryFromSeries(series)
-        // Period-flow totals are only meaningful on the `day`
-        // preset right now (see energySummaryMetricKeys). For
-        // month/year we deliberately don't ask the API to run the
-        // on-the-fly allocator, so flows collapse to EMPTY_FLOWS
-        // and the period-flow card hides itself.
-        const flows =
-          preset === 'day' && summaryResp
-            ? flowsFromTotals(summaryResp.totals, summaryResp.flows ?? null)
-            : EMPTY_FLOWS
         setEnergySeries(series)
         setEnergySummary(summary)
-        setEnergyFlows(flows)
+        // Month/year never show the period-flow card, so flows
+        // collapse to EMPTY_FLOWS here regardless of summaryResp.
+        // Day preset's flows arrive via the independent flows pipeline
+        // below.
+        if (preset !== 'day') {
+          setEnergyFlows(EMPTY_FLOWS)
+        }
         setSocSeries(soc ? socChartRows(soc.points, 'day', anchorDate) : [])
         setPowerSeries(
           power ? powerChartRows(power.points, DAY_POWER_METRIC_KEYS, anchorDate, now) : [],
@@ -457,6 +454,60 @@ export function useDashboardData(input: {
       document.removeEventListener('visibilitychange', onVisibilityChange)
     }
   }, [organizationID, preset, anchorTime, metricsAtTime])
+
+  // Period flows are loaded on demand only: once on mount / when the
+  // operator changes preset or anchor, and otherwise only when the
+  // user explicitly clicks the refresh button on the period-flow
+  // card (see `refreshFlows` below). The on-the-fly allocator inside
+  // /energy-summary scans every telemetry_samples row in the window
+  // and currently takes several seconds for a full day — there is
+  // no point in re-running it on a one-minute timer when the day's
+  // totals barely move between polls. Month / year presets skip the
+  // initial load entirely (the card is hidden there); any flows
+  // cached from a previous day session stay in state but never
+  // reach the UI because `MetricsPanel` gates the period-flow card
+  // on `preset === 'day'`.
+  useEffect(() => {
+    if (preset !== 'day') return
+    let cancelled = false
+    const controller = new AbortController()
+
+    async function loadFlows() {
+      try {
+        const anchorDate = new Date(anchorTime)
+        const now = new Date()
+        const minReliable = MIN_RELIABLE_DATA_AT.getTime()
+        const rawRange = rangeParams(preset, anchorDate, now)
+        const energyFrom = new Date(
+          Math.max(new Date(rawRange.from).getTime(), minReliable),
+        )
+        const baseRange = { ...rawRange, from: energyFrom.toISOString() }
+        const summaryResp = await fetchEnergySummary(
+          {
+            organizationID,
+            from: baseRange.from,
+            to: baseRange.to,
+            metricKeys: energySummaryMetricKeys(preset),
+          },
+          controller.signal,
+        )
+        if (cancelled || controller.signal.aborted) return
+        setEnergyFlows(
+          flowsFromTotals(summaryResp.totals, summaryResp.flows ?? null),
+        )
+      } catch (e) {
+        if (cancelled || isAbortError(e)) return
+        setError(e instanceof Error ? e.message : 'Failed to load period flows')
+      }
+    }
+
+    void loadFlows()
+
+    return () => {
+      cancelled = true
+      controller.abort()
+    }
+  }, [organizationID, preset, anchorTime])
 
   // refreshFlows refetches /energy-summary for the currently selected
   // preset / anchor and rebuilds the period-flow numbers from the

@@ -788,16 +788,27 @@ func (s *Store) Ready(ctx context.Context) error {
 	return s.pool.Ping(ctx)
 }
 
-// EnergyFlowSources streams the source-counter rows the recompute
-// pipeline needs for [from, to], inclusive at both ends. The window is
-// padded by `lookback` so the very first bucket can find a "previous"
-// snapshot to subtract against; without that the first interval of a
-// freshly recomputed period would be silently dropped.
+// EnergyFlowSources returns the per-minute source-counter snapshots
+// the recompute pipeline needs for [from, to], inclusive at both
+// ends. The window is padded by `lookback` so the very first bucket
+// can find a "previous" snapshot to subtract against; without that
+// the first interval of a freshly recomputed period would be
+// silently dropped.
 //
-// Rows are ordered by (time ASC, metric_key ASC) so the bucketing
-// inside energyflow.Recompute can rely on monotonic input. The
-// device_host label is unpacked from the labels JSONB so the handler
-// can resolve each row to a configured Role without re-querying.
+// The query pushes the per-minute "latest reading per metric per
+// device" reduction down into TimescaleDB via time_bucket() +
+// last(value, time), so a full-day request returns roughly
+// `1440 × len(metric_keys) × len(devices)` rows (~10k) instead of
+// the raw 100k+ samples written by the collector. This is the same
+// shape that energyflow.Recompute would have computed in-process; we
+// just let the database do it once, server-side, before sending
+// rows across the wire.
+//
+// Rows are ordered by (bucket_time ASC, metric_key ASC) so the
+// downstream bucketing inside energyflow.Recompute can rely on
+// monotonic input. The device_host label is unpacked from the
+// labels JSONB so the handler can resolve each row to a configured
+// Role without re-querying.
 //
 // The metric_keys catalogue is fixed (EnergyFlowRecomputeSourceMetrics)
 // — accepting an arbitrary list here would let a caller drive the
@@ -822,16 +833,17 @@ func (s *Store) EnergyFlowSources(
 	}
 	rows, err := s.pool.Query(ctx, `
 		SELECT
-			time,
+			time_bucket(INTERVAL '1 minute', time) AS bucket_time,
 			metric_key,
-			value,
+			last(value, time) AS value,
 			COALESCE(labels->>'device_host', '') AS device_host
 		FROM telemetry_samples
 		WHERE organization_id = $1
 			AND metric_key = ANY($2)
 			AND time >= $3
 			AND time <= $4
-		ORDER BY time ASC, metric_key ASC
+		GROUP BY bucket_time, metric_key, COALESCE(labels->>'device_host', '')
+		ORDER BY bucket_time ASC, metric_key ASC
 	`, organizationID, EnergyFlowRecomputeSourceMetrics, from.UTC().Add(-lookback), to.UTC())
 	if err != nil {
 		return nil, fmt.Errorf("energy_flow sources: %w", err)
