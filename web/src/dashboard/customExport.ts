@@ -85,7 +85,7 @@ export type CustomExportBucket = 'raw' | '5 minutes' | '1 hour' | '1 day' | '1 m
 // server. Mirrors the server-side `maxSamplesLimit` in
 // internal/api/handlers.go; bumping one side requires bumping the
 // other so the dialog's "obмеження" hint stays truthful.
-export const RAW_SAMPLES_LIMIT = 1_000_000
+export const RAW_SAMPLES_LIMIT = 5_000_000
 
 // Maximum range (in days) accepted by /api/v1/samples. Mirrors
 // `maxSamplesRange` on the server (31 days). The dialog disables the

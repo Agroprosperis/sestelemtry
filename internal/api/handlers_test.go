@@ -713,7 +713,7 @@ func TestSamplesValidatesInputs(t *testing.T) {
 		},
 		{
 			name: "limit above hard cap",
-			url:  "/api/v1/samples?organization_id=org-a&metric_keys=soc_percent&from=2026-05-09T00:00:00Z&to=2026-05-10T00:00:00Z&limit=2000000",
+			url:  "/api/v1/samples?organization_id=org-a&metric_keys=soc_percent&from=2026-05-09T00:00:00Z&to=2026-05-10T00:00:00Z&limit=6000000",
 		},
 	}
 	for _, tc := range cases {

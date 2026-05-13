@@ -38,8 +38,15 @@ type storeReader interface {
 // request would exceed them so the user fixes their query rather than
 // silently receiving truncated data.
 const (
-	defaultSamplesLimit  = 100_000
-	maxSamplesLimit      = 1_000_000
+	defaultSamplesLimit = 100_000
+	// maxSamplesLimit caps the rows we'll stream for a single export
+	// to keep memory + bandwidth bounded. The 5M cap pairs with the
+	// matching RAW_SAMPLES_LIMIT in web/src/dashboard/customExport.ts
+	// and survives a typical "all columns × 2 devices × 7-day window
+	// at 1 s polling" pull (~13M rows worst case still truncates,
+	// but the cap now buys ~2.5 days of full-fidelity data instead
+	// of the previous ~12-15 hours).
+	maxSamplesLimit      = 5_000_000
 	maxSamplesRange      = 31 * 24 * time.Hour
 	maxSamplesMetricKeys = 20
 )
@@ -315,6 +322,18 @@ func (h *Handlers) samples(w http.ResponseWriter, r *http.Request) {
 	if to.Sub(from) > maxSamplesRange {
 		http.Error(w, fmt.Sprintf("range must be <= %s", maxSamplesRange), http.StatusBadRequest)
 		return
+	}
+	// Streaming CSV responses can run for minutes on large multi-day
+	// pulls; the server-wide WriteTimeout (configured in cmd/api/main.go
+	// to keep idle/slow connections in check) would otherwise sever
+	// the response mid-stream once it expires. The cut hits a row
+	// boundary often enough that the client sees a clean-looking CSV
+	// without our `__TRUNCATED__` sentinel, making the loss invisible.
+	// We clear the deadline only for this handler; the request context
+	// (`r.Context()`) still cancels the query when the client
+	// disconnects so a hung browser doesn't tie up the cursor forever.
+	if rc := http.NewResponseController(w); rc != nil {
+		_ = rc.SetWriteDeadline(time.Time{})
 	}
 	// tz controls how each row's `time` column is rendered in the CSV.
 	// The DB stores everything in UTC; analysts almost always want
