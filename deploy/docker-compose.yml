@@ -5,6 +5,13 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: telemetry
+    # Docker defaults /dev/shm to 64 MB, which is too small for Postgres
+    # parallel workers operating on the telemetry_samples hypertable —
+    # a DISTINCT ON over a day of samples spills shared memory and the
+    # query fails with "could not resize shared memory segment … No
+    # space left on device". 1 GB gives the planner plenty of room
+    # without ballooning host RAM (shm is lazily allocated).
+    shm_size: 1gb
     volumes:
       - timescaledb_data:/var/lib/postgresql/data
     ports:
