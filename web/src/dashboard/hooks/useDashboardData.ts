@@ -455,59 +455,17 @@ export function useDashboardData(input: {
     }
   }, [organizationID, preset, anchorTime, metricsAtTime])
 
-  // Period flows are loaded on demand only: once on mount / when the
-  // operator changes preset or anchor, and otherwise only when the
-  // user explicitly clicks the refresh button on the period-flow
-  // card (see `refreshFlows` below). The on-the-fly allocator inside
-  // /energy-summary scans every telemetry_samples row in the window
-  // and currently takes several seconds for a full day — there is
-  // no point in re-running it on a one-minute timer when the day's
-  // totals barely move between polls. Month / year presets skip the
-  // initial load entirely (the card is hidden there); any flows
-  // cached from a previous day session stay in state but never
-  // reach the UI because `MetricsPanel` gates the period-flow card
-  // on `preset === 'day'`.
-  useEffect(() => {
-    if (preset !== 'day') return
-    let cancelled = false
-    const controller = new AbortController()
-
-    async function loadFlows() {
-      try {
-        const anchorDate = new Date(anchorTime)
-        const now = new Date()
-        const minReliable = MIN_RELIABLE_DATA_AT.getTime()
-        const rawRange = rangeParams(preset, anchorDate, now)
-        const energyFrom = new Date(
-          Math.max(new Date(rawRange.from).getTime(), minReliable),
-        )
-        const baseRange = { ...rawRange, from: energyFrom.toISOString() }
-        const summaryResp = await fetchEnergySummary(
-          {
-            organizationID,
-            from: baseRange.from,
-            to: baseRange.to,
-            metricKeys: energySummaryMetricKeys(preset),
-          },
-          controller.signal,
-        )
-        if (cancelled || controller.signal.aborted) return
-        setEnergyFlows(
-          flowsFromTotals(summaryResp.totals, summaryResp.flows ?? null),
-        )
-      } catch (e) {
-        if (cancelled || isAbortError(e)) return
-        setError(e instanceof Error ? e.message : 'Failed to load period flows')
-      }
-    }
-
-    void loadFlows()
-
-    return () => {
-      cancelled = true
-      controller.abort()
-    }
-  }, [organizationID, preset, anchorTime])
+  // Period flows are NOT loaded automatically. The on-the-fly
+  // allocator inside /energy-summary scans every telemetry_samples
+  // row in the window and pins a Postgres backend for several
+  // seconds, which slows down the concurrent /current and /timeseries
+  // requests that drive the live diagram and the daily counters.
+  // Running it on every page mount made the rest of the dashboard
+  // feel "frozen" for 10–20 s, so we now require the operator to
+  // ask for it explicitly via the refresh button on the period-flow
+  // card (see `refreshFlows` below). Until the button is clicked
+  // `energyFlows` stays at `EMPTY_FLOWS` and the card renders its
+  // own empty state.
 
   // refreshFlows refetches /energy-summary for the currently selected
   // preset / anchor and rebuilds the period-flow numbers from the
