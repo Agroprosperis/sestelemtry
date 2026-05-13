@@ -68,23 +68,60 @@ func (s *Store) Current(ctx context.Context, organizationID string, metricKeys [
 		rows pgx.Rows
 		err  error
 	)
+	// Per-metric LATERAL lookup instead of `DISTINCT ON (metric_key)
+	// … ORDER BY metric_key, time DESC`.
+	//
+	// On a multi-gigabyte telemetry hypertable the DISTINCT ON variant
+	// fans out into a ChunkAppend + Sort + Unique that touches every
+	// chunk holding any of the requested metric_keys before it can
+	// emit a single row — even though we only need the freshest
+	// sample per metric. Postgres has no native "loose index scan",
+	// so query latency grew linearly with retention (multiple seconds
+	// at ~8 GB / tens of millions of rows). The dashboard polls
+	// /current once a second; each tick was racing the previous one
+	// to completion, logging `context canceled` and leaving the live
+	// cards blank.
+	//
+	// The LATERAL form runs a tiny `ORDER BY time DESC LIMIT 1`
+	// against the `telemetry_samples_org_metric_time` index (which is
+	// `(organization_id, metric_key, time DESC)`) once per metric.
+	// That's one index-only chunk seek per metric, no global sort.
+	// Latency drops to a few milliseconds and stays flat as the
+	// hypertable grows.
 	if at.IsZero() {
 		rows, err = s.pool.Query(ctx, `
-			SELECT DISTINCT ON (metric_key)
-				metric_key, value, time, labels
-			FROM telemetry_samples
-			WHERE organization_id = $1 AND metric_key = ANY($2)
-			ORDER BY metric_key, time DESC
+			SELECT
+				m.metric_key,
+				s.value,
+				s.time,
+				s.labels
+			FROM unnest($2::text[]) AS m(metric_key)
+			CROSS JOIN LATERAL (
+				SELECT value, time, labels
+				FROM telemetry_samples
+				WHERE organization_id = $1
+					AND metric_key = m.metric_key
+				ORDER BY time DESC
+				LIMIT 1
+			) AS s
 		`, organizationID, metricKeys)
 	} else {
 		rows, err = s.pool.Query(ctx, `
-			SELECT DISTINCT ON (metric_key)
-				metric_key, value, time, labels
-			FROM telemetry_samples
-			WHERE organization_id = $1
-				AND metric_key = ANY($2)
-				AND time <= $3
-			ORDER BY metric_key, time DESC
+			SELECT
+				m.metric_key,
+				s.value,
+				s.time,
+				s.labels
+			FROM unnest($2::text[]) AS m(metric_key)
+			CROSS JOIN LATERAL (
+				SELECT value, time, labels
+				FROM telemetry_samples
+				WHERE organization_id = $1
+					AND metric_key = m.metric_key
+					AND time <= $3
+				ORDER BY time DESC
+				LIMIT 1
+			) AS s
 		`, organizationID, metricKeys, at.UTC())
 	}
 	if err != nil {
