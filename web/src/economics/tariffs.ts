@@ -5,7 +5,8 @@
 // (fraction) and the two booleans.
 //
 // Defaults reflect the operator-supplied numbers for 2026-05-09:
-//   - `distributionUahPerKwh`: 1-class tariff for ВІННИЦЯОБЛЕНЕРГО
+//   - `distributionUahPerKwh`: 2-class tariff for ВІННИЦЯОБЛЕНЕРГО
+//     (2752.18 грн/МВт·год без ПДВ; 1-class is 0.48810 if needed)
 //   - `transmissionUahPerKwh`: НЕК "Укренерго" 2-й етап (з 01.04.2026)
 //   - `exportDiscount`: 5% знижка на експортну сторону (per ТЗ)
 //   - `degradationUahPerKwh`: вартість циклів УЗЕ (питомий знос)
@@ -29,7 +30,7 @@ export type Tariffs = {
 }
 
 export const DEFAULT_TARIFFS: Tariffs = {
-  distributionUahPerKwh: 0.4881,
+  distributionUahPerKwh: 2.75218,
   transmissionUahPerKwh: 0.74291,
   supplierMarginUahPerKwh: 0,
   otherFeesUahPerKwh: 0,

@@ -65,16 +65,17 @@ describe('hourEconomics', () => {
 
   it('charges the load at the full import price stack', () => {
     // 10 kWh load entirely from grid, RDN = 1 UAH/kWh, no VAT, no fees.
-    // Import price = 1 + 0.4881 + 0.74291 = 2.23101.
-    // baseline = actual = 22.3101; effect = 0 (no PV / ESS).
+    // Import price = 1 + 2.75218 + 0.74291 = 4.49509 (2-class
+    // distribution per spec §3, 2nd-stage transmission).
+    // baseline = actual = 44.9509; effect = 0 (no PV / ESS).
     const r = hourEconomics(
       1.0,
       { ...emptyFlow, gridImport: 10 },
       { ...DEFAULT_TARIFFS, supplierMarginUahPerKwh: 0, otherFeesUahPerKwh: 0 },
     )
-    expect(r.importPriceUahPerKwh).toBeCloseTo(2.23101, 5)
-    expect(r.baselineCost).toBeCloseTo(22.3101, 5)
-    expect(r.actualCost).toBeCloseTo(22.3101, 5)
+    expect(r.importPriceUahPerKwh).toBeCloseTo(4.49509, 5)
+    expect(r.baselineCost).toBeCloseTo(44.9509, 5)
+    expect(r.actualCost).toBeCloseTo(44.9509, 5)
     expect(r.effect).toBeCloseTo(0, 9)
   })
 
@@ -94,8 +95,11 @@ describe('hourEconomics', () => {
 
   it('isolates the ESS contribution in essNet', () => {
     // Battery cycles 5 kWh from grid → load (gridToEss=5, essToLoad=5).
-    // RDN=1, full import 2.23101, full export 0.95.
-    // essNet = 5*2.23101 (revenue) - 5*2.23101 (cost) - 5*0.6 (degradation)
+    // RDN=1, full import 4.49509, full export 0.95. The essToLoad
+    // revenue and gridToEss cost both run through the same import
+    // price stack so they cancel; only the export-priced charge leg
+    // (here zero, no PV) and the degradation term remain.
+    // essNet = 5*4.49509 (revenue) - 5*4.49509 (cost) - 5*0.6 (degradation)
     //        = -3.0
     const r = hourEconomics(
       1,
@@ -118,8 +122,8 @@ describe('hourEconomics', () => {
       { ...emptyFlow, gridImport: 1 },
       { ...DEFAULT_TARIFFS, includeVat: true },
     )
-    // 2.23101 * 1.20 = 2.677212
-    expect(r.importPriceUahPerKwh).toBeCloseTo(2.677212, 5)
+    // 4.49509 * 1.20 = 5.394108
+    expect(r.importPriceUahPerKwh).toBeCloseTo(5.394108, 5)
   })
 })
 
@@ -179,16 +183,18 @@ describe('dailyTotals (spec calibration)', () => {
     return out
   }
 
-  it('produces a daily project effect within [4100, 4400] UAH for the constant-RDN profile', () => {
+  it('produces a daily project effect within [7700, 8000] UAH for the constant-RDN profile', () => {
     const rows = buildSpecCalibrationProfile()
     const totals = dailyTotals(rows)
-    // Analytic value with rdn=1.0 across all 24 hours, no VAT:
-    // baseline = 2010.5 * 2.23101 = 4485.45
-    // actual   = 417.3 * 2.23101 - 917.6 * 0.95 + 321.9 * 0.6
-    //          = 930.94 - 871.72 + 193.14 = 252.36
-    // effect   = 4233.09 UAH
-    expect(totals.effect).toBeGreaterThan(4100)
-    expect(totals.effect).toBeLessThan(4400)
+    // Analytic value with rdn=1.0 across all 24 hours, no VAT,
+    // 2-class distribution (2.75218) + transmission (0.74291):
+    // importPrice = 4.49509
+    // baseline    = 2010.5 * 4.49509 = 9038.78
+    // actual      = 417.3 * 4.49509 - 917.6 * 0.95 + 321.9 * 0.6
+    //             = 1875.79 - 871.72 + 193.14 = 1197.21
+    // effect      = 7841.57 UAH
+    expect(totals.effect).toBeGreaterThan(7700)
+    expect(totals.effect).toBeLessThan(8000)
   })
 
   it('reproduces the targeted daily load (2010.5 kWh) via the energy-balance identity', () => {
