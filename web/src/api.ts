@@ -2,6 +2,7 @@ import type {
   CurrentResponse,
   DAMPricesResponse,
   DashboardConfig,
+  EnergyFlowHourlyResponse,
   OpenMeteoForecast,
   OrganizationsResponse,
   PvForecastPoint,
@@ -271,6 +272,34 @@ export async function fetchRawSamplesCsv(
   if (rows < 0) rows = 0
 
   return { text, filename, truncated, rows }
+}
+
+// fetchEnergyFlowHourly hits /api/v1/energy-flow-hourly which
+// runs the same on-the-fly Recompute() as /api/v1/energy-summary,
+// but partitioned across the 24 hours of the requested calendar day
+// in `tz`. Returns a fixed-length array of 24 rows (zero-filled for
+// hours with no underlying telemetry); the caller never has to deal
+// with sparse indices. See README §"Daily economics" for the
+// dashboard-side flow.
+export async function fetchEnergyFlowHourly(
+  input: {
+    organizationID: string
+    // ISO calendar day (YYYY-MM-DD) interpreted in `tz`.
+    date: string
+    tz?: string
+  },
+  signal?: AbortSignal,
+): Promise<EnergyFlowHourlyResponse> {
+  const url = buildURL('/api/v1/energy-flow-hourly', {
+    organization_id: input.organizationID,
+    date: input.date,
+    tz: input.tz || Intl.DateTimeFormat().resolvedOptions().timeZone || undefined,
+  })
+  const res = await fetch(url, { signal })
+  if (!res.ok) {
+    throw new Error(`energy-flow-hourly request failed: ${res.status}`)
+  }
+  return res.json()
 }
 
 export async function fetchDAMPrices(

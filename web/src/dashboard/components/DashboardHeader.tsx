@@ -4,6 +4,18 @@ import { OrganizationSelect } from './OrganizationSelect'
 import { PeriodPicker } from './PeriodPicker'
 import { RangeSwitch } from './RangeSwitch'
 
+// goToEconomicsView rewrites the URL to ?view=economics while
+// preserving the current organization_id. Implemented here (vs in
+// `Dashboard.tsx`) so the header's switch button can stay a
+// pure presentational component without prop-drilling a router.
+function goToEconomicsView() {
+  if (typeof window === 'undefined') return
+  const url = new URL(window.location.href)
+  url.searchParams.set('view', 'economics')
+  window.history.pushState({}, '', url.toString())
+  window.dispatchEvent(new PopStateEvent('popstate'))
+}
+
 type Props = {
   organizationID: string
   organizationOptions: string[]
@@ -52,6 +64,28 @@ export function DashboardHeader({
         >
           <Bug size={14} weight={debug ? 'fill' : 'regular'} />
           <span>Debug</span>
+        </button>
+        <button
+          type="button"
+          className="economics-switch-button"
+          onClick={goToEconomicsView}
+          title="Перейти до сторінки добової економіки (СЕС + УЗЕ)"
+        >
+          <svg
+            aria-hidden="true"
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M3 3v18h18" />
+            <path d="m7 14 4-4 4 4 5-5" />
+          </svg>
+          <span>Економіка</span>
         </button>
         {onExportClick && (
           <button

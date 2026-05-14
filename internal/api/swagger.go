@@ -179,6 +179,66 @@ paths:
               schema:
                 type: string
                 example: internal server error
+  /api/v1/energy-flow-hourly:
+    get:
+      summary: Hourly directional energy flows (on-the-fly compute)
+      operationId: getEnergyFlowHourly
+      description: |
+        Splits the requested calendar day (in the supplied timezone)
+        into 24 one-hour windows and runs the same on-the-fly
+        Recompute() that backs /api/v1/energy-summary on each window.
+        Returns the four directional flow totals (pv_to_ess_kwh,
+        grid_to_ess_kwh, ess_to_load_kwh, ess_to_grid_kwh) plus the
+        per-hour ESS charge / discharge deltas needed to derive the
+        hourly load via energy balance.
+
+        The per-hour totals sum back to the daily totals served by
+        /api/v1/energy-summary.flows for the same day, so the
+        dashboard's economics view and the existing "Перетік за день"
+        card stay arithmetically consistent.
+      parameters:
+        - name: organization_id
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+          description: Calendar day (YYYY-MM-DD) interpreted in tz.
+        - name: tz
+          in: query
+          required: false
+          schema:
+            type: string
+            default: UTC
+          description: |
+            IANA timezone used to define the day boundaries
+            (e.g. Europe/Kyiv). Unknown zones return 400.
+      responses:
+        "200":
+          description: 24 hourly rows in the requested timezone
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnergyFlowHourlyResponse"
+        "400":
+          description: Invalid or missing query parameters
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: date must be YYYY-MM-DD
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: internal server error
   /api/v1/registers:
     get:
       summary: Modbus register metadata for export annotation
@@ -568,4 +628,74 @@ components:
           items:
             $ref: "#/components/schemas/DAMPrice"
       required: [zone, from, to, prices]
+    EnergyFlowHourlyRow:
+      type: object
+      properties:
+        hour:
+          type: integer
+          minimum: 0
+          maximum: 23
+          example: 14
+        from:
+          type: string
+          format: date-time
+        to:
+          type: string
+          format: date-time
+        pv_to_ess_kwh:
+          type: number
+          format: double
+        grid_to_ess_kwh:
+          type: number
+          format: double
+        ess_to_load_kwh:
+          type: number
+          format: double
+        ess_to_grid_kwh:
+          type: number
+          format: double
+        ess_charged_kwh:
+          type: number
+          format: double
+        ess_discharged_kwh:
+          type: number
+          format: double
+        skipped_intervals:
+          type: integer
+          example: 0
+        warnings:
+          type: array
+          items:
+            type: string
+      required:
+        - hour
+        - from
+        - to
+        - pv_to_ess_kwh
+        - grid_to_ess_kwh
+        - ess_to_load_kwh
+        - ess_to_grid_kwh
+        - ess_charged_kwh
+        - ess_discharged_kwh
+        - skipped_intervals
+    EnergyFlowHourlyResponse:
+      type: object
+      properties:
+        organization_id:
+          type: string
+          example: ze
+        date:
+          type: string
+          format: date
+          example: "2026-05-09"
+        tz:
+          type: string
+          example: Europe/Kyiv
+        hours:
+          type: array
+          minItems: 24
+          maxItems: 24
+          items:
+            $ref: "#/components/schemas/EnergyFlowHourlyRow"
+      required: [organization_id, date, tz, hours]
 `

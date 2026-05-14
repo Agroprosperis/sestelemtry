@@ -258,6 +258,49 @@ type EnergyFlowRawRow struct {
 	DeviceHost string
 }
 
+// EnergyFlowHourlyRow is one hour worth of synthetic flow totals
+// produced by /api/v1/energy-flow-hourly. The handler runs the
+// stateless `energyflow.Recompute()` over the hour's raw rows
+// (same algorithm /api/v1/energy-summary uses for the daily
+// totals), so the dashboard can compose 24 hourly economics
+// rows that, summed back, exactly match the daily-card numbers.
+//
+// `From` and `To` are the absolute boundaries of the hour
+// rendered in the request's timezone. `EssChargedKwh` and
+// `EssDischargedKwh` are exposed because the dashboard needs
+// them to derive `load[h]` via the energy-balance identity
+// without spending another /timeseries call.
+type EnergyFlowHourlyRow struct {
+	Hour             int       `json:"hour"`
+	From             time.Time `json:"from"`
+	To               time.Time `json:"to"`
+	PVToESSKwh       float64   `json:"pv_to_ess_kwh"`
+	GridToESSKwh     float64   `json:"grid_to_ess_kwh"`
+	ESSToLoadKwh     float64   `json:"ess_to_load_kwh"`
+	ESSToGridKwh     float64   `json:"ess_to_grid_kwh"`
+	EssChargedKwh    float64   `json:"ess_charged_kwh"`
+	EssDischargedKwh float64   `json:"ess_discharged_kwh"`
+	// SkippedIntervals counts how many sub-buckets within this
+	// hour the allocator dropped (negative deltas, missing
+	// accumulators, etc). > 0 means the four flow values for
+	// this hour are partial — the dashboard uses this to
+	// surface a per-hour "incomplete data" hint.
+	SkippedIntervals int      `json:"skipped_intervals"`
+	Warnings         []string `json:"warnings,omitempty"`
+}
+
+// EnergyFlowHourlyResponse is the body of GET /api/v1/energy-flow-hourly.
+// `Hours` is always 24 entries (one per hour-of-day in the
+// requested timezone). Hours with no underlying rows return
+// zero flow values rather than being absent from the array
+// so the dashboard can iterate without sparse-index handling.
+type EnergyFlowHourlyResponse struct {
+	OrganizationID string                `json:"organization_id"`
+	Date           string                `json:"date"`
+	Tz             string                `json:"tz"`
+	Hours          []EnergyFlowHourlyRow `json:"hours"`
+}
+
 // SampleRow is one raw `telemetry_samples` record exposed by
 // /api/v1/samples. The endpoint streams these rows as CSV so the
 // dashboard's "Експорт даних → Сирі дані" path can hand the analyst

@@ -55,6 +55,34 @@ export type DAMPricesResponse = {
   prices: DAMPrice[]
 }
 
+// EnergyFlowHourlyRow mirrors `internal/api/types.go:EnergyFlowHourlyRow`.
+// One hour worth of synthetic flow totals produced by
+// /api/v1/energy-flow-hourly. The four `*_to_*_kwh` fields plus the
+// two ESS counter deltas are computed on the fly by the same
+// `energyflow.Recompute()` that backs /api/v1/energy-summary, so the
+// daily-economics page summed across 24 rows reconciles to the
+// "Перетік за день" card on the main dashboard.
+export type EnergyFlowHourlyRow = {
+  hour: number
+  from: string
+  to: string
+  pv_to_ess_kwh: number
+  grid_to_ess_kwh: number
+  ess_to_load_kwh: number
+  ess_to_grid_kwh: number
+  ess_charged_kwh: number
+  ess_discharged_kwh: number
+  skipped_intervals: number
+  warnings?: string[]
+}
+
+export type EnergyFlowHourlyResponse = {
+  organization_id: string
+  date: string
+  tz: string
+  hours: EnergyFlowHourlyRow[]
+}
+
 // RegisterMeta mirrors the api.RegisterMeta struct: vendor-documented
 // Modbus information attached to a metric_key. The dashboard fetches
 // the full map once at boot and uses `address` to annotate CSV

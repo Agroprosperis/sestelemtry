@@ -108,6 +108,7 @@ func (h *Handlers) Router() http.Handler {
 	mux.HandleFunc("/api/v1/samples", h.samples)
 	mux.HandleFunc("/api/v1/registers", h.registers)
 	mux.HandleFunc("/api/v1/energy-summary", h.energySummary)
+	mux.HandleFunc("/api/v1/energy-flow-hourly", h.energyFlowHourly)
 	mux.HandleFunc("/api/v1/dam-prices", h.damPrices)
 	mux.HandleFunc("/swagger", h.swaggerUI)
 	mux.HandleFunc("/swagger/", h.swaggerUI)

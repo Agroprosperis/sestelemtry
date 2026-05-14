@@ -412,6 +412,31 @@
   outline-offset: 2px;
 }
 
+.economics-switch-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 6px 12px;
+  font: inherit;
+  font-size: 13px;
+  color: #0f172a;
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+.economics-switch-button:hover {
+  background-color: #f1f5f9;
+  border-color: #cbd5e1;
+}
+
+.economics-switch-button:focus-visible {
+  outline: 2px solid #6366f1;
+  outline-offset: 2px;
+}
+
 .debug-toggle {
   display: inline-flex;
   align-items: center;

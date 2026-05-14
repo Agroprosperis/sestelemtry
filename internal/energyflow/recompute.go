@@ -60,6 +60,40 @@ type RecomputeResult struct {
 // outages are normal). All other Options fields fall back to spec
 // defaults.
 func Recompute(rows []RawSample, opts Options) RecomputeResult {
+	res := RecomputeResult{
+		Totals: make(map[string]float64, len(SyntheticMetricKeys)),
+	}
+	for _, k := range SyntheticMetricKeys {
+		res.Totals[k] = 0
+	}
+	IterateIntervals(rows, opts, func(curr time.Time, out Result) {
+		_ = curr
+		res.Totals[MetricPVToESSKwh] += out.PVToESSKwh
+		res.Totals[MetricGridToESSKwh] += out.GridToESSKwh
+		res.Totals[MetricESSToLoadKwh] += out.ESSToLoadKwh
+		res.Totals[MetricESSToGridKwh] += out.ESSToGridKwh
+		res.ProcessedIntervals++
+	}, &res)
+	return res
+}
+
+// IntervalCallback receives one non-skipped Allocate result per
+// bucket-pair iteration. `currTimestamp` is the timestamp of the
+// `curr` Sample in the (prev, curr) pair Allocate was called with —
+// callers attribute the result to whatever time-window contains
+// `currTimestamp` (e.g. the hour-of-day for the daily-economics
+// page). Skipped intervals do not invoke the callback; their
+// presence is reported via the `stats` aggregate.
+type IntervalCallback func(currTimestamp time.Time, out Result)
+
+// IterateIntervals is the shared iteration loop used by Recompute
+// and by external callers that need to attribute each Allocate
+// result to a sub-period (e.g. partition the day into 24 hourly
+// totals). The callback is invoked exactly once per non-skipped
+// interval; skipped intervals advance `prev` but do not fire the
+// callback. Bucket / interval counters and bounded warnings are
+// merged into `stats`. Pass `stats=nil` to discard them.
+func IterateIntervals(rows []RawSample, opts Options, cb IntervalCallback, stats *RecomputeResult) {
 	// Historical compute must tolerate hours-long gaps caused by
 	// collector outages, so callers who pass MaxGapSeconds=0 actually
 	// mean "disable the guard entirely". Allocate() re-runs
@@ -75,15 +109,8 @@ func Recompute(rows []RawSample, opts Options) RecomputeResult {
 	opts = opts.WithDefaults()
 	allocOpts := opts
 
-	res := RecomputeResult{
-		Totals: make(map[string]float64, len(SyntheticMetricKeys)),
-	}
-	for _, k := range SyntheticMetricKeys {
-		res.Totals[k] = 0
-	}
-
 	if len(rows) < 2 {
-		return res
+		return
 	}
 
 	windowSec := opts.AllocationWindowSeconds
@@ -140,26 +167,35 @@ func Recompute(rows []RawSample, opts Options) RecomputeResult {
 	}
 
 	if len(bucketEnds) < 2 {
-		res.BucketsConsidered = len(bucketEnds)
-		return res
+		if stats != nil {
+			stats.BucketsConsidered = len(bucketEnds)
+		}
+		return
 	}
 	sort.Slice(bucketEnds, func(i, j int) bool { return bucketEnds[i] < bucketEnds[j] })
 
 	const maxWarnings = 32
 	appendWarning := func(s string) {
-		if len(res.Warnings) >= maxWarnings {
+		if stats == nil {
 			return
 		}
-		res.Warnings = append(res.Warnings, s)
+		if len(stats.Warnings) >= maxWarnings {
+			return
+		}
+		stats.Warnings = append(stats.Warnings, s)
 	}
 
 	var prev *Sample
 	for _, key := range bucketEnds {
 		b := bucketsByEnd[key]
-		res.BucketsConsidered++
+		if stats != nil {
+			stats.BucketsConsidered++
+		}
 		sample, ok := mergeBucket(b.latest)
 		if !ok {
-			res.BucketsDropped++
+			if stats != nil {
+				stats.BucketsDropped++
+			}
 			continue
 		}
 		if prev == nil {
@@ -173,22 +209,20 @@ func Recompute(rows []RawSample, opts Options) RecomputeResult {
 			appendWarning(w)
 		}
 		if out.Skipped {
-			res.SkippedIntervals++
+			if stats != nil {
+				stats.SkippedIntervals++
+			}
 			next := sample
 			prev = &next
 			continue
 		}
-		res.ProcessedIntervals++
-		res.Totals[MetricPVToESSKwh] += out.PVToESSKwh
-		res.Totals[MetricGridToESSKwh] += out.GridToESSKwh
-		res.Totals[MetricESSToLoadKwh] += out.ESSToLoadKwh
-		res.Totals[MetricESSToGridKwh] += out.ESSToGridKwh
+		if cb != nil {
+			cb(sample.Timestamp, out)
+		}
 
 		next := sample
 		prev = &next
 	}
-
-	return res
 }
 
 // bucketEnd returns the right-closed end of the bucket of width
