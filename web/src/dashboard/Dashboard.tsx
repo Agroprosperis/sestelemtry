@@ -44,6 +44,7 @@ export function Dashboard() {
     socSeries,
     powerSeries,
     pvForecastSeries,
+    pvForecastTotal,
     loading,
     cardsLoading,
     flowsRefreshing,
@@ -92,6 +93,7 @@ export function Dashboard() {
           onRefreshFlows={() => void refreshFlows()}
           debug={debug}
           registers={registers}
+          pvForecastTotal={pvForecastTotal}
         />
 
         <div className="dashboard-charts">

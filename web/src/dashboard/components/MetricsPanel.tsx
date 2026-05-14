@@ -24,6 +24,12 @@ type Props = {
   onRefreshFlows: () => void
   debug: boolean
   registers: Record<string, RegisterMeta> | null
+  // pvForecastTotal is the planned generation for the period in kWh,
+  // or null when the forecast is unavailable for the current preset
+  // (only `day` is wired up; month/year would need N daily fetches).
+  // Passed straight through to DailySummaryNarrative for the
+  // "plan vs fact" line.
+  pvForecastTotal: number | null
 }
 
 function formatSnapshotLabel(at: Date): string {
@@ -51,6 +57,7 @@ export function MetricsPanel({
   onRefreshFlows,
   debug,
   registers,
+  pvForecastTotal,
 }: Props) {
   return (
     <div className="metrics-panel-stack">
@@ -80,6 +87,7 @@ export function MetricsPanel({
         anchor={anchor}
         debug={debug}
         registers={registers}
+        pvForecastTotal={pvForecastTotal}
       />
       {preset === 'day' && (
         <EnergyFlowPeriodSummary

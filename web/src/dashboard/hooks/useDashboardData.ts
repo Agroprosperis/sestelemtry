@@ -83,6 +83,13 @@ export type DashboardData = {
   socSeries: SOCChartRow[]
   powerSeries: PowerChartRow[]
   pvForecastSeries: PvForecastHourlyRow[]
+  // pvForecastTotal is the sum of hourly forecast values (kWh; each
+  // hour's `plannedKw` already equals planned kWh because the interval
+  // is exactly 1 hour). Populated only on the day preset where the
+  // n8n flow returns the full forecast for the anchor day; null
+  // otherwise so the UI can hide the "vs forecast" comparison instead
+  // of showing 0 against actual production.
+  pvForecastTotal: number | null
   // loading reflects the charts/summary fetch state and is what `EnergyChart`
   // shows the "Loading..." placeholder for. Cards have their own
   // `cardsLoading` flag so they don't go blank between live ticks.
@@ -164,6 +171,15 @@ export function useDashboardData(input: {
     if (preset !== 'day') return []
     return aggregatePvForecastHourly(pvForecast.data)
   }, [preset, pvForecast.data])
+  const pvForecastTotal = useMemo<number | null>(() => {
+    if (preset !== 'day') return null
+    if (pvForecastSeries.length === 0) return null
+    let sum = 0
+    for (const row of pvForecastSeries) {
+      if (Number.isFinite(row.plannedKw)) sum += row.plannedKw
+    }
+    return sum
+  }, [preset, pvForecastSeries])
 
   const configRef = useRef(config)
   useEffect(() => {
@@ -537,6 +553,7 @@ export function useDashboardData(input: {
     socSeries,
     powerSeries,
     pvForecastSeries,
+    pvForecastTotal,
     loading,
     cardsLoading,
     flowsRefreshing,
