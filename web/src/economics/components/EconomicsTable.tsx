@@ -48,19 +48,19 @@ export function EconomicsTable({ rows }: Props) {
           <thead>
             <tr>
               <th>Год</th>
-              <th>РДН</th>
-              <th>Імпорт ц.</th>
-              <th>Експорт ц.</th>
-              <th>Навант.</th>
-              <th>PV→Навант.</th>
-              <th>Імпорт</th>
-              <th>Експорт</th>
-              <th>УЗЕ заряд</th>
-              <th>УЗЕ розряд</th>
-              <th>Базова</th>
-              <th>Фактична</th>
-              <th>Ефект</th>
-              <th>УЗЕ нетто</th>
+              <th>РДН<br /><small>грн/кВт·год</small></th>
+              <th>Імпорт ц.<br /><small>грн/кВт·год</small></th>
+              <th>Експорт ц.<br /><small>грн/кВт·год</small></th>
+              <th>Навант.<br /><small>кВт·год</small></th>
+              <th>PV→Навант.<br /><small>кВт·год</small></th>
+              <th>Імпорт<br /><small>кВт·год</small></th>
+              <th>Експорт<br /><small>кВт·год</small></th>
+              <th>УЗЕ заряд<br /><small>кВт·год</small></th>
+              <th>УЗЕ розряд<br /><small>кВт·год</small></th>
+              <th>Базова<br /><small>грн</small></th>
+              <th>Фактична<br /><small>грн</small></th>
+              <th>Ефект<br /><small>грн</small></th>
+              <th>УЗЕ нетто<br /><small>грн</small></th>
             </tr>
           </thead>
           <tbody>
