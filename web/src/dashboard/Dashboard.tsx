@@ -1,5 +1,6 @@
 import { lazy, Suspense, useState } from 'react'
 import './dashboard.css'
+import { DashboardControls } from './components/DashboardControls'
 import { DashboardHeader } from './components/DashboardHeader'
 import { EnergyChart } from './components/EnergyChart'
 import { MetricsPanel } from './components/MetricsPanel'
@@ -59,18 +60,7 @@ export function Dashboard() {
 
   return (
     <main className="dashboard-page">
-      <DashboardHeader
-        organizationID={organizationID}
-        organizationOptions={options}
-        onOrganizationChange={onOrganizationChange}
-        preset={preset}
-        onPresetChange={setPreset}
-        anchor={anchor}
-        onAnchorChange={setAnchor}
-        onExportClick={() => setExportOpen(true)}
-        debug={debug}
-        onDebugToggle={toggleDebug}
-      />
+      <DashboardHeader organizationID={organizationID} />
 
       {error && (
         <section className="error-banner" role="alert" aria-live="polite">
@@ -97,6 +87,18 @@ export function Dashboard() {
         />
 
         <div className="dashboard-charts">
+          <DashboardControls
+            organizationID={organizationID}
+            organizationOptions={options}
+            onOrganizationChange={onOrganizationChange}
+            preset={preset}
+            onPresetChange={setPreset}
+            anchor={anchor}
+            onAnchorChange={setAnchor}
+            onExportClick={() => setExportOpen(true)}
+            debug={debug}
+            onDebugToggle={toggleDebug}
+          />
           <WeatherCard
             organizationID={organizationID}
             anchor={anchor}
