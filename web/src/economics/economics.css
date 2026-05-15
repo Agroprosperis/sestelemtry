@@ -4,6 +4,18 @@
   padding: 24px;
   display: grid;
   gap: 20px;
+  /* Cap inner width so a wide child (e.g. the 18-column table)
+     never inflates the page past the viewport — overflow lives
+     inside `.economics-table-scroll` instead. */
+  min-width: 0;
+}
+
+.economics-page > * {
+  /* Grid items default to `min-width: auto` which would expand to
+     fit their widest descendant; reset to 0 so the table-wrap
+     can shrink and its inner scroll container becomes the only
+     thing that overflows horizontally. */
+  min-width: 0;
 }
 
 .economics-header h1 {
@@ -285,6 +297,11 @@
 
 .economics-table-scroll {
   overflow-x: auto;
+  /* Cap to viewport so a 18-column table never blows out the
+     page width on smaller screens. The `+ 48px` budget covers
+     the parent's 16px padding on both sides plus a few pixels
+     of safety. */
+  max-width: 100%;
 }
 
 .economics-table {
