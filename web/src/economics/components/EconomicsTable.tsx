@@ -53,10 +53,14 @@ export function EconomicsTable({ rows }: Props) {
               <th>Експорт ц.<br /><small>грн/кВт·год</small></th>
               <th>Навант.<br /><small>кВт·год</small></th>
               <th>PV→Навант.<br /><small>кВт·год</small></th>
-              <th>Імпорт<br /><small>кВт·год</small></th>
-              <th>Експорт<br /><small>кВт·год</small></th>
-              <th>УЗЕ заряд<br /><small>кВт·год</small></th>
-              <th>УЗЕ розряд<br /><small>кВт·год</small></th>
+              <th>PV→УЗЕ<br /><small>кВт·год</small></th>
+              <th>PV→Мережа<br /><small>кВт·год</small></th>
+              <th>Мережа→Навант.<br /><small>кВт·год</small></th>
+              <th>Мережа→УЗЕ<br /><small>кВт·год</small></th>
+              <th>УЗЕ→Навант.<br /><small>кВт·год</small></th>
+              <th>УЗЕ→Мережа<br /><small>кВт·год</small></th>
+              <th>Імпорт всього<br /><small>кВт·год</small></th>
+              <th>Експорт всього<br /><small>кВт·год</small></th>
               <th>Базова<br /><small>грн</small></th>
               <th>Фактична<br /><small>грн</small></th>
               <th>Ефект<br /><small>грн</small></th>
@@ -70,7 +74,7 @@ export function EconomicsTable({ rows }: Props) {
                 return (
                   <tr key={idx} className="economics-table-empty">
                     <td>{hourLabel}</td>
-                    <td colSpan={13}>—</td>
+                    <td colSpan={17}>—</td>
                   </tr>
                 )
               }
@@ -83,10 +87,14 @@ export function EconomicsTable({ rows }: Props) {
                   <td>{noPrice ? '—' : formatPrice(row.economics.exportPriceUahPerKwh)}</td>
                   <td>{formatNumber(row.economics.load)}</td>
                   <td>{formatNumber(row.economics.pvToLoad)}</td>
+                  <td>{formatNumber(row.flow.pvToEss)}</td>
+                  <td>{formatNumber(row.economics.pvToGrid)}</td>
+                  <td>{formatNumber(row.economics.gridToLoad)}</td>
+                  <td>{formatNumber(row.flow.gridToEss)}</td>
+                  <td>{formatNumber(row.flow.essToLoad)}</td>
+                  <td>{formatNumber(row.flow.essToGrid)}</td>
                   <td>{formatNumber(row.flow.gridImport)}</td>
                   <td>{formatNumber(row.flow.gridExport)}</td>
-                  <td>{formatNumber(row.flow.essCharged)}</td>
-                  <td>{formatNumber(row.flow.essDischarged)}</td>
                   <td>{noPrice ? '—' : formatUah(row.economics.baselineCost)}</td>
                   <td>{noPrice ? '—' : formatUah(row.economics.actualCost)}</td>
                   <td className={row.economics.effect >= 0 ? 'cell-positive' : 'cell-negative'}>
