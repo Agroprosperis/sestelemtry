@@ -1,5 +1,6 @@
 import { useId } from 'react'
 import { OrganizationSelect } from '../../dashboard/components/OrganizationSelect'
+import { formatOrganizationLabel } from '../../dashboard/config'
 import { DEFAULT_TARIFFS, type Tariffs } from '../tariffs'
 
 type Props = {
@@ -81,9 +82,11 @@ export function EconomicsHeader({
             alt="Агропросперіс"
             className="economics-header-logo"
           />
-          <div>
+          <div className="economics-header-titles">
             <h1>Добова економіка (СЕС + УЗЕ)</h1>
-            <p>Розрахунок ефекту проєкту за обраний день на базі цін РДН і тарифів.</p>
+            <p>
+              {formatOrganizationLabel(organizationID)} · розрахунок ефекту за обраний день на базі цін РДН і тарифів.
+            </p>
           </div>
         </div>
         <div className="economics-header-controls">

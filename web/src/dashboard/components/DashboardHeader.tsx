@@ -1,4 +1,5 @@
 import { Bug } from '@phosphor-icons/react'
+import { formatOrganizationLabel } from '../config'
 import type { RangePreset } from '../range'
 import { OrganizationSelect } from './OrganizationSelect'
 import { PeriodPicker } from './PeriodPicker'
@@ -49,9 +50,9 @@ export function DashboardHeader({
           alt="Агропросперіс"
           className="dashboard-header-logo"
         />
-        <div>
+        <div className="dashboard-header-titles">
           <h1>Моніторинг СЕС + УЗЕ</h1>
-          <p>Організація: {organizationID}</p>
+          <p>{formatOrganizationLabel(organizationID)}</p>
         </div>
       </div>
       <div className="header-controls">

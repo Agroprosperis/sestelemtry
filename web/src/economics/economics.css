@@ -20,24 +20,34 @@
 
 .economics-header h1 {
   margin: 0;
-  font-size: 26px;
+  font-size: 22px;
+  line-height: 1.2;
   color: #0f172a;
+  white-space: nowrap;
 }
 
 .economics-header p {
-  margin: 6px 0 0;
+  margin: 2px 0 0;
   color: #475569;
-  font-size: 14px;
+  font-size: 13px;
 }
 
 .economics-header-brand {
   display: inline-flex;
   align-items: center;
-  gap: 14px;
+  gap: 12px;
+  min-width: 0;
+}
+
+.economics-header-titles {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
 }
 
 .economics-header-logo {
-  height: 44px;
+  height: 36px;
   width: auto;
   display: block;
   flex-shrink: 0;

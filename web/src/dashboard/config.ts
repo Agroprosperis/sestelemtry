@@ -2,6 +2,30 @@ import type { DashboardConfig } from '../types'
 
 export const KNOWN_ORGANIZATIONS = ['demo-org', 'pe', 'ze']
 
+// ORGANIZATION_DISPLAY_NAMES maps an organization id to a
+// human-readable Ukrainian site name shown next to selectors,
+// header subtitles, and KPI labels. The backend's
+// /api/v1/organizations response already carries a `name` field
+// pulled from the deployment YAML, so this map is purely a
+// frontend fallback for instances where the server response
+// hasn't been refreshed yet (or the operator wants a different
+// label inside the dashboard than the one logged in metrics).
+//
+// Keep this list short — anything that needs richer per-org
+// metadata should live in the backend config so it survives a
+// frontend redeploy.
+export const ORGANIZATION_DISPLAY_NAMES: Record<string, string> = {
+  pe: 'Радивилівський елеватор',
+  ze: 'Жмеринський елеватор',
+}
+
+// formatOrganizationLabel returns the user-facing name for an
+// organization id. Prefers the explicit display map, falls back
+// to the bare id so unknown / new orgs still render usefully.
+export function formatOrganizationLabel(id: string): string {
+  return ORGANIZATION_DISPLAY_NAMES[id] ?? id
+}
+
 export const DASHBOARD_REFRESH_MS = 1000
 
 // Background re-fetch cadence for charts, summary cards, and period
