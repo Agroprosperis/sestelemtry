@@ -75,9 +75,16 @@ export function EconomicsHeader({
   return (
     <header className="economics-header">
       <div className="economics-header-row">
-        <div>
-          <h1>Добова економіка (СЕС + УЗЕ)</h1>
-          <p>Розрахунок ефекту проєкту за обраний день на базі цін РДН і тарифів.</p>
+        <div className="economics-header-brand">
+          <img
+            src="/logo_agroprosperis.png"
+            alt="Агропросперіс"
+            className="economics-header-logo"
+          />
+          <div>
+            <h1>Добова економіка (СЕС + УЗЕ)</h1>
+            <p>Розрахунок ефекту проєкту за обраний день на базі цін РДН і тарифів.</p>
+          </div>
         </div>
         <div className="economics-header-controls">
           <OrganizationSelect

@@ -30,6 +30,19 @@
   font-size: 14px;
 }
 
+.economics-header-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.economics-header-logo {
+  height: 44px;
+  width: auto;
+  display: block;
+  flex-shrink: 0;
+}
+
 .economics-header-row {
   display: flex;
   justify-content: space-between;

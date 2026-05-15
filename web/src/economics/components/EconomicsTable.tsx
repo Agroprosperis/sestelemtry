@@ -49,15 +49,15 @@ export function EconomicsTable({ rows }: Props) {
             <tr>
               <th>Год</th>
               <th>РДН<br /><small>грн/кВт·год</small></th>
-              <th>Імпорт ц.<br /><small>грн/кВт·год</small></th>
-              <th>Експорт ц.<br /><small>грн/кВт·год</small></th>
-              <th>Навант.<br /><small>кВт·год</small></th>
-              <th>PV→Навант.<br /><small>кВт·год</small></th>
+              <th>Ціна імпорту<br /><small>грн/кВт·год</small></th>
+              <th>Ціна експорту<br /><small>грн/кВт·год</small></th>
+              <th>Споживання<br /><small>кВт·год</small></th>
+              <th>PV→Споживання<br /><small>кВт·год</small></th>
               <th>PV→УЗЕ<br /><small>кВт·год</small></th>
               <th>PV→Мережа<br /><small>кВт·год</small></th>
-              <th>Мережа→Навант.<br /><small>кВт·год</small></th>
+              <th>Мережа→Споживання<br /><small>кВт·год</small></th>
               <th>Мережа→УЗЕ<br /><small>кВт·год</small></th>
-              <th>УЗЕ→Навант.<br /><small>кВт·год</small></th>
+              <th>УЗЕ→Споживання<br /><small>кВт·год</small></th>
               <th>УЗЕ→Мережа<br /><small>кВт·год</small></th>
               <th>Імпорт всього<br /><small>кВт·год</small></th>
               <th>Експорт всього<br /><small>кВт·год</small></th>

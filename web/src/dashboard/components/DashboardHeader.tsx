@@ -43,9 +43,16 @@ export function DashboardHeader({
 }: Props) {
   return (
     <header className="dashboard-header">
-      <div>
-        <h1>Telemetry Dashboard</h1>
-        <p>Organization: {organizationID}</p>
+      <div className="dashboard-header-brand">
+        <img
+          src="/logo_agroprosperis.png"
+          alt="Агропросперіс"
+          className="dashboard-header-logo"
+        />
+        <div>
+          <h1>Моніторинг СЕС + УЗЕ</h1>
+          <p>Організація: {organizationID}</p>
+        </div>
       </div>
       <div className="header-controls">
         <OrganizationSelect value={organizationID} options={organizationOptions} onChange={onOrganizationChange} />
