@@ -474,9 +474,25 @@
   padding: 4px 8px;
 }
 
+/* Column zebra: tint every other hour column so the eye can latch
+ * onto a single column when scanning across 24 values. The metric
+ * label (1st child) and Σ total (last child) are excluded so the
+ * sticky columns keep their own backgrounds. Aligned across header
+ * row 2 and tbody so the same hour columns get the same tint. */
+.economics-table-pivot
+  tbody
+  tr:not(.economics-table-summary-row)
+  td:nth-child(2n):not(.economics-table-total-cell) {
+  background: #f3f6fa;
+}
+
+.economics-table-pivot thead th.economics-table-hour-cell:nth-child(2n + 1) {
+  background: #eef2f7;
+}
+
 .economics-table-pivot tbody tr:hover td:not(.economics-table-total-cell),
 .economics-table-pivot tbody tr:hover th.economics-table-metric {
-  background: #f8fafc;
+  background: #e2e8f0;
 }
 
 /* Summary rows (Споживання, PV, Імпорт всього, Експорт всього)
