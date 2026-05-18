@@ -249,6 +249,32 @@ const METRIC_GROUPS: Array<{ id: string; label: string; rows: MetricRow[] }> = [
     ],
   },
   {
+    // The two ESS↔grid exchange flows that aren't already visible
+    // under "Виробіток PV" (PV → УЗЕ) or "Споживання" (УЗЕ →
+    // Споживання). Kept as a small standalone block so the operator
+    // doesn't read them as a decomposition of Імпорт/Експорт всього.
+    id: 'ess_grid',
+    label: 'УЗЕ ↔ Мережа',
+    rows: [
+      {
+        id: 'grid_to_ess',
+        label: 'Мережа → УЗЕ',
+        unit: 'кВт·год',
+        kind: 'energy',
+        pickHourValue: (row) => row?.flow.gridToEss ?? null,
+        total: (rows) => sumOver(rows, (r) => r?.flow.gridToEss ?? null),
+      },
+      {
+        id: 'ess_to_grid',
+        label: 'УЗЕ → Мережа',
+        unit: 'кВт·год',
+        kind: 'energy',
+        pickHourValue: (row) => row?.flow.essToGrid ?? null,
+        total: (rows) => sumOver(rows, (r) => r?.flow.essToGrid ?? null),
+      },
+    ],
+  },
+  {
     // Revenue / expense per channel — the per-hour version of the
     // EBITDA panel above the chart. Each row is `flowₕ · priceₕ`
     // (matching `dailyTotals` revenue/expense fields exactly), so
@@ -349,6 +375,28 @@ const METRIC_GROUPS: Array<{ id: string; label: string; rows: MetricRow[] }> = [
           ),
       },
       {
+        // Витрати summary mirrors the Дохід всього row above so the
+        // panel and the table read the same way (heading row +
+        // breakdown beneath). Today there's only one expense leg
+        // (gridToEss · importPrice), but the summary slot is kept so
+        // adding e.g. degradation cost later doesn't require
+        // restructuring the table.
+        id: 'expense_total',
+        label: 'Витрати всього',
+        unit: 'грн',
+        kind: 'uah',
+        summary: true,
+        pickHourValue: pickRevenue(
+          (r) => r.flow.gridToEss,
+          (r) => r.economics.importPriceUahPerKwh,
+        ),
+        total: (rows) =>
+          sumOver(
+            rows,
+            pickRevenue((r) => r.flow.gridToEss, (r) => r.economics.importPriceUahPerKwh),
+          ),
+      },
+      {
         id: 'expense_grid_charge',
         label: 'Витрати: Заряд УЗЕ із мережі',
         unit: 'грн',
@@ -374,6 +422,12 @@ const METRIC_GROUPS: Array<{ id: string; label: string; rows: MetricRow[] }> = [
         label: 'Базова вартість',
         unit: 'грн',
         kind: 'uah',
+        // Marked as summary so the Економіка block visually
+        // separates from the revenue rows above. The block is read
+        // top-down: baseline (counterfactual) → actual (today) →
+        // effect (their delta) → УЗЕ нетто (battery's slice), so
+        // emphasising the entry-point row anchors the section.
+        summary: true,
         pickHourValue: pickWhenPriced((r) => r.economics.baselineCost),
         total: (rows) => sumOver(rows, pickWhenPriced((r) => r.economics.baselineCost)),
       },
