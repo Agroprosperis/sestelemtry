@@ -383,3 +383,134 @@
   color: #dc2626;
   font-weight: 600;
 }
+
+.cell-empty {
+  color: #cbd5e1;
+}
+
+/* Pivot table: hours as columns, metrics as rows. The first two
+ * columns (metric label + unit) and the trailing daily-sum column
+ * stay anchored while the 24 hour columns scroll horizontally;
+ * sticky-position keeps them readable on narrow screens without
+ * losing the wide hour grid. */
+.economics-table-pivot {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.economics-table-pivot thead th.economics-table-metric-head,
+.economics-table-pivot thead th.economics-table-unit-head {
+  position: sticky;
+  z-index: 3;
+  background: #f8fafc;
+}
+
+.economics-table-pivot thead th.economics-table-metric-head {
+  left: 0;
+  text-align: left;
+  min-width: 180px;
+}
+
+.economics-table-pivot thead th.economics-table-unit-head {
+  left: 180px;
+  text-align: left;
+  min-width: 96px;
+  border-right: 1px solid #e2e8f0;
+}
+
+.economics-table-pivot thead th.economics-table-hours-head {
+  text-align: center;
+  font-weight: 500;
+  color: #94a3b8;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding-bottom: 2px;
+}
+
+.economics-table-pivot thead th.economics-table-hour-cell {
+  text-align: right;
+  min-width: 56px;
+  font-weight: 600;
+  color: #475569;
+  padding: 4px 8px;
+}
+
+.economics-table-pivot thead th.economics-table-total-head {
+  position: sticky;
+  right: 0;
+  z-index: 3;
+  background: #f1f5f9;
+  border-left: 1px solid #e2e8f0;
+  text-align: right;
+  min-width: 110px;
+}
+
+.economics-table-pivot tbody th.economics-table-metric {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: #ffffff;
+  text-align: left;
+  font-weight: 500;
+  color: #0f172a;
+  white-space: nowrap;
+  border-bottom: 1px solid #f1f5f9;
+  padding: 6px 8px;
+}
+
+.economics-table-pivot tbody td.economics-table-unit {
+  position: sticky;
+  left: 180px;
+  z-index: 2;
+  background: #ffffff;
+  text-align: left;
+  color: #94a3b8;
+  font-size: 11px;
+  white-space: nowrap;
+  border-right: 1px solid #e2e8f0;
+}
+
+.economics-table-pivot tbody td.economics-table-total-cell {
+  position: sticky;
+  right: 0;
+  z-index: 2;
+  background: #f8fafc;
+  border-left: 1px solid #e2e8f0;
+  font-weight: 600;
+}
+
+.economics-table-pivot tbody tr.economics-table-group th {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: #eef2ff;
+  color: #312e81;
+  text-align: left;
+  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 8px 8px 6px;
+  border-bottom: 1px solid #c7d2fe;
+}
+
+.economics-table-pivot tbody tr:hover td:not(.economics-table-total-cell):not(.economics-table-unit),
+.economics-table-pivot tbody tr:hover th.economics-table-metric {
+  background: #f8fafc;
+}
+
+/* Summary rows (Споживання, PV, Імпорт всього, Експорт всього)
+ * are emphasised so the operator can scan them as section totals
+ * rather than rummaging for the line they need. The breakdown
+ * rows underneath each summary should sum to it. */
+.economics-table-pivot tbody tr.economics-table-summary-row td,
+.economics-table-pivot tbody tr.economics-table-summary-row th {
+  font-weight: 700;
+  background: #f8fafc;
+  border-top: 1px solid #cbd5e1;
+}
+
+.economics-table-pivot tbody tr.economics-table-summary-row td.economics-table-total-cell {
+  background: #e2e8f0;
+}
