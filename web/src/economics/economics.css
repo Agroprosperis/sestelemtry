@@ -560,10 +560,16 @@
 
 .economics-table-pivot thead th.economics-table-total-head {
   position: sticky;
-  right: 0;
+  /* The Σ column is now anchored to the right edge of the metric
+     label column (192 px wide), forming a two-column sticky block
+     on the LEFT of the table. We keep `right` unset because the
+     column scrolls together with the hour columns when the table
+     is wider than the viewport — it's the metric+Σ pair that the
+     analyst wants pinned, not the right edge. */
+  left: 192px;
   z-index: 3;
   background: #f1f5f9;
-  border-left: 1px solid #e2e8f0;
+  border-right: 1px solid #e2e8f0;
   text-align: right;
   min-width: 96px;
 }
@@ -592,10 +598,13 @@
 
 .economics-table-pivot tbody td.economics-table-total-cell {
   position: sticky;
-  right: 0;
+  /* Mirror of the Σ header: anchored 192 px from the scroll
+     container's left edge so it sits flush against the sticky
+     metric column. */
+  left: 192px;
   z-index: 2;
   background: #f8fafc;
-  border-left: 1px solid #e2e8f0;
+  border-right: 1px solid #e2e8f0;
   font-weight: 600;
   min-width: 96px;
   padding: 4px 8px;
@@ -603,13 +612,19 @@
 
 /* Column zebra: tint every other hour column so the eye can latch
  * onto a single column when scanning across 24 values. The metric
- * label (1st child) and Σ total (last child) are excluded so the
- * sticky columns keep their own backgrounds. Aligned across header
- * row 2 and tbody so the same hour columns get the same tint. */
+ * label (1st child) and Σ total (now 2nd child) are excluded so the
+ * sticky columns keep their own backgrounds. With the new layout
+ * [metric][Σ][hours]: hour 0 sits at td:nth-child(3), hour 1 at
+ * td:nth-child(4), … so `td:nth-child(2n+1)` selects the
+ * even-numbered hours (0, 2, 4, …, 22) — the metric th doesn't
+ * match because the selector also requires `td`, and the Σ td at
+ * position 2 is excluded explicitly. The thead row 2 only contains
+ * 24 hour cells (1…24) so the same `nth-child(2n+1)` selects hours
+ * 0, 2, 4, … and the two layers stay aligned. */
 .economics-table-pivot
   tbody
   tr:not(.economics-table-summary-row)
-  td:nth-child(2n):not(.economics-table-total-cell) {
+  td:nth-child(2n + 1):not(.economics-table-total-cell) {
   background: #f3f6fa;
 }
 
@@ -619,11 +634,14 @@
 
 /* Hover specificity has to match the zebra rule above (which uses
  * two :not() filters + :nth-child) or zebra-tinted cells keep their
- * tint on row hover. We add a redundant :not() to the td selector
- * to bump specificity to (0,4,3) — same as zebra — and let
- * source order resolve in hover's favour. */
-.economics-table-pivot tbody tr:hover:not(.economics-table-summary-row) td:not(.economics-table-total-cell),
-.economics-table-pivot tbody tr:hover th.economics-table-metric {
+ * tint on row hover. Source order resolves in hover's favour when
+ * specificity ties. */
+.economics-table-pivot
+  tbody
+  tr:hover:not(.economics-table-summary-row)
+  td:not(.economics-table-total-cell),
+.economics-table-pivot tbody tr:hover th.economics-table-metric,
+.economics-table-pivot tbody tr:hover td.economics-table-total-cell {
   background: #e2e8f0;
 }
 

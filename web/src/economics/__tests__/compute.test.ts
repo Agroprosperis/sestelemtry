@@ -178,6 +178,7 @@ describe('dailyTotals (spec calibration)', () => {
         rdnUahPerKwh: rdn,
         flow: flowPerHour,
         economics: hourEconomics(rdn, flowPerHour, tariffs),
+        essRemainingKwhStart: null,
       })
     }
     return out
@@ -263,6 +264,7 @@ describe('dailyTotals (spec calibration)', () => {
         rdnUahPerKwh: rdn,
         flow: flowPerHour,
         economics: hourEconomics(rdn, flowPerHour, tariffs),
+        essRemainingKwhStart: null,
       })
     }
     const totals = dailyTotals(rows)

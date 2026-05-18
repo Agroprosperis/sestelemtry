@@ -27,6 +27,14 @@ const PV_GRID_METRIC_KEYS = [
   'accumulated_electricity_sold_kwh',
 ] as const
 
+// soc_percent is a gauge (not an accumulator), so we pull it with
+// `aggregation=last` over 1-hour buckets ending one hour BEFORE
+// each target hour: the last raw sample observed in `[H-1, H)` is
+// the closest the analyst has to "SOC at the start of hour H".
+// Range therefore stretches from yesterday-23:00 through today-22:59
+// in LOCAL_TZ — 24 buckets, one per target hour 00…23.
+const SOC_METRIC_KEY = 'soc_percent'
+
 export type EconomicsData = {
   // Always 24-long. `null` means the hour wasn't recovered yet
   // (still loading) or the underlying telemetry had no rows for
@@ -93,6 +101,14 @@ export function useEconomicsData(input: Input): EconomicsData {
     const dayStartIso = dayStart.toISOString()
     const dayEndIso = dayEnd.toISOString()
 
+    // SOC window is shifted one hour earlier than the day window so
+    // each `aggregation=last` bucket [H-1, H) yields the value the
+    // operator would have read at the start of hour H. The end
+    // boundary lands at today 23:00 (i.e., dayEnd minus 1h), so the
+    // last bucket covers 22:00–23:00 and feeds into hour 23.
+    const socStart = new Date(dayStart.getTime() - 60 * 60 * 1000)
+    const socEnd = new Date(dayEnd.getTime() - 60 * 60 * 1000)
+
     Promise.all([
       fetchEnergyFlowHourly(
         { organizationID: input.organizationID, date: input.date, tz: LOCAL_TZ },
@@ -114,9 +130,27 @@ export function useEconomicsData(input: Input): EconomicsData {
         { from: input.date, to: input.date, zone: DAM_ZONE },
         controller.signal,
       ),
+      fetchTimeseries(
+        {
+          organizationID: input.organizationID,
+          metricKeys: [SOC_METRIC_KEY],
+          from: socStart.toISOString(),
+          to: socEnd.toISOString(),
+          bucket: '1 hour',
+          tz: LOCAL_TZ,
+          aggregation: 'last',
+        },
+        controller.signal,
+      ),
     ])
-      .then(([flowsResp, deltasResp, damResp]) => {
-        const rows = assembleHourlyRows(flowsResp, deltasResp, damResp.prices, input.tariffs)
+      .then(([flowsResp, deltasResp, damResp, socResp]) => {
+        const rows = assembleHourlyRows(
+          flowsResp,
+          deltasResp,
+          damResp.prices,
+          socResp,
+          input.tariffs,
+        )
         const skipDiagnostics = collectSkipDiagnostics(flowsResp)
         const hoursMissingPrice = rows.reduce(
           (acc, row) => (row && row.rdnUahPerKwh === null ? acc + 1 : acc),
@@ -157,11 +191,20 @@ function assembleHourlyRows(
   flows: EnergyFlowHourlyResponse,
   deltas: TimeseriesResponse,
   damPrices: DAMPrice[],
+  socResp: TimeseriesResponse,
   tariffs: Tariffs,
 ): Array<HourEconomicsRow | null> {
   const pvByHour = bucketBy(deltas.points.filter((p) => p.metric_key === 'accumulated_pv_energy_yield_kwh'))
   const importByHour = bucketBy(deltas.points.filter((p) => p.metric_key === 'accumulated_electricity_purchased_kwh'))
   const exportByHour = bucketBy(deltas.points.filter((p) => p.metric_key === 'accumulated_electricity_sold_kwh'))
+  // SOC buckets are timestamped at the START of each [H-1, H)
+  // window, so a sample at 23:00 yesterday represents "SOC observed
+  // walking into hour 0 today". `bucketSocByHourStart` shifts the
+  // hour index by +1 (mod 24) so the operator-facing hour is the
+  // map's key.
+  const socByHourStart = bucketSocByHourStart(
+    socResp.points.filter((p) => p.metric_key === SOC_METRIC_KEY),
+  )
 
   // DAM hours are 1..24 (hour-ending convention from the source XLS).
   // Hour 1 covers 00:00–01:00 local, hour 24 covers 23:00–24:00, so
@@ -202,13 +245,39 @@ function assembleHourlyRows(
           // automatically via `rdnUahPerKwh === null`.
           hourEconomics(0, flow, tariffs)
         : hourEconomics(rdn, flow, tariffs)
+    const socPercent = socByHourStart.get(h)
+    const essRemainingKwhStart =
+      socPercent === undefined || !Number.isFinite(socPercent)
+        ? null
+        : (socPercent / 100) * tariffs.essCapacityKwh
     out.push({
       hour: h,
       hourStart: flowRow.from,
       rdnUahPerKwh: rdn,
       flow,
       economics,
+      essRemainingKwhStart,
     })
+  }
+  return out
+}
+
+// bucketSocByHourStart maps each SOC sample to the OPERATOR-FACING
+// hour it represents the start of. The /api/v1/timeseries call uses
+// `aggregation=last` over [H-1, H) buckets, so a point timestamped
+// at H-1 is "the SOC observed at the start of hour H". We shift the
+// source hour by +1 (mod 24) and keep the latest sample wins
+// semantics that aggregation=last already provides server-side.
+function bucketSocByHourStart(
+  points: { metric_key: string; time: string; value: number }[],
+): Map<number, number> {
+  const out = new Map<number, number>()
+  for (const point of points) {
+    const t = new Date(point.time)
+    if (Number.isNaN(t.getTime())) continue
+    const sourceHour = t.getHours()
+    const targetHour = (sourceHour + 1) % 24
+    out.set(targetHour, point.value)
   }
   return out
 }

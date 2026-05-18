@@ -279,4 +279,13 @@ export type HourEconomicsRow = {
   rdnUahPerKwh: number | null
   flow: HourFlows
   economics: HourEconomics
+  // ESS state-of-charge at the START of the hour, in kWh. Computed
+  // upstream as `(soc_percent / 100) · tariffs.essCapacityKwh`,
+  // where soc_percent is the last raw sample observed in the
+  // PREVIOUS hour (so the value reads as "battery level the
+  // operator saw walking into hour H"). null when the SOC sensor
+  // had no samples in the relevant window — common for hour 0 if
+  // the day's first sample lands after midnight, or for any hour
+  // during a collector outage.
+  essRemainingKwhStart: number | null
 }

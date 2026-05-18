@@ -265,6 +265,21 @@ const METRIC_GROUPS: Array<{ id: string; label: string; rows: MetricRow[] }> = [
         pickHourValue: (row) => row?.flow.essToGrid ?? null,
         total: (rows) => sumOver(rows, (r) => r?.flow.essToGrid ?? null),
       },
+      {
+        // Залишок УЗЕ = SOC at the start of the hour · ємність.
+        // Pre-computed in useEconomicsData (where tariffs live)
+        // because the row config has no access to tariffs at render
+        // time. The Σ column intentionally returns null: summing
+        // residual battery levels across hours is meaningless (each
+        // hour's value is an instantaneous snapshot, not a flow), so
+        // we render an em-dash instead of a fake total.
+        id: 'ess_remaining',
+        label: 'Залишок УЗЕ',
+        unit: 'кВт·год',
+        kind: 'energy',
+        pickHourValue: (row) => row?.essRemainingKwhStart ?? null,
+        total: () => null,
+      },
     ],
   },
   {
@@ -445,36 +460,20 @@ const METRIC_GROUPS: Array<{ id: string; label: string; rows: MetricRow[] }> = [
     ],
   },
   {
+    // Економіка carries the two project-level deltas (Ефект,
+    // УЗЕ нетто) — Базова / Фактична були прибрані, бо їх повна
+    // розкладка вже видима у групі "Дохід та витрати" вище. Перший
+    // рядок цього блоку позначений як summary щоб у місці переходу
+    // від EBITDA до економіки виник чіткий візуальний роздільник.
     id: 'economics',
     label: 'Економіка',
     rows: [
-      {
-        id: 'baseline',
-        label: 'Базова вартість',
-        unit: 'грн',
-        kind: 'uah',
-        // Marked as summary so the Економіка block visually
-        // separates from the revenue rows above. The block is read
-        // top-down: baseline (counterfactual) → actual (today) →
-        // effect (their delta) → УЗЕ нетто (battery's slice), so
-        // emphasising the entry-point row anchors the section.
-        summary: true,
-        pickHourValue: pickWhenPriced((r) => r.economics.baselineCost),
-        total: (rows) => sumOver(rows, pickWhenPriced((r) => r.economics.baselineCost)),
-      },
-      {
-        id: 'actual',
-        label: 'Фактична вартість',
-        unit: 'грн',
-        kind: 'uah',
-        pickHourValue: pickWhenPriced((r) => r.economics.actualCost),
-        total: (rows) => sumOver(rows, pickWhenPriced((r) => r.economics.actualCost)),
-      },
       {
         id: 'effect',
         label: 'Ефект',
         unit: 'грн',
         kind: 'uah_signed',
+        summary: true,
         pickHourValue: pickWhenPriced((r) => r.economics.effect),
         total: (rows) => sumOver(rows, pickWhenPriced((r) => r.economics.effect)),
       },
@@ -525,11 +524,11 @@ export function EconomicsTable({ rows }: Props) {
               <th className="economics-table-metric-head" rowSpan={2} scope="col">
                 Показник
               </th>
-              <th colSpan={HOUR_COUNT} scope="colgroup" className="economics-table-hours-head">
-                Година (00…23)
-              </th>
               <th rowSpan={2} scope="col" className="economics-table-total-head">
                 Σ за добу
+              </th>
+              <th colSpan={HOUR_COUNT} scope="colgroup" className="economics-table-hours-head">
+                Година (00…23)
               </th>
             </tr>
             <tr>
@@ -550,13 +549,6 @@ export function EconomicsTable({ rows }: Props) {
                     {metric.label}
                     <small>, {metric.unit}</small>
                   </th>
-                  {rows.map((row, hourIdx) =>
-                    <FragmentCell
-                      key={hourIdx}
-                      value={metric.pickHourValue(row)}
-                      kind={metric.kind}
-                    />
-                  )}
                   <td className="economics-table-total-cell">
                     {totalValue === null ? (
                       <span className="cell-empty">—</span>
@@ -564,6 +556,13 @@ export function EconomicsTable({ rows }: Props) {
                       renderTotal(totalValue, metric.kind)
                     )}
                   </td>
+                  {rows.map((row, hourIdx) => (
+                    <FragmentCell
+                      key={hourIdx}
+                      value={metric.pickHourValue(row)}
+                      kind={metric.kind}
+                    />
+                  ))}
                 </tr>
               )
             })}
