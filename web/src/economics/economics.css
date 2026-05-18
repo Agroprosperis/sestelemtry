@@ -396,6 +396,11 @@
 .economics-table-pivot {
   border-collapse: separate;
   border-spacing: 0;
+  font-size: 12px;
+}
+
+.economics-table-pivot tbody td {
+  padding: 3px 4px;
 }
 
 .economics-table-pivot thead th.economics-table-metric-head {
@@ -404,7 +409,7 @@
   background: #f8fafc;
   left: 0;
   text-align: left;
-  min-width: 220px;
+  min-width: 192px;
   border-right: 1px solid #e2e8f0;
 }
 
@@ -420,10 +425,10 @@
 
 .economics-table-pivot thead th.economics-table-hour-cell {
   text-align: right;
-  min-width: 56px;
+  min-width: 40px;
   font-weight: 600;
   color: #475569;
-  padding: 4px 8px;
+  padding: 3px 4px;
 }
 
 .economics-table-pivot thead th.economics-table-total-head {
@@ -433,7 +438,7 @@
   background: #f1f5f9;
   border-left: 1px solid #e2e8f0;
   text-align: right;
-  min-width: 110px;
+  min-width: 96px;
 }
 
 .economics-table-pivot tbody th.economics-table-metric {
@@ -447,8 +452,8 @@
   white-space: nowrap;
   border-bottom: 1px solid #f1f5f9;
   border-right: 1px solid #e2e8f0;
-  padding: 6px 8px;
-  min-width: 220px;
+  padding: 4px 8px;
+  min-width: 192px;
 }
 
 .economics-table-pivot tbody th.economics-table-metric small {
@@ -465,6 +470,8 @@
   background: #f8fafc;
   border-left: 1px solid #e2e8f0;
   font-weight: 600;
+  min-width: 96px;
+  padding: 4px 8px;
 }
 
 .economics-table-pivot tbody tr:hover td:not(.economics-table-total-cell),

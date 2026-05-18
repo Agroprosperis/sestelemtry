@@ -11,15 +11,15 @@ const numberFmt = new Intl.NumberFormat('uk-UA', {
 })
 
 const uahFmt = new Intl.NumberFormat('uk-UA', {
-  style: 'currency',
-  currency: 'UAH',
+  style: 'decimal',
+  useGrouping: true,
   minimumFractionDigits: 0,
   maximumFractionDigits: 0,
 })
 
 const priceFmt = new Intl.NumberFormat('uk-UA', {
-  minimumFractionDigits: 3,
-  maximumFractionDigits: 3,
+  minimumFractionDigits: 0,
+  maximumFractionDigits: 0,
 })
 
 function formatNumber(v: number | null | undefined): string {
