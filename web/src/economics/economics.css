@@ -571,7 +571,8 @@
   background: #f1f5f9;
   border-right: 1px solid #e2e8f0;
   text-align: right;
-  min-width: 76px;
+  min-width: 60px;
+  padding: 6px 6px;
 }
 
 .economics-table-pivot tbody th.economics-table-metric {
@@ -606,7 +607,7 @@
   background: #f8fafc;
   border-right: 1px solid #e2e8f0;
   font-weight: 600;
-  min-width: 76px;
+  min-width: 60px;
   padding: 4px 6px;
 }
 
