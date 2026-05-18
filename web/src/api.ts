@@ -1,3 +1,4 @@
+import type { ElevatorCode } from './dashboard/transforms/pvForecast'
 import {
   type WeatherForecastApiResponse,
   weatherFromApi,
@@ -353,7 +354,7 @@ function delay(ms: number, signal?: AbortSignal): Promise<void> {
 }
 
 export async function fetchPvForecast(
-  input: { elevatorCode: 'JE' | 'RE'; forecastDay: string },
+  input: { elevatorCode: ElevatorCode; forecastDay: string },
   signal?: AbortSignal,
 ): Promise<PvForecastPoint[]> {
   const url = new URL(PV_FORECAST_WEBHOOK_URL)
