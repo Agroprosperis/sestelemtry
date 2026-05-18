@@ -216,6 +216,58 @@ describe('dailyTotals (spec calibration)', () => {
     expect(totals.hoursWithData).toBe(22)
     expect(totals.hoursMissingPrice).toBe(2)
   })
+
+  it('EBITDA equals revenueTotal − expenseTotal by construction', () => {
+    const totals = dailyTotals(buildSpecCalibrationProfile())
+    expect(totals.ebitda).toBeCloseTo(totals.revenueTotal - totals.expenseTotal, 6)
+    expect(totals.revenueTotal).toBeCloseTo(
+      totals.revenuePvExport + totals.revenuePvSelf + totals.revenueEssExport + totals.revenueEssSelf,
+      6,
+    )
+    expect(totals.expenseTotal).toBeCloseTo(totals.expenseGridCharge, 6)
+  })
+
+  it('EBITDA matches project effect when degradationUahPerKwh = 0', () => {
+    // Rebuild the synthetic profile with zero degradation so the
+    // single difference between `effect` (which subtracts wear) and
+    // `ebitda` (which doesn't) collapses, and the two framings of
+    // the same energy flows must agree bit-for-bit.
+    const tariffs = { ...DEFAULT_TARIFFS, degradationUahPerKwh: 0 }
+    const rdn = 1.0
+    const targets = {
+      load: 2010.5,
+      pv: 2660.4,
+      gridImport: 417.3,
+      gridExport: 917.6,
+      essDischarge: 321.9,
+    }
+    const essCharged =
+      targets.pv + targets.gridImport + targets.essDischarge - targets.gridExport - targets.load
+    const hours = 24
+    const flowPerHour: HourFlows = {
+      pv: targets.pv / hours,
+      gridImport: targets.gridImport / hours,
+      gridExport: targets.gridExport / hours,
+      essCharged: essCharged / hours,
+      essDischarged: targets.essDischarge / hours,
+      pvToEss: 0,
+      gridToEss: essCharged / hours,
+      essToLoad: targets.essDischarge / hours,
+      essToGrid: 0,
+    }
+    const rows: Array<HourEconomicsRow | null> = []
+    for (let h = 0; h < hours; h++) {
+      rows.push({
+        hour: h,
+        hourStart: `2026-05-09T${String(h).padStart(2, '0')}:00:00+03:00`,
+        rdnUahPerKwh: rdn,
+        flow: flowPerHour,
+        economics: hourEconomics(rdn, flowPerHour, tariffs),
+      })
+    }
+    const totals = dailyTotals(rows)
+    expect(totals.ebitda).toBeCloseTo(totals.effect, 6)
+  })
 })
 
 describe('tariffs URL round-trip', () => {

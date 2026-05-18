@@ -166,6 +166,20 @@ export type DailyTotals = {
   hoursMissingPrice: number
   avgImportPriceUahPerKwh: number
   avgExportPriceUahPerKwh: number
+  // EBITDA framing: each component is summed per hour as
+  // `flowₕ · priceₕ` so it reproduces the table's Σ column rather
+  // than the (less precise) `flow · weighted-avg-price`. Hours with
+  // null RDN are skipped, matching the existing baseline/actual
+  // logic. EBITDA = revenueTotal − expenseTotal, and equals
+  // `effect` when `degradationUahPerKwh = 0`.
+  revenuePvExport: number
+  revenuePvSelf: number
+  revenueEssExport: number
+  revenueEssSelf: number
+  revenueTotal: number
+  expenseGridCharge: number
+  expenseTotal: number
+  ebitda: number
 }
 
 export function dailyTotals(rows: Array<HourEconomicsRow | null>): DailyTotals {
@@ -191,6 +205,14 @@ export function dailyTotals(rows: Array<HourEconomicsRow | null>): DailyTotals {
     hoursMissingPrice: 0,
     avgImportPriceUahPerKwh: 0,
     avgExportPriceUahPerKwh: 0,
+    revenuePvExport: 0,
+    revenuePvSelf: 0,
+    revenueEssExport: 0,
+    revenueEssSelf: 0,
+    revenueTotal: 0,
+    expenseGridCharge: 0,
+    expenseTotal: 0,
+    ebitda: 0,
   }
   let importLoadKwh = 0
   let exportKwh = 0
@@ -221,13 +243,25 @@ export function dailyTotals(rows: Array<HourEconomicsRow | null>): DailyTotals {
     acc.essToLoad += row.flow.essToLoad
     acc.essToGrid += row.flow.essToGrid
 
+    const importPrice = row.economics.importPriceUahPerKwh
+    const exportPrice = row.economics.exportPriceUahPerKwh
+    acc.revenuePvExport += row.economics.pvToGrid * exportPrice
+    acc.revenuePvSelf += row.economics.pvToLoad * importPrice
+    acc.revenueEssExport += row.flow.essToGrid * exportPrice
+    acc.revenueEssSelf += row.flow.essToLoad * importPrice
+    acc.expenseGridCharge += row.flow.gridToEss * importPrice
+
     importLoadKwh += row.flow.gridImport
     exportKwh += row.flow.gridExport
-    importPriceUahSum += row.economics.importPriceUahPerKwh * row.flow.gridImport
-    exportPriceUahSum += row.economics.exportPriceUahPerKwh * row.flow.gridExport
+    importPriceUahSum += importPrice * row.flow.gridImport
+    exportPriceUahSum += exportPrice * row.flow.gridExport
   }
   acc.avgImportPriceUahPerKwh = importLoadKwh > 0 ? importPriceUahSum / importLoadKwh : 0
   acc.avgExportPriceUahPerKwh = exportKwh > 0 ? exportPriceUahSum / exportKwh : 0
+  acc.revenueTotal =
+    acc.revenuePvExport + acc.revenuePvSelf + acc.revenueEssExport + acc.revenueEssSelf
+  acc.expenseTotal = acc.expenseGridCharge
+  acc.ebitda = acc.revenueTotal - acc.expenseTotal
   return acc
 }
 

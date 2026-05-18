@@ -277,6 +277,135 @@
   color: #94a3b8;
 }
 
+/* Revenue / EBITDA breakdown panel — sits between the secondary KPI
+ * strip and the charts. Two columns (Дохід / Витрати) on wide
+ * viewports, single column under 720 px so it stays readable on
+ * tablets. The header carries EBITDA total with a colored stripe
+ * mirroring the .kpi-card-success / .kpi-card-danger convention so
+ * the operator can scan one number first and drill into the
+ * breakdown below. */
+.economics-revenue-panel {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 16px 20px;
+}
+
+.economics-revenue-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  border-bottom: 1px solid #f1f5f9;
+  padding-bottom: 12px;
+  margin-bottom: 12px;
+}
+
+.economics-revenue-header h3 {
+  margin: 0;
+  font-size: 14px;
+  color: #0f172a;
+}
+
+.economics-revenue-ebitda {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 10px;
+  border-left: 4px solid #16a34a;
+  padding-left: 10px;
+}
+
+.economics-revenue-ebitda.negative {
+  border-left-color: #dc2626;
+}
+
+.economics-revenue-ebitda-label {
+  font-size: 12px;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.economics-revenue-ebitda-value {
+  font-size: 22px;
+  font-weight: 700;
+  color: #0f172a;
+  font-variant-numeric: tabular-nums;
+}
+
+.economics-revenue-body {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+}
+
+@media (max-width: 720px) {
+  .economics-revenue-body {
+    grid-template-columns: 1fr;
+  }
+}
+
+.economics-revenue-column-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  border-bottom: 1px solid #e2e8f0;
+  padding-bottom: 6px;
+  margin-bottom: 4px;
+}
+
+.economics-revenue-column-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.economics-revenue-column-total {
+  font-size: 14px;
+  font-weight: 700;
+  color: #0f172a;
+  font-variant-numeric: tabular-nums;
+}
+
+.economics-revenue-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.economics-revenue-line {
+  display: grid;
+  grid-template-columns: 1fr auto 48px;
+  align-items: baseline;
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid #f1f5f9;
+  font-size: 13px;
+}
+
+.economics-revenue-line:last-child {
+  border-bottom: none;
+}
+
+.economics-revenue-line-label {
+  color: #475569;
+}
+
+.economics-revenue-line-amount {
+  color: #0f172a;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.economics-revenue-line-share {
+  color: #94a3b8;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
 .economics-charts {
   display: grid;
   grid-template-columns: 1fr;
@@ -490,7 +619,12 @@
   background: #eef2f7;
 }
 
-.economics-table-pivot tbody tr:hover td:not(.economics-table-total-cell),
+/* Hover specificity has to match the zebra rule above (which uses
+ * two :not() filters + :nth-child) or zebra-tinted cells keep their
+ * tint on row hover. We add a redundant :not() to the td selector
+ * to bump specificity to (0,4,3) — same as zebra — and let
+ * source order resolve in hover's favour. */
+.economics-table-pivot tbody tr:hover:not(.economics-table-summary-row) td:not(.economics-table-total-cell),
 .economics-table-pivot tbody tr:hover th.economics-table-metric {
   background: #e2e8f0;
 }
