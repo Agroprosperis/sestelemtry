@@ -411,6 +411,44 @@ const METRIC_GROUPS: Array<{ id: string; label: string; rows: MetricRow[] }> = [
             pickRevenue((r) => r.flow.gridToEss, (r) => r.economics.importPriceUahPerKwh),
           ),
       },
+      {
+        // EBITDA = Дохід − Витрати per hour. Equals the Економіка
+        // block's `Ефект` when `degradationUahPerKwh = 0`; the
+        // difference otherwise is the УЗЕ-degradation cost the
+        // Економіка block subtracts. We render with sign coloring so
+        // negative-EBITDA hours (rare, charge cost > all four
+        // revenue legs) stand out in red.
+        id: 'ebitda',
+        label: 'EBITDA',
+        unit: 'грн',
+        kind: 'uah_signed',
+        summary: true,
+        pickHourValue: (row) => {
+          if (!row || row.rdnUahPerKwh === null) return null
+          const imp = row.economics.importPriceUahPerKwh
+          const exp = row.economics.exportPriceUahPerKwh
+          const revenue =
+            row.economics.pvToGrid * exp +
+            row.economics.pvToLoad * imp +
+            row.flow.essToGrid * exp +
+            row.flow.essToLoad * imp
+          const expense = row.flow.gridToEss * imp
+          return revenue - expense
+        },
+        total: (rows) =>
+          sumOver(rows, (row) => {
+            if (!row || row.rdnUahPerKwh === null) return null
+            const imp = row.economics.importPriceUahPerKwh
+            const exp = row.economics.exportPriceUahPerKwh
+            const revenue =
+              row.economics.pvToGrid * exp +
+              row.economics.pvToLoad * imp +
+              row.flow.essToGrid * exp +
+              row.flow.essToLoad * imp
+            const expense = row.flow.gridToEss * imp
+            return revenue - expense
+          }),
+      },
     ],
   },
   {

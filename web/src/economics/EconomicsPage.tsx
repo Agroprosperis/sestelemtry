@@ -4,7 +4,6 @@ import { dailyTotals } from './compute'
 import { EconomicsCharts } from './components/EconomicsCharts'
 import { EconomicsHeader } from './components/EconomicsHeader'
 import { EconomicsKpis } from './components/EconomicsKpis'
-import { EconomicsRevenuePanel } from './components/EconomicsRevenuePanel'
 import { EconomicsTable } from './components/EconomicsTable'
 import './economics.css'
 import { DEFAULT_TARIFFS, parseTariffsFromSearch, serializeTariffsToSearch, type Tariffs } from './tariffs'
@@ -119,7 +118,6 @@ export function EconomicsPage() {
       ) : (
         <>
           <EconomicsKpis totals={totals} tariffs={tariffs} />
-          <EconomicsRevenuePanel totals={totals} />
           <EconomicsCharts rows={data.rows} />
           <EconomicsTable rows={data.rows} />
         </>
