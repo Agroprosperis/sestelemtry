@@ -18,8 +18,8 @@ const uahFmt = new Intl.NumberFormat('uk-UA', {
 })
 
 const priceFmt = new Intl.NumberFormat('uk-UA', {
-  minimumFractionDigits: 1,
-  maximumFractionDigits: 1,
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
 })
 
 function formatNumber(v: number | null | undefined): string {
@@ -133,6 +133,27 @@ const METRIC_GROUPS: Array<{ id: string; label: string; rows: MetricRow[] }> = [
         pickHourValue: pickWhenPriced((r) => r.economics.exportPriceUahPerKwh),
         total: () => null,
       },
+      {
+        // Імпорт/Експорт всього sit directly under the price rows
+        // so the operator can read "ціна × обсяг" left-to-right
+        // without bouncing between groups. Energy unit (кВт·год)
+        // contrasts with the грн/кВт·год above, the visual jump is
+        // intentional.
+        id: 'grid_import',
+        label: 'Імпорт всього',
+        unit: 'кВт·год',
+        kind: 'energy',
+        pickHourValue: (row) => row?.flow.gridImport ?? null,
+        total: (rows) => sumOver(rows, (r) => r?.flow.gridImport ?? null),
+      },
+      {
+        id: 'grid_export',
+        label: 'Експорт всього',
+        unit: 'кВт·год',
+        kind: 'energy',
+        pickHourValue: (row) => row?.flow.gridExport ?? null,
+        total: (rows) => sumOver(rows, (r) => r?.flow.gridExport ?? null),
+      },
     ],
   },
   {
@@ -217,34 +238,6 @@ const METRIC_GROUPS: Array<{ id: string; label: string; rows: MetricRow[] }> = [
         kind: 'energy',
         pickHourValue: (row) => row?.economics.pvToGrid ?? null,
         total: (rows) => sumOver(rows, (r) => r?.economics.pvToGrid ?? null),
-      },
-    ],
-  },
-  {
-    // Grid totals as standalone rows. The breakdown into source/sink
-    // channels is intentionally omitted here — `Мережа → Споживання`
-    // already lives under "Споживання" and `PV → Мережа` under
-    // "Виробіток PV", so duplicating those rows here would just add
-    // noise. The Імпорт/Експорт totals stay as a quick-glance number
-    // before the operator moves on to the money rows below.
-    id: 'grid',
-    label: 'Мережа',
-    rows: [
-      {
-        id: 'grid_import',
-        label: 'Імпорт всього',
-        unit: 'кВт·год',
-        kind: 'energy',
-        pickHourValue: (row) => row?.flow.gridImport ?? null,
-        total: (rows) => sumOver(rows, (r) => r?.flow.gridImport ?? null),
-      },
-      {
-        id: 'grid_export',
-        label: 'Експорт всього',
-        unit: 'кВт·год',
-        kind: 'energy',
-        pickHourValue: (row) => row?.flow.gridExport ?? null,
-        total: (rows) => sumOver(rows, (r) => r?.flow.gridExport ?? null),
       },
     ],
   },
