@@ -26,6 +26,7 @@ type storeReader interface {
 	Timeseries(ctx context.Context, organizationID string, metricKeys []string, from, to time.Time, bucket, tz string, aggregation TimeseriesAggregation) (TimeseriesResponse, error)
 	EnergySummary(ctx context.Context, organizationID string, metricKeys []string, from, to time.Time) (EnergySummaryResponse, error)
 	DAMPrices(ctx context.Context, zone int, from, to time.Time) (DAMPricesResponse, error)
+	WeatherForecast(ctx context.Context, organizationID string, from, to time.Time) (WeatherForecastResponse, error)
 	Samples(ctx context.Context, organizationID string, metricKeys []string, from, to time.Time, limit int, emit func(SampleRow) error) (int, bool, error)
 	EnergyFlowSources(ctx context.Context, organizationID string, from, to time.Time, lookback time.Duration) ([]EnergyFlowRawRow, error)
 	Ready(ctx context.Context) error
@@ -110,6 +111,7 @@ func (h *Handlers) Router() http.Handler {
 	mux.HandleFunc("/api/v1/energy-summary", h.energySummary)
 	mux.HandleFunc("/api/v1/energy-flow-hourly", h.energyFlowHourly)
 	mux.HandleFunc("/api/v1/dam-prices", h.damPrices)
+	mux.HandleFunc("/api/v1/weather-forecast", h.weatherForecast)
 	mux.HandleFunc("/swagger", h.swaggerUI)
 	mux.HandleFunc("/swagger/", h.swaggerUI)
 	mux.HandleFunc("/swagger/openapi.yaml", h.swaggerSpec)
@@ -606,6 +608,100 @@ func (h *Handlers) damPrices(w http.ResponseWriter, r *http.Request) {
 		"duration_ms", dur.Milliseconds(),
 	)
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// weatherForecast returns the cached Open-Meteo forecast for an
+// organization in [from, to]. Range bounds are inclusive date values
+// (YYYY-MM-DD); omitting them defaults to today..today+2d (today and
+// the next two days, which spans the WeatherCard's "yesterday/today/
+// tomorrow" anchor selector without needing a wide window).
+//
+// Empty hourly/daily arrays in the response mean "the collector
+// hasn't populated this org / range yet" — the frontend treats it as
+// a cue to fall back to Open-Meteo directly.
+func (h *Handlers) weatherForecast(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	orgID := strings.TrimSpace(r.URL.Query().Get("organization_id"))
+	if orgID == "" {
+		http.Error(w, "organization_id is required", http.StatusBadRequest)
+		return
+	}
+	from, to, err := parseWeatherDateRange(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	// Expand `to` to the end of day so an "inclusive" date range
+	// like from=2026-05-15&to=2026-05-15 returns all 24 hours of
+	// 2026-05-15 (stored as `timestamptz` at hourly granularity).
+	hourTo := to.Add(24*time.Hour - time.Nanosecond)
+
+	start := time.Now()
+	resp, err := h.store.WeatherForecast(r.Context(), orgID, from, hourTo)
+	dur := time.Since(start)
+	if err != nil {
+		h.log.Error("api_weather_forecast",
+			"organization_id", orgID,
+			"from", from,
+			"to", to,
+			"duration_ms", dur.Milliseconds(),
+			"err", err,
+		)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+	// Keep the response-level bounds at the original day-precision
+	// values the caller asked for so clients can echo them back
+	// verbatim. The hour expansion above is purely a SQL-side detail.
+	resp.From = from.UTC()
+	resp.To = to.UTC()
+	h.log.Info("api_weather_forecast_ok",
+		"organization_id", orgID,
+		"from", from,
+		"to", to,
+		"hourly", len(resp.Hourly),
+		"daily", len(resp.Daily),
+		"duration_ms", dur.Milliseconds(),
+	)
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// parseWeatherDateRange reads `from` and `to` (YYYY-MM-DD) query
+// params, defaulting to today..today+2d in UTC. The default window
+// pairs with the WeatherCard's anchor selector (yesterday/today/
+// tomorrow) and the typical Open-Meteo model horizon.
+func parseWeatherDateRange(r *http.Request) (from, to time.Time, err error) {
+	fromStr := strings.TrimSpace(r.URL.Query().Get("from"))
+	toStr := strings.TrimSpace(r.URL.Query().Get("to"))
+	now := time.Now().UTC()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	if fromStr == "" {
+		from = today
+	} else {
+		from, err = time.Parse("2006-01-02", fromStr)
+		if err != nil {
+			return time.Time{}, time.Time{}, fmt.Errorf("from must be YYYY-MM-DD")
+		}
+	}
+	if toStr == "" {
+		to = from.AddDate(0, 0, 2)
+	} else {
+		to, err = time.Parse("2006-01-02", toStr)
+		if err != nil {
+			return time.Time{}, time.Time{}, fmt.Errorf("to must be YYYY-MM-DD")
+		}
+	}
+	if to.Before(from) {
+		return time.Time{}, time.Time{}, fmt.Errorf("to must be on or after from")
+	}
+	const maxSpan = 31 * 24 * time.Hour
+	if to.Sub(from) > maxSpan {
+		return time.Time{}, time.Time{}, fmt.Errorf("date range must be <= 31 days")
+	}
+	return from, to, nil
 }
 
 // parseZone reads `zone` query param (1..99). Defaults to 2 (unified UA grid).

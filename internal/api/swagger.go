@@ -179,6 +179,57 @@ paths:
               schema:
                 type: string
                 example: internal server error
+  /api/v1/weather-forecast:
+    get:
+      summary: Cached Open-Meteo forecast for an organization
+      operationId: getWeatherForecast
+      description: |
+        Returns the hourly + daily Open-Meteo forecast cached by the
+        weather-collector service for the given organization. Empty
+        hourly/daily arrays mean the collector hasn't populated this
+        org / range yet — clients should fall back to fetching the
+        forecast directly from Open-Meteo in that case.
+      parameters:
+        - name: organization_id
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: from
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+          description: Inclusive lower bound (YYYY-MM-DD). Defaults to today UTC.
+        - name: to
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+          description: Inclusive upper bound (YYYY-MM-DD). Defaults to from+2d. Max span 31 days.
+      responses:
+        "200":
+          description: Cached hourly + daily forecast rows
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WeatherForecastResponse"
+        "400":
+          description: Invalid query parameters
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: organization_id is required
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: internal server error
   /api/v1/energy-flow-hourly:
     get:
       summary: Hourly directional energy flows (on-the-fly compute)
@@ -628,6 +679,93 @@ components:
           items:
             $ref: "#/components/schemas/DAMPrice"
       required: [zone, from, to, prices]
+    WeatherForecastHour:
+      type: object
+      properties:
+        hour:
+          type: string
+          format: date-time
+        temperature_2m_c:
+          type: number
+          format: double
+          nullable: true
+        cloud_cover_pct:
+          type: number
+          format: double
+          nullable: true
+        is_day:
+          type: boolean
+          nullable: true
+        shortwave_wm2:
+          type: number
+          format: double
+          nullable: true
+        direct_wm2:
+          type: number
+          format: double
+          nullable: true
+        diffuse_wm2:
+          type: number
+          format: double
+          nullable: true
+        gti_instant_wm2:
+          type: number
+          format: double
+          nullable: true
+        fetched_at:
+          type: string
+          format: date-time
+      required: [hour, fetched_at]
+    WeatherForecastDay:
+      type: object
+      properties:
+        day:
+          type: string
+          format: date
+        sunrise:
+          type: string
+          format: date-time
+          nullable: true
+        sunset:
+          type: string
+          format: date-time
+          nullable: true
+        daylight_duration_s:
+          type: number
+          format: double
+          nullable: true
+        sunshine_duration_s:
+          type: number
+          format: double
+          nullable: true
+        shortwave_radiation_sum:
+          type: number
+          format: double
+          nullable: true
+        fetched_at:
+          type: string
+          format: date-time
+      required: [day, fetched_at]
+    WeatherForecastResponse:
+      type: object
+      properties:
+        organization_id:
+          type: string
+        from:
+          type: string
+          format: date-time
+        to:
+          type: string
+          format: date-time
+        hourly:
+          type: array
+          items:
+            $ref: "#/components/schemas/WeatherForecastHour"
+        daily:
+          type: array
+          items:
+            $ref: "#/components/schemas/WeatherForecastDay"
+      required: [organization_id, from, to, hourly, daily]
     EnergyFlowHourlyRow:
       type: object
       properties:

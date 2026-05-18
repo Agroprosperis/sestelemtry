@@ -63,3 +63,14 @@ organizations:
           - electricity_sold_day_kwh
           - electricity_purchased_day_kwh
           - local_time_epoch_s
+
+# Open-Meteo forecast cache. The weather-collector fetches a fresh
+# forecast every `interval` for each org with a `location` block and
+# upserts (organization_id, hour) rows — no history is kept. Set
+# enabled: false to skip running the collector in this environment.
+weather:
+  enabled: true
+  interval: 1h
+  retry:
+    attempts: 3
+    backoff: 5s

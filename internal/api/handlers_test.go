@@ -22,6 +22,8 @@ type mockStore struct {
 	summaryErr  error
 	damResp     DAMPricesResponse
 	damErr      error
+	weatherResp WeatherForecastResponse
+	weatherErr  error
 	readyErr    error
 
 	currentAt time.Time
@@ -29,6 +31,10 @@ type mockStore struct {
 	damZone int
 	damFrom time.Time
 	damTo   time.Time
+
+	weatherOrg  string
+	weatherFrom time.Time
+	weatherTo   time.Time
 
 	summaryFrom time.Time
 	summaryTo   time.Time
@@ -68,6 +74,11 @@ func (m *mockStore) EnergySummary(_ context.Context, _ string, metricKeys []stri
 func (m *mockStore) DAMPrices(_ context.Context, zone int, from, to time.Time) (DAMPricesResponse, error) {
 	m.damZone, m.damFrom, m.damTo = zone, from, to
 	return m.damResp, m.damErr
+}
+
+func (m *mockStore) WeatherForecast(_ context.Context, orgID string, from, to time.Time) (WeatherForecastResponse, error) {
+	m.weatherOrg, m.weatherFrom, m.weatherTo = orgID, from, to
+	return m.weatherResp, m.weatherErr
 }
 
 func (m *mockStore) Samples(_ context.Context, orgID string, keys []string, from, to time.Time, limit int, emit func(SampleRow) error) (int, bool, error) {
@@ -400,6 +411,101 @@ func TestDAMPricesHidesInternalError(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "internal server error") {
 		t.Fatalf("expected generic error body, got %q", rec.Body.String())
+	}
+}
+
+func TestWeatherForecastRequiresOrgID(t *testing.T) {
+	h := NewHandlers(&mockStore{}, "*")
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/weather-forecast", nil)
+	rec := httptest.NewRecorder()
+	h.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("want 400 got %d", rec.Code)
+	}
+}
+
+func TestWeatherForecastDefaultRangeIsTodayPlus2(t *testing.T) {
+	temp := 12.3
+	cloud := 40.0
+	store := &mockStore{
+		weatherResp: WeatherForecastResponse{
+			OrganizationID: "org-a",
+			Hourly: []WeatherForecastHour{
+				{Hour: time.Now().UTC().Truncate(time.Hour), Temperature2mC: &temp, CloudCoverPct: &cloud},
+			},
+		},
+	}
+	h := NewHandlers(store, "*")
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/weather-forecast?organization_id=org-a", nil)
+	rec := httptest.NewRecorder()
+	h.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200 got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if store.weatherOrg != "org-a" {
+		t.Fatalf("orgID not forwarded: %q", store.weatherOrg)
+	}
+	// from..to span is 2 days + (24h-1ns) of `to` expansion = 3 days - 1ns.
+	want := 3*24*time.Hour - time.Nanosecond
+	if got := store.weatherTo.Sub(store.weatherFrom); got != want {
+		t.Fatalf("default range span: got %v want %v", got, want)
+	}
+	var resp WeatherForecastResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp.Hourly) != 1 {
+		t.Fatalf("expected 1 hourly point, got %d", len(resp.Hourly))
+	}
+	if resp.Hourly[0].Temperature2mC == nil || *resp.Hourly[0].Temperature2mC != 12.3 {
+		t.Fatalf("temp not echoed: %+v", resp.Hourly[0])
+	}
+}
+
+func TestWeatherForecastParsesDateRange(t *testing.T) {
+	store := &mockStore{}
+	h := NewHandlers(store, "*")
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/weather-forecast?organization_id=org-a&from=2026-05-15&to=2026-05-17", nil)
+	rec := httptest.NewRecorder()
+	h.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200 got %d body=%s", rec.Code, rec.Body.String())
+	}
+	wantFrom := time.Date(2026, 5, 15, 0, 0, 0, 0, time.UTC)
+	if !store.weatherFrom.Equal(wantFrom) {
+		t.Fatalf("from: got %v want %v", store.weatherFrom, wantFrom)
+	}
+	wantTo := time.Date(2026, 5, 17, 0, 0, 0, 0, time.UTC).Add(24*time.Hour - time.Nanosecond)
+	if !store.weatherTo.Equal(wantTo) {
+		t.Fatalf("to expansion: got %v want %v", store.weatherTo, wantTo)
+	}
+}
+
+func TestWeatherForecastRejectsBadParams(t *testing.T) {
+	cases := []string{
+		"/api/v1/weather-forecast?organization_id=org-a&from=not-a-date",
+		"/api/v1/weather-forecast?organization_id=org-a&from=2026-05-02&to=2026-05-01",
+		"/api/v1/weather-forecast?organization_id=org-a&from=2026-01-01&to=2026-12-31",
+	}
+	h := NewHandlers(&mockStore{}, "*")
+	for _, u := range cases {
+		req := httptest.NewRequest(http.MethodGet, u, nil)
+		rec := httptest.NewRecorder()
+		h.Router().ServeHTTP(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("%s: want 400 got %d", u, rec.Code)
+		}
+	}
+}
+
+func TestWeatherForecastHidesInternalError(t *testing.T) {
+	h := NewHandlers(&mockStore{weatherErr: errors.New("db down")}, "*")
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/weather-forecast?organization_id=org-a", nil)
+	rec := httptest.NewRecorder()
+	h.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("want 500 got %d", rec.Code)
 	}
 }
 

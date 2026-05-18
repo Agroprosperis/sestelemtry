@@ -81,3 +81,17 @@ oree:
   retry:
     attempts: 5
     backoff: 5m
+
+# Open-Meteo forecast cache (consumed by weather-collector + /api/v1/weather-forecast).
+# The collector fetches a fresh forecast every `interval` for each org with a
+# `location` block and upserts (organization_id, hour) rows — no history is kept.
+# Set enabled: false to skip running the weather-collector against this config.
+weather:
+  enabled: true
+  base_url: "https://api.open-meteo.com/v1/forecast"
+  interval: 1h
+  http_timeout: 30s
+  user_agent: "sestelemetry-weather/1.0"
+  retry:
+    attempts: 3
+    backoff: 5s

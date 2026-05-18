@@ -113,6 +113,71 @@ organizations:
 	}
 }
 
+func TestLoadAppliesWeatherDefaults(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	content := `register_catalog: registers/huawei_smartlogger.yaml
+organizations:
+  - id: org-a
+    modbus:
+      host: 127.0.0.1
+weather:
+  enabled: true
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load error: %v", err)
+	}
+	w := cfg.Weather
+	if w.BaseURL != "https://api.open-meteo.com/v1/forecast" {
+		t.Fatalf("base_url default: %q", w.BaseURL)
+	}
+	if w.Interval != time.Hour {
+		t.Fatalf("interval default: %v", w.Interval)
+	}
+	if w.HTTPTimeout != 30*time.Second {
+		t.Fatalf("http_timeout default: %v", w.HTTPTimeout)
+	}
+	if w.UserAgent != "sestelemetry-weather/1.0" {
+		t.Fatalf("user_agent default: %q", w.UserAgent)
+	}
+	if w.Retry.Attempts != 3 || w.Retry.Backoff != 5*time.Second {
+		t.Fatalf("retry defaults: %+v", w.Retry)
+	}
+}
+
+func TestLoadRejectsBadWeather(t *testing.T) {
+	dir := t.TempDir()
+	cases := map[string]string{
+		"too short": `weather:
+  interval: 30s
+`,
+		"too long": `weather:
+  interval: 25h
+`,
+	}
+	for name, weather := range cases {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(dir, name+".yaml")
+			content := `register_catalog: registers/huawei_smartlogger.yaml
+organizations:
+  - id: org-a
+    modbus:
+      host: 127.0.0.1
+` + weather
+			if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := Load(path); err == nil {
+				t.Fatal("expected validation error, got nil")
+			}
+		})
+	}
+}
+
 func TestParseRunAt(t *testing.T) {
 	cases := []struct {
 		in     string

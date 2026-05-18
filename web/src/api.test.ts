@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { fetchRawSamplesCsv, fetchRegisters, resetRegistersCache } from './api'
+import {
+  fetchRawSamplesCsv,
+  fetchRegisters,
+  fetchWeatherForecastFromAPI,
+  resetRegistersCache,
+} from './api'
 
 // fetchRawSamplesCsv post-processes the response body just enough to
 // detect the server's truncation sentinel and pull the suggested
@@ -183,5 +188,44 @@ describe('fetchRegisters', () => {
     const ok = await fetchRegisters()
     expect(ok.metadata).toEqual({})
     expect(fetchSpy).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('fetchWeatherForecastFromAPI', () => {
+  beforeEach(() => {
+    vi.unstubAllGlobals()
+  })
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('returns null when the backend has no rows so the caller falls back to Open-Meteo', async () => {
+    const body = JSON.stringify({
+      organization_id: 'ze',
+      from: '2026-05-15T00:00:00Z',
+      to: '2026-05-17T00:00:00Z',
+      hourly: [],
+      daily: [],
+    })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(body, { status: 200, headers: { 'content-type': 'application/json' } })),
+    )
+    const got = await fetchWeatherForecastFromAPI({
+      organizationID: 'ze',
+      from: '2026-05-15',
+      to: '2026-05-17',
+    })
+    expect(got).toBeNull()
+  })
+
+  it('throws on non-200 so the caller falls back to Open-Meteo', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('boom', { status: 500 })),
+    )
+    await expect(
+      fetchWeatherForecastFromAPI({ organizationID: 'ze', from: '2026-05-15', to: '2026-05-17' }),
+    ).rejects.toThrow(/weather-forecast request failed: 500/)
   })
 })

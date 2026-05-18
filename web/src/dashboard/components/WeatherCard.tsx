@@ -162,9 +162,14 @@ export function WeatherCard({ organizationID, anchor, preset }: Props) {
   // hooks; it self-skips the network call when latitude/longitude are
   // null (no location configured for this org).
   const { data, loading, error } = useWeather({
+    organizationID,
     latitude: location?.latitude ?? null,
     longitude: location?.longitude ?? null,
     anchor,
+    // Skip the network fetch entirely for month/year presets. The
+    // card still renders nothing in those cases (see the early return
+    // below), so any data we'd pull would be discarded anyway.
+    enabled: preset === 'day',
   })
   // Single-day weather for `month` / `year` presets is misleading — the
   // anchor day on those presets is just a cursor inside the period — so

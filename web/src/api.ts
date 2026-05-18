@@ -1,3 +1,7 @@
+import {
+  type WeatherForecastApiResponse,
+  weatherFromApi,
+} from './dashboard/transforms/weatherAdapter'
 import type {
   CurrentResponse,
   DAMPricesResponse,
@@ -395,6 +399,31 @@ const OPEN_METEO_FORECAST_URL = 'https://api.open-meteo.com/v1/forecast'
 // Same backoff schedule as the n8n forecast — Open-Meteo is third-party,
 // so a single transient hiccup shouldn't blank the weather card.
 const OPEN_METEO_RETRY_DELAYS_MS = [200, 600]
+
+// fetchWeatherForecastFromAPI tries the backend's cached forecast
+// first. Returns null on empty/missing data (so the caller can fall
+// back to Open-Meteo directly) and throws on transport-level errors.
+//
+// `from` / `to` are local YYYY-MM-DD strings; the backend treats them
+// as inclusive UTC dates and expands `to` to end-of-day on its side.
+// The UTC ISO → local-TZ shape conversion lives in the adapter at
+// `dashboard/transforms/weatherAdapter.ts`.
+export async function fetchWeatherForecastFromAPI(
+  input: { organizationID: string; from: string; to: string },
+  signal?: AbortSignal,
+): Promise<OpenMeteoForecast | null> {
+  const url = buildURL('/api/v1/weather-forecast', {
+    organization_id: input.organizationID,
+    from: input.from,
+    to: input.to,
+  })
+  const res = await fetch(url, { signal })
+  if (!res.ok) {
+    throw new Error(`weather-forecast request failed: ${res.status}`)
+  }
+  const body = (await res.json()) as WeatherForecastApiResponse
+  return weatherFromApi(body)
+}
 
 // fetchOpenMeteoWeather calls the public Open-Meteo /v1/forecast endpoint
 // with the exact `daily=` / `hourly=` shape the dashboard PV pipeline uses

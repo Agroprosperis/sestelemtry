@@ -691,6 +691,62 @@ func applyApplianceConsumptionRule(totals map[string]float64) {
 	totals[consumptionKey] = value
 }
 
+// WeatherForecast returns the cached hourly + daily Open-Meteo forecast
+// for the given organization in [from, to]. The bounds are inclusive on
+// both ends, mirroring the DAMPrices semantics so the dashboard can
+// request `today..today+2d` and receive whatever the weather-collector
+// has cached for that window.
+//
+// Both arrays are always non-nil; empty arrays mean the collector
+// hasn't populated this org / range yet, which the frontend treats as
+// "fall back to Open-Meteo directly".
+func (s *Store) WeatherForecast(
+	ctx context.Context,
+	organizationID string,
+	from, to time.Time,
+) (WeatherForecastResponse, error) {
+	out := WeatherForecastResponse{
+		OrganizationID: organizationID,
+		From:           from.UTC(),
+		To:             to.UTC(),
+		Hourly:         make([]WeatherForecastHour, 0),
+		Daily:          make([]WeatherForecastDay, 0),
+	}
+	hourly, err := storage.QueryWeatherHourly(ctx, s.pool, organizationID, from, to)
+	if err != nil {
+		return out, fmt.Errorf("query hourly: %w", err)
+	}
+	for _, r := range hourly {
+		out.Hourly = append(out.Hourly, WeatherForecastHour{
+			Hour:           r.Hour,
+			Temperature2mC: r.Temperature2mC,
+			CloudCoverPct:  r.CloudCoverPct,
+			IsDay:          r.IsDay,
+			ShortwaveWm2:   r.ShortwaveWm2,
+			DirectWm2:      r.DirectWm2,
+			DiffuseWm2:     r.DiffuseWm2,
+			GtiInstantWm2:  r.GtiInstantWm2,
+			FetchedAt:      r.FetchedAt,
+		})
+	}
+	daily, err := storage.QueryWeatherDaily(ctx, s.pool, organizationID, from, to)
+	if err != nil {
+		return out, fmt.Errorf("query daily: %w", err)
+	}
+	for _, r := range daily {
+		out.Daily = append(out.Daily, WeatherForecastDay{
+			Day:                   r.Day,
+			Sunrise:               r.Sunrise,
+			Sunset:                r.Sunset,
+			DaylightDurationS:     r.DaylightDurationS,
+			SunshineDurationS:     r.SunshineDurationS,
+			ShortwaveRadiationSum: r.ShortwaveRadiationSum,
+			FetchedAt:             r.FetchedAt,
+		})
+	}
+	return out, nil
+}
+
 // DAMPrices returns hourly Day-Ahead Market rows for the inclusive date range
 // [from, to] and the given trading zone. Rows are sorted by delivery_date
 // ascending then by hour ascending.

@@ -124,6 +124,47 @@ type DAMPricesResponse struct {
 	Prices []DAMPrice `json:"prices"`
 }
 
+// WeatherForecastHour is one hour of cached Open-Meteo forecast data
+// for an organization. Numeric fields are pointers so missing values
+// (e.g. radiation before sunrise on the first day of the model window)
+// survive the JSON round-trip as nulls rather than being silently
+// replaced with zero.
+type WeatherForecastHour struct {
+	Hour           time.Time `json:"hour"`
+	Temperature2mC *float64  `json:"temperature_2m_c,omitempty"`
+	CloudCoverPct  *float64  `json:"cloud_cover_pct,omitempty"`
+	IsDay          *bool     `json:"is_day,omitempty"`
+	ShortwaveWm2   *float64  `json:"shortwave_wm2,omitempty"`
+	DirectWm2      *float64  `json:"direct_wm2,omitempty"`
+	DiffuseWm2     *float64  `json:"diffuse_wm2,omitempty"`
+	GtiInstantWm2  *float64  `json:"gti_instant_wm2,omitempty"`
+	FetchedAt      time.Time `json:"fetched_at"`
+}
+
+// WeatherForecastDay is one daily summary cached for an organization.
+type WeatherForecastDay struct {
+	Day                   time.Time  `json:"day"`
+	Sunrise               *time.Time `json:"sunrise,omitempty"`
+	Sunset                *time.Time `json:"sunset,omitempty"`
+	DaylightDurationS     *float64   `json:"daylight_duration_s,omitempty"`
+	SunshineDurationS     *float64   `json:"sunshine_duration_s,omitempty"`
+	ShortwaveRadiationSum *float64   `json:"shortwave_radiation_sum,omitempty"`
+	FetchedAt             time.Time  `json:"fetched_at"`
+}
+
+// WeatherForecastResponse is the body of GET /api/v1/weather-forecast.
+// `Hourly` and `Daily` are always non-nil arrays (empty when the
+// collector hasn't populated this org / range yet) so clients can
+// iterate without nil-checks. The dashboard treats an empty `Hourly`
+// as "no cached forecast" and falls back to Open-Meteo directly.
+type WeatherForecastResponse struct {
+	OrganizationID string                `json:"organization_id"`
+	From           time.Time             `json:"from"`
+	To             time.Time             `json:"to"`
+	Hourly         []WeatherForecastHour `json:"hourly"`
+	Daily          []WeatherForecastDay  `json:"daily"`
+}
+
 // EnergySummaryAccumulators are the raw cumulative Modbus counters
 // served by the EnergySummary store via `last(end) - last(seed)`.
 // The four directional flow counters (pv_to_ess_kwh, grid_to_ess_kwh,

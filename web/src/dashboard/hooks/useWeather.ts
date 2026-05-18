@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { fetchOpenMeteoWeather } from '../../api'
+import { fetchOpenMeteoWeather, fetchWeatherForecastFromAPI } from '../../api'
 import type { OpenMeteoForecast } from '../../types'
 import { weatherDayFromAnchor } from '../transforms/weather'
 
@@ -11,15 +11,11 @@ type CacheEntry = {
 }
 
 // Module-level cache shared across hook instances. Keyed by
-// `${latitude}:${longitude}:${anchorDay}` so flipping between
-// today/yesterday (within the forecast window) reuses recent results,
-// and switching between organizations doesn't clobber the other org's
-// cached payload.
+// `${orgID}` because the backend response carries the full
+// yesterday..tomorrow window in one payload — flipping the WeatherCard
+// anchor between those three days hits the same cache entry and
+// avoids re-fetching the identical 3-day forecast for each click.
 const cache = new Map<string, CacheEntry>()
-
-function cacheKey(latitude: number, longitude: number, day: string): string {
-  return `${latitude}:${longitude}:${day}`
-}
 
 function readFreshCache(key: string, now: number): OpenMeteoForecast | null {
   const hit = cache.get(key)
@@ -41,27 +37,51 @@ export type UseWeatherResult = {
 type FetchState = {
   // The cache key the most recent successful (or failed) fetch belongs
   // to. We compare it with the current render's key to know whether
-  // `data` / `error` are stale from a previous (lat, lon, day) combo.
+  // `data` / `error` are stale from a previous org / disabled state.
   key: string | null
   data: OpenMeteoForecast | null
   error: string | null
 }
 
-// useWeather fetches the Open-Meteo forecast for the given coordinates
-// and anchor day, with a 5-minute in-memory cache and a graceful
-// fallback to `null` data when coords are absent (e.g. demo-org has
-// no location configured) or the fetch fails. Mirrors the structure
-// of usePvForecast so render stays pure and React's
-// `set-state-in-effect` rule is satisfied.
+// fetchRangeForAnchor returns the inclusive YYYY-MM-DD range we ask the
+// backend for. We always request a 3-day window (yesterday..tomorrow)
+// so flipping between anchor days in the WeatherCard's selector reuses
+// the same cached fetch and the request stays small.
+function fetchRangeForAnchor(anchor: Date): { from: string; to: string } {
+  const yesterday = new Date(anchor)
+  yesterday.setDate(yesterday.getDate() - 1)
+  const tomorrow = new Date(anchor)
+  tomorrow.setDate(tomorrow.getDate() + 1)
+  return {
+    from: weatherDayFromAnchor(yesterday),
+    to: weatherDayFromAnchor(tomorrow),
+  }
+}
+
+// useWeather fetches the Open-Meteo forecast for the given organization
+// and anchor day. It tries the backend's cached forecast first
+// (`/api/v1/weather-forecast`) so the weather-collector's centrally
+// stored data is the source of truth, then falls back to a direct
+// Open-Meteo call if the backend returns empty / errors out. Render
+// stays pure (React's `set-state-in-effect` rule) and a 5-minute
+// in-memory cache prevents the WeatherCard from refetching on every
+// anchor flick.
+//
+// `enabled` lets the caller short-circuit the fetch when the surrounding
+// view doesn't actually render weather (e.g. month/year presets in the
+// dashboard). The hook still has to run unconditionally to satisfy the
+// rules of hooks, but no network request fires while disabled.
 export function useWeather(input: {
+  organizationID: string
   latitude: number | null
   longitude: number | null
   anchor: Date
+  enabled?: boolean
 }): UseWeatherResult {
-  const { latitude, longitude } = input
-  const day = weatherDayFromAnchor(input.anchor)
-  const key =
-    latitude !== null && longitude !== null ? cacheKey(latitude, longitude, day) : null
+  const { organizationID, latitude, longitude } = input
+  const enabled = input.enabled !== false
+  const canFetch = enabled && latitude !== null && longitude !== null
+  const key = canFetch ? organizationID : null
 
   const [state, setState] = useState<FetchState>({
     key: null,
@@ -85,30 +105,45 @@ export function useWeather(input: {
       }
     }
 
+    const range = fetchRangeForAnchor(input.anchor)
     void (async () => {
+      let data: OpenMeteoForecast | null = null
       try {
-        const data = await fetchOpenMeteoWeather(
-          { latitude, longitude },
+        data = await fetchWeatherForecastFromAPI(
+          { organizationID, from: range.from, to: range.to },
           controller.signal,
         )
-        if (cancelled) return
-        cache.set(key, { data, fetchedAt: Date.now() })
-        setState({ key, data, error: null })
       } catch (e) {
         if (cancelled || isAbortError(e)) return
-        setState({
-          key,
-          data: null,
-          error: e instanceof Error ? e.message : 'Failed to load weather',
-        })
+        // API hiccup shouldn't blank the widget — `data` stays null
+        // and we fall through to the direct Open-Meteo path below.
       }
+      if (!data) {
+        try {
+          data = await fetchOpenMeteoWeather(
+            { latitude, longitude },
+            controller.signal,
+          )
+        } catch (e) {
+          if (cancelled || isAbortError(e)) return
+          setState({
+            key,
+            data: null,
+            error: e instanceof Error ? e.message : 'Failed to load weather',
+          })
+          return
+        }
+      }
+      if (cancelled) return
+      cache.set(key, { data, fetchedAt: Date.now() })
+      setState({ key, data, error: null })
     })()
 
     return () => {
       cancelled = true
       controller.abort()
     }
-  }, [key, latitude, longitude])
+  }, [key, organizationID, latitude, longitude, input.anchor])
 
   if (!key) return { data: null, loading: false, error: null }
   if (state.key !== key) return { data: null, loading: true, error: null }

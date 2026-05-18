@@ -74,6 +74,26 @@ services:
       - ${SESTELEMETRY_HOST_CONFIG_PATH:-/etc/sestelemetry/config.yaml}:/etc/sestelemetry/config.yaml:ro
       - ${SESTELEMETRY_HOST_REGISTERS_PATH:-/etc/sestelemetry/registers}:/etc/sestelemetry/registers:ro
 
+  # Opt-in: start with `docker compose --profile weather up`. The
+  # collector refreshes the Open-Meteo forecast cache every
+  # `weather.interval` for each org with a `location` block configured.
+  weather-collector:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    profiles: ["weather"]
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@timescaledb:5432/telemetry?sslmode=disable
+      TZ: Europe/Kyiv
+    entrypoint: ["/usr/local/bin/weather-collector"]
+    command: ["-config", "/etc/sestelemetry/config.yaml"]
+    volumes:
+      - ${SESTELEMETRY_HOST_CONFIG_PATH:-/etc/sestelemetry/config.yaml}:/etc/sestelemetry/config.yaml:ro
+      - ${SESTELEMETRY_HOST_REGISTERS_PATH:-/etc/sestelemetry/registers}:/etc/sestelemetry/registers:ro
+
   web:
     build:
       context: ../web

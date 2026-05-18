@@ -105,6 +105,23 @@ type OREE struct {
 	Retry              OREERetry     `yaml:"retry"`
 }
 
+// Weather configures the optional weather-collector service that
+// caches Open-Meteo forecasts per organization in TimescaleDB so the
+// API can serve them without hitting Open-Meteo on every request and
+// future backend models (economic, PV) have a stable source of truth.
+//
+// The collector polls every `Interval` and upserts (organization, hour)
+// rows — there is no forecast history, each refresh overwrites
+// previously stored values.
+type Weather struct {
+	Enabled     bool          `yaml:"enabled"`
+	BaseURL     string        `yaml:"base_url"`
+	Interval    time.Duration `yaml:"interval"`
+	HTTPTimeout time.Duration `yaml:"http_timeout"`
+	UserAgent   string        `yaml:"user_agent"`
+	Retry       OREERetry     `yaml:"retry"`
+}
+
 type Root struct {
 	DatabaseURL        string             `yaml:"database_url"`
 	RegisterCatalog    string             `yaml:"register_catalog"`
@@ -112,6 +129,7 @@ type Root struct {
 	ModbusRegisterMap  ModbusRegisterMap  `yaml:"modbus_register_map"`
 	Organizations      []Organization     `yaml:"organizations"`
 	OREE               OREE               `yaml:"oree"`
+	Weather            Weather            `yaml:"weather"`
 }
 
 // Load reads YAML config from path and applies defaults.
@@ -149,6 +167,10 @@ func Load(path string) (*Root, error) {
 	}
 	c.applyOREEDefaults()
 	if err := c.validateOREE(); err != nil {
+		return nil, err
+	}
+	c.applyWeatherDefaults()
+	if err := c.validateWeather(); err != nil {
 		return nil, err
 	}
 	return &c, nil
@@ -205,6 +227,39 @@ func (c *Root) applyOREEDefaults() {
 	if o.Retry.Backoff <= 0 {
 		o.Retry.Backoff = 5 * time.Minute
 	}
+}
+
+func (c *Root) applyWeatherDefaults() {
+	w := &c.Weather
+	if w.BaseURL == "" {
+		w.BaseURL = "https://api.open-meteo.com/v1/forecast"
+	}
+	if w.Interval <= 0 {
+		w.Interval = time.Hour
+	}
+	if w.HTTPTimeout <= 0 {
+		w.HTTPTimeout = 30 * time.Second
+	}
+	if w.UserAgent == "" {
+		w.UserAgent = "sestelemetry-weather/1.0"
+	}
+	if w.Retry.Attempts <= 0 {
+		w.Retry.Attempts = 3
+	}
+	if w.Retry.Backoff <= 0 {
+		w.Retry.Backoff = 5 * time.Second
+	}
+}
+
+func (c *Root) validateWeather() error {
+	w := &c.Weather
+	if w.Interval < time.Minute {
+		return fmt.Errorf("config: weather.interval must be >= 1m, got %s", w.Interval)
+	}
+	if w.Interval > 24*time.Hour {
+		return fmt.Errorf("config: weather.interval must be <= 24h, got %s", w.Interval)
+	}
+	return nil
 }
 
 func (c *Root) validateOREE() error {
