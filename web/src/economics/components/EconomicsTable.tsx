@@ -325,9 +325,6 @@ export function EconomicsTable({ rows }: Props) {
               <th className="economics-table-metric-head" rowSpan={2} scope="col">
                 Показник
               </th>
-              <th className="economics-table-unit-head" rowSpan={2} scope="col">
-                Од.
-              </th>
               <th colSpan={HOUR_COUNT} scope="colgroup" className="economics-table-hours-head">
                 Година (00…23)
               </th>
@@ -344,39 +341,32 @@ export function EconomicsTable({ rows }: Props) {
             </tr>
           </thead>
           <tbody>
-            {METRIC_GROUPS.flatMap((group) => [
-              <tr key={`group-${group.id}`} className="economics-table-group">
-                <th colSpan={HOUR_COUNT + 3} scope="rowgroup">
-                  {group.label}
-                </th>
-              </tr>,
-              ...group.rows.map((metric) => {
-                const totalValue = metric.total(rows)
-                const rowClass = metric.summary ? 'economics-table-summary-row' : undefined
-                return (
-                  <tr key={metric.id} className={rowClass}>
-                    <th scope="row" className="economics-table-metric">
-                      {metric.label}
-                    </th>
-                    <td className="economics-table-unit">{metric.unit}</td>
-                    {rows.map((row, hourIdx) =>
-                      <FragmentCell
-                        key={hourIdx}
-                        value={metric.pickHourValue(row)}
-                        kind={metric.kind}
-                      />
+            {METRIC_GROUPS.flatMap((group) => group.rows).map((metric) => {
+              const totalValue = metric.total(rows)
+              const rowClass = metric.summary ? 'economics-table-summary-row' : undefined
+              return (
+                <tr key={metric.id} className={rowClass}>
+                  <th scope="row" className="economics-table-metric">
+                    {metric.label}
+                    <small>, {metric.unit}</small>
+                  </th>
+                  {rows.map((row, hourIdx) =>
+                    <FragmentCell
+                      key={hourIdx}
+                      value={metric.pickHourValue(row)}
+                      kind={metric.kind}
+                    />
+                  )}
+                  <td className="economics-table-total-cell">
+                    {totalValue === null ? (
+                      <span className="cell-empty">—</span>
+                    ) : (
+                      renderTotal(totalValue, metric.kind)
                     )}
-                    <td className="economics-table-total-cell">
-                      {totalValue === null ? (
-                        <span className="cell-empty">—</span>
-                      ) : (
-                        renderTotal(totalValue, metric.kind)
-                      )}
-                    </td>
-                  </tr>
-                )
-              }),
-            ])}
+                  </td>
+                </tr>
+              )
+            })}
           </tbody>
         </table>
       </div>
