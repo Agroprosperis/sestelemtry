@@ -18,8 +18,8 @@ const uahFmt = new Intl.NumberFormat('uk-UA', {
 })
 
 const priceFmt = new Intl.NumberFormat('uk-UA', {
-  minimumFractionDigits: 0,
-  maximumFractionDigits: 0,
+  minimumFractionDigits: 1,
+  maximumFractionDigits: 1,
 })
 
 function formatNumber(v: number | null | undefined): string {
