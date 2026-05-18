@@ -277,6 +277,129 @@
   color: #94a3b8;
 }
 
+/* EBITDA + revenue/expense panel — sits between the secondary KPI
+ * strip and the charts. Three-column grid: a prominent EBITDA card
+ * on the left anchors the section, a wider Дохід column in the
+ * middle gets the four breakdown lines, and a narrower Витрати
+ * column on the right holds the single grid-charge line. Collapses
+ * to a single column under 720 px so it stays readable on tablets. */
+.economics-revenue-panel {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 16px 20px;
+}
+
+.economics-revenue-grid {
+  display: grid;
+  grid-template-columns: minmax(180px, max-content) 2fr 1fr;
+  gap: 28px;
+  align-items: start;
+}
+
+@media (max-width: 720px) {
+  .economics-revenue-grid {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+}
+
+.economics-revenue-ebitda-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 16px;
+  border-left: 4px solid #16a34a;
+  background: #f8fafc;
+  border-radius: 8px;
+}
+
+.economics-revenue-ebitda-card.negative {
+  border-left-color: #dc2626;
+}
+
+.economics-revenue-ebitda-label {
+  font-size: 11px;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.economics-revenue-ebitda-value {
+  font-size: 24px;
+  font-weight: 700;
+  color: #0f172a;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Column header uses the same 3-track grid as the line rows
+ * (label · amount · share) so the column total sits directly above
+ * the amount column, not at the far right edge of the column. */
+.economics-revenue-column-header {
+  display: grid;
+  grid-template-columns: 1fr auto 48px;
+  align-items: baseline;
+  gap: 12px;
+  border-bottom: 1px solid #e2e8f0;
+  padding-bottom: 6px;
+  margin-bottom: 4px;
+}
+
+.economics-revenue-column-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.economics-revenue-column-total {
+  font-size: 14px;
+  font-weight: 700;
+  color: #0f172a;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.economics-revenue-column-share-spacer {
+  display: block;
+}
+
+.economics-revenue-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.economics-revenue-line {
+  display: grid;
+  grid-template-columns: 1fr auto 48px;
+  align-items: baseline;
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid #f1f5f9;
+  font-size: 13px;
+}
+
+.economics-revenue-line:last-child {
+  border-bottom: none;
+}
+
+.economics-revenue-line-label {
+  color: #475569;
+}
+
+.economics-revenue-line-amount {
+  color: #0f172a;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.economics-revenue-line-share {
+  color: #94a3b8;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
 .economics-charts {
   display: grid;
   grid-template-columns: 1fr;

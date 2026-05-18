@@ -58,8 +58,6 @@ export function EconomicsKpis({ totals, tariffs }: Props) {
   const avoidedImportKwh = totals.pvToLoad + totals.essToLoad
   const effectClass = totals.effect >= 0 ? 'kpi-card kpi-card-success' : 'kpi-card kpi-card-danger'
   const essNetClass = totals.essNet >= 0 ? 'kpi-card kpi-card-info' : 'kpi-card kpi-card-warning'
-  const ebitdaClass =
-    totals.ebitda >= 0 ? 'kpi-card kpi-card-success' : 'kpi-card kpi-card-danger'
 
   return (
     <section className="economics-kpis" aria-label="Ключові показники">
@@ -83,28 +81,6 @@ export function EconomicsKpis({ totals, tariffs }: Props) {
           <span className="kpi-label">Чистий ефект УЗЕ</span>
           <span className="kpi-value">{formatUah(totals.essNet)}</span>
           <span className="kpi-sub">внесок батареї без СЕС</span>
-        </div>
-      </div>
-
-      {/* EBITDA framing: revenue / expense / net (Dohid - Vytraty)
-       *  for the day. The per-channel breakdown lives in the
-       *  hourly table, so here we keep just the three rolled-up
-       *  cards so the operator sees the EBITDA story at a glance. */}
-      <div className="kpi-secondary-strip">
-        <div className={ebitdaClass}>
-          <span className="kpi-label">EBITDA за добу</span>
-          <span className="kpi-value">{formatUah(totals.ebitda)}</span>
-          <span className="kpi-sub">дохід − витрати</span>
-        </div>
-        <div className="kpi-card kpi-card-info">
-          <span className="kpi-label">Дохід за добу</span>
-          <span className="kpi-value">{formatUah(totals.revenueTotal)}</span>
-          <span className="kpi-sub">СЕС + УЗЕ × ціна</span>
-        </div>
-        <div className="kpi-card kpi-card-warning">
-          <span className="kpi-label">Витрати за добу</span>
-          <span className="kpi-value">{formatUah(totals.expenseTotal)}</span>
-          <span className="kpi-sub">заряд УЗЕ із мережі</span>
         </div>
       </div>
 
