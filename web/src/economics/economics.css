@@ -571,7 +571,7 @@
   background: #f1f5f9;
   border-right: 1px solid #e2e8f0;
   text-align: right;
-  min-width: 96px;
+  min-width: 76px;
 }
 
 .economics-table-pivot tbody th.economics-table-metric {
@@ -606,8 +606,8 @@
   background: #f8fafc;
   border-right: 1px solid #e2e8f0;
   font-weight: 600;
-  min-width: 96px;
-  padding: 4px 8px;
+  min-width: 76px;
+  padding: 4px 6px;
 }
 
 /* Column zebra: tint every other hour column so the eye can latch
