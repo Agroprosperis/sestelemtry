@@ -449,6 +449,10 @@
      the parent's 16px padding on both sides plus a few pixels
      of safety. */
   max-width: 100%;
+  /* Reserve space below for the horizontal scrollbar so it never
+     paints over the last row (УЗЕ нетто). On platforms that draw
+     overlay scrollbars the gap reads as a normal bottom margin. */
+  padding-bottom: 12px;
 }
 
 .economics-table {
