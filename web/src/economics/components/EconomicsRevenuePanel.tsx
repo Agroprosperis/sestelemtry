@@ -93,6 +93,7 @@ function RevenueColumn({
       <div className="economics-revenue-column-header">
         <span className="economics-revenue-column-title">{title}</span>
         <span className="economics-revenue-column-total">{formatUah(total)}</span>
+        <span className="economics-revenue-column-share-spacer" aria-hidden="true" />
       </div>
       <ul className="economics-revenue-list">
         {lines.map((line) => (

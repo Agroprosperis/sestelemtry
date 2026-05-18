@@ -332,9 +332,13 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* Column header uses the same 3-track grid as the line rows
+ * (label · amount · share) so the column total sits directly above
+ * the amount column, not at the far right edge of the column.
+ * The 3rd track is a spacer that mirrors the share column width. */
 .economics-revenue-column-header {
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: 1fr auto 48px;
   align-items: baseline;
   gap: 12px;
   border-bottom: 1px solid #e2e8f0;
@@ -353,6 +357,11 @@
   font-weight: 700;
   color: #0f172a;
   font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.economics-revenue-column-share-spacer {
+  display: block;
 }
 
 .economics-revenue-list {
