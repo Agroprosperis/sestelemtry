@@ -72,6 +72,22 @@ function pickWhenPriced(
   }
 }
 
+// pickRevenue returns the per-hour UAH value for a revenue/expense
+// channel: `flow(row) · price(row)` where flow is a kWh accessor and
+// price is the matching import or export price (already on each
+// HourEconomicsRow). Hours with no RDN price are skipped — same
+// guard the baseline/actual rows use, so a partial day stays
+// honest instead of inflating revenue with zero-priced kWh.
+function pickRevenue(
+  flow: (row: HourEconomicsRow) => number,
+  price: (row: HourEconomicsRow) => number,
+): (row: HourEconomicsRow | null) => number | null {
+  return (row) => {
+    if (!row || row.rdnUahPerKwh === null) return null
+    return flow(row) * price(row)
+  }
+}
+
 function sumOver(
   rows: Array<HourEconomicsRow | null>,
   pick: (row: HourEconomicsRow | null) => number | null,
@@ -205,48 +221,147 @@ const METRIC_GROUPS: Array<{ id: string; label: string; rows: MetricRow[] }> = [
     ],
   },
   {
-    // Grid + ESS aggregates that aren't already covered by the
-    // consumption / PV groupings. `Мережа → УЗЕ` is the only
-    // grid-side flow that doesn't reach the load directly; the two
-    // ESS-discharge sinks are summarised here so the operator can
-    // see the battery's daily round-trip without scrolling back
-    // through the consumption block.
-    id: 'grid_ess',
-    label: 'Мережа і УЗЕ',
+    // Grid totals as standalone rows. The breakdown into source/sink
+    // channels is intentionally omitted here — `Мережа → Споживання`
+    // already lives under "Споживання" and `PV → Мережа` under
+    // "Виробіток PV", so duplicating those rows here would just add
+    // noise. The Імпорт/Експорт totals stay as a quick-glance number
+    // before the operator moves on to the money rows below.
+    id: 'grid',
+    label: 'Мережа',
     rows: [
       {
         id: 'grid_import',
         label: 'Імпорт всього',
         unit: 'кВт·год',
         kind: 'energy',
-        summary: true,
         pickHourValue: (row) => row?.flow.gridImport ?? null,
         total: (rows) => sumOver(rows, (r) => r?.flow.gridImport ?? null),
-      },
-      {
-        id: 'grid_to_ess',
-        label: 'Мережа → УЗЕ',
-        unit: 'кВт·год',
-        kind: 'energy',
-        pickHourValue: (row) => row?.flow.gridToEss ?? null,
-        total: (rows) => sumOver(rows, (r) => r?.flow.gridToEss ?? null),
       },
       {
         id: 'grid_export',
         label: 'Експорт всього',
         unit: 'кВт·год',
         kind: 'energy',
-        summary: true,
         pickHourValue: (row) => row?.flow.gridExport ?? null,
         total: (rows) => sumOver(rows, (r) => r?.flow.gridExport ?? null),
       },
+    ],
+  },
+  {
+    // Revenue / expense per channel — the per-hour version of the
+    // EBITDA panel above the chart. Each row is `flowₕ · priceₕ`
+    // (matching `dailyTotals` revenue/expense fields exactly), so
+    // the Σ column reproduces the panel's amounts to the гривня.
+    // `Дохід всього` is a summary row (sum of the four below);
+    // Витрати has only one breakdown line, so no separate summary.
+    id: 'revenue',
+    label: 'Дохід та витрати',
+    rows: [
       {
-        id: 'ess_to_grid',
-        label: 'УЗЕ → Мережа',
-        unit: 'кВт·год',
-        kind: 'energy',
-        pickHourValue: (row) => row?.flow.essToGrid ?? null,
-        total: (rows) => sumOver(rows, (r) => r?.flow.essToGrid ?? null),
+        id: 'revenue_total',
+        label: 'Дохід всього',
+        unit: 'грн',
+        kind: 'uah',
+        summary: true,
+        pickHourValue: (row) => {
+          if (!row || row.rdnUahPerKwh === null) return null
+          const imp = row.economics.importPriceUahPerKwh
+          const exp = row.economics.exportPriceUahPerKwh
+          return (
+            row.economics.pvToGrid * exp +
+            row.economics.pvToLoad * imp +
+            row.flow.essToGrid * exp +
+            row.flow.essToLoad * imp
+          )
+        },
+        total: (rows) =>
+          sumOver(rows, (row) => {
+            if (!row || row.rdnUahPerKwh === null) return null
+            const imp = row.economics.importPriceUahPerKwh
+            const exp = row.economics.exportPriceUahPerKwh
+            return (
+              row.economics.pvToGrid * exp +
+              row.economics.pvToLoad * imp +
+              row.flow.essToGrid * exp +
+              row.flow.essToLoad * imp
+            )
+          }),
+      },
+      {
+        id: 'revenue_pv_export',
+        label: 'Дохід: СЕС → мережа',
+        unit: 'грн',
+        kind: 'uah',
+        pickHourValue: pickRevenue(
+          (r) => r.economics.pvToGrid,
+          (r) => r.economics.exportPriceUahPerKwh,
+        ),
+        total: (rows) =>
+          sumOver(
+            rows,
+            pickRevenue((r) => r.economics.pvToGrid, (r) => r.economics.exportPriceUahPerKwh),
+          ),
+      },
+      {
+        id: 'revenue_pv_self',
+        label: 'Дохід: СЕС → споживання',
+        unit: 'грн',
+        kind: 'uah',
+        pickHourValue: pickRevenue(
+          (r) => r.economics.pvToLoad,
+          (r) => r.economics.importPriceUahPerKwh,
+        ),
+        total: (rows) =>
+          sumOver(
+            rows,
+            pickRevenue((r) => r.economics.pvToLoad, (r) => r.economics.importPriceUahPerKwh),
+          ),
+      },
+      {
+        id: 'revenue_ess_export',
+        label: 'Дохід: УЗЕ → мережа',
+        unit: 'грн',
+        kind: 'uah',
+        pickHourValue: pickRevenue(
+          (r) => r.flow.essToGrid,
+          (r) => r.economics.exportPriceUahPerKwh,
+        ),
+        total: (rows) =>
+          sumOver(
+            rows,
+            pickRevenue((r) => r.flow.essToGrid, (r) => r.economics.exportPriceUahPerKwh),
+          ),
+      },
+      {
+        id: 'revenue_ess_self',
+        label: 'Дохід: УЗЕ → споживання',
+        unit: 'грн',
+        kind: 'uah',
+        pickHourValue: pickRevenue(
+          (r) => r.flow.essToLoad,
+          (r) => r.economics.importPriceUahPerKwh,
+        ),
+        total: (rows) =>
+          sumOver(
+            rows,
+            pickRevenue((r) => r.flow.essToLoad, (r) => r.economics.importPriceUahPerKwh),
+          ),
+      },
+      {
+        id: 'expense_grid_charge',
+        label: 'Витрати: Заряд УЗЕ із мережі',
+        unit: 'грн',
+        kind: 'uah',
+        pickHourValue: pickRevenue(
+          (r) => r.flow.gridToEss,
+          (r) => r.economics.importPriceUahPerKwh,
+        ),
+        total: (rows) =>
+          sumOver(
+            rows,
+            pickRevenue((r) => r.flow.gridToEss, (r) => r.economics.importPriceUahPerKwh),
+          ),
       },
     ],
   },
