@@ -277,13 +277,12 @@
   color: #94a3b8;
 }
 
-/* Revenue / EBITDA breakdown panel — sits between the secondary KPI
- * strip and the charts. Two columns (Дохід / Витрати) on wide
- * viewports, single column under 720 px so it stays readable on
- * tablets. The header carries EBITDA total with a colored stripe
- * mirroring the .kpi-card-success / .kpi-card-danger convention so
- * the operator can scan one number first and drill into the
- * breakdown below. */
+/* EBITDA + revenue/expense panel — sits between the secondary KPI
+ * strip and the charts. Three-column grid: a prominent EBITDA card
+ * on the left anchors the section, a wider Дохід column in the
+ * middle gets the four breakdown lines, and a narrower Витрати
+ * column on the right holds the single grid-charge line. Collapses
+ * to a single column under 720 px so it stays readable on tablets. */
 .economics-revenue-panel {
   background: #ffffff;
   border: 1px solid #e2e8f0;
@@ -291,59 +290,46 @@
   padding: 16px 20px;
 }
 
-.economics-revenue-header {
+.economics-revenue-grid {
+  display: grid;
+  grid-template-columns: minmax(180px, max-content) 2fr 1fr;
+  gap: 28px;
+  align-items: start;
+}
+
+@media (max-width: 720px) {
+  .economics-revenue-grid {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+}
+
+.economics-revenue-ebitda-card {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 16px;
-  flex-wrap: wrap;
-  border-bottom: 1px solid #f1f5f9;
-  padding-bottom: 12px;
-  margin-bottom: 12px;
-}
-
-.economics-revenue-header h3 {
-  margin: 0;
-  font-size: 14px;
-  color: #0f172a;
-}
-
-.economics-revenue-ebitda {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 10px;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 16px;
   border-left: 4px solid #16a34a;
-  padding-left: 10px;
+  background: #f8fafc;
+  border-radius: 8px;
 }
 
-.economics-revenue-ebitda.negative {
+.economics-revenue-ebitda-card.negative {
   border-left-color: #dc2626;
 }
 
 .economics-revenue-ebitda-label {
-  font-size: 12px;
+  font-size: 11px;
   color: #64748b;
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
 
 .economics-revenue-ebitda-value {
-  font-size: 22px;
+  font-size: 24px;
   font-weight: 700;
   color: #0f172a;
   font-variant-numeric: tabular-nums;
-}
-
-.economics-revenue-body {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 24px;
-}
-
-@media (max-width: 720px) {
-  .economics-revenue-body {
-    grid-template-columns: 1fr;
-  }
 }
 
 .economics-revenue-column-header {
