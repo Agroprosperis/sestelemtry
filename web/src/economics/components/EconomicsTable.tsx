@@ -60,6 +60,26 @@ type MetricRow = {
   summary?: boolean
   pickHourValue: (row: HourEconomicsRow | null) => number | null
   total: (rows: Array<HourEconomicsRow | null>) => number | null
+  // cellClass adds a per-value modifier class to each hour cell.
+  // Used by the РДН row to tint hours by price tier (cheap → blue,
+  // peak → red) so the operator can scan the day's price profile
+  // without reading individual numbers. Returns undefined to opt
+  // out for a given cell (e.g. null/zero values).
+  cellClass?: (value: number | null) => string | undefined
+}
+
+// rdnTierClass maps an RDN price (UAH/kWh) onto one of four pale
+// background classes. Thresholds step in 4 UAH/kWh increments so
+// the bands cover the full UA market range an operator might see
+// on any given day: <4 cheap, 4–8 moderate, 8–12 elevated, ≥12
+// peak. Returns undefined for null/zero so the empty-cell renderer
+// keeps the muted "—" treatment instead of being painted "cheap".
+function rdnTierClass(value: number | null): string | undefined {
+  if (value === null || !Number.isFinite(value) || value === 0) return undefined
+  if (value < 4) return 'rdn-tier-cool'
+  if (value < 8) return 'rdn-tier-warm'
+  if (value < 12) return 'rdn-tier-hot'
+  return 'rdn-tier-peak'
 }
 
 function pickWhenPriced(
@@ -116,6 +136,7 @@ const METRIC_GROUPS: Array<{ id: string; label: string; rows: MetricRow[] }> = [
         kind: 'price',
         pickHourValue: (row) => row?.rdnUahPerKwh ?? null,
         total: () => null,
+        cellClass: rdnTierClass,
       },
       {
         id: 'import_price',
@@ -489,7 +510,11 @@ const METRIC_GROUPS: Array<{ id: string; label: string; rows: MetricRow[] }> = [
   },
 ]
 
-function renderCell(value: number | null, kind: MetricKind): ReactElement {
+function renderCell(
+  value: number | null,
+  kind: MetricKind,
+  extraClass?: string,
+): ReactElement {
   if (value === null) return <td className="cell-empty">—</td>
   let formatted: string
   let className: string | undefined
@@ -508,7 +533,8 @@ function renderCell(value: number | null, kind: MetricKind): ReactElement {
       className = value >= 0 ? 'cell-positive' : 'cell-negative'
       break
   }
-  return <td className={className}>{formatted}</td>
+  const merged = [className, extraClass].filter(Boolean).join(' ') || undefined
+  return <td className={merged}>{formatted}</td>
 }
 
 const HOUR_COUNT = 24
@@ -556,13 +582,17 @@ export function EconomicsTable({ rows }: Props) {
                       renderTotal(totalValue, metric.kind)
                     )}
                   </td>
-                  {rows.map((row, hourIdx) => (
-                    <FragmentCell
-                      key={hourIdx}
-                      value={metric.pickHourValue(row)}
-                      kind={metric.kind}
-                    />
-                  ))}
+                  {rows.map((row, hourIdx) => {
+                    const value = metric.pickHourValue(row)
+                    return (
+                      <FragmentCell
+                        key={hourIdx}
+                        value={value}
+                        kind={metric.kind}
+                        extraClass={metric.cellClass?.(value)}
+                      />
+                    )
+                  })}
                 </tr>
               )
             })}
@@ -573,8 +603,16 @@ export function EconomicsTable({ rows }: Props) {
   )
 }
 
-function FragmentCell({ value, kind }: { value: number | null; kind: MetricKind }) {
-  return renderCell(value, kind)
+function FragmentCell({
+  value,
+  kind,
+  extraClass,
+}: {
+  value: number | null
+  kind: MetricKind
+  extraClass?: string
+}) {
+  return renderCell(value, kind, extraClass)
 }
 
 function renderTotal(value: number, kind: MetricKind): ReactElement {
