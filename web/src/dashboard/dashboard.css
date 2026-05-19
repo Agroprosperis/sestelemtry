@@ -953,6 +953,50 @@
   margin-top: 3px;
 }
 
+/* Skeleton placeholders for the energy summary cards. They reuse
+ * the same shimmer keyframes the chart skeleton uses
+ * (`chart-skeleton-shimmer`) so the two loading regions visually
+ * pulse in sync while the user switches dates. Each modifier
+ * (-value, -row, -pct, -bar) approximates the footprint of the
+ * real value it temporarily replaces, so the layout doesn't shift
+ * once the data resolves. */
+.energy-summary-skel {
+  display: inline-block;
+  border-radius: 4px;
+  background: linear-gradient(110deg, #e2e8f0 8%, #f1f5f9 18%, #e2e8f0 33%);
+  background-size: 200% 100%;
+  animation: chart-skeleton-shimmer 1.4s linear infinite;
+  vertical-align: middle;
+}
+
+.energy-summary-skel-value {
+  width: 88px;
+  height: 14px;
+}
+
+.energy-summary-skel-row {
+  width: 76px;
+  height: 12px;
+}
+
+.energy-summary-skel-pct {
+  width: 40px;
+  height: 12px;
+}
+
+.energy-summary-skel-bar {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 999px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .energy-summary-skel {
+    animation: none;
+  }
+}
+
 .chart-wrap {
   width: 100%;
   height: 300px;

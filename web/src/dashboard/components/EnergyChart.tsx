@@ -248,7 +248,7 @@ export function EnergyChart({
   return (
     <div className="chart-card">
       <h2>Energy Trend</h2>
-      <EnergySummary summary={summary} />
+      <EnergySummary summary={summary} loading={loading} />
       <div className="chart-wrap">
         {loading ? (
           <ChartSkeleton preset={preset} />
