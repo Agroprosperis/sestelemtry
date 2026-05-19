@@ -662,42 +662,70 @@
 }
 
 /* РДН price tiers: each hour cell on the РДН row gets a pale tint
- * keyed to the day-ahead price band (cool/warm/hot/peak). The
- * extra `tr:not(.summary)` qualifier raises specificity above the
- * zebra rule (0,3,3) and the row hover (0,3,2) so the tier color
- * survives both. The РДН row carries no Σ value, so we don't need
- * a separate sticky-cell tint. Colors are kept pale on purpose:
- * they're a scanning aid, not the primary signal. */
-.economics-table-pivot tbody tr:not(.economics-table-summary-row) td.rdn-tier-cool {
+ * keyed to the day-ahead price band (cool/warm/hot/peak). Both
+ * `.economics-table` and `.economics-table-pivot` are present on
+ * the same <table>, so chaining them costs no extra markup but
+ * raises specificity to (0,4,3) — equal to the zebra rule but
+ * later in source, so the tier color wins. Without this bump the
+ * even-hour cells (sitting at td:nth-child(2n+1)) would inherit
+ * the zebra grey and the РДН row would look striped instead of
+ * tinted. Colors are kept pale on purpose: they're a scanning
+ * aid, not the primary signal. */
+.economics-table.economics-table-pivot
+  tbody
+  tr:not(.economics-table-summary-row)
+  td.rdn-tier-cool {
   background: #dbeafe;
 }
 
-.economics-table-pivot tbody tr:not(.economics-table-summary-row) td.rdn-tier-warm {
+.economics-table.economics-table-pivot
+  tbody
+  tr:not(.economics-table-summary-row)
+  td.rdn-tier-warm {
   background: #fef3c7;
 }
 
-.economics-table-pivot tbody tr:not(.economics-table-summary-row) td.rdn-tier-hot {
+.economics-table.economics-table-pivot
+  tbody
+  tr:not(.economics-table-summary-row)
+  td.rdn-tier-hot {
   background: #fed7aa;
 }
 
-.economics-table-pivot tbody tr:not(.economics-table-summary-row) td.rdn-tier-peak {
+.economics-table.economics-table-pivot
+  tbody
+  tr:not(.economics-table-summary-row)
+  td.rdn-tier-peak {
   background: #fecaca;
 }
 
 /* Slightly darken the tier color on row hover so the РДН row still
- * reacts to the cursor without losing the price-band signal. */
-.economics-table-pivot tbody tr:hover:not(.economics-table-summary-row) td.rdn-tier-cool {
+ * reacts to the cursor without losing the price-band signal. Same
+ * specificity bump as above to outrank the generic row-hover rule. */
+.economics-table.economics-table-pivot
+  tbody
+  tr:hover:not(.economics-table-summary-row)
+  td.rdn-tier-cool {
   background: #bfdbfe;
 }
 
-.economics-table-pivot tbody tr:hover:not(.economics-table-summary-row) td.rdn-tier-warm {
+.economics-table.economics-table-pivot
+  tbody
+  tr:hover:not(.economics-table-summary-row)
+  td.rdn-tier-warm {
   background: #fde68a;
 }
 
-.economics-table-pivot tbody tr:hover:not(.economics-table-summary-row) td.rdn-tier-hot {
+.economics-table.economics-table-pivot
+  tbody
+  tr:hover:not(.economics-table-summary-row)
+  td.rdn-tier-hot {
   background: #fdba74;
 }
 
-.economics-table-pivot tbody tr:hover:not(.economics-table-summary-row) td.rdn-tier-peak {
+.economics-table.economics-table-pivot
+  tbody
+  tr:hover:not(.economics-table-summary-row)
+  td.rdn-tier-peak {
   background: #fca5a5;
 }
