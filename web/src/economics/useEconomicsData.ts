@@ -31,8 +31,10 @@ const PV_GRID_METRIC_KEYS = [
 // `aggregation=last` over 1-hour buckets ending one hour BEFORE
 // each target hour: the last raw sample observed in `[H-1, H)` is
 // the closest the analyst has to "SOC at the start of hour H".
-// Range therefore stretches from yesterday-23:00 through today-22:59
-// in LOCAL_TZ — 24 buckets, one per target hour 00…23.
+// We currently only consume the bucket for hour 0 (anchor for the
+// cumulative residual calculation below), but keep the full 24-h
+// window so an operator-side debugger / future "SOC vs computed
+// residual" reconciliation chart can read the same response.
 const SOC_METRIC_KEY = 'soc_percent'
 
 export type EconomicsData = {
@@ -245,19 +247,51 @@ function assembleHourlyRows(
           // automatically via `rdnUahPerKwh === null`.
           hourEconomics(0, flow, tariffs)
         : hourEconomics(rdn, flow, tariffs)
-    const socPercent = socByHourStart.get(h)
-    const essRemainingKwhStart =
-      socPercent === undefined || !Number.isFinite(socPercent)
-        ? null
-        : (socPercent / 100) * tariffs.essCapacityKwh
     out.push({
       hour: h,
       hourStart: flowRow.from,
       rdnUahPerKwh: rdn,
       flow,
       economics,
-      essRemainingKwhStart,
+      // Anchored on hour 0's SOC and rolled forward by net charge
+      // flows below — placeholder until that second pass runs.
+      essRemainingKwhStart: null,
     })
+  }
+
+  // Залишок УЗЕ second pass: anchor hour 0 from SOC[0] · ємність,
+  // then for each subsequent hour roll the running residual forward
+  // by the previous hour's net charge minus discharge:
+  //   residual[h+1] = residual[h] + (PV→УЗЕ + Мережа→УЗЕ
+  //                                 − УЗЕ→Споживання − УЗЕ→Мережа)[h]
+  // Using cumulative flows instead of re-reading SOC for every hour
+  // hides intra-hour gauge dropouts and keeps the table arithmetic
+  // self-consistent (the operator can verify the running line by
+  // adding/subtracting the four flow rows above it). When SOC[0] is
+  // missing or any preceding hour has no flow data, the residual
+  // is null from that point on — we don't fabricate a starting
+  // value just to produce a number.
+  const soc0Percent = socByHourStart.get(0)
+  let running: number | null =
+    soc0Percent === undefined || !Number.isFinite(soc0Percent)
+      ? null
+      : (soc0Percent / 100) * tariffs.essCapacityKwh
+  for (let h = 0; h < 24; h++) {
+    const cur = out[h]
+    if (cur !== null) {
+      out[h] = { ...cur, essRemainingKwhStart: running }
+    }
+    if (h === 23) break
+    if (running === null || cur === null) {
+      running = null
+    } else {
+      running =
+        running +
+        cur.flow.pvToEss +
+        cur.flow.gridToEss -
+        cur.flow.essToLoad -
+        cur.flow.essToGrid
+    }
   }
   return out
 }

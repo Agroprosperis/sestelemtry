@@ -245,14 +245,6 @@ const METRIC_GROUPS: Array<{ id: string; label: string; rows: MetricRow[] }> = [
         total: (rows) => sumOver(rows, (r) => r?.economics.pvToLoad ?? null),
       },
       {
-        id: 'pv_to_ess',
-        label: 'PV → УЗЕ',
-        unit: 'кВт·год',
-        kind: 'energy',
-        pickHourValue: (row) => row?.flow.pvToEss ?? null,
-        total: (rows) => sumOver(rows, (r) => r?.flow.pvToEss ?? null),
-      },
-      {
         id: 'pv_to_grid',
         label: 'PV → Мережа',
         unit: 'кВт·год',
@@ -260,15 +252,25 @@ const METRIC_GROUPS: Array<{ id: string; label: string; rows: MetricRow[] }> = [
         pickHourValue: (row) => row?.economics.pvToGrid ?? null,
         total: (rows) => sumOver(rows, (r) => r?.economics.pvToGrid ?? null),
       },
+      {
+        id: 'pv_to_ess',
+        label: 'PV → УЗЕ',
+        unit: 'кВт·год',
+        kind: 'energy',
+        pickHourValue: (row) => row?.flow.pvToEss ?? null,
+        total: (rows) => sumOver(rows, (r) => r?.flow.pvToEss ?? null),
+      },
     ],
   },
   {
-    // The two ESS↔grid exchange flows that aren't already visible
-    // under "Виробіток PV" (PV → УЗЕ) or "Споживання" (УЗЕ →
-    // Споживання). Kept as a small standalone block so the operator
-    // doesn't read them as a decomposition of Імпорт/Експорт всього.
+    // УЗЕ-flows block. Sequenced as charge-from-grid → discharge-to-
+    // load → discharge-to-grid → залишок so the rows read top-down
+    // as "що зайшло в УЗЕ → що вийшло → що залишилось". УЗЕ →
+    // Споживання is intentionally duplicated here (it also lives in
+    // the consumption breakdown above) so the operator can scan the
+    // whole УЗЕ life-cycle without jumping between sections.
     id: 'ess_grid',
-    label: 'УЗЕ ↔ Мережа',
+    label: 'УЗЕ',
     rows: [
       {
         id: 'grid_to_ess',
@@ -277,6 +279,17 @@ const METRIC_GROUPS: Array<{ id: string; label: string; rows: MetricRow[] }> = [
         kind: 'energy',
         pickHourValue: (row) => row?.flow.gridToEss ?? null,
         total: (rows) => sumOver(rows, (r) => r?.flow.gridToEss ?? null),
+      },
+      {
+        // Duplicate of the consumption-group row with the same
+        // semantics. Different React key ('ess_to_load_dup') so
+        // both rows can coexist without a key collision.
+        id: 'ess_to_load_dup',
+        label: 'УЗЕ → Споживання',
+        unit: 'кВт·год',
+        kind: 'energy',
+        pickHourValue: (row) => row?.flow.essToLoad ?? null,
+        total: (rows) => sumOver(rows, (r) => r?.flow.essToLoad ?? null),
       },
       {
         id: 'ess_to_grid',
