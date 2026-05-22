@@ -108,11 +108,13 @@ organizations:
       connect_timeout: 2s
       request_timeout: 2s
 
-  # Дубовʼязівський елеватор (DE). Координати ще не задані — додайте
-  # `location:` блок (latitude/longitude/city) для увімкнення weather widget.
   - id: de
     name: Дубовязівський елеватор
     poll_interval: 1s
+    location:
+      latitude: 51.15119965
+      longitude: 33.383904
+      city: "Дубовʼязівка"
     modbus:
       host: 10.34.40.241
       port: 502
@@ -120,11 +122,13 @@ organizations:
       connect_timeout: 2s
       request_timeout: 2s
 
-  # Сорочанський мірошник (SE). Координати ще не задані — додайте
-  # `location:` блок (latitude/longitude/city) для увімкнення weather widget.
-  - id: se
+  - id: sm
     name: Сорочанський мірошник
     poll_interval: 1s
+    location:
+      latitude: 49.066043
+      longitude: 29.3634120
+      city: "Сорочани"
     modbus:
       host: 10.36.40.102
       port: 502

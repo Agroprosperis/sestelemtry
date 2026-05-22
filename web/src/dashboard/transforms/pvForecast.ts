@@ -11,7 +11,7 @@ export type PvForecastHourlyRow = {
   plannedKw: number
 }
 
-export type ElevatorCode = 'JE' | 'RE' | 'PE' | 'AB' | 'KE' | 'DE' | 'SE'
+export type ElevatorCode = 'JE' | 'RE' | 'PE' | 'AB' | 'KE' | 'DE' | 'SM'
 
 // elevatorCodeFor maps the dashboard's organization ID to the n8n flow's
 // elevator code. Elevators that we don't have a forecast for return null,
@@ -23,7 +23,7 @@ export function elevatorCodeFor(organizationID: string): ElevatorCode | null {
   if (organizationID === 'ab') return 'AB'
   if (organizationID === 'ke') return 'KE'
   if (organizationID === 'de') return 'DE'
-  if (organizationID === 'se') return 'SE'
+  if (organizationID === 'sm') return 'SM'
   return null
 }
 

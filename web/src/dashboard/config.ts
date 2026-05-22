@@ -1,6 +1,6 @@
 import type { DashboardConfig } from '../types'
 
-export const KNOWN_ORGANIZATIONS = ['demo-org', 'pe', 'ze', 'ab', 'ke', 'pde', 'de', 'se']
+export const KNOWN_ORGANIZATIONS = ['demo-org', 'pe', 'ze', 'ab', 'ke', 'pde', 'de', 'sm']
 
 // ORGANIZATION_DISPLAY_NAMES maps an organization id to a
 // human-readable Ukrainian site name shown next to selectors,
@@ -21,7 +21,7 @@ export const ORGANIZATION_DISPLAY_NAMES: Record<string, string> = {
   ke: 'Кролевецький елеватор',
   pde: 'Поділля елеватор',
   de: 'Дубовязівський елеватор',
-  se: 'Сорочанський мірошник',
+  sm: 'Сорочанський мірошник',
 }
 
 // formatOrganizationLabel returns the user-facing name for an
