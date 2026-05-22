@@ -7,8 +7,8 @@ import { EconomicsKpis } from './components/EconomicsKpis'
 import { EconomicsRevenuePanel } from './components/EconomicsRevenuePanel'
 import { EconomicsTable } from './components/EconomicsTable'
 import './economics.css'
-import { DEFAULT_TARIFFS, parseTariffsFromSearch, serializeTariffsToSearch, type Tariffs } from './tariffs'
 import { useEconomicsData } from './useEconomicsData'
+import { useOrgTariffs } from './useOrgTariffs'
 
 // today() returns YYYY-MM-DD in Europe/Kyiv. The economics page is
 // always anchored to local Ukraine time regardless of the operator's
@@ -36,36 +36,51 @@ function readDateFromUrl(): string {
   return value
 }
 
-function readTariffsFromUrl(): Tariffs {
-  if (typeof window === 'undefined') return DEFAULT_TARIFFS
-  return parseTariffsFromSearch(window.location.search)
-}
-
 // updateUrl rewrites the current URL's query string in place using
-// `replaceState` so changing tariffs / dates doesn't pollute the
-// browser history with one entry per keystroke. The org param is
-// already managed by `useOrganizationParam` (it owns the read /
-// writeback there); we just preserve it.
-function updateUrl(date: string, tariffs: Tariffs) {
+// `replaceState` so changing the date doesn't pollute the browser
+// history with one entry per keystroke. Tariffs are no longer URL-
+// persisted (per-org settings live on the backend now); the org param
+// is owned by `useOrganizationParam`. Any leftover legacy tariff
+// query params (distribution=…, etc.) are silently dropped here so
+// shared old links self-clean on first interaction.
+const LEGACY_TARIFF_KEYS = [
+  'distribution',
+  'transmission',
+  'supplier_margin',
+  'other_fees',
+  'export_discount',
+  'degradation',
+  'include_vat',
+  'vat_rate',
+  'ess_capacity',
+]
+
+function updateUrl(date: string) {
   if (typeof window === 'undefined') return
   const url = new URL(window.location.href)
   url.searchParams.set('view', 'economics')
   url.searchParams.set('date', date)
-  serializeTariffsToSearch(tariffs, url.searchParams)
+  for (const key of LEGACY_TARIFF_KEYS) url.searchParams.delete(key)
   window.history.replaceState({}, '', url.toString())
 }
 
 export function EconomicsPage() {
   const { organizationID, options, change: onOrganizationChange } = useOrganizationParam()
   const [date, setDate] = useState<string>(readDateFromUrl)
-  const [tariffs, setTariffs] = useState<Tariffs>(readTariffsFromUrl)
+  const {
+    tariffs,
+    status: tariffsStatus,
+    error: tariffsError,
+    setTariffs,
+  } = useOrgTariffs(organizationID)
 
-  // Keep the URL in sync with date + tariffs so the analyst can
-  // copy/paste a "this view" link into Slack. Org id changes are
-  // already URL-synced inside `useOrganizationParam`.
+  // Keep the URL in sync with the date so the analyst can copy/paste
+  // a "this view" link into Slack. Org id changes are already URL-
+  // synced inside `useOrganizationParam`; tariffs are persisted per-
+  // org on the backend and intentionally don't show up in the URL.
   useEffect(() => {
-    updateUrl(date, tariffs)
-  }, [date, tariffs])
+    updateUrl(date)
+  }, [date])
 
   const data = useEconomicsData({ organizationID, date, tariffs })
 
@@ -75,9 +90,9 @@ export function EconomicsPage() {
     if (typeof window === 'undefined') return
     const url = new URL(window.location.href)
     url.searchParams.delete('view')
-    // We deliberately leave date and tariffs in the URL: returning
-    // to the economics page later restores the operator's last
-    // working set without forcing them to retype it.
+    // We deliberately leave the date in the URL: returning to the
+    // economics page later restores the operator's last working day
+    // without forcing them to retype it.
     window.history.pushState({}, '', url.toString())
     window.dispatchEvent(new PopStateEvent('popstate'))
   }, [])
@@ -92,6 +107,8 @@ export function EconomicsPage() {
         onDateChange={setDate}
         tariffs={tariffs}
         onTariffsChange={setTariffs}
+        tariffsStatus={tariffsStatus}
+        tariffsError={tariffsError}
         onBackToDashboard={onBackToDashboard}
       />
 

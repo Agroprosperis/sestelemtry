@@ -29,6 +29,14 @@ type storeReader interface {
 	WeatherForecast(ctx context.Context, organizationID string, from, to time.Time) (WeatherForecastResponse, error)
 	Samples(ctx context.Context, organizationID string, metricKeys []string, from, to time.Time, limit int, emit func(SampleRow) error) (int, bool, error)
 	EnergyFlowSources(ctx context.Context, organizationID string, from, to time.Time, lookback time.Duration) ([]EnergyFlowRawRow, error)
+	// GetOrgTariffs reports the persisted economics tariff bundle for
+	// `organizationID`. The bool is false when the org has never saved
+	// tariffs (the handler maps that to 404 so the frontend can fall
+	// back to bundled defaults).
+	GetOrgTariffs(ctx context.Context, organizationID string) (OrgTariffs, bool, error)
+	// UpsertOrgTariffs replaces the persisted tariff bundle for
+	// `organizationID` (last-writer-wins).
+	UpsertOrgTariffs(ctx context.Context, organizationID string, tariffs OrgTariffs) error
 	Ready(ctx context.Context) error
 }
 
@@ -112,6 +120,7 @@ func (h *Handlers) Router() http.Handler {
 	mux.HandleFunc("/api/v1/energy-flow-hourly", h.energyFlowHourly)
 	mux.HandleFunc("/api/v1/dam-prices", h.damPrices)
 	mux.HandleFunc("/api/v1/weather-forecast", h.weatherForecast)
+	mux.HandleFunc("/api/v1/organization-tariffs", h.organizationTariffs)
 	mux.HandleFunc("/swagger", h.swaggerUI)
 	mux.HandleFunc("/swagger/", h.swaggerUI)
 	mux.HandleFunc("/swagger/openapi.yaml", h.swaggerSpec)
@@ -667,6 +676,120 @@ func (h *Handlers) weatherForecast(w http.ResponseWriter, r *http.Request) {
 		"duration_ms", dur.Milliseconds(),
 	)
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// organizationTariffs serves GET / accepts PUT for the per-org
+// economics-page tariff bundle. We use a single handler for both
+// methods (rather than splitting into /org-tariffs and
+// /org-tariffs/save) so the URL contract stays small and matches
+// REST conventions: GET reads the resource, PUT replaces it.
+//
+// Reads return 404 when the org has never persisted a row so the
+// frontend can deliberately fall back to bundled defaults instead of
+// silently receiving an all-zeros struct (which would be a valid but
+// nonsensical tariff). Writes are all-or-nothing: every field must
+// pass validation or the row is left untouched and the caller gets a
+// 400 explaining which field failed.
+func (h *Handlers) organizationTariffs(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		h.getOrganizationTariffs(w, r)
+	case http.MethodPut:
+		h.putOrganizationTariffs(w, r)
+	default:
+		w.Header().Set("Allow", "GET, PUT")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (h *Handlers) getOrganizationTariffs(w http.ResponseWriter, r *http.Request) {
+	orgID := strings.TrimSpace(r.URL.Query().Get("organization_id"))
+	if orgID == "" {
+		http.Error(w, "organization_id is required", http.StatusBadRequest)
+		return
+	}
+	tariffs, ok, err := h.store.GetOrgTariffs(r.Context(), orgID)
+	if err != nil {
+		h.log.Error("api_org_tariffs_get", "organization_id", orgID, "err", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+	if !ok {
+		http.Error(w, "tariffs not found", http.StatusNotFound)
+		return
+	}
+	writeJSON(w, http.StatusOK, tariffs)
+}
+
+func (h *Handlers) putOrganizationTariffs(w http.ResponseWriter, r *http.Request) {
+	orgID := strings.TrimSpace(r.URL.Query().Get("organization_id"))
+	if orgID == "" {
+		http.Error(w, "organization_id is required", http.StatusBadRequest)
+		return
+	}
+	// Cap the body so a malicious caller can't hand us a multi-MB
+	// JSON blob just to trip validation. The actual payload is
+	// ~9 small numbers, so 64 KiB is generous headroom.
+	r.Body = http.MaxBytesReader(w, r.Body, 64*1024)
+	defer r.Body.Close()
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	var payload OrgTariffs
+	if err := dec.Decode(&payload); err != nil {
+		http.Error(w, fmt.Sprintf("invalid JSON body: %v", err), http.StatusBadRequest)
+		return
+	}
+	if err := validateOrgTariffs(payload); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := h.store.UpsertOrgTariffs(r.Context(), orgID, payload); err != nil {
+		h.log.Error("api_org_tariffs_put", "organization_id", orgID, "err", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+	h.log.Info("api_org_tariffs_put_ok", "organization_id", orgID)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// validateOrgTariffs checks each numeric field is finite and inside
+// the documented physical range. We reject NaN / ±Inf explicitly
+// because PostgreSQL's `jsonb` accepts them but the dashboard's
+// formatters render them as "NaN UAH" and downstream calc panics on
+// division. Bounds match the frontend's input guards so the API can
+// never end up holding a tariff the UI itself wouldn't accept.
+func validateOrgTariffs(t OrgTariffs) error {
+	pairs := []struct {
+		name string
+		val  float64
+	}{
+		{"distribution_uah_per_kwh", t.DistributionUahPerKwh},
+		{"transmission_uah_per_kwh", t.TransmissionUahPerKwh},
+		{"supplier_margin_uah_per_kwh", t.SupplierMarginUahPerKwh},
+		{"other_fees_uah_per_kwh", t.OtherFeesUahPerKwh},
+		{"degradation_uah_per_kwh", t.DegradationUahPerKwh},
+	}
+	for _, p := range pairs {
+		if math.IsNaN(p.val) || math.IsInf(p.val, 0) {
+			return fmt.Errorf("%s must be a finite number", p.name)
+		}
+		if p.val < 0 {
+			return fmt.Errorf("%s must be >= 0", p.name)
+		}
+	}
+	if math.IsNaN(t.ExportDiscount) || math.IsInf(t.ExportDiscount, 0) ||
+		t.ExportDiscount < 0 || t.ExportDiscount > 1 {
+		return fmt.Errorf("export_discount must be in [0, 1]")
+	}
+	if math.IsNaN(t.VatRate) || math.IsInf(t.VatRate, 0) ||
+		t.VatRate < 0 || t.VatRate > 1 {
+		return fmt.Errorf("vat_rate must be in [0, 1]")
+	}
+	if math.IsNaN(t.EssCapacityKwh) || math.IsInf(t.EssCapacityKwh, 0) ||
+		t.EssCapacityKwh <= 0 {
+		return fmt.Errorf("ess_capacity_kwh must be > 0")
+	}
+	return nil
 }
 
 // parseWeatherDateRange reads `from` and `to` (YYYY-MM-DD) query

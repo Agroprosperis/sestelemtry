@@ -45,6 +45,15 @@ func main() {
 	}
 	defer pool.Close()
 
+	// The API process is the sole writer of organization_tariffs (no
+	// collector touches it), so we own its bootstrap. Idempotent —
+	// running this on every start lets a fresh environment boot
+	// without an external migration step.
+	if err := storage.InitTariffsSchema(ctx, pool); err != nil {
+		log.Error("db_init_tariffs", "err", err)
+		os.Exit(1)
+	}
+
 	store := api.NewStore(pool)
 	// Boot-time feature detection: if the collector has run migration 004
 	// (or InitContinuousAggregates), the daily CAGG is queryable and

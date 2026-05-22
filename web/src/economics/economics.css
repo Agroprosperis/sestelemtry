@@ -115,16 +115,52 @@
   font-weight: 600;
   color: #0f172a;
   list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .economics-tariffs > summary::after {
-  content: ' ▾';
+  content: '▾';
   color: #94a3b8;
   font-size: 12px;
+  margin-left: auto;
 }
 
 .economics-tariffs[open] > summary::after {
-  content: ' ▴';
+  content: '▴';
+}
+
+.economics-tariffs-status {
+  font-weight: 500;
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  line-height: 1.4;
+}
+
+.economics-tariffs-status-loading,
+.economics-tariffs-status-saving {
+  background: #f1f5f9;
+  color: #475569;
+  border-color: #e2e8f0;
+}
+
+.economics-tariffs-status-saved {
+  background: #ecfdf5;
+  color: #047857;
+  border-color: #a7f3d0;
+}
+
+.economics-tariffs-status-error {
+  background: #fef2f2;
+  color: #b91c1c;
+  border-color: #fecaca;
+}
+
+.economics-tariffs-status-idle {
+  display: none;
 }
 
 .economics-tariffs-grid {

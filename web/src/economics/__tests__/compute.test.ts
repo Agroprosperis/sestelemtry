@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { dailyTotals, hourEconomics, deriveDerivedFlows, type HourEconomicsRow, type HourFlows } from '../compute'
-import { DEFAULT_TARIFFS, parseTariffsFromSearch, serializeTariffsToSearch } from '../tariffs'
+import { DEFAULT_TARIFFS } from '../tariffs'
 
 // emptyFlow is a zero-valued HourFlows for assembling specific test
 // scenarios without enumerating the full record each time.
@@ -269,32 +269,5 @@ describe('dailyTotals (spec calibration)', () => {
     }
     const totals = dailyTotals(rows)
     expect(totals.ebitda).toBeCloseTo(totals.effect, 6)
-  })
-})
-
-describe('tariffs URL round-trip', () => {
-  it('parseTariffsFromSearch returns defaults on empty input', () => {
-    expect(parseTariffsFromSearch('')).toEqual(DEFAULT_TARIFFS)
-  })
-
-  it('writes only non-default values to the URL', () => {
-    const params = new URLSearchParams()
-    serializeTariffsToSearch(DEFAULT_TARIFFS, params)
-    expect(params.toString()).toBe('')
-  })
-
-  it('overrides defaults via URL parameters', () => {
-    const t = parseTariffsFromSearch('distribution=0.5&include_vat=true')
-    expect(t.distributionUahPerKwh).toBe(0.5)
-    expect(t.includeVat).toBe(true)
-    expect(t.transmissionUahPerKwh).toBe(DEFAULT_TARIFFS.transmissionUahPerKwh)
-  })
-
-  it('round-trips a custom tariffs object', () => {
-    const custom = { ...DEFAULT_TARIFFS, distributionUahPerKwh: 0.55, includeVat: true }
-    const params = new URLSearchParams()
-    serializeTariffsToSearch(custom, params)
-    const reparsed = parseTariffsFromSearch(params)
-    expect(reparsed).toEqual(custom)
   })
 })

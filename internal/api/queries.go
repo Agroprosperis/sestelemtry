@@ -881,6 +881,39 @@ func (s *Store) Ready(ctx context.Context) error {
 	return s.pool.Ping(ctx)
 }
 
+// GetOrgTariffs returns the persisted tariff bundle for the given org.
+// The bool is false when no row exists (the handler maps that to 404
+// so the frontend can fall back to bundled defaults). JSON decoding
+// happens here so the storage layer can stay schema-free — the API
+// owns the DTO shape.
+func (s *Store) GetOrgTariffs(ctx context.Context, organizationID string) (OrgTariffs, bool, error) {
+	var out OrgTariffs
+	payload, ok, err := storage.GetOrgTariffs(ctx, s.pool, organizationID)
+	if err != nil {
+		return out, false, err
+	}
+	if !ok {
+		return out, false, nil
+	}
+	if err := json.Unmarshal(payload, &out); err != nil {
+		return out, false, fmt.Errorf("decode org tariffs: %w", err)
+	}
+	return out, true, nil
+}
+
+// UpsertOrgTariffs persists the tariff bundle for the given org. The
+// handler validates field shapes before calling — we re-encode here
+// so the JSONB column always stores the canonical struct shape (in
+// particular, missing fields land as their Go zero value rather than
+// being absent on disk).
+func (s *Store) UpsertOrgTariffs(ctx context.Context, organizationID string, tariffs OrgTariffs) error {
+	payload, err := json.Marshal(tariffs)
+	if err != nil {
+		return fmt.Errorf("encode org tariffs: %w", err)
+	}
+	return storage.UpsertOrgTariffs(ctx, s.pool, organizationID, payload)
+}
+
 // EnergyFlowSources streams the source-counter rows the recompute
 // pipeline needs for [from, to], inclusive at both ends. The window
 // is padded by `lookback` so the very first bucket can find a

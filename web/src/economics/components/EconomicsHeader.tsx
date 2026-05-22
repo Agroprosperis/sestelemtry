@@ -2,6 +2,7 @@ import { useId } from 'react'
 import { OrganizationSelect } from '../../dashboard/components/OrganizationSelect'
 import { formatOrganizationLabel } from '../../dashboard/config'
 import { DEFAULT_TARIFFS, type Tariffs } from '../tariffs'
+import type { OrgTariffsStatus } from '../useOrgTariffs'
 
 type Props = {
   organizationID: string
@@ -11,10 +12,31 @@ type Props = {
   onDateChange: (next: string) => void
   tariffs: Tariffs
   onTariffsChange: (next: Tariffs) => void
+  tariffsStatus: OrgTariffsStatus
+  tariffsError: string | null
   // Render a "back to main dashboard" link that drops `?view=economics`
   // and pushes a new history entry. Kept as a callback so the page
   // file can decide whether to use pushState or hard navigate.
   onBackToDashboard: () => void
+}
+
+// statusLabel maps the hook's coarse state machine to the inline
+// indicator next to "Параметри тарифів". We keep the strings short
+// because the indicator sits inline with the <summary> chevron — a
+// long label there would break the click target on narrow screens.
+function statusLabel(status: OrgTariffsStatus): string {
+  switch (status) {
+    case 'loading':
+      return 'Завантаження…'
+    case 'saving':
+      return 'Зберігаємо…'
+    case 'saved':
+      return 'Збережено'
+    case 'error':
+      return 'Помилка збереження'
+    default:
+      return ''
+  }
 }
 
 // numericInput is a small wrapper around a labelled <input type=number>
@@ -70,9 +92,13 @@ export function EconomicsHeader({
   onDateChange,
   tariffs,
   onTariffsChange,
+  tariffsStatus,
+  tariffsError,
   onBackToDashboard,
 }: Props) {
   const update = (patch: Partial<Tariffs>) => onTariffsChange({ ...tariffs, ...patch })
+  const statusText = statusLabel(tariffsStatus)
+  const statusTitle = tariffsStatus === 'error' && tariffsError ? tariffsError : undefined
   return (
     <header className="economics-header">
       <div className="economics-header-row">
@@ -115,7 +141,18 @@ export function EconomicsHeader({
       </div>
 
       <details className="economics-tariffs" open>
-        <summary>Параметри тарифів</summary>
+        <summary>
+          <span>Параметри тарифів</span>
+          {statusText && (
+            <span
+              className={`economics-tariffs-status economics-tariffs-status-${tariffsStatus}`}
+              title={statusTitle}
+              role={tariffsStatus === 'error' ? 'alert' : 'status'}
+            >
+              {statusText}
+            </span>
+          )}
+        </summary>
         <div className="economics-tariffs-grid">
           <NumericField
             label="Розподіл (Distribution)"

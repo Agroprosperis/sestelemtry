@@ -358,3 +358,27 @@ type SampleRow struct {
 	Value     float64
 	Labels    map[string]string
 }
+
+// OrgTariffs is the per-organization economics-page tariff bundle
+// served by GET / accepted by PUT /api/v1/organization-tariffs. The
+// JSON shape mirrors the frontend `Tariffs` type field-for-field
+// (snake_case on the wire, camelCase in TS) so the React economics
+// page can stop persisting these knobs in the URL and instead load /
+// save per-elevator settings on the backend.
+//
+// All numeric fields are absolute UAH/kWh values except `VatRate` and
+// `ExportDiscount`, which are unitless 0..1 fractions. `IncludeVAT`
+// toggles whether the dashboard adds VAT on top when displaying full
+// tariff numbers; storing it lets each org default its own
+// preference rather than have the UI guess.
+type OrgTariffs struct {
+	DistributionUahPerKwh   float64 `json:"distribution_uah_per_kwh"`
+	TransmissionUahPerKwh   float64 `json:"transmission_uah_per_kwh"`
+	SupplierMarginUahPerKwh float64 `json:"supplier_margin_uah_per_kwh"`
+	OtherFeesUahPerKwh      float64 `json:"other_fees_uah_per_kwh"`
+	ExportDiscount          float64 `json:"export_discount"`
+	DegradationUahPerKwh    float64 `json:"degradation_uah_per_kwh"`
+	IncludeVat              bool    `json:"include_vat"`
+	VatRate                 float64 `json:"vat_rate"`
+	EssCapacityKwh          float64 `json:"ess_capacity_kwh"`
+}

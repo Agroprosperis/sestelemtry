@@ -55,6 +55,12 @@ type mockStore struct {
 	flowSourcesOrg  string
 	flowSourcesFrom time.Time
 	flowSourcesTo   time.Time
+
+	tariffsByOrg     map[string]OrgTariffs
+	tariffsGetErr    error
+	tariffsPutErr    error
+	tariffsLastOrg   string
+	tariffsLastWrite OrgTariffs
 }
 
 func (m *mockStore) Current(_ context.Context, _ string, _ []string, at time.Time) (CurrentResponse, error) {
@@ -113,6 +119,27 @@ func (m *mockStore) EnergyFlowSources(_ context.Context, orgID string, from, to 
 
 func (m *mockStore) Ready(_ context.Context) error {
 	return m.readyErr
+}
+
+func (m *mockStore) GetOrgTariffs(_ context.Context, organizationID string) (OrgTariffs, bool, error) {
+	if m.tariffsGetErr != nil {
+		return OrgTariffs{}, false, m.tariffsGetErr
+	}
+	t, ok := m.tariffsByOrg[organizationID]
+	return t, ok, nil
+}
+
+func (m *mockStore) UpsertOrgTariffs(_ context.Context, organizationID string, tariffs OrgTariffs) error {
+	if m.tariffsPutErr != nil {
+		return m.tariffsPutErr
+	}
+	m.tariffsLastOrg = organizationID
+	m.tariffsLastWrite = tariffs
+	if m.tariffsByOrg == nil {
+		m.tariffsByOrg = make(map[string]OrgTariffs)
+	}
+	m.tariffsByOrg[organizationID] = tariffs
+	return nil
 }
 
 func TestCurrentRequiresOrganizationID(t *testing.T) {

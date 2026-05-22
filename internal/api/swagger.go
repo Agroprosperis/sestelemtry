@@ -487,6 +487,90 @@ paths:
               schema:
                 type: string
                 example: internal server error
+  /api/v1/organization-tariffs:
+    get:
+      summary: Persisted economics tariff bundle for an organization
+      operationId: getOrganizationTariffs
+      description: |
+        Returns the per-org tariff settings the economics dashboard
+        uses to compute baseline / actual cost columns. Returns 404
+        when the org has never saved a tariff bundle — the frontend
+        treats that as "use bundled defaults" and only persists when
+        the analyst edits the form.
+      parameters:
+        - name: organization_id
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Persisted tariff bundle
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrgTariffs"
+        "400":
+          description: Missing organization_id
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: organization_id is required
+        "404":
+          description: No tariffs saved for this organization
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: tariffs not found
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: internal server error
+    put:
+      summary: Save the economics tariff bundle for an organization
+      operationId: putOrganizationTariffs
+      description: |
+        Replaces the persisted tariff bundle for the given org
+        (last-writer-wins). All numeric fields must be finite;
+        export_discount and vat_rate are 0..1 fractions;
+        ess_capacity_kwh must be > 0; everything else must be >= 0.
+        Unknown JSON fields are rejected so a frontend out of sync
+        with the API DTO fails loudly rather than silently dropping
+        data.
+      parameters:
+        - name: organization_id
+          in: query
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OrgTariffs"
+      responses:
+        "204":
+          description: Tariffs saved
+        "400":
+          description: Missing organization_id, malformed body, or out-of-range field
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: vat_rate must be in [0, 1]
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: internal server error
 components:
   schemas:
     DashboardMetric:
@@ -836,4 +920,58 @@ components:
           items:
             $ref: "#/components/schemas/EnergyFlowHourlyRow"
       required: [organization_id, date, tz, hours]
+    OrgTariffs:
+      type: object
+      description: |
+        Per-organization tariff settings persisted by the economics
+        dashboard. Numeric fields are UAH/kWh except export_discount
+        and vat_rate (unitless 0..1 fractions). Field shape mirrors
+        the React Tariffs type (snake_case on the wire).
+      properties:
+        distribution_uah_per_kwh:
+          type: number
+          format: double
+          minimum: 0
+        transmission_uah_per_kwh:
+          type: number
+          format: double
+          minimum: 0
+        supplier_margin_uah_per_kwh:
+          type: number
+          format: double
+          minimum: 0
+        other_fees_uah_per_kwh:
+          type: number
+          format: double
+          minimum: 0
+        export_discount:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+        degradation_uah_per_kwh:
+          type: number
+          format: double
+          minimum: 0
+        include_vat:
+          type: boolean
+        vat_rate:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+        ess_capacity_kwh:
+          type: number
+          format: double
+          exclusiveMinimum: 0
+      required:
+        - distribution_uah_per_kwh
+        - transmission_uah_per_kwh
+        - supplier_margin_uah_per_kwh
+        - other_fees_uah_per_kwh
+        - export_discount
+        - degradation_uah_per_kwh
+        - include_vat
+        - vat_rate
+        - ess_capacity_kwh
 `
