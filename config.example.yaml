@@ -113,6 +113,29 @@ organizations:
       connect_timeout: 2s
       request_timeout: 2s
 
+  # Дубовʼязівський елеватор / Сорочанський мірошник: shipped without
+  # `location:` until ops captures coordinates. Sites still poll Modbus;
+  # only the dashboard's weather widget hides itself.
+  - id: de
+    name: Дубовязівський елеватор
+    poll_interval: 1s
+    modbus:
+      host: 10.34.40.241
+      port: 502
+      unit_id: 99
+      connect_timeout: 2s
+      request_timeout: 2s
+
+  - id: se
+    name: Сорочанський мірошник
+    poll_interval: 1s
+    modbus:
+      host: 10.36.40.102
+      port: 502
+      unit_id: 99
+      connect_timeout: 2s
+      request_timeout: 2s
+
 # Day-Ahead Market (RDN) prices from oree.com.ua (consumed by dam-collector).
 # Set enabled: false to skip running the dam-collector against this config.
 oree:

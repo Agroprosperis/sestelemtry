@@ -108,6 +108,30 @@ organizations:
       connect_timeout: 2s
       request_timeout: 2s
 
+  # Дубовʼязівський елеватор (DE). Координати ще не задані — додайте
+  # `location:` блок (latitude/longitude/city) для увімкнення weather widget.
+  - id: de
+    name: Дубовязівський елеватор
+    poll_interval: 1s
+    modbus:
+      host: 10.34.40.241
+      port: 502
+      unit_id: 99
+      connect_timeout: 2s
+      request_timeout: 2s
+
+  # Сорочанський мірошник (SE). Координати ще не задані — додайте
+  # `location:` блок (latitude/longitude/city) для увімкнення weather widget.
+  - id: se
+    name: Сорочанський мірошник
+    poll_interval: 1s
+    modbus:
+      host: 10.36.40.102
+      port: 502
+      unit_id: 99
+      connect_timeout: 2s
+      request_timeout: 2s
+
 # Open-Meteo forecast cache. The weather-collector fetches a fresh
 # forecast every `interval` for each org with a `location` block and
 # upserts (organization_id, hour) rows — no history is kept. Set
