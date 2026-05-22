@@ -42,7 +42,7 @@ export function EnergySummary({ summary, loading = false }: Props) {
     <div className="energy-summary-grid" aria-busy={ariaBusy}>
       <section className="energy-summary-card">
         <div className="energy-summary-title">
-          <span>Вироблено фотоелектричною установкою</span>
+          <span>Вироблено СЕС</span>
           <strong>
             {renderValue(
               loading,
@@ -139,7 +139,7 @@ export function EnergySummary({ summary, loading = false }: Props) {
         </div>
         <div className="energy-summary-rows">
           <div className="energy-summary-row">
-            <span>Від ФЕ та УЗЕ</span>
+            <span>Від СЕС та УЗЕ</span>
             <strong>
               {renderValue(
                 loading,

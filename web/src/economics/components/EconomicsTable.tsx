@@ -196,7 +196,7 @@ const METRIC_GROUPS: Array<{ id: string; label: string; rows: MetricRow[] }> = [
       },
       {
         id: 'pv_to_load',
-        label: 'PV → Споживання',
+        label: 'СЕС → Споживання',
         unit: 'кВт·год',
         kind: 'energy',
         pickHourValue: (row) => row?.economics.pvToLoad ?? null,
@@ -225,11 +225,11 @@ const METRIC_GROUPS: Array<{ id: string; label: string; rows: MetricRow[] }> = [
     // `pv` is the SmartLogger accumulator delta; the three
     // PV→{load,ess,grid} rows must sum to it.
     id: 'pv',
-    label: 'Виробіток PV',
+    label: 'Виробіток СЕС',
     rows: [
       {
         id: 'pv_total',
-        label: 'PV (виробіток)',
+        label: 'СЕС (виробіток)',
         unit: 'кВт·год',
         kind: 'energy',
         summary: true,
@@ -238,7 +238,7 @@ const METRIC_GROUPS: Array<{ id: string; label: string; rows: MetricRow[] }> = [
       },
       {
         id: 'pv_to_load_pv',
-        label: 'PV → Споживання',
+        label: 'СЕС → Споживання',
         unit: 'кВт·год',
         kind: 'energy',
         pickHourValue: (row) => row?.economics.pvToLoad ?? null,
@@ -246,7 +246,7 @@ const METRIC_GROUPS: Array<{ id: string; label: string; rows: MetricRow[] }> = [
       },
       {
         id: 'pv_to_grid',
-        label: 'PV → Мережа',
+        label: 'СЕС → Мережа',
         unit: 'кВт·год',
         kind: 'energy',
         pickHourValue: (row) => row?.economics.pvToGrid ?? null,
@@ -254,7 +254,7 @@ const METRIC_GROUPS: Array<{ id: string; label: string; rows: MetricRow[] }> = [
       },
       {
         id: 'pv_to_ess',
-        label: 'PV → УЗЕ',
+        label: 'СЕС → УЗЕ',
         unit: 'кВт·год',
         kind: 'energy',
         pickHourValue: (row) => row?.flow.pvToEss ?? null,

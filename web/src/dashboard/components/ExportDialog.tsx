@@ -33,7 +33,7 @@ const COLUMN_OPTIONS: Array<{ id: keyof CustomExportColumns; label: string; hint
   {
     id: 'energy',
     label: 'Енергія (kWh)',
-    hint: 'PV / заряд / розряд / купівля / продаж / споживання',
+    hint: 'СЕС / заряд / розряд / купівля / продаж / споживання',
   },
   {
     id: 'flow',
@@ -45,7 +45,7 @@ const COLUMN_OPTIONS: Array<{ id: keyof CustomExportColumns; label: string; hint
   {
     id: 'power',
     label: 'Миттєва потужність (kW)',
-    hint: 'PV / УЗЕ / мережа / навантаження. Беремо last-sample у бакеті',
+    hint: 'СЕС / УЗЕ / мережа / навантаження. Беремо last-sample у бакеті',
   },
   {
     id: 'device',

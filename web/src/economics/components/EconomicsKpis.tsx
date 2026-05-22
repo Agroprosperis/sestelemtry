@@ -88,7 +88,7 @@ export function EconomicsKpis({ totals, tariffs }: Props) {
         <div className="kpi-card kpi-card-secondary">
           <span className="kpi-label">Уникнутий імпорт</span>
           <span className="kpi-value">{formatKwh(avoidedImportKwh)}</span>
-          <span className="kpi-sub">PV→споживання + УЗЕ→споживання</span>
+          <span className="kpi-sub">СЕС→споживання + УЗЕ→споживання</span>
         </div>
         <div className="kpi-card kpi-card-secondary">
           <span className="kpi-label">Самоспоживання СЕС</span>
