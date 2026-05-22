@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { fetchOrgTariffs, saveOrgTariffs } from '../api'
+import { fetchOrgTariffs, saveOrgTariffs } from './orgTariffsClient'
 import { DEFAULT_TARIFFS, type Tariffs } from './tariffs'
 
 // Save status surfaced to the EconomicsHeader so the operator gets a
