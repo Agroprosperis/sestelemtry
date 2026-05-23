@@ -446,10 +446,11 @@
   gap: 6px;
 }
 
-/* Add breathing room between adjacent segment bars (e.g. PV
-   distribution → consumption split, or Заряд → Розряд) so the
-   second group reads as a separate story instead of running into
-   the first group's per-row list. */
+/* Add breathing room before each segment bar (after the hero
+   and between adjacent bars) so groups like Заряд → Розряд or
+   PV-distribution → consumption-split read as separate stories
+   instead of running into the previous block's per-row list. */
+.summary-hero + .summary-segbar,
 .summary-segbar + .summary-segbar {
   margin-top: 8px;
 }
