@@ -80,8 +80,8 @@
 .overview-balance-stage {
   position: relative;
   width: 100%;
-  aspect-ratio: 5 / 3;
-  min-height: 320px;
+  aspect-ratio: 12 / 5;
+  min-height: 260px;
   background: #ffffff;
 }
 
@@ -97,11 +97,11 @@
   position: absolute;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   background: #ffffff;
   border: 1px solid #e2e8f0;
-  border-radius: 12px;
-  padding: 8px 12px;
+  border-radius: 10px;
+  padding: 6px 10px;
   box-shadow: 0 2px 6px rgba(15, 23, 42, 0.06);
   /* Cards must sit above the ribbons so ribbon overlap doesn't
      bleed through the white card surface. */
@@ -118,9 +118,9 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 30px;
-  border-radius: 8px;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
   border: 1px solid transparent;
   flex: 0 0 auto;
 }
@@ -142,7 +142,7 @@
 }
 
 .overview-balance-card-value {
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 700;
   color: #0f172a;
   font-variant-numeric: tabular-nums;
@@ -150,7 +150,7 @@
 }
 
 .overview-balance-card--hub .overview-balance-card-value {
-  font-size: 18px;
+  font-size: 16px;
 }
 
 .overview-balance-empty {

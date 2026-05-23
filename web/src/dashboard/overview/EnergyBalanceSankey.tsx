@@ -37,12 +37,12 @@ type CardSlot = {
 }
 
 const CARDS: Record<string, CardSlot> = {
-  pv: { left: 0, top: 2, width: 22, height: 22 },
-  gridImport: { left: 0, top: 38, width: 22, height: 22 },
-  essDischarge: { left: 0, top: 74, width: 22, height: 22 },
-  load: { left: 38, top: 30, width: 24, height: 38 },
-  gridExport: { left: 78, top: 2, width: 22, height: 22 },
-  essCharge: { left: 78, top: 56, width: 22, height: 22 },
+  pv: { left: 0, top: 4, width: 22, height: 18 },
+  gridImport: { left: 0, top: 41, width: 22, height: 18 },
+  essDischarge: { left: 0, top: 78, width: 22, height: 18 },
+  load: { left: 38, top: 32, width: 24, height: 36 },
+  gridExport: { left: 78, top: 4, width: 22, height: 18 },
+  essCharge: { left: 78, top: 60, width: 22, height: 18 },
 }
 
 const NODE_ICONS: Record<string, Icon> = {
