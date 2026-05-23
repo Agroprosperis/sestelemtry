@@ -1,4 +1,11 @@
-import { ArrowsClockwise } from '@phosphor-icons/react'
+import {
+  ArrowsClockwise,
+  BatteryFull,
+  BatteryHigh,
+  BatteryLow,
+  BatteryMedium,
+} from '@phosphor-icons/react'
+import type { ReactElement } from 'react'
 import type { CurrentResponse } from '../../types'
 import { formatPeriodLabel } from '../format'
 import type { RangePreset } from '../range'
@@ -63,6 +70,24 @@ function readSoc(current: CurrentResponse | null): number | null {
   return typeof v === 'number' && Number.isFinite(v) ? v : null
 }
 
+const RING_ICON_PROPS = {
+  size: 28,
+  weight: 'duotone' as const,
+  color: '#15803d',
+}
+
+// renderRingBatteryIcon picks the Phosphor glyph that visually
+// matches the current SOC band, so the centre of the ring
+// reinforces what the arc length already says without printing
+// another "52 %" string.
+function renderRingBatteryIcon(soc: number | null): ReactElement {
+  if (soc === null) return <BatteryMedium {...RING_ICON_PROPS} />
+  if (soc >= 80) return <BatteryFull {...RING_ICON_PROPS} />
+  if (soc >= 50) return <BatteryHigh {...RING_ICON_PROPS} />
+  if (soc >= 25) return <BatteryMedium {...RING_ICON_PROPS} />
+  return <BatteryLow {...RING_ICON_PROPS} />
+}
+
 // SocRing mirrors DailySummaryNarrative.ForecastRing so the two
 // hero blocks read as a pair: same radius, stroke width and label
 // typography. The arc length encodes SOC directly (0–100 %) since
@@ -77,52 +102,42 @@ function SocRing({
   const visible = loading ? null : socPercent
   const ratio = visible === null ? 0 : Math.max(0, Math.min(1, visible / 100))
   const dashOffset = RING_CIRCUMFERENCE * (1 - ratio)
-  const label =
-    visible === null ? PLACEHOLDER : `${Math.round(visible)}%`
   return (
-    <svg
-      className="summary-ring"
-      width={72}
-      height={72}
-      viewBox="0 0 72 72"
+    <span
+      className="summary-ring summary-ring--battery"
       role="img"
       aria-label={
         visible === null ? 'SOC недоступний' : `SOC ${Math.round(visible)} відсотків`
       }
     >
-      <circle
-        cx={36}
-        cy={36}
-        r={RING_RADIUS}
-        stroke="#e2e8f0"
-        strokeWidth={6}
-        fill="none"
-      />
-      {visible !== null && (
+      <svg width={72} height={72} viewBox="0 0 72 72" aria-hidden="true">
         <circle
           cx={36}
           cy={36}
           r={RING_RADIUS}
-          stroke="#22c55e"
+          stroke="#e2e8f0"
           strokeWidth={6}
           fill="none"
-          strokeDasharray={RING_CIRCUMFERENCE}
-          strokeDashoffset={dashOffset}
-          strokeLinecap="round"
-          transform="rotate(-90 36 36)"
         />
-      )}
-      <text
-        x={36}
-        y={40}
-        textAnchor="middle"
-        fontSize={14}
-        fontWeight={700}
-        fill="#0f172a"
-      >
-        {label}
-      </text>
-    </svg>
+        {visible !== null && (
+          <circle
+            cx={36}
+            cy={36}
+            r={RING_RADIUS}
+            stroke="#22c55e"
+            strokeWidth={6}
+            fill="none"
+            strokeDasharray={RING_CIRCUMFERENCE}
+            strokeDashoffset={dashOffset}
+            strokeLinecap="round"
+            transform="rotate(-90 36 36)"
+          />
+        )}
+      </svg>
+      <span className="summary-ring-icon" aria-hidden="true">
+        {renderRingBatteryIcon(visible)}
+      </span>
+    </span>
   )
 }
 

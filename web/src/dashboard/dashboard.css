@@ -418,6 +418,28 @@
   flex: 0 0 auto;
 }
 
+/* The battery variant overlays a Phosphor glyph in the centre of
+   the SVG arc so the ring reads as a battery gauge at a glance.
+   The wrapper uses inline grid stacking so the SVG and the icon
+   share the same 72x72 cell without absolute positioning. */
+.summary-ring--battery {
+  display: inline-grid;
+  place-items: center;
+  width: 72px;
+  height: 72px;
+}
+
+.summary-ring--battery > svg {
+  grid-area: 1 / 1;
+}
+
+.summary-ring-icon {
+  grid-area: 1 / 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .summary-segbar {
   display: flex;
   flex-direction: column;
