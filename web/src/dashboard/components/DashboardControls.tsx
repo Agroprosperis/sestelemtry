@@ -3,6 +3,7 @@ import type { RangePreset } from '../range'
 import { OrganizationSelect } from './OrganizationSelect'
 import { PeriodPicker } from './PeriodPicker'
 import { RangeSwitch } from './RangeSwitch'
+import { ViewSwitch, type ViewMode } from './ViewSwitch'
 
 // goToEconomicsView rewrites the URL to ?view=economics while
 // preserving the current organization_id. Implemented here (vs in
@@ -12,6 +13,21 @@ function goToEconomicsView() {
   if (typeof window === 'undefined') return
   const url = new URL(window.location.href)
   url.searchParams.set('view', 'economics')
+  window.history.pushState({}, '', url.toString())
+  window.dispatchEvent(new PopStateEvent('popstate'))
+}
+
+// goToView rewrites the ?view= param to the chosen mode and tells
+// the App router to re-read it. Used by the Огляд/Детально switch
+// rendered on both the detailed dashboard and the overview page.
+function goToView(next: ViewMode) {
+  if (typeof window === 'undefined') return
+  const url = new URL(window.location.href)
+  if (next === 'overview') {
+    url.searchParams.set('view', 'overview')
+  } else {
+    url.searchParams.delete('view')
+  }
   window.history.pushState({}, '', url.toString())
   window.dispatchEvent(new PopStateEvent('popstate'))
 }
@@ -27,6 +43,11 @@ type Props = {
   onExportClick?: () => void
   debug: boolean
   onDebugToggle: () => void
+  // view selects which "Огляд / Детально" segment shows as active in
+  // the strip. The strip is rendered both in the detailed dashboard
+  // (view='dashboard') and on the overview page (view='overview') —
+  // the switch updates the URL and triggers App-level routing.
+  view?: ViewMode
 }
 
 // DashboardControls is the strip of interactive widgets that sits
@@ -46,10 +67,12 @@ export function DashboardControls({
   onExportClick,
   debug,
   onDebugToggle,
+  view = 'dashboard',
 }: Props) {
   return (
     <div className="dashboard-controls">
       <OrganizationSelect value={organizationID} options={organizationOptions} onChange={onOrganizationChange} />
+      <ViewSwitch value={view} onChange={goToView} />
       <RangeSwitch value={preset} onChange={onPresetChange} />
       <PeriodPicker preset={preset} anchor={anchor} onChange={onAnchorChange} />
       <button

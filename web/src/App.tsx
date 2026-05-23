@@ -1,21 +1,26 @@
 import { useEffect, useState } from 'react'
 import { Dashboard } from './dashboard/Dashboard'
+import { OverviewPage } from './dashboard/overview/OverviewPage'
 import { EconomicsPage } from './economics/EconomicsPage'
+
+type View = 'dashboard' | 'overview' | 'economics'
 
 // readView reads the `?view=` query parameter on every render and
 // returns the active page id. We deliberately avoid pulling in
-// `react-router-dom` for what is currently a one-extra-page
+// `react-router-dom` for what is currently a small-set-of-pages
 // dashboard: the fewer client-side dependencies, the smaller the
 // initial JS payload (and the simpler the offline / PWA story).
-function readView(): 'dashboard' | 'economics' {
+function readView(): View {
   if (typeof window === 'undefined') return 'dashboard'
   const params = new URLSearchParams(window.location.search)
   const view = params.get('view')
-  return view === 'economics' ? 'economics' : 'dashboard'
+  if (view === 'economics') return 'economics'
+  if (view === 'overview') return 'overview'
+  return 'dashboard'
 }
 
 function App() {
-  const [view, setView] = useState<'dashboard' | 'economics'>(readView)
+  const [view, setView] = useState<View>(readView)
 
   // Listen for back/forward navigation so the lightweight query-param
   // routing still feels native: hitting the back button after going to
@@ -30,6 +35,9 @@ function App() {
 
   if (view === 'economics') {
     return <EconomicsPage />
+  }
+  if (view === 'overview') {
+    return <OverviewPage />
   }
   return <Dashboard />
 }

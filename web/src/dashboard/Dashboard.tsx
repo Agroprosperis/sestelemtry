@@ -98,6 +98,7 @@ export function Dashboard() {
             onExportClick={() => setExportOpen(true)}
             debug={debug}
             onDebugToggle={toggleDebug}
+            view="dashboard"
           />
           <WeatherCard
             organizationID={organizationID}
