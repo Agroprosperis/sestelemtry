@@ -542,6 +542,20 @@ export function useDashboardData(input: {
     }
   }, [organizationID, preset, anchorTime])
 
+  // Auto-trigger the flow allocator on `day` preset so the
+  // BatteryDayNarrative / DailySummaryNarrative cards (which read
+  // pvToLoad / pvToEss / pvToGrid / essCharged / essDischarged out
+  // of `energyFlows`) have data on first paint instead of zeros.
+  // The allocator is still gated to `day` because the on-the-fly
+  // allocator is meaningless for month/year aggregates. A user
+  // switching organization or date kicks this off again; the
+  // refresh button on the period-flow card stays useful for forced
+  // re-runs without reloading the page.
+  useEffect(() => {
+    if (preset !== 'day') return
+    refreshFlows()
+  }, [organizationID, anchorTime, preset, refreshFlows])
+
   return {
     config,
     current,

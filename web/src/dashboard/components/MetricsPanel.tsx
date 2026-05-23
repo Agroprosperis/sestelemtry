@@ -8,7 +8,6 @@ import { CurrentSnapshotNarrative } from './CurrentSnapshotNarrative'
 import { DailySummaryNarrative } from './DailySummaryNarrative'
 import { EnergyFlowPeriodSummary } from './EnergyFlowPeriodSummary'
 import { MetricsAtPicker } from './MetricsAtPicker'
-import { TodayCountersNarrative } from './TodayCountersNarrative'
 
 type Props = {
   current: CurrentResponse | null
@@ -69,12 +68,6 @@ export function MetricsPanel({
       )}
       <CurrentSnapshotNarrative
         liveAllocation={liveAllocation}
-        loading={loading}
-        debug={debug}
-        registers={registers}
-      />
-      <TodayCountersNarrative
-        current={current}
         loading={loading}
         debug={debug}
         registers={registers}
