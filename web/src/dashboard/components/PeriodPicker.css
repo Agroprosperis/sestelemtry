@@ -76,3 +76,21 @@
 .period-picker input[type='month']::-webkit-inner-spin-button {
   display: none;
 }
+
+/* Force the native datetime-edit shadow element to center its text
+ * box across the input width. Without this the wrapper hugs the
+ * start edge and `text-align: center` on the host has no effect,
+ * which leaves "23.05.2026" visually shifted left even after we
+ * hide the picker indicator. */
+.period-picker input[type='date']::-webkit-datetime-edit,
+.period-picker input[type='month']::-webkit-datetime-edit {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  padding: 0;
+}
+
+.period-picker input[type='date']::-webkit-datetime-edit-fields-wrapper,
+.period-picker input[type='month']::-webkit-datetime-edit-fields-wrapper {
+  padding: 0;
+}
