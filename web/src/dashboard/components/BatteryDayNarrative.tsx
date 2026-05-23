@@ -113,7 +113,7 @@ export function BatteryDayNarrative({
   const socPercent = readSoc(current)
   const periodLabel = formatPeriodLabel(preset, anchor)
 
-  const flowRows: FlowRow[] = [
+  const chargeRows: FlowRow[] = [
     {
       label: 'Від сонця → УЗЕ',
       valueKwh: flows.pvToEssKwh,
@@ -128,6 +128,8 @@ export function BatteryDayNarrative({
       color: '#3b82f6',
       bucket: 'in',
     },
+  ]
+  const dischargeRows: FlowRow[] = [
     {
       label: 'УЗЕ → споживання',
       valueKwh: flows.essToLoadKwh,
@@ -143,15 +145,40 @@ export function BatteryDayNarrative({
       bucket: 'out',
     },
   ]
-  const totalIn = flowRows
-    .filter((r) => r.bucket === 'in')
-    .reduce((s, r) => s + r.valueKwh, 0)
-  const totalOut = flowRows
-    .filter((r) => r.bucket === 'out')
-    .reduce((s, r) => s + r.valueKwh, 0)
-  const denomFor = (b: 'in' | 'out') => (b === 'in' ? totalIn : totalOut)
+  // The breakdown rows under each summary use that summary's total
+  // as their denominator so percentages always sum to 100 % within
+  // a column instead of being normalised against the mixed total.
+  const denomFor = (b: 'in' | 'out') => (b === 'in' ? charged : discharged)
 
   const isBusy = loading || refreshing
+
+  const renderBreakdownRow = (r: FlowRow) => {
+    const denom = denomFor(r.bucket)
+    const pct = isBusy || denom <= 0 ? 0 : (r.valueKwh / denom) * 100
+    return (
+      <li key={r.label} className="battery-narrative-breakdown-item">
+        <span className="battery-narrative-breakdown-icon" aria-hidden="true">
+          <r.Icon size={ROW_ICON_SIZE} weight="duotone" color={r.color} />
+        </span>
+        <span className="battery-narrative-breakdown-label">{r.label}</span>
+        <strong className="battery-narrative-breakdown-value">
+          {isBusy ? PLACEHOLDER : formatEnergyUk(r.valueKwh)}
+        </strong>
+        <span className="battery-narrative-breakdown-bar" aria-hidden="true">
+          <span
+            className="battery-narrative-breakdown-fill"
+            style={{
+              width: `${Math.max(0, Math.min(100, pct))}%`,
+              background: r.color,
+            }}
+          />
+        </span>
+        <span className="battery-narrative-breakdown-pct">
+          {isBusy ? PLACEHOLDER : formatPercent(pct)}
+        </span>
+      </li>
+    )
+  }
 
   return (
     <section
@@ -198,6 +225,9 @@ export function BatteryDayNarrative({
                 style={{ width: `${isBusy ? 0 : clampPct(charged, maxTotal)}%` }}
               />
             </div>
+            <ul className="battery-narrative-breakdown">
+              {chargeRows.map(renderBreakdownRow)}
+            </ul>
           </div>
           <div className="battery-narrative-row">
             <div className="battery-narrative-row-head">
@@ -214,41 +244,12 @@ export function BatteryDayNarrative({
                 }}
               />
             </div>
+            <ul className="battery-narrative-breakdown">
+              {dischargeRows.map(renderBreakdownRow)}
+            </ul>
           </div>
         </div>
       </div>
-      <div className="battery-narrative-divider" aria-hidden="true" />
-      <ul className="accum-narrative-list">
-        {flowRows.map((r) => {
-          const denom = denomFor(r.bucket)
-          // While refreshing, bars and percentages collapse so the
-          // previous load's flow story doesn't linger as fresh data.
-          const pct = isBusy || denom <= 0 ? 0 : (r.valueKwh / denom) * 100
-          return (
-            <li key={r.label} className="accum-narrative-item">
-              <span className="accum-narrative-icon" aria-hidden="true">
-                <r.Icon size={ROW_ICON_SIZE} weight="duotone" color={r.color} />
-              </span>
-              <span className="accum-narrative-label">{r.label}</span>
-              <strong className="accum-narrative-value">
-                {isBusy ? PLACEHOLDER : formatEnergyUk(r.valueKwh)}
-              </strong>
-              <span className="accum-narrative-bar" aria-hidden="true">
-                <span
-                  className="accum-narrative-bar-fill"
-                  style={{
-                    width: `${Math.max(0, Math.min(100, pct))}%`,
-                    background: r.color,
-                  }}
-                />
-              </span>
-              <span className="accum-narrative-pct">
-                {isBusy ? PLACEHOLDER : formatPercent(pct)}
-              </span>
-            </li>
-          )
-        })}
-      </ul>
       <p className="battery-narrative-balance-foot">
         Баланс батареї:{' '}
         {isBusy ? (

@@ -371,30 +371,6 @@
   height: 100%;
 }
 
-/* battery-narrative reuses accum-narrative-list for its 4-row
-   directional flow breakdown, so this scoped override extends the
-   row grid with a trailing % column. Other consumers of
-   accum-narrative-list (cumulative snapshot) keep the simpler
-   3-col shape on row 1. */
-.battery-narrative .accum-narrative-item {
-  grid-template-columns: 24px 1fr auto auto;
-}
-
-.battery-narrative .accum-narrative-bar {
-  grid-column: 2 / 4;
-}
-
-.accum-narrative-pct {
-  font-size: 12px;
-  color: #64748b;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-  text-align: right;
-  grid-row: 2;
-  grid-column: 4;
-  padding-left: 6px;
-}
-
 /* DailySummaryNarrative renders a forecast-ring hero on top and
    two segmented bars below: "Куди пішла енергія від СЕС" and
    "Споживання приладів". Scoped to the narrower left-panel
@@ -645,13 +621,77 @@
   color: #94a3b8;
 }
 
-/* Divider between the SOC + summary block and the directional
-   flow rows below — visually separates "totals" from "breakdown"
-   without forcing two cards. */
-.battery-narrative-divider {
-  height: 1px;
+/* The breakdown list nests directional flows under their parent
+   summary (Заряд / Розряд). Bars sit on row 2 so labels and
+   numbers stay legible in the narrow left panel. */
+.battery-narrative-breakdown {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.battery-narrative-breakdown-item {
+  display: grid;
+  grid-template-columns: 18px 1fr auto auto;
+  column-gap: 6px;
+  row-gap: 2px;
+  align-items: center;
+  font-size: 12px;
+}
+
+.battery-narrative-breakdown-icon {
+  grid-row: 1;
+  grid-column: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.battery-narrative-breakdown-label {
+  grid-row: 1;
+  grid-column: 2;
+  color: #475569;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.battery-narrative-breakdown-value {
+  grid-row: 1;
+  grid-column: 3;
+  font-weight: 600;
+  color: #0f172a;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.battery-narrative-breakdown-bar {
+  grid-row: 2;
+  grid-column: 2 / 4;
+  height: 4px;
   background: #e2e8f0;
-  margin: 4px 0;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.battery-narrative-breakdown-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+}
+
+.battery-narrative-breakdown-pct {
+  grid-row: 2;
+  grid-column: 4;
+  font-size: 11px;
+  color: #64748b;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  text-align: right;
+  padding-left: 4px;
 }
 
 .battery-narrative-balance-foot {
