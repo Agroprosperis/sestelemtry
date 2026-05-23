@@ -25,25 +25,42 @@ function today(): string {
   return fmt.format(new Date())
 }
 
+// readDateFromUrl picks the day shown on the economics page,
+// preferring `?anchor` so toggling between the main dashboard and
+// this view keeps a shared "what day am I looking at" pin without
+// the operator re-selecting it. `?date` is supported as a
+// backward-compat fallback for shared links from before the URL
+// keys were unified — they self-heal on first edit because
+// `updateUrl` deletes the legacy `date` param when it writes
+// `anchor`.
+//
+// We accept any preset's anchor (day/month/year) as the date here:
+// month/year anchors land on the 1st of the period, which is a
+// valid calendar day for the economics view to render.
 function readDateFromUrl(): string {
   if (typeof window === 'undefined') return today()
   const params = new URLSearchParams(window.location.search)
-  const value = params.get('date')
-  if (!value) return today()
+  const raw = (params.get('anchor') ?? params.get('date') ?? '').trim()
+  if (!raw) return today()
   // Soft validation: must look like YYYY-MM-DD. We don't full-parse
   // here — the backend already rejects malformed dates with a 400.
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return today()
-  return value
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return today()
+  return raw
 }
 
 // updateUrl rewrites the current URL's query string in place using
 // `replaceState` so changing the date doesn't pollute the browser
 // history with one entry per keystroke. Tariffs are no longer URL-
 // persisted (per-org settings live on the backend now); the org param
-// is owned by `useOrganizationParam`. Any leftover legacy tariff
-// query params (distribution=…, etc.) are silently dropped here so
-// shared old links self-clean on first interaction.
-const LEGACY_TARIFF_KEYS = [
+// is owned by `useOrganizationParam`. We write the same `anchor`
+// key the main dashboard uses so a click on "← Дашборд" lands on
+// the same day the analyst was viewing here.
+//
+// Legacy keys (`?date` from older economics shares, `?distribution=…`
+// etc. from URL-persisted tariffs) are silently dropped so shared
+// old links self-clean on first interaction.
+const LEGACY_QUERY_KEYS = [
+  'date',
   'distribution',
   'transmission',
   'supplier_margin',
@@ -59,8 +76,8 @@ function updateUrl(date: string) {
   if (typeof window === 'undefined') return
   const url = new URL(window.location.href)
   url.searchParams.set('view', 'economics')
-  url.searchParams.set('date', date)
-  for (const key of LEGACY_TARIFF_KEYS) url.searchParams.delete(key)
+  url.searchParams.set('anchor', date)
+  for (const key of LEGACY_QUERY_KEYS) url.searchParams.delete(key)
   window.history.replaceState({}, '', url.toString())
 }
 
