@@ -5,12 +5,39 @@ import { DashboardHeader } from '../components/DashboardHeader'
 import { useDebugMode } from '../hooks/useDebugMode'
 import { useOrganizationParam } from '../hooks/useOrganizationParam'
 import { useRangeParams } from '../hooks/useRangeParams'
+import type { EnergyFlows } from '../transforms/flows'
 import { BatteryDayCard } from './BatteryDayCard'
 import { BatteryFlowsCard } from './BatteryFlowsCard'
 import { CumulativeMetricsCard } from './CumulativeMetricsCard'
 import { DailySummaryCard } from './DailySummaryCard'
 import { EnergyBalanceSankey } from './EnergyBalanceSankey'
 import { useOverviewData } from './useOverviewData'
+
+// hasDemoFlag is a dev-only escape hatch: with `?demo=1` the page
+// short-circuits the data hook and renders a deterministic snapshot
+// that mirrors the design mock. Useful for visual review when the
+// local DB has no real data, but never enabled in production builds.
+function hasDemoFlag(): boolean {
+  if (!import.meta.env.DEV) return false
+  if (typeof window === 'undefined') return false
+  return new URLSearchParams(window.location.search).get('demo') === '1'
+}
+
+const DEMO_FLOWS: EnergyFlows = {
+  pvProducedKwh: 2880,
+  loadConsumedKwh: 311.7,
+  gridImportKwh: 310,
+  gridExportKwh: 2570,
+  essChargedKwh: 118.91,
+  essDischargedKwh: 0.13,
+  pvToLoadKwh: 191.2,
+  gridToLoadKwh: 120.4,
+  essToLoadKwh: 0.1,
+  pvToGridKwh: 2569.97,
+  pvToEssKwh: 118.83,
+  gridToEssKwh: 0.08,
+  essToGridKwh: 0.03,
+}
 
 // OverviewPage is the high-level "today's energy" view. It packs
 // six panels (Sankey balance, daily summary with forecast ring,
@@ -27,8 +54,14 @@ export function OverviewPage() {
   const { organizationID, options, change: onOrganizationChange } = useOrganizationParam()
   const { debug, toggleDebug } = useDebugMode()
 
-  const { flows, socPercent, cumulative, pvForecastKwh, loading, error } =
-    useOverviewData({ organizationID, anchor })
+  const data = useOverviewData({ organizationID, anchor })
+  const demo = hasDemoFlag()
+  const flows = demo ? DEMO_FLOWS : data.flows
+  const socPercent = demo ? 64 : data.socPercent
+  const cumulative = data.cumulative
+  const pvForecastKwh = demo ? 3120 : data.pvForecastKwh
+  const loading = demo ? false : data.loading
+  const error = demo ? undefined : data.error
 
   return (
     <main className="dashboard-page overview-page">
