@@ -24,15 +24,17 @@ type CostChartRow = {
 
 const formatHourLabel = (hour: number) => `${String(hour).padStart(2, '0')}:00`
 
-const uahFormatter = new Intl.NumberFormat('uk-UA', {
-  style: 'currency',
-  currency: 'UAH',
-  minimumFractionDigits: 0,
-  maximumFractionDigits: 0,
-})
-
-function uahTickFormatter(v: number): string {
-  return uahFormatter.format(v).replace('UAH', '').trim()
+// pickFractionDigits adapts UAH precision to the chart's value
+// range. Without this, an off-peak day where the УЗЕ contributes a
+// few hryvnias gets rounded to all-zeros — the bars stay visible
+// but every Y-axis tick and tooltip prints "0 ₴", making the chart
+// look broken when it isn't. Two decimals for sub-1 ₴ values, one
+// decimal for 1..9 ₴, and integers from 10 ₴ upward keeps the
+// labels readable across day-types without retuning per fixture.
+function pickFractionDigits(maxAbs: number): number {
+  if (maxAbs < 1) return 2
+  if (maxAbs < 10) return 1
+  return 0
 }
 
 export function EconomicsCharts({ rows }: Props) {
@@ -45,6 +47,32 @@ export function EconomicsCharts({ rows }: Props) {
       })),
     [rows],
   )
+
+  // Drive Y-axis + tooltip precision from the largest hour magnitude
+  // shown on the chart so every series gets the same number of
+  // decimals (avoids "0 ₴" labels next to non-zero bars).
+  const maxAbs = useMemo(() => {
+    let m = 0
+    for (const row of costData) {
+      if (row.essNet === null || !Number.isFinite(row.essNet)) continue
+      const a = Math.abs(row.essNet)
+      if (a > m) m = a
+    }
+    return m
+  }, [costData])
+
+  const uahFormatter = useMemo(() => {
+    const fractionDigits = pickFractionDigits(maxAbs)
+    return new Intl.NumberFormat('uk-UA', {
+      style: 'currency',
+      currency: 'UAH',
+      minimumFractionDigits: fractionDigits,
+      maximumFractionDigits: fractionDigits,
+    })
+  }, [maxAbs])
+
+  const uahTickFormatter = (v: number): string =>
+    uahFormatter.format(v).replace('UAH', '').trim()
 
   const tooltipUahFormatter = (value: number) =>
     Number.isFinite(value) ? uahFormatter.format(value) : '—'
