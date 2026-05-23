@@ -457,6 +457,11 @@
   color: #0f172a;
 }
 
+.economics-table-context {
+  color: #64748b;
+  font-weight: 400;
+}
+
 .economics-table-scroll {
   overflow-x: auto;
   /* Cap to viewport so a 18-column table never blows out the

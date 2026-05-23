@@ -1,8 +1,26 @@
 import type { ReactElement } from 'react'
+import { formatOrganizationLabel } from '../../dashboard/config'
 import type { HourEconomicsRow } from '../compute'
 
 type Props = {
   rows: Array<HourEconomicsRow | null>
+  // organizationID + date are surfaced in the table heading so an
+  // operator who exports / screenshots the breakdown can see at a
+  // glance which elevator and which day the numbers belong to.
+  organizationID: string
+  date: string
+}
+
+// formatLocalDate turns an ISO YYYY-MM-DD into the dotted Ukrainian
+// form (DD.MM.YYYY) so the heading matches the PeriodPicker's
+// rendering. We deliberately avoid `new Date(value).toLocale*` to
+// dodge the UTC-midnight off-by-one shift that bites in negative
+// browser offsets — the underlying string is already a calendar day
+// and we just reformat it.
+function formatLocalDate(iso: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso)
+  if (!m) return iso
+  return `${m[3]}.${m[2]}.${m[1]}`
 }
 
 const numberFmt = new Intl.NumberFormat('uk-UA', {
@@ -552,10 +570,15 @@ function renderCell(
 
 const HOUR_COUNT = 24
 
-export function EconomicsTable({ rows }: Props) {
+export function EconomicsTable({ rows, organizationID, date }: Props) {
+  const orgLabel = formatOrganizationLabel(organizationID)
+  const dateLabel = formatLocalDate(date)
   return (
     <section className="economics-table-wrap" aria-label="Погодинна деталізація">
-      <h3>Погодинна деталізація</h3>
+      <h3>
+        Погодинна деталізація
+        <span className="economics-table-context"> · {orgLabel} · {dateLabel}</span>
+      </h3>
       <div className="economics-table-scroll">
         <table className="economics-table economics-table-pivot">
           <thead>

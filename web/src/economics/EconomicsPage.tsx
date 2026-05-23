@@ -155,7 +155,7 @@ export function EconomicsPage() {
           <EconomicsKpis totals={totals} tariffs={tariffs} />
           <EconomicsRevenuePanel totals={totals} />
           <EconomicsCharts rows={data.rows} />
-          <EconomicsTable rows={data.rows} />
+          <EconomicsTable rows={data.rows} organizationID={organizationID} date={date} />
         </>
       )}
     </main>
