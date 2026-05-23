@@ -1,9 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Dashboard } from './dashboard/Dashboard'
-import { OverviewPage } from './dashboard/overview/OverviewPage'
 import { EconomicsPage } from './economics/EconomicsPage'
 
-type View = 'dashboard' | 'overview' | 'economics'
+type View = 'dashboard' | 'economics'
 
 // readView reads the `?view=` query parameter on every render and
 // returns the active page id. We deliberately avoid pulling in
@@ -15,7 +14,6 @@ function readView(): View {
   const params = new URLSearchParams(window.location.search)
   const view = params.get('view')
   if (view === 'economics') return 'economics'
-  if (view === 'overview') return 'overview'
   return 'dashboard'
 }
 
@@ -35,9 +33,6 @@ function App() {
 
   if (view === 'economics') {
     return <EconomicsPage />
-  }
-  if (view === 'overview') {
-    return <OverviewPage />
   }
   return <Dashboard />
 }

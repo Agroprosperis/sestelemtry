@@ -75,7 +75,6 @@ export function Dashboard() {
           loading={cardsLoading}
           metricsAt={metricsAt}
           onMetricsAtChange={setMetricsAt}
-          summary={energySummary}
           flows={energyFlows}
           preset={preset}
           anchor={anchor}
@@ -98,7 +97,6 @@ export function Dashboard() {
             onExportClick={() => setExportOpen(true)}
             debug={debug}
             onDebugToggle={toggleDebug}
-            view="dashboard"
           />
           <WeatherCard
             organizationID={organizationID}

@@ -40,9 +40,8 @@ describe('EnergyFlowPeriodSummary', () => {
   it('renders the four flow rows with kWh values from flowsFromTotals', () => {
     renderCard()
 
-    // The card now uses the icon · label · value · bar · % layout
-    // (mirrors the overview's BatteryFlowsCard) — labels read as
-    // arrows instead of full sentences.
+    // The card uses the icon · label · value · bar · % layout —
+    // labels read as arrows instead of full sentences.
     expect(screen.getByText(/Від сонця → УЗЕ/)).toBeInTheDocument()
     expect(screen.getByText(/З мережі → УЗЕ/)).toBeInTheDocument()
     expect(screen.getByText(/УЗЕ → споживання/)).toBeInTheDocument()

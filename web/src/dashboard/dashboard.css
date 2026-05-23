@@ -282,10 +282,9 @@
 }
 
 /* AccumulatedSnapshotNarrative renders one row per cumulative
-   counter with the icon · label · value · proportional bar layout
-   (mirrors the overview view's cumulative card so both surfaces
-   read consistently). Bars are normalized against the largest
-   value in the set so small readings stay visible at a glance. */
+   counter with the icon · label · value · proportional bar layout.
+   Bars are normalized against the largest value in the set so
+   small readings stay visible at a glance. */
 .accum-narrative-list {
   list-style: none;
   margin: 0;
@@ -390,6 +389,257 @@
 
 .flow-period-balance strong.is-negative {
   color: #dc2626;
+}
+
+/* DailySummaryNarrative renders a forecast-ring hero on top and
+   two segmented bars below: "Куди пішла енергія від СЕС" and
+   "Споживання приладів". Scoped to the narrower left-panel
+   column with smaller hero typography than a full-width card. */
+.summary-narrative {
+  gap: 12px;
+}
+
+.summary-hero {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: linear-gradient(135deg, #f8fafc 0%, #ffffff 60%);
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.summary-hero-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.summary-hero-label {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.summary-hero-value {
+  font-size: 20px;
+  font-weight: 700;
+  color: #0f172a;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+
+.summary-hero-sub {
+  font-size: 12px;
+  color: #475569;
+}
+
+.summary-ring {
+  flex: 0 0 auto;
+}
+
+.summary-segbar {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.summary-segbar-head {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  color: #334155;
+  gap: 12px;
+}
+
+.summary-segbar-head strong {
+  color: #0f172a;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.summary-segbar-track {
+  display: flex;
+  width: 100%;
+  height: 8px;
+  border-radius: 999px;
+  background: #f1f5f9;
+  overflow: hidden;
+}
+
+.summary-segbar-fill {
+  display: block;
+  height: 100%;
+}
+
+.summary-segbar-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.summary-segbar-list li {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #334155;
+}
+
+.summary-segbar-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.summary-segbar-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.summary-segbar-value {
+  font-variant-numeric: tabular-nums;
+  color: #0f172a;
+}
+
+.summary-segbar-pct {
+  color: #64748b;
+}
+
+.summary-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  flex: 0 0 auto;
+}
+
+/* BatteryDayNarrative renders a SOC tile next to a stack of
+   charge/discharge bars and a balance footer, telling the
+   battery-state-of-day story at a glance. */
+.battery-narrative {
+  gap: 12px;
+}
+
+.battery-narrative-body {
+  display: flex;
+  align-items: stretch;
+  gap: 12px;
+}
+
+.battery-narrative-soc {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  background: linear-gradient(160deg, #f0fdf4 0%, #ffffff 70%);
+  border: 1px solid #bbf7d0;
+  border-radius: 10px;
+  padding: 10px 14px;
+  min-width: 92px;
+}
+
+.battery-narrative-soc strong {
+  font-size: 20px;
+  font-weight: 700;
+  color: #0f172a;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.battery-narrative-soc span {
+  font-size: 11px;
+  color: #64748b;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.battery-narrative-stats {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.battery-narrative-row-head {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  color: #334155;
+}
+
+.battery-narrative-row-head strong {
+  font-weight: 600;
+  color: #0f172a;
+  font-variant-numeric: tabular-nums;
+}
+
+.battery-narrative-track {
+  margin-top: 4px;
+  width: 100%;
+  height: 6px;
+  border-radius: 999px;
+  background: #f1f5f9;
+  overflow: hidden;
+}
+
+.battery-narrative-fill {
+  display: block;
+  height: 100%;
+}
+
+.battery-narrative-fill--charge {
+  background: #22c55e;
+}
+
+.battery-narrative-fill--discharge {
+  background: #f97316;
+}
+
+.battery-narrative-balance {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px dashed #e2e8f0;
+}
+
+.battery-narrative-balance span {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.battery-narrative-balance strong {
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+}
+
+.battery-narrative-balance strong.is-positive {
+  color: #16a34a;
+}
+
+.battery-narrative-balance strong.is-negative {
+  color: #dc2626;
+}
+
+.battery-narrative-balance small {
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+@media (max-width: 720px) {
+  .battery-narrative-body {
+    flex-direction: column;
+  }
 }
 
 .metrics-at-hint {

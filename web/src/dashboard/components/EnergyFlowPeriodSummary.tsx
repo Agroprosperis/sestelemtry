@@ -13,9 +13,10 @@ import type { EnergyFlows } from '../transforms/flows'
 // EnergyFlowPeriodSummary is the four-line battery flow companion
 // to the live power diagram. It reads off the directional flow
 // totals the API server computed on the fly for the selected
-// period and surfaces them with the same icon · label · value ·
-// bar · % layout used in the overview view's BatteryFlowsCard, so
-// both dashboards expose the battery's daily story consistently.
+// period and surfaces them with an icon · label · value · bar · %
+// layout, normalising in/out percentages against their respective
+// direction totals so a tiny inflow stays visible against a much
+// larger outflow.
 //
 // Today the card is only rendered for the `day` preset (the parent
 // `MetricsPanel` gates it on the global RangePreset). Month/year

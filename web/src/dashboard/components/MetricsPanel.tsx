@@ -2,8 +2,8 @@ import type { CurrentResponse, RegisterMeta } from '../../types'
 import type { RangePreset } from '../range'
 import type { EnergyFlows } from '../transforms/flows'
 import type { LiveAllocation } from '../transforms/liveAllocation'
-import type { EnergySummary } from '../transforms/summary'
 import { AccumulatedSnapshotNarrative } from './AccumulatedSnapshotNarrative'
+import { BatteryDayNarrative } from './BatteryDayNarrative'
 import { CurrentSnapshotNarrative } from './CurrentSnapshotNarrative'
 import { DailySummaryNarrative } from './DailySummaryNarrative'
 import { EnergyFlowPeriodSummary } from './EnergyFlowPeriodSummary'
@@ -16,7 +16,6 @@ type Props = {
   loading: boolean
   metricsAt: Date | null
   onMetricsAtChange: (next: Date | null) => void
-  summary: EnergySummary
   flows: EnergyFlows
   preset: RangePreset
   anchor: Date
@@ -49,7 +48,6 @@ export function MetricsPanel({
   loading,
   metricsAt,
   onMetricsAtChange,
-  summary,
   flows,
   preset,
   anchor,
@@ -82,13 +80,16 @@ export function MetricsPanel({
         registers={registers}
       />
       <DailySummaryNarrative
-        summary={summary}
+        flows={flows}
         preset={preset}
         anchor={anchor}
         debug={debug}
         registers={registers}
         pvForecastTotal={pvForecastTotal}
       />
+      {preset === 'day' && (
+        <BatteryDayNarrative flows={flows} current={current} loading={loading} />
+      )}
       {preset === 'day' && (
         <EnergyFlowPeriodSummary
           flows={flows}
