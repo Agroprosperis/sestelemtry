@@ -2,6 +2,7 @@ import type { RegisterMeta } from '../../types'
 import { formatPeriodLabel } from '../format'
 import type { RangePreset } from '../range'
 import type { EnergyFlows } from '../transforms/flows'
+import { LoadingSpinner } from './LoadingSpinner'
 import { ModbusAddr } from './ModbusAddr'
 
 type Props = {
@@ -15,6 +16,11 @@ type Props = {
   // for the org or non-day preset). Drives the radial "% виконання"
   // ring above the segment bars.
   pvForecastTotal: number | null
+  // loading tracks the period-flow allocator. The card stays
+  // visible with last-known values during refresh so the operator
+  // sees what's about to change; the title spinner is the
+  // "fetching new numbers" cue.
+  loading?: boolean
 }
 
 const TITLES: Record<RangePreset, string> = {
@@ -176,6 +182,7 @@ export function DailySummaryNarrative({
   debug,
   registers,
   pvForecastTotal,
+  loading,
 }: Props) {
   const periodLabel = formatPeriodLabel(preset, anchor)
   const pvSegments = [
@@ -219,12 +226,14 @@ export function DailySummaryNarrative({
     <section
       className="metrics-group summary-narrative"
       aria-labelledby="daily-narrative-title"
+      aria-busy={loading || undefined}
     >
       <header className="metrics-group-header">
         <h2 id="daily-narrative-title" className="metrics-group-title">
           {TITLES[preset]}
           <span className="metrics-group-subtitle"> · {periodLabel}</span>
         </h2>
+        {loading && <LoadingSpinner label="Завантаження підсумку" />}
       </header>
       <div className="summary-hero">
         <div className="summary-hero-text">

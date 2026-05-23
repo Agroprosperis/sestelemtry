@@ -7,6 +7,7 @@ import {
 import type { ReactElement } from 'react'
 import type { CurrentResponse } from '../../types'
 import type { EnergyFlows } from '../transforms/flows'
+import { LoadingSpinner } from './LoadingSpinner'
 
 type Props = {
   flows: EnergyFlows
@@ -70,9 +71,12 @@ export function BatteryDayNarrative({ flows, current, loading }: Props) {
       aria-labelledby="battery-day-title"
       aria-busy={loading || undefined}
     >
-      <h2 id="battery-day-title" className="metrics-group-title">
-        Батарея за день
-      </h2>
+      <header className="metrics-group-header">
+        <h2 id="battery-day-title" className="metrics-group-title">
+          Батарея за день
+        </h2>
+        {loading && <LoadingSpinner label="Завантаження стану батареї" />}
+      </header>
       <div className="battery-narrative-body">
         <div className="battery-narrative-soc">
           {renderBatteryIcon(socPercent)}

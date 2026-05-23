@@ -243,6 +243,28 @@
   }
 }
 
+/* Passive loading indicator used in narrative-card headers (no
+   button affordance, just the rotating glyph). Reuses the same
+   `metrics-refresh-spin` keyframe so all spinners on the page
+   rotate at the same rate. */
+.metrics-group-spinner {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #64748b;
+  flex: 0 0 auto;
+}
+
+.metrics-group-spinner.is-spinning svg {
+  animation: metrics-refresh-spin 0.9s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .metrics-group-spinner.is-spinning svg {
+    animation: none;
+  }
+}
+
 .daily-narrative-list {
   list-style: none;
   margin: 0;

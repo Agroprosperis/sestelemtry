@@ -79,9 +79,14 @@ export function MetricsPanel({
         debug={debug}
         registers={registers}
         pvForecastTotal={pvForecastTotal}
+        loading={flowsRefreshing}
       />
       {preset === 'day' && (
-        <BatteryDayNarrative flows={flows} current={current} loading={loading} />
+        <BatteryDayNarrative
+          flows={flows}
+          current={current}
+          loading={flowsRefreshing}
+        />
       )}
       {preset === 'day' && (
         <EnergyFlowPeriodSummary

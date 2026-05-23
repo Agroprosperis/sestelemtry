@@ -9,6 +9,7 @@ import {
 } from '@phosphor-icons/react'
 import type { CurrentResponse, RegisterMeta } from '../../types'
 import { formatEnergyCompactKWhUk } from '../format'
+import { LoadingSpinner } from './LoadingSpinner'
 import { ModbusAddr } from './ModbusAddr'
 
 type Props = {
@@ -112,9 +113,12 @@ export function AccumulatedSnapshotNarrative({
       aria-labelledby="accumulated-snapshot-title"
       aria-busy={loading}
     >
-      <h2 id="accumulated-snapshot-title" className="metrics-group-title">
-        Накопичувальні показники
-      </h2>
+      <header className="metrics-group-header">
+        <h2 id="accumulated-snapshot-title" className="metrics-group-title">
+          Накопичувальні показники
+        </h2>
+        {loading && <LoadingSpinner label="Завантаження лічильників" />}
+      </header>
       <ul className="accum-narrative-list">
         {rows.map((r) => {
           const pct = max > 0 && r.value !== null ? (r.value / max) * 100 : 0
