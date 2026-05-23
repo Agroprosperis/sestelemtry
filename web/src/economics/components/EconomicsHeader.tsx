@@ -1,8 +1,29 @@
 import { useId } from 'react'
 import { OrganizationSelect } from '../../dashboard/components/OrganizationSelect'
+import { PeriodPicker } from '../../dashboard/components/PeriodPicker'
 import { formatOrganizationLabel } from '../../dashboard/config'
 import { DEFAULT_TARIFFS, type Tariffs } from '../tariffs'
 import type { OrgTariffsStatus } from '../useOrgTariffs'
+
+// parseDateString and formatDateString translate between the
+// "YYYY-MM-DD" string the economics page already keeps in state
+// (and on the URL) and the Date object PeriodPicker expects. We
+// construct local-time Dates so the picker's day index matches the
+// operator's wall clock — using `new Date('YYYY-MM-DD')` instead
+// would parse as UTC midnight and shift back a day in negative
+// offsets relative to UTC.
+function parseDateString(value: string): Date {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
+  if (!m) return new Date()
+  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
+}
+
+function formatDateString(d: Date): string {
+  const y = d.getFullYear()
+  const mo = String(d.getMonth() + 1).padStart(2, '0')
+  const da = String(d.getDate()).padStart(2, '0')
+  return `${y}-${mo}-${da}`
+}
 
 type Props = {
   organizationID: string
@@ -121,14 +142,11 @@ export function EconomicsHeader({
             options={organizationOptions}
             onChange={onOrganizationChange}
           />
-          <label className="economics-date">
-            <span>Дата</span>
-            <input
-              type="date"
-              value={date}
-              onChange={(e) => onDateChange(e.target.value)}
-            />
-          </label>
+          <PeriodPicker
+            preset="day"
+            anchor={parseDateString(date)}
+            onChange={(next) => onDateChange(formatDateString(next))}
+          />
           <button
             type="button"
             className="economics-back-link"

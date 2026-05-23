@@ -1,0 +1,78 @@
+/* PeriodPicker styles. Co-located with the component (rather than
+ * in dashboard/dashboard.css) so any page can `import` the picker
+ * and get the visuals "for free", without having to also pull the
+ * dashboard's full stylesheet. The economics page reuses the picker
+ * to keep the day-selection control visually identical across views.
+ */
+.period-picker {
+  display: inline-flex;
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 2px;
+  color: #334155;
+  gap: 2px;
+  width: 220px;
+}
+
+.period-picker .period-nav {
+  border: none;
+  background: transparent;
+  color: #475569;
+  font-size: 18px;
+  line-height: 1;
+  padding: 4px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.period-picker .period-nav:hover:not(:disabled) {
+  background: #f1f5f9;
+}
+
+.period-picker .period-nav:disabled {
+  color: #cbd5e1;
+  cursor: not-allowed;
+}
+
+.period-picker .period-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 8px;
+  justify-content: center;
+}
+
+.period-picker input[type='date'],
+.period-picker input[type='month'],
+.period-picker select {
+  border: none;
+  background: transparent;
+  color: #0f172a;
+  font-size: 14px;
+  outline: none;
+  font-family: inherit;
+  padding: 0;
+  width: 100%;
+  min-width: 0;
+  text-align: center;
+  text-align-last: center;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+/* Hide the native calendar picker indicator so the date text stays
+ * centered between the ‹/› navigation buttons. The whole input is
+ * still clickable and the picker opens on click — we just stop the
+ * indicator from claiming visual space on the right edge. */
+.period-picker input[type='date']::-webkit-calendar-picker-indicator,
+.period-picker input[type='month']::-webkit-calendar-picker-indicator {
+  display: none;
+}
+
+.period-picker input[type='date']::-webkit-inner-spin-button,
+.period-picker input[type='month']::-webkit-inner-spin-button {
+  display: none;
+}

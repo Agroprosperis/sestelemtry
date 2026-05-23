@@ -68,26 +68,6 @@
   flex-wrap: wrap;
 }
 
-.economics-date {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
-  border-radius: 10px;
-  padding: 4px 10px;
-  color: #334155;
-  font-size: 13px;
-}
-
-.economics-date input[type='date'] {
-  border: none;
-  background: transparent;
-  color: #0f172a;
-  font-size: 14px;
-  outline: none;
-}
-
 .economics-back-link {
   background: #ffffff;
   border: 1px solid #e2e8f0;

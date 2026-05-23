@@ -1,4 +1,5 @@
 import { useId, useMemo } from 'react'
+import './PeriodPicker.css'
 import { isCurrentPeriod, shiftPeriod, startOfPeriod, type RangePreset } from '../range'
 
 type Props = {
