@@ -424,6 +424,14 @@
   gap: 6px;
 }
 
+/* Add breathing room between adjacent segment bars (e.g. PV
+   distribution → consumption split, or Заряд → Розряд) so the
+   second group reads as a separate story instead of running into
+   the first group's per-row list. */
+.summary-segbar + .summary-segbar {
+  margin-top: 8px;
+}
+
 .summary-segbar-head {
   display: flex;
   justify-content: space-between;

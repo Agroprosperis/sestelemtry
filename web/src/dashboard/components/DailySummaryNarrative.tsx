@@ -279,11 +279,7 @@ export function DailySummaryNarrative({
         />
       </div>
       <SegmentBar
-        title={
-          loading
-            ? `Куди пішла енергія від СЕС (${PLACEHOLDER})`
-            : `Куди пішла енергія від СЕС (${formatEnergyUk(flows.pvProducedKwh)})`
-        }
+        title="Куди пішла енергія від СЕС"
         totalKwh={Math.max(flows.pvProducedKwh, pvSelfConsumed + flows.pvToGridKwh)}
         segments={pvSegments}
         loading={loading}

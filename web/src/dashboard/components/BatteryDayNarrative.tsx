@@ -214,13 +214,6 @@ export function BatteryDayNarrative({
     { name: 'УЗЕ → мережа', valueKwh: flows.essToGridKwh, color: '#22c55e' },
   ]
 
-  // The hero subtitle pairs both totals so the SOC ring on the
-  // right has narrative context next to it (mirrors how the daily
-  // summary hero pairs PV-produced with the forecast).
-  const subtitle = isBusy
-    ? `заряд ${PLACEHOLDER} · розряд ${PLACEHOLDER}`
-    : `заряд ${formatEnergyUk(charged)} · розряд ${formatEnergyUk(discharged)}`
-
   return (
     <section
       className="metrics-group summary-narrative"
@@ -252,26 +245,17 @@ export function BatteryDayNarrative({
               ? PLACEHOLDER
               : `${Math.round(socPercent)}%`}
           </strong>
-          <span className="summary-hero-sub">{subtitle}</span>
         </div>
         <SocRing socPercent={socPercent} loading={isBusy} />
       </div>
       <SegmentBar
-        title={
-          isBusy
-            ? `Заряд (${PLACEHOLDER})`
-            : `Заряд (${formatEnergyUk(charged)})`
-        }
+        title="Заряд"
         totalKwh={charged}
         segments={chargeSegments}
         loading={isBusy}
       />
       <SegmentBar
-        title={
-          isBusy
-            ? `Розряд (${PLACEHOLDER})`
-            : `Розряд (${formatEnergyUk(discharged)})`
-        }
+        title="Розряд"
         totalKwh={discharged}
         segments={dischargeSegments}
         loading={isBusy}
