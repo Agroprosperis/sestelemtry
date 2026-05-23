@@ -5,6 +5,7 @@ import {
   Buildings,
   Plug,
   Sun,
+  type Icon,
 } from '@phosphor-icons/react'
 import type { CurrentResponse, RegisterMeta } from '../../types'
 import { formatEnergyCompactKWhUk } from '../format'
@@ -18,6 +19,14 @@ type Props = {
 }
 
 const ICON_SIZE = 20
+
+type RowSpec = {
+  label: string
+  metricKey: string | string[]
+  Icon: Icon
+  color: string
+  value: number | null
+}
 
 function reading(current: CurrentResponse | null, key: string): number | null {
   const v = current?.metrics?.[key]?.value
@@ -36,108 +45,107 @@ export function AccumulatedSnapshotNarrative({
   debug,
   registers,
 }: Props) {
-  const pv = reading(current, 'accumulated_pv_energy_yield_kwh')
-  const consumption = reading(current, 'accumulated_power_consumption_kwh')
-  const purchased = reading(current, 'accumulated_electricity_purchased_kwh')
-  const sold = reading(current, 'accumulated_electricity_sold_kwh')
-  const charged = reading(current, 'total_energy_charged_kwh')
-  const discharged = reading(current, 'total_energy_discharged_kwh')
-  const gridSupply = reading(current, 'total_power_supply_from_grid_kwh')
+  const rows: RowSpec[] = [
+    {
+      label: 'Виробіток СЕС',
+      metricKey: 'accumulated_pv_energy_yield_kwh',
+      Icon: Sun,
+      color: '#f59e0b',
+      value: reading(current, 'accumulated_pv_energy_yield_kwh'),
+    },
+    {
+      label: 'Споживання приладів',
+      metricKey: 'accumulated_power_consumption_kwh',
+      Icon: Buildings,
+      color: '#7c3aed',
+      value: reading(current, 'accumulated_power_consumption_kwh'),
+    },
+    {
+      label: 'Куплено з мережі',
+      metricKey: 'accumulated_electricity_purchased_kwh',
+      Icon: ArrowDownLeft,
+      color: '#3b82f6',
+      value: reading(current, 'accumulated_electricity_purchased_kwh'),
+    },
+    {
+      label: 'Відпущено в мережу',
+      metricKey: 'accumulated_electricity_sold_kwh',
+      Icon: ArrowUpRight,
+      color: '#22c55e',
+      value: reading(current, 'accumulated_electricity_sold_kwh'),
+    },
+    {
+      label: 'Батарея: заряд',
+      metricKey: 'total_energy_charged_kwh',
+      Icon: BatteryFull,
+      color: '#16a34a',
+      value: reading(current, 'total_energy_charged_kwh'),
+    },
+    {
+      label: 'Батарея: розряд',
+      metricKey: 'total_energy_discharged_kwh',
+      Icon: BatteryFull,
+      color: '#94a3b8',
+      value: reading(current, 'total_energy_discharged_kwh'),
+    },
+    {
+      label: 'Постачання з мережі (загальне)',
+      metricKey: 'total_power_supply_from_grid_kwh',
+      Icon: Plug,
+      color: '#475569',
+      value: reading(current, 'total_power_supply_from_grid_kwh'),
+    },
+  ]
+
+  // Bar widths normalize against the largest reading so every row
+  // has a non-trivial fill — picking an absolute scale would crush
+  // small values to a hairline. The card is a relative comparison,
+  // not an absolute one.
+  const max = rows.reduce(
+    (m, r) => (r.value !== null && r.value > m ? r.value : m),
+    0,
+  )
+
   return (
     <section
-      className="metrics-group daily-narrative"
+      className="metrics-group accum-narrative"
       aria-labelledby="accumulated-snapshot-title"
       aria-busy={loading}
     >
       <h2 id="accumulated-snapshot-title" className="metrics-group-title">
         Накопичувальні показники
       </h2>
-      <ul className="daily-narrative-list">
-        <li>
-          <span className="daily-narrative-icon" aria-hidden="true">
-            <Sun size={ICON_SIZE} weight="duotone" color="#f59e0b" />
-          </span>
-          <span>
-            Виробіток СЕС
-            <ModbusAddr
-              debug={debug}
-              registers={registers}
-              keys="accumulated_pv_energy_yield_kwh"
-            />
-            : <strong>{formatTotal(pv, loading)}</strong>
-          </span>
-        </li>
-        <li>
-          <span className="daily-narrative-icon" aria-hidden="true">
-            <Buildings size={ICON_SIZE} weight="duotone" color="#7c3aed" />
-          </span>
-          <span>
-            Споживання приладами
-            <ModbusAddr
-              debug={debug}
-              registers={registers}
-              keys="accumulated_power_consumption_kwh"
-            />
-            : <strong>{formatTotal(consumption, loading)}</strong>
-          </span>
-        </li>
-        <li>
-          <span className="daily-narrative-icon" aria-hidden="true">
-            <ArrowDownLeft size={ICON_SIZE} weight="bold" color="#3b82f6" />
-          </span>
-          <span>
-            Куплено з мережі
-            <ModbusAddr
-              debug={debug}
-              registers={registers}
-              keys="accumulated_electricity_purchased_kwh"
-            />
-            : <strong>{formatTotal(purchased, loading)}</strong>
-          </span>
-        </li>
-        <li>
-          <span className="daily-narrative-icon" aria-hidden="true">
-            <ArrowUpRight size={ICON_SIZE} weight="bold" color="#22c55e" />
-          </span>
-          <span>
-            Відпущено в мережу
-            <ModbusAddr
-              debug={debug}
-              registers={registers}
-              keys="accumulated_electricity_sold_kwh"
-            />
-            : <strong>{formatTotal(sold, loading)}</strong>
-          </span>
-        </li>
-        <li>
-          <span className="daily-narrative-icon" aria-hidden="true">
-            <BatteryFull size={ICON_SIZE} weight="duotone" color="#22c55e" />
-          </span>
-          <span>
-            Батарея
-            <ModbusAddr
-              debug={debug}
-              registers={registers}
-              keys={['total_energy_charged_kwh', 'total_energy_discharged_kwh']}
-            />
-            : заряд <strong>{formatTotal(charged, loading)}</strong>, розряд{' '}
-            <strong>{formatTotal(discharged, loading)}</strong>
-          </span>
-        </li>
-        <li>
-          <span className="daily-narrative-icon" aria-hidden="true">
-            <Plug size={ICON_SIZE} weight="duotone" color="#475569" />
-          </span>
-          <span>
-            Постачання з мережі (загальне)
-            <ModbusAddr
-              debug={debug}
-              registers={registers}
-              keys="total_power_supply_from_grid_kwh"
-            />
-            : <strong>{formatTotal(gridSupply, loading)}</strong>
-          </span>
-        </li>
+      <ul className="accum-narrative-list">
+        {rows.map((r) => {
+          const pct = max > 0 && r.value !== null ? (r.value / max) * 100 : 0
+          return (
+            <li key={r.label} className="accum-narrative-item">
+              <span className="accum-narrative-icon" aria-hidden="true">
+                <r.Icon size={ICON_SIZE} weight="duotone" color={r.color} />
+              </span>
+              <span className="accum-narrative-label">
+                {r.label}
+                <ModbusAddr
+                  debug={debug}
+                  registers={registers}
+                  keys={r.metricKey}
+                />
+              </span>
+              <strong className="accum-narrative-value">
+                {formatTotal(r.value, loading)}
+              </strong>
+              <span className="accum-narrative-bar" aria-hidden="true">
+                <span
+                  className="accum-narrative-bar-fill"
+                  style={{
+                    width: `${Math.max(0, Math.min(100, pct))}%`,
+                    background: r.color,
+                  }}
+                />
+              </span>
+            </li>
+          )
+        })}
       </ul>
     </section>
   )

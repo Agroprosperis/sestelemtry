@@ -37,19 +37,24 @@ function renderCard(
 }
 
 describe('EnergyFlowPeriodSummary', () => {
-  it('renders the four narrative rows with kWh values from flowsFromTotals', () => {
+  it('renders the four flow rows with kWh values from flowsFromTotals', () => {
     renderCard()
 
-    expect(screen.getByText(/УЗЕ зарядилось від сонця/)).toBeInTheDocument()
-    expect(screen.getByText(/УЗЕ зарядилось від мережі/)).toBeInTheDocument()
-    expect(screen.getByText(/УЗЕ віддало на споживання/)).toBeInTheDocument()
-    expect(screen.getByText(/УЗЕ віддало в мережу/)).toBeInTheDocument()
+    // The card now uses the icon · label · value · bar · % layout
+    // (mirrors the overview's BatteryFlowsCard) — labels read as
+    // arrows instead of full sentences.
+    expect(screen.getByText(/Від сонця → УЗЕ/)).toBeInTheDocument()
+    expect(screen.getByText(/З мережі → УЗЕ/)).toBeInTheDocument()
+    expect(screen.getByText(/УЗЕ → споживання/)).toBeInTheDocument()
+    expect(screen.getByText(/УЗЕ → мережа/)).toBeInTheDocument()
 
-    // Compact Ukrainian formatter: 20 кВт·год.
-    expect(screen.getByText(/20\s*кВт·год/)).toBeInTheDocument()
-    expect(screen.getByText(/5\s*кВт·год/)).toBeInTheDocument()
-    expect(screen.getByText(/40\s*кВт·год/)).toBeInTheDocument()
-    expect(screen.getByText(/10\s*кВт·год/)).toBeInTheDocument()
+    // Compact Ukrainian formatter: 20 кВт·год. Anchor the regex
+    // with a non-digit boundary so "5" doesn't also match the
+    // "-25 кВт·год" balance footer.
+    expect(screen.getByText(/(^|[^\d])20\s*кВт·год/)).toBeInTheDocument()
+    expect(screen.getByText(/(^|[^\d])5\s*кВт·год/)).toBeInTheDocument()
+    expect(screen.getByText(/(^|[^\d])40\s*кВт·год/)).toBeInTheDocument()
+    expect(screen.getByText(/(^|[^\d])10\s*кВт·год/)).toBeInTheDocument()
   })
 
   it('renders inside the metrics-group container so it stacks with other left-panel cards', () => {
@@ -63,7 +68,14 @@ describe('EnergyFlowPeriodSummary', () => {
       ),
     })
     expect(container.querySelector('section.metrics-group')).not.toBeNull()
-    expect(container.querySelector('ul.daily-narrative-list')).not.toBeNull()
+    expect(container.querySelector('ul.accum-narrative-list')).not.toBeNull()
+  })
+
+  it('renders a battery balance footer summing inflow vs outflow', () => {
+    renderCard()
+    // totalIn=20+5=25, totalOut=40+10=50, balance=-25 → "-25 кВт·год".
+    expect(screen.getByText(/Баланс батареї/)).toBeInTheDocument()
+    expect(screen.getByText(/-25\s*кВт·год/)).toBeInTheDocument()
   })
 
   it('renders a period-aware title from the preset', () => {

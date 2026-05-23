@@ -4,26 +4,23 @@ import {
   ArrowUpRight,
   Lightning,
   Sun,
+  type Icon,
 } from '@phosphor-icons/react'
 import { formatEnergyCompactKWhUk, formatPeriodLabel } from '../format'
 import type { RangePreset } from '../range'
 import type { EnergyFlows } from '../transforms/flows'
 
-// EnergyFlowPeriodSummary is the four-line narrative companion to
-// the live power diagram. It reads off the directional flow totals
-// the API server computed on the fly for the selected period and
-// surfaces a plain-Ukrainian summary of "how the battery was used"
-// without forcing the operator to read a Sankey. The card is
-// rendered in the left metrics panel, sharing the `metrics-group`
-// styling with the other narrative cards.
+// EnergyFlowPeriodSummary is the four-line battery flow companion
+// to the live power diagram. It reads off the directional flow
+// totals the API server computed on the fly for the selected
+// period and surfaces them with the same icon · label · value ·
+// bar · % layout used in the overview view's BatteryFlowsCard, so
+// both dashboards expose the battery's daily story consistently.
 //
 // Today the card is only rendered for the `day` preset (the parent
 // `MetricsPanel` gates it on the global RangePreset). Month/year
 // presets hide the card because the API restricts the on-the-fly
-// allocator to day-sized windows for now. The `preset` prop is kept
-// so the title still reads as part of the same "за день / за
-// місяць / за рік" family with the other left-panel cards once we
-// lift that restriction.
+// allocator to day-sized windows for now.
 
 type Props = {
   flows: EnergyFlows
@@ -41,6 +38,24 @@ const TITLES: Record<RangePreset, string> = {
   year: 'Перетік за рік',
 }
 
+type FlowRow = {
+  label: string
+  valueKwh: number
+  Icon: Icon
+  color: string
+  // bucket=in groups inflows (PV→ESS, Grid→ESS) and bucket=out
+  // groups outflows (ESS→Load, ESS→Grid) so each row's percentage
+  // is normalized against its own direction's total instead of a
+  // mixed sum that would skew small flows into invisibility.
+  bucket: 'in' | 'out'
+}
+
+function formatPercent(value: number): string {
+  if (!Number.isFinite(value) || value === 0) return '0,00 %'
+  if (value >= 10) return `${Math.round(value)} %`
+  return `${value.toFixed(2).replace('.', ',')} %`
+}
+
 export function EnergyFlowPeriodSummary({
   flows,
   preset,
@@ -49,9 +64,48 @@ export function EnergyFlowPeriodSummary({
   refreshing,
 }: Props) {
   const periodLabel = formatPeriodLabel(preset, anchor)
+  const rows: FlowRow[] = [
+    {
+      label: 'Від сонця → УЗЕ',
+      valueKwh: flows.pvToEssKwh,
+      Icon: Sun,
+      color: '#f59e0b',
+      bucket: 'in',
+    },
+    {
+      label: 'З мережі → УЗЕ',
+      valueKwh: flows.gridToEssKwh,
+      Icon: ArrowDownLeft,
+      color: '#3b82f6',
+      bucket: 'in',
+    },
+    {
+      label: 'УЗЕ → споживання',
+      valueKwh: flows.essToLoadKwh,
+      Icon: Lightning,
+      color: '#7c3aed',
+      bucket: 'out',
+    },
+    {
+      label: 'УЗЕ → мережа',
+      valueKwh: flows.essToGridKwh,
+      Icon: ArrowUpRight,
+      color: '#22c55e',
+      bucket: 'out',
+    },
+  ]
+  const totalIn = rows
+    .filter((r) => r.bucket === 'in')
+    .reduce((s, r) => s + r.valueKwh, 0)
+  const totalOut = rows
+    .filter((r) => r.bucket === 'out')
+    .reduce((s, r) => s + r.valueKwh, 0)
+  const denomFor = (b: 'in' | 'out') => (b === 'in' ? totalIn : totalOut)
+  const balance = totalIn - totalOut
+
   return (
     <section
-      className="metrics-group daily-narrative"
+      className="metrics-group accum-narrative flow-period-narrative"
       aria-labelledby="energy-flow-period-title"
       aria-busy={refreshing}
     >
@@ -71,44 +125,40 @@ export function EnergyFlowPeriodSummary({
           <ArrowsClockwise size={16} weight="bold" />
         </button>
       </header>
-      <ul className="daily-narrative-list">
-        <li>
-          <span className="daily-narrative-icon" aria-hidden="true">
-            <Sun size={ICON_SIZE} weight="duotone" color="#f59e0b" />
-          </span>
-          <span>
-            УЗЕ зарядилось від сонця:{' '}
-            <strong>{formatEnergyCompactKWhUk(flows.pvToEssKwh)}</strong>
-          </span>
-        </li>
-        <li>
-          <span className="daily-narrative-icon" aria-hidden="true">
-            <ArrowDownLeft size={ICON_SIZE} weight="bold" color="#3b82f6" />
-          </span>
-          <span>
-            УЗЕ зарядилось від мережі:{' '}
-            <strong>{formatEnergyCompactKWhUk(flows.gridToEssKwh)}</strong>
-          </span>
-        </li>
-        <li>
-          <span className="daily-narrative-icon" aria-hidden="true">
-            <Lightning size={ICON_SIZE} weight="duotone" color="#7c3aed" />
-          </span>
-          <span>
-            УЗЕ віддало на споживання:{' '}
-            <strong>{formatEnergyCompactKWhUk(flows.essToLoadKwh)}</strong>
-          </span>
-        </li>
-        <li>
-          <span className="daily-narrative-icon" aria-hidden="true">
-            <ArrowUpRight size={ICON_SIZE} weight="bold" color="#22c55e" />
-          </span>
-          <span>
-            УЗЕ віддало в мережу:{' '}
-            <strong>{formatEnergyCompactKWhUk(flows.essToGridKwh)}</strong>
-          </span>
-        </li>
+      <ul className="accum-narrative-list">
+        {rows.map((r) => {
+          const denom = denomFor(r.bucket)
+          const pct = denom > 0 ? (r.valueKwh / denom) * 100 : 0
+          return (
+            <li key={r.label} className="accum-narrative-item">
+              <span className="accum-narrative-icon" aria-hidden="true">
+                <r.Icon size={ICON_SIZE} weight="duotone" color={r.color} />
+              </span>
+              <span className="accum-narrative-label">{r.label}</span>
+              <strong className="accum-narrative-value">
+                {formatEnergyCompactKWhUk(r.valueKwh)}
+              </strong>
+              <span className="accum-narrative-bar" aria-hidden="true">
+                <span
+                  className="accum-narrative-bar-fill"
+                  style={{
+                    width: `${Math.max(0, Math.min(100, pct))}%`,
+                    background: r.color,
+                  }}
+                />
+              </span>
+              <span className="accum-narrative-pct">{formatPercent(pct)}</span>
+            </li>
+          )
+        })}
       </ul>
+      <p className="flow-period-balance">
+        Баланс батареї:{' '}
+        <strong className={balance >= 0 ? 'is-positive' : 'is-negative'}>
+          {balance >= 0 ? '+' : ''}
+          {formatEnergyCompactKWhUk(balance)}
+        </strong>
+      </p>
     </section>
   )
 }
