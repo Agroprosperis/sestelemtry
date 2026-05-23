@@ -50,6 +50,12 @@ function formatEnergyUk(valueKWh: number): string {
   return `${valueKWh.toFixed(2).replace('.', ',')} кВт·год`
 }
 
+// PLACEHOLDER is the dash glyph used in place of numbers while
+// data is in flight. Em dash with the same trailing kWh suffix
+// would lie about units, so we show only the dash to make it
+// obvious that nothing has loaded yet.
+const PLACEHOLDER = '—'
+
 function formatPercent(value: number): string {
   if (!Number.isFinite(value) || value === 0) return '0,00 %'
   if (value >= 10) return `${Math.round(value)} %`
@@ -64,16 +70,19 @@ function pctOf(part: number, total: number): number {
 function ForecastRing({
   actualKwh,
   forecastKwh,
+  loading,
 }: {
   actualKwh: number
   forecastKwh: number | null
+  loading?: boolean
 }) {
   // ratio is capped to 1.5 so a wildly-overshooting forecast (e.g.
   // backend reports 0 plan because of a stale n8n cache) doesn't
   // produce a multi-loop dasharray. The visible ring stays clamped
   // at 100% even when displayPct shows the true ratio.
-  const ratio =
-    forecastKwh && forecastKwh > 0
+  const ratio = loading
+    ? null
+    : forecastKwh && forecastKwh > 0
       ? Math.max(0, Math.min(1.5, actualKwh / forecastKwh))
       : null
   const displayPct = ratio === null ? null : Math.round(ratio * 100)
@@ -132,17 +141,27 @@ function SegmentBar({
   title,
   totalKwh,
   segments,
+  loading,
 }: {
   title: string
   totalKwh: number
   segments: Array<{ name: string; valueKwh: number; color: string }>
+  loading?: boolean
 }) {
-  const safeSegments = segments.map((s) => ({ ...s, pct: pctOf(s.valueKwh, totalKwh) }))
+  // While loading, segment bars collapse to zero width and per-row
+  // values fall back to the dash placeholder so the operator can't
+  // misread stale numbers as fresh ones. The list rows still render
+  // (with their colour swatches and labels) so the card height
+  // doesn't reflow once data lands.
+  const safeSegments = segments.map((s) => ({
+    ...s,
+    pct: loading ? 0 : pctOf(s.valueKwh, totalKwh),
+  }))
   return (
     <div className="summary-segbar">
       <div className="summary-segbar-head">
         <span>{title}</span>
-        <strong>{formatEnergyUk(totalKwh)}</strong>
+        <strong>{loading ? PLACEHOLDER : formatEnergyUk(totalKwh)}</strong>
       </div>
       <div className="summary-segbar-track" aria-hidden="true">
         {safeSegments.map((s) => (
@@ -165,8 +184,10 @@ function SegmentBar({
               <span className="summary-segbar-name">{s.name}</span>
             </span>
             <span className="summary-segbar-value">
-              {formatEnergyUk(s.valueKwh)}
-              <span className="summary-segbar-pct"> · {formatPercent(s.pct)}</span>
+              {loading ? PLACEHOLDER : formatEnergyUk(s.valueKwh)}
+              {!loading && (
+                <span className="summary-segbar-pct"> · {formatPercent(s.pct)}</span>
+              )}
             </span>
           </li>
         ))}
@@ -217,8 +238,9 @@ export function DailySummaryNarrative({
   ]
   const consumptionTotal =
     consumptionSegments[0].valueKwh + consumptionSegments[1].valueKwh
-  const forecastSummary =
-    pvForecastTotal !== null && pvForecastTotal > 0
+  const forecastSummary = loading
+    ? `прогноз ${PLACEHOLDER}`
+    : pvForecastTotal !== null && pvForecastTotal > 0
       ? `прогноз ${formatEnergyUk(pvForecastTotal)}`
       : 'прогноз недоступний'
 
@@ -246,24 +268,31 @@ export function DailySummaryNarrative({
             />
           </span>
           <strong className="summary-hero-value">
-            {formatEnergyUk(flows.pvProducedKwh)}
+            {loading ? PLACEHOLDER : formatEnergyUk(flows.pvProducedKwh)}
           </strong>
           <span className="summary-hero-sub">{forecastSummary}</span>
         </div>
         <ForecastRing
           actualKwh={flows.pvProducedKwh}
           forecastKwh={pvForecastTotal}
+          loading={loading}
         />
       </div>
       <SegmentBar
-        title={`Куди пішла енергія від СЕС (${formatEnergyUk(flows.pvProducedKwh)})`}
+        title={
+          loading
+            ? `Куди пішла енергія від СЕС (${PLACEHOLDER})`
+            : `Куди пішла енергія від СЕС (${formatEnergyUk(flows.pvProducedKwh)})`
+        }
         totalKwh={Math.max(flows.pvProducedKwh, pvSelfConsumed + flows.pvToGridKwh)}
         segments={pvSegments}
+        loading={loading}
       />
       <SegmentBar
         title="Споживання приладів"
         totalKwh={consumptionTotal}
         segments={consumptionSegments}
+        loading={loading}
       />
     </section>
   )

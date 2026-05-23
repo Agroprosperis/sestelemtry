@@ -34,8 +34,13 @@ function reading(current: CurrentResponse | null, key: string): number | null {
   return typeof v === 'number' && Number.isFinite(v) ? v : null
 }
 
+// PLACEHOLDER replaces stale numbers in the card while a refresh
+// is in flight so the operator can't misread the previous load's
+// values as the new ones.
+const PLACEHOLDER = '—'
+
 function formatTotal(value: number | null, loading: boolean): string {
-  if (loading) return '...'
+  if (loading) return PLACEHOLDER
   if (value === null) return '--'
   return formatEnergyCompactKWhUk(value)
 }
@@ -121,7 +126,11 @@ export function AccumulatedSnapshotNarrative({
       </header>
       <ul className="accum-narrative-list">
         {rows.map((r) => {
-          const pct = max > 0 && r.value !== null ? (r.value / max) * 100 : 0
+          // While loading we collapse all bars to zero — keeping
+          // the previous fill widths would tell a stale story
+          // until the new totals arrive.
+          const pct =
+            !loading && max > 0 && r.value !== null ? (r.value / max) * 100 : 0
           return (
             <li key={r.label} className="accum-narrative-item">
               <span className="accum-narrative-icon" aria-hidden="true">

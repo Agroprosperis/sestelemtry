@@ -371,15 +371,16 @@
   height: 100%;
 }
 
-/* The flow-period card extends the layout with a trailing %
-   column. We override the grid only when this column is present
-   so other consumers (cumulative card) keep the simpler 3-col
-   shape on row 1. */
-.flow-period-narrative .accum-narrative-item {
+/* battery-narrative reuses accum-narrative-list for its 4-row
+   directional flow breakdown, so this scoped override extends the
+   row grid with a trailing % column. Other consumers of
+   accum-narrative-list (cumulative snapshot) keep the simpler
+   3-col shape on row 1. */
+.battery-narrative .accum-narrative-item {
   grid-template-columns: 24px 1fr auto auto;
 }
 
-.flow-period-narrative .accum-narrative-bar {
+.battery-narrative .accum-narrative-bar {
   grid-column: 2 / 4;
 }
 
@@ -392,25 +393,6 @@
   grid-row: 2;
   grid-column: 4;
   padding-left: 6px;
-}
-
-.flow-period-balance {
-  margin: 4px 0 0;
-  font-size: 12px;
-  color: #475569;
-}
-
-.flow-period-balance strong {
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-}
-
-.flow-period-balance strong.is-positive {
-  color: #16a34a;
-}
-
-.flow-period-balance strong.is-negative {
-  color: #dc2626;
 }
 
 /* DailySummaryNarrative renders a forecast-ring hero on top and
@@ -586,8 +568,13 @@
 .battery-narrative-stats {
   flex: 1;
   display: flex;
-  flex-direction: column;
-  gap: 8px;
+  flex-direction: row;
+  gap: 16px;
+  min-width: 0;
+}
+
+.battery-narrative-row {
+  flex: 1;
   min-width: 0;
 }
 
@@ -658,9 +645,45 @@
   color: #94a3b8;
 }
 
+/* Divider between the SOC + summary block and the directional
+   flow rows below — visually separates "totals" from "breakdown"
+   without forcing two cards. */
+.battery-narrative-divider {
+  height: 1px;
+  background: #e2e8f0;
+  margin: 4px 0;
+}
+
+.battery-narrative-balance-foot {
+  margin: 0;
+  font-size: 12px;
+  color: #475569;
+}
+
+.battery-narrative-balance-foot strong {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.battery-narrative-balance-foot strong.is-positive {
+  color: #16a34a;
+}
+
+.battery-narrative-balance-foot strong.is-negative {
+  color: #dc2626;
+}
+
+.battery-narrative-balance-foot small {
+  color: #94a3b8;
+}
+
 @media (max-width: 720px) {
   .battery-narrative-body {
     flex-direction: column;
+  }
+  .battery-narrative-stats {
+    flex-direction: column;
+    gap: 8px;
   }
 }
 

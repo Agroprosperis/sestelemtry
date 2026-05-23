@@ -6,7 +6,6 @@ import { AccumulatedSnapshotNarrative } from './AccumulatedSnapshotNarrative'
 import { BatteryDayNarrative } from './BatteryDayNarrative'
 import { CurrentSnapshotNarrative } from './CurrentSnapshotNarrative'
 import { DailySummaryNarrative } from './DailySummaryNarrative'
-import { EnergyFlowPeriodSummary } from './EnergyFlowPeriodSummary'
 import { MetricsAtPicker } from './MetricsAtPicker'
 
 type Props = {
@@ -85,16 +84,11 @@ export function MetricsPanel({
         <BatteryDayNarrative
           flows={flows}
           current={current}
-          loading={flowsRefreshing}
-        />
-      )}
-      {preset === 'day' && (
-        <EnergyFlowPeriodSummary
-          flows={flows}
           preset={preset}
           anchor={anchor}
           refreshing={flowsRefreshing}
           onRefresh={onRefreshFlows}
+          loading={loading}
         />
       )}
       <AccumulatedSnapshotNarrative
