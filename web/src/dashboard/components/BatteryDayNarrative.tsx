@@ -1,16 +1,4 @@
-import {
-  ArrowDownLeft,
-  ArrowsClockwise,
-  ArrowUpRight,
-  BatteryFull,
-  BatteryHigh,
-  BatteryLow,
-  BatteryMedium,
-  Lightning,
-  Sun,
-  type Icon,
-} from '@phosphor-icons/react'
-import type { ReactElement } from 'react'
+import { ArrowsClockwise } from '@phosphor-icons/react'
 import type { CurrentResponse } from '../../types'
 import { formatPeriodLabel } from '../format'
 import type { RangePreset } from '../range'
@@ -27,31 +15,19 @@ type Props = {
   loading?: boolean
 }
 
-const ICON_PROPS = { size: 56, weight: 'duotone' as const, color: '#22c55e' }
-const ROW_ICON_SIZE = 18
+const TITLES: Record<RangePreset, string> = {
+  day: 'Батарея за день',
+  month: 'Батарея за місяць',
+  year: 'Батарея за рік',
+}
+
+const RING_RADIUS = 30
+const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS
 
 // PLACEHOLDER replaces stale numbers in the card while a refresh
 // is in flight so the operator can't misread the previous load's
 // values as the new ones.
 const PLACEHOLDER = '—'
-
-function renderBatteryIcon(soc: number | null): ReactElement {
-  if (soc === null) return <BatteryMedium {...ICON_PROPS} />
-  if (soc >= 80) return <BatteryFull {...ICON_PROPS} />
-  if (soc >= 50) return <BatteryHigh {...ICON_PROPS} />
-  if (soc >= 25) return <BatteryMedium {...ICON_PROPS} />
-  return <BatteryLow {...ICON_PROPS} />
-}
-
-function clampPct(value: number, max: number): number {
-  if (!Number.isFinite(value) || !Number.isFinite(max) || max <= 0) return 0
-  return Math.max(0, Math.min(100, (value / max) * 100))
-}
-
-function readSoc(current: CurrentResponse | null): number | null {
-  const v = current?.metrics?.soc_percent?.value
-  return typeof v === 'number' && Number.isFinite(v) ? v : null
-}
 
 // formatEnergyUk is an adaptive kWh/MWh formatter; the dashboard's
 // shared format helpers are kWh-only, which would force any value
@@ -77,22 +53,136 @@ function formatPercent(value: number): string {
   return `${value.toFixed(2).replace('.', ',')} %`
 }
 
-const TITLES: Record<RangePreset, string> = {
-  day: 'Батарея за день',
-  month: 'Батарея за місяць',
-  year: 'Батарея за рік',
+function pctOf(part: number, total: number): number {
+  if (!Number.isFinite(part) || !Number.isFinite(total) || total <= 0) return 0
+  return Math.max(0, Math.min(100, (part / total) * 100))
 }
 
-type FlowRow = {
-  label: string
-  valueKwh: number
-  Icon: Icon
-  color: string
-  // bucket=in groups inflows (PV→ESS, Grid→ESS) and bucket=out
-  // groups outflows (ESS→Load, ESS→Grid) so each row's percentage
-  // is normalized against its own direction's total instead of a
-  // mixed sum that would skew small flows into invisibility.
-  bucket: 'in' | 'out'
+function readSoc(current: CurrentResponse | null): number | null {
+  const v = current?.metrics?.soc_percent?.value
+  return typeof v === 'number' && Number.isFinite(v) ? v : null
+}
+
+// SocRing mirrors DailySummaryNarrative.ForecastRing so the two
+// hero blocks read as a pair: same radius, stroke width and label
+// typography. The arc length encodes SOC directly (0–100 %) since
+// state-of-charge is already a percentage.
+function SocRing({
+  socPercent,
+  loading,
+}: {
+  socPercent: number | null
+  loading?: boolean
+}) {
+  const visible = loading ? null : socPercent
+  const ratio = visible === null ? 0 : Math.max(0, Math.min(1, visible / 100))
+  const dashOffset = RING_CIRCUMFERENCE * (1 - ratio)
+  const label =
+    visible === null ? PLACEHOLDER : `${Math.round(visible)}%`
+  return (
+    <svg
+      className="summary-ring"
+      width={72}
+      height={72}
+      viewBox="0 0 72 72"
+      role="img"
+      aria-label={
+        visible === null ? 'SOC недоступний' : `SOC ${Math.round(visible)} відсотків`
+      }
+    >
+      <circle
+        cx={36}
+        cy={36}
+        r={RING_RADIUS}
+        stroke="#e2e8f0"
+        strokeWidth={6}
+        fill="none"
+      />
+      {visible !== null && (
+        <circle
+          cx={36}
+          cy={36}
+          r={RING_RADIUS}
+          stroke="#22c55e"
+          strokeWidth={6}
+          fill="none"
+          strokeDasharray={RING_CIRCUMFERENCE}
+          strokeDashoffset={dashOffset}
+          strokeLinecap="round"
+          transform="rotate(-90 36 36)"
+        />
+      )}
+      <text
+        x={36}
+        y={40}
+        textAnchor="middle"
+        fontSize={14}
+        fontWeight={700}
+        fill="#0f172a"
+      >
+        {label}
+      </text>
+    </svg>
+  )
+}
+
+function SegmentBar({
+  title,
+  totalKwh,
+  segments,
+  loading,
+}: {
+  title: string
+  totalKwh: number
+  segments: Array<{ name: string; valueKwh: number; color: string }>
+  loading?: boolean
+}) {
+  // While loading, segment widths collapse to zero and per-row
+  // numbers fall back to the dash placeholder so the operator
+  // can't misread stale values as fresh ones. Rows still render
+  // (with their colour swatches and labels) so the card height
+  // doesn't reflow once data lands.
+  const safeSegments = segments.map((s) => ({
+    ...s,
+    pct: loading ? 0 : pctOf(s.valueKwh, totalKwh),
+  }))
+  return (
+    <div className="summary-segbar">
+      <div className="summary-segbar-head">
+        <span>{title}</span>
+        <strong>{loading ? PLACEHOLDER : formatEnergyUk(totalKwh)}</strong>
+      </div>
+      <div className="summary-segbar-track" aria-hidden="true">
+        {safeSegments.map((s) => (
+          <span
+            key={s.name}
+            className="summary-segbar-fill"
+            style={{ width: `${s.pct}%`, background: s.color }}
+          />
+        ))}
+      </div>
+      <ul className="summary-segbar-list">
+        {safeSegments.map((s) => (
+          <li key={s.name}>
+            <span className="summary-segbar-row">
+              <span
+                className="summary-swatch"
+                style={{ background: s.color }}
+                aria-hidden="true"
+              />
+              <span className="summary-segbar-name">{s.name}</span>
+            </span>
+            <span className="summary-segbar-value">
+              {loading ? PLACEHOLDER : formatEnergyUk(s.valueKwh)}
+              {!loading && (
+                <span className="summary-segbar-pct"> · {formatPercent(s.pct)}</span>
+              )}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
 }
 
 export function BatteryDayNarrative({
@@ -107,82 +197,33 @@ export function BatteryDayNarrative({
   const charged = flows.essChargedKwh
   const discharged = flows.essDischargedKwh
   const balance = charged - discharged
-  // Both summary bars share the same max so a glance reads which
-  // side dominated; the smaller side appears as a fraction.
-  const maxTotal = Math.max(charged, discharged)
   const socPercent = readSoc(current)
   const periodLabel = formatPeriodLabel(preset, anchor)
-
-  const chargeRows: FlowRow[] = [
-    {
-      label: 'Від сонця → УЗЕ',
-      valueKwh: flows.pvToEssKwh,
-      Icon: Sun,
-      color: '#f59e0b',
-      bucket: 'in',
-    },
-    {
-      label: 'З мережі → УЗЕ',
-      valueKwh: flows.gridToEssKwh,
-      Icon: ArrowDownLeft,
-      color: '#3b82f6',
-      bucket: 'in',
-    },
-  ]
-  const dischargeRows: FlowRow[] = [
-    {
-      label: 'УЗЕ → споживання',
-      valueKwh: flows.essToLoadKwh,
-      Icon: Lightning,
-      color: '#7c3aed',
-      bucket: 'out',
-    },
-    {
-      label: 'УЗЕ → мережа',
-      valueKwh: flows.essToGridKwh,
-      Icon: ArrowUpRight,
-      color: '#22c55e',
-      bucket: 'out',
-    },
-  ]
-  // The breakdown rows under each summary use that summary's total
-  // as their denominator so percentages always sum to 100 % within
-  // a column instead of being normalised against the mixed total.
-  const denomFor = (b: 'in' | 'out') => (b === 'in' ? charged : discharged)
-
   const isBusy = loading || refreshing
 
-  const renderBreakdownRow = (r: FlowRow) => {
-    const denom = denomFor(r.bucket)
-    const pct = isBusy || denom <= 0 ? 0 : (r.valueKwh / denom) * 100
-    return (
-      <li key={r.label} className="battery-narrative-breakdown-item">
-        <span className="battery-narrative-breakdown-icon" aria-hidden="true">
-          <r.Icon size={ROW_ICON_SIZE} weight="duotone" color={r.color} />
-        </span>
-        <span className="battery-narrative-breakdown-label">{r.label}</span>
-        <strong className="battery-narrative-breakdown-value">
-          {isBusy ? PLACEHOLDER : formatEnergyUk(r.valueKwh)}
-        </strong>
-        <span className="battery-narrative-breakdown-bar" aria-hidden="true">
-          <span
-            className="battery-narrative-breakdown-fill"
-            style={{
-              width: `${Math.max(0, Math.min(100, pct))}%`,
-              background: r.color,
-            }}
-          />
-        </span>
-        <span className="battery-narrative-breakdown-pct">
-          {isBusy ? PLACEHOLDER : formatPercent(pct)}
-        </span>
-      </li>
-    )
-  }
+  const chargeSegments = [
+    { name: 'Від сонця → УЗЕ', valueKwh: flows.pvToEssKwh, color: '#f59e0b' },
+    { name: 'З мережі → УЗЕ', valueKwh: flows.gridToEssKwh, color: '#3b82f6' },
+  ]
+  const dischargeSegments = [
+    {
+      name: 'УЗЕ → споживання',
+      valueKwh: flows.essToLoadKwh,
+      color: '#7c3aed',
+    },
+    { name: 'УЗЕ → мережа', valueKwh: flows.essToGridKwh, color: '#22c55e' },
+  ]
+
+  // The hero subtitle pairs both totals so the SOC ring on the
+  // right has narrative context next to it (mirrors how the daily
+  // summary hero pairs PV-produced with the forecast).
+  const subtitle = isBusy
+    ? `заряд ${PLACEHOLDER} · розряд ${PLACEHOLDER}`
+    : `заряд ${formatEnergyUk(charged)} · розряд ${formatEnergyUk(discharged)}`
 
   return (
     <section
-      className="metrics-group battery-narrative"
+      className="metrics-group summary-narrative"
       aria-labelledby="battery-day-title"
       aria-busy={isBusy || undefined}
     >
@@ -203,53 +244,38 @@ export function BatteryDayNarrative({
           <ArrowsClockwise size={16} weight="bold" />
         </button>
       </header>
-      <div className="battery-narrative-body">
-        <div className="battery-narrative-soc">
-          {renderBatteryIcon(isBusy ? null : socPercent)}
-          <strong>
+      <div className="summary-hero">
+        <div className="summary-hero-text">
+          <span className="summary-hero-label">Стан заряду</span>
+          <strong className="summary-hero-value">
             {isBusy || socPercent === null
               ? PLACEHOLDER
               : `${Math.round(socPercent)}%`}
           </strong>
-          <span>SOC</span>
+          <span className="summary-hero-sub">{subtitle}</span>
         </div>
-        <div className="battery-narrative-stats">
-          <div className="battery-narrative-row">
-            <div className="battery-narrative-row-head">
-              <span>Заряд</span>
-              <strong>{isBusy ? PLACEHOLDER : formatEnergyUk(charged)}</strong>
-            </div>
-            <div className="battery-narrative-track" aria-hidden="true">
-              <span
-                className="battery-narrative-fill battery-narrative-fill--charge"
-                style={{ width: `${isBusy ? 0 : clampPct(charged, maxTotal)}%` }}
-              />
-            </div>
-            <ul className="battery-narrative-breakdown">
-              {chargeRows.map(renderBreakdownRow)}
-            </ul>
-          </div>
-          <div className="battery-narrative-row">
-            <div className="battery-narrative-row-head">
-              <span>Розряд</span>
-              <strong>
-                {isBusy ? PLACEHOLDER : formatEnergyUk(discharged)}
-              </strong>
-            </div>
-            <div className="battery-narrative-track" aria-hidden="true">
-              <span
-                className="battery-narrative-fill battery-narrative-fill--discharge"
-                style={{
-                  width: `${isBusy ? 0 : clampPct(discharged, maxTotal)}%`,
-                }}
-              />
-            </div>
-            <ul className="battery-narrative-breakdown">
-              {dischargeRows.map(renderBreakdownRow)}
-            </ul>
-          </div>
-        </div>
+        <SocRing socPercent={socPercent} loading={isBusy} />
       </div>
+      <SegmentBar
+        title={
+          isBusy
+            ? `Заряд (${PLACEHOLDER})`
+            : `Заряд (${formatEnergyUk(charged)})`
+        }
+        totalKwh={charged}
+        segments={chargeSegments}
+        loading={isBusy}
+      />
+      <SegmentBar
+        title={
+          isBusy
+            ? `Розряд (${PLACEHOLDER})`
+            : `Розряд (${formatEnergyUk(discharged)})`
+        }
+        totalKwh={discharged}
+        segments={dischargeSegments}
+        loading={isBusy}
+      />
       <p className="battery-narrative-balance-foot">
         Баланс батареї:{' '}
         {isBusy ? (
