@@ -507,6 +507,15 @@ func (s *Store) timeseriesInstant(ctx context.Context, organizationID string, me
 // the counter mid-period the result will clamp; the dashboard then
 // refuses to fabricate a number rather than guessing across the
 // rollback.
+//
+// The half-open semantic [from, to) matters: callers pass `to` as
+// "first instant of the next period" (e.g. start of next day for the
+// day preset). Using `time <= $4` would pull in the boundary sample
+// that already belongs to the next period — a one-second drift on
+// the raw path, but on the CAGG path the bucket key `day` is exactly
+// that boundary, so `<=` jumps a whole day forward and end−seed
+// silently aggregates two days of accumulation. We use `time < $4`
+// here so end_value never crosses the period boundary.
 const summarySQLRaw = `
 	SELECT
 		m.metric_key,
@@ -514,7 +523,7 @@ const summarySQLRaw = `
 			SELECT value FROM telemetry_samples
 			WHERE organization_id = $1
 				AND metric_key = m.metric_key
-				AND time <= $4
+				AND time < $4
 			ORDER BY time DESC
 			LIMIT 1
 		) AS end_value,
@@ -531,7 +540,7 @@ const summarySQLRaw = `
 			WHERE organization_id = $1
 				AND metric_key = m.metric_key
 				AND time >= $3
-				AND time <= $4
+				AND time < $4
 			ORDER BY time ASC
 			LIMIT 1
 		) AS in_period_first
@@ -542,6 +551,12 @@ const summarySQLRaw = `
 // lookups. Each one walks at most ~30-365 rows on the
 // (organization_id, metric_key, day DESC) index; real-time
 // aggregation keeps the end_value fresh for the current partial day.
+//
+// Same half-open semantic as summarySQLRaw: `day < $4`, not `<=`.
+// CAGG bucket keys are aligned to local-midnight (Europe/Kyiv) and
+// the dashboard's `to` is exactly the next midnight, so `<=` would
+// pick the bucket for the day AFTER the requested period and quietly
+// double the period's accumulators.
 var summarySQLDaily = `
 	SELECT
 		m.metric_key,
@@ -549,7 +564,7 @@ var summarySQLDaily = `
 			SELECT last_value FROM ` + storage.DailyCAGGView + `
 			WHERE organization_id = $1
 				AND metric_key = m.metric_key
-				AND day <= $4
+				AND day < $4
 			ORDER BY day DESC
 			LIMIT 1
 		) AS end_value,
@@ -566,7 +581,7 @@ var summarySQLDaily = `
 			WHERE organization_id = $1
 				AND metric_key = m.metric_key
 				AND day >= $3
-				AND day <= $4
+				AND day < $4
 			ORDER BY day ASC
 			LIMIT 1
 		) AS in_period_first
