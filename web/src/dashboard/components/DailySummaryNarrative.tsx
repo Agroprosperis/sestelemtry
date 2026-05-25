@@ -66,6 +66,30 @@ function pctOf(part: number, total: number): number {
   return Math.max(0, Math.min(100, (part / total) * 100))
 }
 
+// integerHamilton converts an array of raw percentages into integers
+// that sum to exactly the rounded raw total. We floor each value
+// then hand out the leftover slots one-by-one to the entries with
+// the largest fractional parts (Hamilton / largest-remainder
+// method). Without this step naive Math.round on each pct lets the
+// row sum drift to 99 or 101 — the operator reads that as a bug
+// even though the underlying ratios are fine.
+function integerHamilton(rawPcts: number[]): number[] {
+  if (rawPcts.length === 0) return []
+  const floors = rawPcts.map((v) => Math.max(0, Math.floor(v)))
+  const target = Math.round(rawPcts.reduce((a, b) => a + b, 0))
+  let leftover = target - floors.reduce((a, b) => a + b, 0)
+  if (leftover <= 0) return floors
+  const order = rawPcts
+    .map((v, i) => ({ i, frac: v - Math.floor(v) }))
+    .sort((a, b) => b.frac - a.frac)
+  const out = floors.slice()
+  for (let k = 0; k < order.length && leftover > 0; k++) {
+    out[order[k].i] += 1
+    leftover--
+  }
+  return out
+}
+
 function ForecastRing({
   actualKwh,
   forecastKwh,
@@ -152,9 +176,14 @@ function SegmentBar({
   // misread stale numbers as fresh ones. The list rows still render
   // (with their colour swatches and labels) so the card height
   // doesn't reflow once data lands.
-  const safeSegments = segments.map((s) => ({
+  const rawPcts = segments.map((s) =>
+    loading ? 0 : pctOf(s.valueKwh, totalKwh),
+  )
+  const intPcts = integerHamilton(rawPcts)
+  const safeSegments = segments.map((s, i) => ({
     ...s,
-    pct: loading ? 0 : pctOf(s.valueKwh, totalKwh),
+    pct: rawPcts[i],
+    intPct: intPcts[i],
   }))
   return (
     <div className="summary-segbar">
@@ -185,7 +214,10 @@ function SegmentBar({
             <span className="summary-segbar-value">
               {loading ? PLACEHOLDER : formatEnergyUk(s.valueKwh)}
               {!loading && (
-                <span className="summary-segbar-pct"> · {formatPercent(s.pct)}</span>
+                <span className="summary-segbar-pct">
+                  {' '}
+                  · {formatPercent(s.intPct)}
+                </span>
               )}
             </span>
           </li>
@@ -218,11 +250,17 @@ export function DailySummaryNarrative({
     },
     { name: 'Заряд УЗЕ', valueKwh: flows.pvToEssKwh, color: '#f59e0b' },
   ]
-  // pvSelfConsumed sums the two non-export buckets so the bar
-  // total matches the PV produced figure even when the algebra
-  // drifts by a kWh of rounding (very rare but possible for the
-  // synthetic flow allocator).
-  const pvSelfConsumed = flows.pvToLoadKwh + flows.pvToEssKwh
+  // Drive the bar total off the component sum so segment
+  // percentages always add to exactly 100 %. Using the meter
+  // (`flows.pvProducedKwh`) here would let the row sum dip below
+  // 100 % whenever the on-the-fly allocator under-attributes a
+  // few kWh, which the operator reads as a bug. The hero block
+  // above still prints `pvProducedKwh` separately so the meter
+  // truth is preserved.
+  const pvBreakdownTotal = pvSegments.reduce(
+    (acc, s) => acc + s.valueKwh,
+    0,
+  )
   const consumptionSegments = [
     {
       name: 'Від СЕС та УЗЕ',
@@ -279,7 +317,7 @@ export function DailySummaryNarrative({
       </div>
       <SegmentBar
         title="Куди пішла енергія від СЕС"
-        totalKwh={Math.max(flows.pvProducedKwh, pvSelfConsumed + flows.pvToGridKwh)}
+        totalKwh={pvBreakdownTotal}
         segments={pvSegments}
         loading={loading}
       />

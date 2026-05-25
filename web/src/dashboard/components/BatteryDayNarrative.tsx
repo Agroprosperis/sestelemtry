@@ -64,6 +64,31 @@ function pctOf(part: number, total: number): number {
   return Math.max(0, Math.min(100, (part / total) * 100))
 }
 
+// integerHamilton converts an array of raw percentages (0..100, must
+// sum to <=100 within float noise) into integers that sum to exactly
+// the same total but with no leftover. We floor each value, then
+// hand out the remaining integer slots one-by-one to the entries
+// with the largest fractional parts (Hamilton / largest-remainder
+// method). Without this step naive Math.round on each pct lets the
+// row sum drift to 99 or 101 — the operator reads that as a bug
+// even though the underlying ratios are fine.
+function integerHamilton(rawPcts: number[]): number[] {
+  if (rawPcts.length === 0) return []
+  const floors = rawPcts.map((v) => Math.max(0, Math.floor(v)))
+  const target = Math.round(rawPcts.reduce((a, b) => a + b, 0))
+  let leftover = target - floors.reduce((a, b) => a + b, 0)
+  if (leftover <= 0) return floors
+  const order = rawPcts
+    .map((v, i) => ({ i, frac: v - Math.floor(v) }))
+    .sort((a, b) => b.frac - a.frac)
+  const out = floors.slice()
+  for (let k = 0; k < order.length && leftover > 0; k++) {
+    out[order[k].i] += 1
+    leftover--
+  }
+  return out
+}
+
 function readSoc(current: CurrentResponse | null): number | null {
   const v = current?.metrics?.soc_percent?.value
   return typeof v === 'number' && Number.isFinite(v) ? v : null
@@ -156,9 +181,14 @@ function SegmentBar({
   // can't misread stale values as fresh ones. Rows still render
   // (with their colour swatches and labels) so the card height
   // doesn't reflow once data lands.
-  const safeSegments = segments.map((s) => ({
+  const rawPcts = segments.map((s) =>
+    loading ? 0 : pctOf(s.valueKwh, totalKwh),
+  )
+  const intPcts = integerHamilton(rawPcts)
+  const safeSegments = segments.map((s, i) => ({
     ...s,
-    pct: loading ? 0 : pctOf(s.valueKwh, totalKwh),
+    pct: rawPcts[i],
+    intPct: intPcts[i],
   }))
   return (
     <div className="summary-segbar">
@@ -189,7 +219,10 @@ function SegmentBar({
             <span className="summary-segbar-value">
               {loading ? PLACEHOLDER : formatEnergyUk(s.valueKwh)}
               {!loading && (
-                <span className="summary-segbar-pct"> · {formatPercent(s.pct)}</span>
+                <span className="summary-segbar-pct">
+                  {' '}
+                  · {formatPercent(s.intPct)}
+                </span>
               )}
             </span>
           </li>
@@ -208,9 +241,6 @@ export function BatteryDayNarrative({
   onRefresh,
   loading,
 }: Props) {
-  const charged = flows.essChargedKwh
-  const discharged = flows.essDischargedKwh
-  const balance = charged - discharged
   const socPercent = readSoc(current)
   const periodLabel = formatPeriodLabel(preset, anchor)
   const isBusy = loading || refreshing
@@ -227,6 +257,25 @@ export function BatteryDayNarrative({
     },
     { name: 'УЗЕ → мережа', valueKwh: flows.essToGridKwh, color: '#22c55e' },
   ]
+  // Drive the bar total + per-segment percentages off the same
+  // component sum so the row labels always add to 100 %. The
+  // alternative — using the raw `total_energy_charged_kwh` /
+  // `total_energy_discharged_kwh` accumulators — drifts a few
+  // percent from the on-the-fly allocator's PV→ESS / Grid→ESS
+  // (and ESS→Load / ESS→Grid) outputs because the allocator
+  // attributes each minute heuristically while the meter is a
+  // straight integral. The drift is typically <5 % and shows up
+  // as 101 % / 99 % rounding mismatches that the operator reads
+  // as a bug. Using the component sum keeps the breakdown self-
+  // consistent; the `Баланс батареї` line below uses the same
+  // sums so charge-minus-discharge stays equal to the difference
+  // of what's printed in each bar header.
+  const charged = chargeSegments.reduce((acc, s) => acc + s.valueKwh, 0)
+  const discharged = dischargeSegments.reduce(
+    (acc, s) => acc + s.valueKwh,
+    0,
+  )
+  const balance = charged - discharged
 
   return (
     <section
