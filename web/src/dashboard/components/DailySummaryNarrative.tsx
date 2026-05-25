@@ -76,17 +76,17 @@ function ForecastRing({
   forecastKwh: number | null
   loading?: boolean
 }) {
-  // ratio is capped to 1.5 so a wildly-overshooting forecast (e.g.
-  // backend reports 0 plan because of a stale n8n cache) doesn't
-  // produce a multi-loop dasharray. The visible ring stays clamped
-  // at 100% even when displayPct shows the true ratio.
-  const ratio = loading
-    ? null
-    : forecastKwh && forecastKwh > 0
-      ? Math.max(0, Math.min(1.5, actualKwh / forecastKwh))
+  // The visible arc is clamped to a single full revolution so a
+  // big overshoot (e.g. forecast underestimated by 2x) doesn't
+  // produce a multi-loop dasharray; the printed percentage stays
+  // truthful so 200 %, 250 %, etc. are still legible.
+  const rawRatio =
+    !loading && forecastKwh !== null && forecastKwh > 0
+      ? actualKwh / forecastKwh
       : null
-  const displayPct = ratio === null ? null : Math.round(ratio * 100)
-  const cappedRatio = ratio === null ? 0 : Math.min(ratio, 1)
+  const displayPct =
+    rawRatio === null ? null : Math.round(Math.max(0, rawRatio) * 100)
+  const cappedRatio = rawRatio === null ? 0 : Math.max(0, Math.min(rawRatio, 1))
   const dashOffset = RING_CIRCUMFERENCE * (1 - cappedRatio)
   return (
     <svg
@@ -109,7 +109,7 @@ function ForecastRing({
         strokeWidth={6}
         fill="none"
       />
-      {ratio !== null && (
+      {rawRatio !== null && (
         <circle
           cx={36}
           cy={36}
