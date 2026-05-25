@@ -55,9 +55,8 @@ function formatEnergyUk(valueKWh: number): string {
 }
 
 function formatPercent(value: number): string {
-  if (!Number.isFinite(value) || value === 0) return '0,00 %'
-  if (value >= 10) return `${Math.round(value)} %`
-  return `${value.toFixed(2).replace('.', ',')} %`
+  if (!Number.isFinite(value) || value === 0) return '0 %'
+  return `${Math.round(value)} %`
 }
 
 function pctOf(part: number, total: number): number {
