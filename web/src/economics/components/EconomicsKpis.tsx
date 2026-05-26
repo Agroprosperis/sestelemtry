@@ -106,7 +106,16 @@ export function EconomicsKpis({ totals, tariffs }: Props) {
           <span className="kpi-value">{formatUah(totals.effect)}</span>
           <span className="kpi-sub">{totals.effect >= 0 ? 'економія' : 'переплата'} за день</span>
         </div>
-        <div className={essRealizedClass}>
+        <div
+          className={essRealizedClass}
+          title={
+            'Cash-flow ESS-частини за умови що сонце безплатне.' +
+            ' WAC-облік: PV→УЗЕ заходить за 0 грн/кВт·год,' +
+            ' Мережа→УЗЕ — за повним імпортним стеком цієї години.' +
+            ' Розряди списуються за середньою; знос УЗЕ віднімається.' +
+            ' Деталі — у блоці «Як рахуємо собівартість УЗЕ?» під таблицею.'
+          }
+        >
           <span className="kpi-label">Реалізований ефект УЗЕ</span>
           <span className="kpi-value">{formatUah(totals.essRealizedProfitUah)}</span>
           <span className="kpi-sub">
