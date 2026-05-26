@@ -309,6 +309,9 @@ function assembleHourlyRows(
       essAvgCostUahPerKwhStart: null,
       essWithdrawnCostUah: null,
       essRealizedProfitUah: null,
+      essCostBasisUahEnd: null,
+      essAvgCostUahPerKwhEnd: null,
+      essResidualKwhEnd: null,
     })
   }
 
@@ -368,34 +371,32 @@ function assembleHourlyRows(
   for (let h = 0; h < 24; h++) {
     const cur = out[h]
     if (cur === null) continue
-    // When we don't have a price for this hour we still update the
-    // running state (PV→ESS at 0, Grid→ESS we treat as a no-cash
-    // event because we can't honestly quote a price; discharges
-    // withdraw at whatever running avg exists). The per-row
-    // `essRealizedProfitUah` stays null so the daily total skips
-    // this hour, mirroring how `dailyTotals` skips null-price
-    // hours for the EBITDA framing.
-    const importPrice = cur.economics.importPriceUahPerKwh
-    const exportPrice = cur.economics.exportPriceUahPerKwh
+    // Skip null-RDN hours entirely instead of pretending the
+    // import / export prices are 0: a Grid→УЗЕ flow at the
+    // "free" price would dilute the WAC downward, and subsequent
+    // priced-hour discharges would over-state realized profit. By
+    // not advancing `state` we keep the cost-basis ledger calibrated
+    // to whatever the last priced hour ended at; the kWh tracker
+    // will drift from the inverter accumulator if there are real
+    // flows in the missing-RDN window, but that's preferable to
+    // fabricating prices.
+    if (cur.rdnUahPerKwh === null) continue
     const result = rollHour(
       state,
       cur.flow,
-      // Use 0 for import price when RDN is missing so charges from
-      // the grid that hour don't pollute the average with a
-      // fabricated number; that hour's grid-charge cost simply isn't
-      // counted for cost-basis purposes.
-      cur.rdnUahPerKwh === null ? 0 : importPrice,
-      cur.rdnUahPerKwh === null ? 0 : exportPrice,
+      cur.economics.importPriceUahPerKwh,
+      cur.economics.exportPriceUahPerKwh,
       tariffs.degradationUahPerKwh,
     )
     out[h] = {
       ...cur,
       essCostBasisUahStart: state.uah,
       essAvgCostUahPerKwhStart: result.avgCostStartUahPerKwh,
-      essWithdrawnCostUah:
-        cur.rdnUahPerKwh === null ? null : result.withdrawnCostUah,
-      essRealizedProfitUah:
-        cur.rdnUahPerKwh === null ? null : result.realizedProfitUah,
+      essWithdrawnCostUah: result.withdrawnCostUah,
+      essRealizedProfitUah: result.realizedProfitUah,
+      essCostBasisUahEnd: result.next.uah,
+      essAvgCostUahPerKwhEnd: result.avgCostEndUahPerKwh,
+      essResidualKwhEnd: result.next.kwh,
     }
     state = result.next
   }
@@ -409,7 +410,10 @@ function assembleHourlyRows(
 // last-ditch default when even the SOC anchor is missing. Kept as
 // a pure helper so the lint rule that complains about double
 // initialisation in the calling effect stays quiet.
-function pickInitialEssState(
+//
+// Exported for unit tests; production code calls it via
+// `assembleHourlyRows`.
+export function pickInitialEssState(
   yFlows: EnergyFlowHourlyResponse | null,
   yDeltas: TimeseriesResponse | null,
   yDamPrices: DAMPrice[] | null,
@@ -426,14 +430,27 @@ function pickInitialEssState(
   return ZERO_ESS_STATE
 }
 
+// Exported for unit tests; production code reaches it via
+// `pickInitialEssState`.
+//
 // preRollYesterday walks the previous day's 24-hour window through
-// the same `rollHour` algorithm (using yesterday's tariffs +
-// flows + RDN prices) and returns the cost-basis state at midnight.
-// Hours with missing RDN are skipped on both sides — the same
-// "we don't fabricate a price" rule applies — so a partly-missing
-// yesterday still produces a useful seed when the populated hours
-// dominated the activity.
-function preRollYesterday(
+// the same `rollHour` algorithm and returns the cost-basis state
+// at midnight. Hours with missing RDN are SKIPPED entirely —
+// pretending their import/export prices are 0 would log Grid→УЗЕ
+// charges as free and corrupt the seed handed to today. A partly-
+// missing yesterday still produces a useful seed when populated
+// hours dominated the activity; if yesterday is entirely
+// price-less, the seed degrades to `tariffs.seedEssCostUahPerKwh`
+// applied to whatever residual `seedFromCostPerKwh` was given (we
+// pass 0, so an empty battery — the cleanest default).
+//
+// Note: today's tariffs are reused for yesterday's recompute. If
+// the operator changed e.g. distribution rate between the two
+// days, today's KPI / table will reflect the new rate even for
+// yesterday's charges. That trade-off is intentional — the
+// dashboard never persists historical tariff snapshots, so the
+// only honest alternative would be to ignore yesterday entirely.
+export function preRollYesterday(
   yFlows: EnergyFlowHourlyResponse,
   yDeltas: TimeseriesResponse,
   yDamPrices: DAMPrice[],
@@ -454,6 +471,8 @@ function preRollYesterday(
   for (let h = 0; h < 24; h++) {
     const flowRow = yFlows.hours[h]
     if (!flowRow) continue
+    const rdn = priceMap.has(h) ? (priceMap.get(h) as number) : null
+    if (rdn === null) continue
     const flow: HourFlows = {
       pv: pvByHour.get(h) ?? 0,
       gridImport: importByHour.get(h) ?? 0,
@@ -464,16 +483,6 @@ function preRollYesterday(
       gridToEss: flowRow.grid_to_ess_kwh,
       essToLoad: flowRow.ess_to_load_kwh,
       essToGrid: flowRow.ess_to_grid_kwh,
-    }
-    const rdn = priceMap.has(h) ? (priceMap.get(h) as number) : null
-    if (rdn === null) {
-      // Pull discharges through at the existing avg even without a
-      // price (we don't need a price to know the energy left). The
-      // charge legs that hour aren't priced so we use 0 — matches
-      // the "free" treatment of PV.
-      const result = rollHour(state, flow, 0, 0, tariffs.degradationUahPerKwh)
-      state = result.next
-      continue
     }
     const economics = hourEconomics(rdn, flow, tariffs)
     const result = rollHour(

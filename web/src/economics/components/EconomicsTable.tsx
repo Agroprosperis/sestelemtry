@@ -52,6 +52,17 @@ function formatPrice(v: number | null | undefined): string {
   return priceFmt.format(v)
 }
 
+// formatPriceAllowZero is the cost-basis variant of formatPrice
+// that renders 0 as "0,00" rather than collapsing to em-dash. A
+// PV-only-charged battery has avg = 0 грн/кВт·год while still
+// holding kWh, and showing "—" there would make the operator
+// think we lost the data; the explicit zero is the honest answer.
+function formatPriceAllowZero(v: number | null | undefined): string {
+  if (v === null || v === undefined) return '—'
+  if (!Number.isFinite(v)) return '—'
+  return priceFmt.format(v)
+}
+
 function formatUah(v: number | null | undefined): string {
   if (v === null || v === undefined) return '—'
   if (!Number.isFinite(v)) return '—'
@@ -64,7 +75,7 @@ function formatUah(v: number | null | undefined): string {
 // label. `pickHourValue` returns the per-hour number and `total`
 // gives the daily aggregate; both return null when the underlying
 // row is missing or the metric is undefined for that hour.
-type MetricKind = 'price' | 'energy' | 'uah' | 'uah_signed'
+type MetricKind = 'price' | 'price_with_zero' | 'energy' | 'uah' | 'uah_signed'
 
 type MetricRow = {
   id: string
@@ -335,12 +346,14 @@ const METRIC_GROUPS: Array<{ id: string; label: string; rows: MetricRow[] }> = [
       {
         // Собівартість УЗЕ — поточна WAC цінність енергії в батареї
         // на початок години. Сума за добу не має сенсу (це знімок,
-        // як і Залишок), тому Σ = null. Округлення до цін —
-        // 2 знаки після коми, як для тарифів.
+        // як і Залишок), тому Σ = null. Використовує
+        // 'price_with_zero', бо години після PV-зарядки мають
+        // avg = 0 грн/кВт·год при ненульовому кВт·год — em-dash
+        // тут вводив би оператора в оману.
         id: 'ess_cost_basis',
         label: 'Собівартість УЗЕ',
         unit: 'грн/кВт·год',
-        kind: 'price',
+        kind: 'price_with_zero',
         pickHourValue: (row) => row?.essAvgCostUahPerKwhStart ?? null,
         total: () => null,
       },
@@ -584,6 +597,9 @@ function renderCell(
     case 'price':
       formatted = formatPrice(value)
       break
+    case 'price_with_zero':
+      formatted = formatPriceAllowZero(value)
+      break
     case 'energy':
       formatted = formatNumber(value)
       break
@@ -689,6 +705,8 @@ function renderTotal(value: number, kind: MetricKind): ReactElement {
       // for price metrics so this branch is never reached, but we
       // handle it defensively.
       return <span>{formatPrice(value)}</span>
+    case 'price_with_zero':
+      return <span>{formatPriceAllowZero(value)}</span>
     case 'energy':
       return <span>{formatNumber(value)}</span>
     case 'uah':

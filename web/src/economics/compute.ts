@@ -196,7 +196,18 @@ export type DailyTotals = {
   essWithdrawnCostUah: number
   essRealizedProfitUah: number
   essDegradationCostUah: number
+  // End-of-day snapshot of the cost-basis tracker. `Eod` is the
+  // state AFTER hour 23 (or the last priced hour, when later hours
+  // had no RDN). Three views of the same scalar pair: avg cost per
+  // kWh, residual kWh, and total UAH "stuck" inside the battery
+  // (= avg · residual). The KPI strip uses residual === 0 as the
+  // "battery emptied today" trigger, and `essCostBasisUahEod` as
+  // the "deferred profit" hint that explains why
+  // `essRealizedProfitUah + pvLegs` may differ from `effect` on
+  // carry-over days.
   essAvgCostBasisUahPerKwhEod: number
+  essResidualKwhEod: number
+  essCostBasisUahEod: number
 }
 
 export function dailyTotals(rows: Array<HourEconomicsRow | null>): DailyTotals {
@@ -234,17 +245,13 @@ export function dailyTotals(rows: Array<HourEconomicsRow | null>): DailyTotals {
     essRealizedProfitUah: 0,
     essDegradationCostUah: 0,
     essAvgCostBasisUahPerKwhEod: 0,
+    essResidualKwhEod: 0,
+    essCostBasisUahEod: 0,
   }
   let importLoadKwh = 0
   let exportKwh = 0
   let importPriceUahSum = 0
   let exportPriceUahSum = 0
-  // The EOD basis is "the value reported by the LAST row that
-  // populated cost-basis fields", since rows are passed in
-  // chronological order. We track the last seen value rather than
-  // scanning back so a single-day call still produces a sane
-  // snapshot even when the trailing hours have null prices.
-  let lastAvgCostEod: number | null = null
   for (const row of rows) {
     if (!row) continue
     if (row.rdnUahPerKwh === null) {
@@ -304,17 +311,33 @@ export function dailyTotals(rows: Array<HourEconomicsRow | null>): DailyTotals {
   const essRevenue = acc.revenueEssExport + acc.revenueEssSelf
   acc.essDegradationCostUah =
     essRevenue - acc.essWithdrawnCostUah - acc.essRealizedProfitUah
-  // Find the EOD avg cost from the last row that populated cost-basis
-  // fields, scanning right-to-left so partial-day data (e.g. last few
-  // hours have null RDN) still produces a sensible value.
+  // EOD snapshot — read the END-of-hour state from the last row
+  // that ran through `rollHour`. Scanning right-to-left handles
+  // the typical "tail of the day has no DAM yet" case: hours with
+  // null RDN don't carry End fields, so we naturally fall back to
+  // the last hour that did. Three views of the same scalar pair:
+  // avg cost per kWh (for the "tomorrow's basis" KPI), residual
+  // kWh (so the KPI can say "battery empty" instead of formatting
+  // 0 as em-dash), total UAH "stuck" inside (= avg · residual),
+  // which we surface as deferred-profit context.
   for (let i = rows.length - 1; i >= 0; i--) {
     const r = rows[i]
-    if (r && r.essAvgCostUahPerKwhStart !== null) {
-      lastAvgCostEod = r.essAvgCostUahPerKwhStart
+    // Loose `!= null` so `undefined` (older test fixtures, partial
+    // hydration) is treated the same as `null`. This way only rows
+    // that were explicitly populated by `assembleHourlyRows` count
+    // as the EOD source.
+    if (
+      r &&
+      r.essAvgCostUahPerKwhEnd != null &&
+      r.essResidualKwhEnd != null &&
+      r.essCostBasisUahEnd != null
+    ) {
+      acc.essAvgCostBasisUahPerKwhEod = r.essAvgCostUahPerKwhEnd
+      acc.essResidualKwhEod = r.essResidualKwhEnd
+      acc.essCostBasisUahEod = r.essCostBasisUahEnd
       break
     }
   }
-  acc.essAvgCostBasisUahPerKwhEod = lastAvgCostEod ?? 0
   return acc
 }
 
@@ -362,4 +385,13 @@ export type HourEconomicsRow = {
   essAvgCostUahPerKwhStart: number | null
   essWithdrawnCostUah: number | null
   essRealizedProfitUah: number | null
+  // End-of-hour cost-basis snapshot. `*End` is the state AFTER
+  // this hour's charges/discharges, i.e. the start state for the
+  // next hour. Stored on the row so `dailyTotals` can pick the
+  // last priced hour's End values as the EOD snapshot without
+  // re-rolling the whole day. null when the row didn't run
+  // through `rollHour` (missing RDN price for the hour, etc).
+  essCostBasisUahEnd: number | null
+  essAvgCostUahPerKwhEnd: number | null
+  essResidualKwhEnd: number | null
 }

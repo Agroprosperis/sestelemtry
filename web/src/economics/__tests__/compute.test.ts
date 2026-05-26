@@ -184,6 +184,9 @@ describe('dailyTotals (spec calibration)', () => {
         essAvgCostUahPerKwhStart: null,
         essWithdrawnCostUah: null,
         essRealizedProfitUah: null,
+        essCostBasisUahEnd: null,
+        essAvgCostUahPerKwhEnd: null,
+        essResidualKwhEnd: null,
       })
     }
     return out
@@ -274,6 +277,9 @@ describe('dailyTotals (spec calibration)', () => {
         essAvgCostUahPerKwhStart: null,
         essWithdrawnCostUah: null,
         essRealizedProfitUah: null,
+        essCostBasisUahEnd: null,
+        essAvgCostUahPerKwhEnd: null,
+        essResidualKwhEnd: null,
       })
     }
     const totals = dailyTotals(rows)
@@ -326,6 +332,9 @@ describe('dailyTotals (cost-basis aggregates)', () => {
         essAvgCostUahPerKwhStart: out.avgCostStartUahPerKwh,
         essWithdrawnCostUah: out.withdrawnCostUah,
         essRealizedProfitUah: out.realizedProfitUah,
+        essCostBasisUahEnd: out.next.uah,
+        essAvgCostUahPerKwhEnd: out.avgCostEndUahPerKwh,
+        essResidualKwhEnd: out.next.kwh,
       })
       state = out.next
     }
@@ -338,6 +347,8 @@ describe('dailyTotals (cost-basis aggregates)', () => {
     expect(totals.essRealizedProfitUah).toBeCloseTo(600, 6)
     // EOD avg cost: battery is empty, so 0.
     expect(totals.essAvgCostBasisUahPerKwhEod).toBe(0)
+    expect(totals.essResidualKwhEod).toBe(0)
+    expect(totals.essCostBasisUahEod).toBe(0)
   })
 
   it('preserves an EOD non-empty cost basis when the battery is not fully discharged', () => {
@@ -371,15 +382,141 @@ describe('dailyTotals (cost-basis aggregates)', () => {
         essAvgCostUahPerKwhStart: out.avgCostStartUahPerKwh,
         essWithdrawnCostUah: out.withdrawnCostUah,
         essRealizedProfitUah: out.realizedProfitUah,
+        essCostBasisUahEnd: out.next.uah,
+        essAvgCostUahPerKwhEnd: out.avgCostEndUahPerKwh,
+        essResidualKwhEnd: out.next.kwh,
       })
       state = out.next
     }
     const totals = dailyTotals(rows)
     // After hour 2 the battery sits at 100 kWh @ avg 3.
-    // Hours 3..23 see avgCostStart = 3 (no further activity).
-    // EOD avg from the LAST row's `essAvgCostUahPerKwhStart` is 3.
+    // Hours 3..23 see no flow → state stays. EOD reads the End
+    // fields of hour 23 = (kwh: 100, uah: 300, avg: 3).
     expect(totals.essAvgCostBasisUahPerKwhEod).toBeCloseTo(3, 6)
+    expect(totals.essResidualKwhEod).toBeCloseTo(100, 6)
+    expect(totals.essCostBasisUahEod).toBeCloseTo(300, 6)
     expect(totals.essWithdrawnCostUah).toBe(0)
     expect(totals.essRealizedProfitUah).toBe(0)
+  })
+
+  it('reports the END-of-hour-23 avg as EOD when hour 23 itself charges', () => {
+    // Regression for an off-by-one where EOD was read from
+    // `essAvgCostUahPerKwhStart` of hour 23 (i.e. avg AT THE
+    // START of hour 23) — which differs from the post-charge avg
+    // when hour 23 has activity. Charge 100 kWh @ RDN=5 in hour
+    // 23 starting from an empty battery: start-avg = 0,
+    // end-avg = 5, EOD must be 5.
+    const tariffs = {
+      ...DEFAULT_TARIFFS,
+      distributionUahPerKwh: 0,
+      transmissionUahPerKwh: 0,
+      supplierMarginUahPerKwh: 0,
+      otherFeesUahPerKwh: 0,
+      degradationUahPerKwh: 0,
+    }
+    const rows: Array<HourEconomicsRow | null> = []
+    let state: EssState = ZERO_ESS_STATE
+    for (let h = 0; h < 24; h++) {
+      const rdn = 1
+      const flow: HourFlows = {
+        pv: 0,
+        gridImport: h === 23 ? 100 : 0,
+        gridExport: 0,
+        essCharged: h === 23 ? 100 : 0,
+        essDischarged: 0,
+        pvToEss: 0,
+        gridToEss: h === 23 ? 100 : 0,
+        essToLoad: 0,
+        essToGrid: 0,
+      }
+      const lastHourRdn = h === 23 ? 5 : rdn
+      const econ = hourEconomics(lastHourRdn, flow, tariffs)
+      const out = rollHour(state, flow, econ.importPriceUahPerKwh, econ.exportPriceUahPerKwh, tariffs.degradationUahPerKwh)
+      rows.push({
+        hour: h,
+        hourStart: `2026-05-10T${String(h).padStart(2, '0')}:00:00+03:00`,
+        rdnUahPerKwh: lastHourRdn,
+        flow,
+        economics: econ,
+        essRemainingKwhStart: null,
+        essCostBasisUahStart: state.uah,
+        essAvgCostUahPerKwhStart: out.avgCostStartUahPerKwh,
+        essWithdrawnCostUah: out.withdrawnCostUah,
+        essRealizedProfitUah: out.realizedProfitUah,
+        essCostBasisUahEnd: out.next.uah,
+        essAvgCostUahPerKwhEnd: out.avgCostEndUahPerKwh,
+        essResidualKwhEnd: out.next.kwh,
+      })
+      state = out.next
+    }
+    const totals = dailyTotals(rows)
+    expect(totals.essAvgCostBasisUahPerKwhEod).toBeCloseTo(5, 6)
+    expect(totals.essResidualKwhEod).toBeCloseTo(100, 6)
+    expect(totals.essCostBasisUahEod).toBeCloseTo(500, 6)
+  })
+
+  it('falls back to the last End fields when trailing hours have no RDN', () => {
+    // Hours 22 and 23 have `null` RDN → cost-basis fields stay
+    // null, so the EOD scan should fall back to hour 21.
+    const tariffs = { ...DEFAULT_TARIFFS, distributionUahPerKwh: 0, transmissionUahPerKwh: 0, supplierMarginUahPerKwh: 0, otherFeesUahPerKwh: 0, degradationUahPerKwh: 0 }
+    const rows: Array<HourEconomicsRow | null> = []
+    let state: EssState = ZERO_ESS_STATE
+    for (let h = 0; h < 24; h++) {
+      const hasPrice = h <= 21
+      const rdn = hasPrice ? (h === 2 ? 4 : 1) : null
+      const flow: HourFlows = {
+        pv: 0,
+        gridImport: h === 2 ? 100 : 0,
+        gridExport: 0,
+        essCharged: h === 2 ? 100 : 0,
+        essDischarged: 0,
+        pvToEss: 0,
+        gridToEss: h === 2 ? 100 : 0,
+        essToLoad: 0,
+        essToGrid: 0,
+      }
+      const econ = hourEconomics(rdn ?? 0, flow, tariffs)
+      if (rdn === null) {
+        rows.push({
+          hour: h,
+          hourStart: `2026-05-10T${String(h).padStart(2, '0')}:00:00+03:00`,
+          rdnUahPerKwh: null,
+          flow,
+          economics: econ,
+          essRemainingKwhStart: null,
+          essCostBasisUahStart: null,
+          essAvgCostUahPerKwhStart: null,
+          essWithdrawnCostUah: null,
+          essRealizedProfitUah: null,
+          essCostBasisUahEnd: null,
+          essAvgCostUahPerKwhEnd: null,
+          essResidualKwhEnd: null,
+        })
+        continue
+      }
+      const out = rollHour(state, flow, econ.importPriceUahPerKwh, econ.exportPriceUahPerKwh, tariffs.degradationUahPerKwh)
+      rows.push({
+        hour: h,
+        hourStart: `2026-05-10T${String(h).padStart(2, '0')}:00:00+03:00`,
+        rdnUahPerKwh: rdn,
+        flow,
+        economics: econ,
+        essRemainingKwhStart: null,
+        essCostBasisUahStart: state.uah,
+        essAvgCostUahPerKwhStart: out.avgCostStartUahPerKwh,
+        essWithdrawnCostUah: out.withdrawnCostUah,
+        essRealizedProfitUah: out.realizedProfitUah,
+        essCostBasisUahEnd: out.next.uah,
+        essAvgCostUahPerKwhEnd: out.avgCostEndUahPerKwh,
+        essResidualKwhEnd: out.next.kwh,
+      })
+      state = out.next
+    }
+    const totals = dailyTotals(rows)
+    // After hour 2: state = (100, 400), avg = 4. Hours 3..21 are
+    // no-op priced rows so the End-fields stay (100, 400, avg 4).
+    // EOD must read hour 21's End, not silently coalesce to 0.
+    expect(totals.essAvgCostBasisUahPerKwhEod).toBeCloseTo(4, 6)
+    expect(totals.essResidualKwhEod).toBeCloseTo(100, 6)
   })
 })

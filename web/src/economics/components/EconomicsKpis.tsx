@@ -51,6 +51,28 @@ function formatPriceUahPerKwh(v: number): string {
   return `${priceFormatter.format(v)}/кВт·год`
 }
 
+// formatEodSubtitle composes the "на завтра…" sub-line of the
+// realized-profit KPI. Three branches:
+//   - empty battery (residual kWh ≈ 0) → "батарея порожня на
+//     завтра" so the operator doesn't read the em-dash as a
+//     loading error;
+//   - PV-only inventory (residual > 0, avg = 0) → just the kWh
+//     count + "вільна енергія" so it's clear there's stock but no
+//     cash basis to recover;
+//   - normal → "X грн/кВт·год · Y кВт·год (Z грн)" surfacing the
+//     deferred-profit context that explains why
+//     `realized + pvLegs` may differ from `effect` on carry-over
+//     days (the cash is "stuck" inside the battery until tomorrow).
+function formatEodSubtitle(avgUahPerKwh: number, residualKwh: number, costUah: number): string {
+  if (!Number.isFinite(residualKwh) || residualKwh <= 0.01) {
+    return 'батарея порожня на завтра'
+  }
+  if (!Number.isFinite(avgUahPerKwh) || avgUahPerKwh <= 0) {
+    return `на завтра — ${formatKwh(residualKwh)} вільної енергії`
+  }
+  return `на завтра — ${formatPriceUahPerKwh(avgUahPerKwh)} · ${formatKwh(residualKwh)} (${formatUah(costUah)})`
+}
+
 export function EconomicsKpis({ totals, tariffs }: Props) {
   const pvSelfConsumed = totals.pvToLoad + totals.pvToEss
   const pvSelfConsumptionShare = totals.pv > 0 ? pvSelfConsumed / totals.pv : 0
@@ -88,7 +110,11 @@ export function EconomicsKpis({ totals, tariffs }: Props) {
           <span className="kpi-label">Реалізований ефект УЗЕ</span>
           <span className="kpi-value">{formatUah(totals.essRealizedProfitUah)}</span>
           <span className="kpi-sub">
-            на завтра — {formatPriceUahPerKwh(totals.essAvgCostBasisUahPerKwhEod)}
+            {formatEodSubtitle(
+              totals.essAvgCostBasisUahPerKwhEod,
+              totals.essResidualKwhEod,
+              totals.essCostBasisUahEod,
+            )}
           </span>
         </div>
       </div>
