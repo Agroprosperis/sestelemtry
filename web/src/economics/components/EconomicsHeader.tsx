@@ -238,7 +238,7 @@ export function EconomicsHeader({
             onChange={(essCapacityKwh) => update({ essCapacityKwh })}
           />
           <NumericField
-            label="Собівартість seed-залишку УЗЕ"
+            label="Стартова собівартість УЗЕ на 00:00"
             value={tariffs.seedEssCostUahPerKwh}
             step={0.01}
             min={0}

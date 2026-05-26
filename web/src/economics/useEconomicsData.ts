@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { fetchDAMPrices, fetchEnergyFlowHourly, fetchTimeseries } from '../api'
 import type { DAMPrice, EnergyFlowHourlyResponse, TimeseriesResponse } from '../types'
 import { hourEconomics, type HourEconomicsRow, type HourFlows } from './compute'
-import { rollHour, seedFromCostPerKwh, type EssState, ZERO_ESS_STATE } from './costBasis'
+import { rollHour, seedFromCostPerKwh, type EssState } from './costBasis'
 import type { Tariffs } from './tariffs'
 
 // DAM zone 2 is the unified UA grid; zone 1 is the historical
@@ -350,16 +350,19 @@ function assembleHourlyRows(
     }
   }
 
-  // Cost-basis third pass: pre-roll yesterday's 24 hours so we land
-  // at 00:00 today with the actual UAH/kWh that survived overnight,
-  // then roll today's 24 hours filling the four cost-basis fields
-  // on each row. PV→ESS contributes 0 UAH (sun is free), Grid→ESS
-  // contributes `gridToEss · importPrice` (real cash), and
-  // discharges withdraw at the running average (WAC). The initial
-  // state branches on which signals we have for yesterday: full
-  // 48-hour roll when both flows and DAM are available; otherwise
-  // a seed derived from `tariffs.seedEssCostUahPerKwh` × today's
-  // hour-0 residual; otherwise an empty battery.
+  // Cost-basis third pass: derive today's 00:00 ESS state and roll
+  // today's 24 hours filling the four cost-basis fields on each row.
+  // PV→ESS contributes 0 UAH (sun is free), Grid→ESS contributes
+  // `gridToEss · importPrice` (real cash), discharges withdraw at
+  // the running average (WAC). The starting kWh comes from
+  // yesterday's pre-roll when available, today's hour-0 SOC as the
+  // first fallback, or zero. The starting UAH is **always**
+  // `kwh × seedEssCostUahPerKwh` — yesterday's WAC roll only
+  // informs the kWh balance, never the cost basis. That makes the
+  // seed tariff a direct, predictable handle for the operator:
+  // typing "10 грн/кВт·год" guarantees the table opens at 10
+  // грн/кВт·год average regardless of what charges happened
+  // yesterday.
   let state: EssState = pickInitialEssState(
     yFlows,
     yDeltas,
@@ -403,15 +406,29 @@ function assembleHourlyRows(
   return out
 }
 
-// pickInitialEssState chooses where today's cost-basis pipeline
-// starts. Pre-rolling yesterday is the highest-fidelity option;
-// the seed-from-tariff path is the operator's manual fallback for
-// fresh deployments / DAM outages; an empty battery is the
-// last-ditch default when even the SOC anchor is missing. Kept as
-// a pure helper so the lint rule that complains about double
-// initialisation in the calling effect stays quiet.
+// pickInitialEssState builds today's 00:00 ESS state by combining
+// the best available *kWh* signal with the operator-supplied seed
+// price. Order of preference for the kWh leg:
+//   1. Pre-rolled yesterday — the WAC roll's residual kWh is the
+//      most physically calibrated number we have (it tracks the
+//      four directional flows hour-by-hour and absorbs round-trip
+//      losses).
+//   2. Today's hour-0 SOC anchor — % × ємність when the gauge is
+//      readable but yesterday's data is missing.
+//   3. Empty battery — when even the SOC anchor is unavailable.
 //
-// Exported for unit tests; production code calls it via
+// The UAH leg is ALWAYS `kwh × tariffs.seedEssCostUahPerKwh`. Past
+// versions of this helper carried yesterday's pre-rolled WAC into
+// today, which made the seed tariff a quiet fallback that did
+// nothing whenever yesterday's flows were healthy. Operators
+// expect the seed to be a direct override — set 10 грн/кВт·год and
+// see 10 грн/кВт·год at hour 0 — so the new contract is exactly
+// that. Yesterday's pre-roll still runs (it's authoritative for
+// the kWh count) but its uah leg is discarded here.
+//
+// Kept as a pure helper so the lint rule that complains about
+// double initialisation in the calling effect stays quiet, and
+// exported for unit tests; production code calls it via
 // `assembleHourlyRows`.
 export function pickInitialEssState(
   yFlows: EnergyFlowHourlyResponse | null,
@@ -420,14 +437,17 @@ export function pickInitialEssState(
   tariffs: Tariffs,
   soc0Percent: number | undefined,
 ): EssState {
+  let kwh = 0
   if (yFlows && yDeltas && yDamPrices) {
-    return preRollYesterday(yFlows, yDeltas, yDamPrices, tariffs)
+    kwh = preRollYesterday(yFlows, yDeltas, yDamPrices, tariffs).kwh
+  } else if (
+    soc0Percent !== undefined &&
+    Number.isFinite(soc0Percent) &&
+    soc0Percent > 0
+  ) {
+    kwh = (soc0Percent / 100) * tariffs.essCapacityKwh
   }
-  if (soc0Percent !== undefined && Number.isFinite(soc0Percent) && soc0Percent > 0) {
-    const dayStartResidual = (soc0Percent / 100) * tariffs.essCapacityKwh
-    return seedFromCostPerKwh(dayStartResidual, tariffs.seedEssCostUahPerKwh)
-  }
-  return ZERO_ESS_STATE
+  return seedFromCostPerKwh(kwh, tariffs.seedEssCostUahPerKwh)
 }
 
 // Exported for unit tests; production code reaches it via

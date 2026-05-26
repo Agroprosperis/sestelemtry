@@ -60,10 +60,11 @@ function makeDamPrices(prices: Record<number, number>): DAMPrice[] {
 }
 
 describe('pickInitialEssState', () => {
-  it('chooses preRollYesterday when all yesterday signals are present', () => {
+  it('takes kWh from preRollYesterday but applies seed price for UAH', () => {
     // Yesterday charges 100 kWh from grid in hour 2 at RDN=2 →
-    // ends with state (100, 200), avg=2 (with zero distribution
-    // tariff so importPrice = RDN).
+    // pre-roll's WAC would land at uah=200 (avg=2). The new
+    // contract discards that uah and uses seed × kwh instead, so
+    // seedEssCostUahPerKwh=10 produces uah=1000 regardless.
     const tariffs = {
       ...DEFAULT_TARIFFS,
       distributionUahPerKwh: 0,
@@ -71,7 +72,7 @@ describe('pickInitialEssState', () => {
       supplierMarginUahPerKwh: 0,
       otherFeesUahPerKwh: 0,
       degradationUahPerKwh: 0,
-      seedEssCostUahPerKwh: 99, // would dominate if seed-fallback fires
+      seedEssCostUahPerKwh: 10,
     }
     const yFlows = makeFlowResponse({
       2: makeFlowHour(2, { grid_to_ess_kwh: 100, ess_charged_kwh: 100 }),
@@ -79,7 +80,29 @@ describe('pickInitialEssState', () => {
     const yDam = makeDamPrices({ 2: 2 })
     const state = pickInitialEssState(yFlows, makeEmptyDeltas(), yDam, tariffs, undefined)
     expect(state.kwh).toBeCloseTo(100, 6)
-    expect(state.uah).toBeCloseTo(200, 6)
+    expect(state.uah).toBeCloseTo(1000, 6)
+  })
+
+  it('preserves the kWh balance even when seed=0', () => {
+    // Same yesterday data as the previous test but with seed=0.
+    // The kwh leg still tracks pre-roll (100), the uah leg goes
+    // to 0 because seed × kwh = 0.
+    const tariffs = {
+      ...DEFAULT_TARIFFS,
+      distributionUahPerKwh: 0,
+      transmissionUahPerKwh: 0,
+      supplierMarginUahPerKwh: 0,
+      otherFeesUahPerKwh: 0,
+      degradationUahPerKwh: 0,
+      seedEssCostUahPerKwh: 0,
+    }
+    const yFlows = makeFlowResponse({
+      2: makeFlowHour(2, { grid_to_ess_kwh: 100, ess_charged_kwh: 100 }),
+    })
+    const yDam = makeDamPrices({ 2: 2 })
+    const state = pickInitialEssState(yFlows, makeEmptyDeltas(), yDam, tariffs, undefined)
+    expect(state.kwh).toBeCloseTo(100, 6)
+    expect(state.uah).toBeCloseTo(0, 6)
   })
 
   it('falls back to seedEssCostUahPerKwh × SOC when yesterday is missing', () => {
@@ -96,9 +119,9 @@ describe('pickInitialEssState', () => {
   })
 
   it('returns ZERO_ESS_STATE when yesterday is partially missing', () => {
-    // yFlows present but yDam absent → we can't price yesterday's
-    // charges, so the seed degrades to the ZERO branch (no SOC
-    // anchor here either).
+    // yFlows present but yDam absent → we can't pre-roll, so the
+    // kWh leg falls back to SOC (also absent here), then to 0.
+    // seed × 0 = 0.
     const yFlows = makeFlowResponse({
       2: makeFlowHour(2, { grid_to_ess_kwh: 100, ess_charged_kwh: 100 }),
     })
