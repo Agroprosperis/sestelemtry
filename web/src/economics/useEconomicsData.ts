@@ -354,15 +354,14 @@ function assembleHourlyRows(
   // today's 24 hours filling the four cost-basis fields on each row.
   // PV→ESS contributes 0 UAH (sun is free), Grid→ESS contributes
   // `gridToEss · importPrice` (real cash), discharges withdraw at
-  // the running average (WAC). The starting kWh comes from
-  // yesterday's pre-roll when available, today's hour-0 SOC as the
-  // first fallback, or zero. The starting UAH is **always**
-  // `kwh × seedEssCostUahPerKwh` — yesterday's WAC roll only
-  // informs the kWh balance, never the cost basis. That makes the
-  // seed tariff a direct, predictable handle for the operator:
-  // typing "10 грн/кВт·год" guarantees the table opens at 10
-  // грн/кВт·год average regardless of what charges happened
-  // yesterday.
+  // the running average (WAC). The starting kWh prefers SOC at
+  // hour 0 (the gauge — same number the "Залишок УЗЕ" row uses),
+  // falls back to yesterday's pre-roll, then to zero. The starting
+  // UAH is **always** `kwh × seedEssCostUahPerKwh` — yesterday's
+  // WAC roll only informs the kWh balance when SOC is missing,
+  // never the cost basis. That makes the seed tariff a direct,
+  // predictable handle for the operator: typing "10 грн/кВт·год"
+  // guarantees the table opens at 10 грн/кВт·год average.
   let state: EssState = pickInitialEssState(
     yFlows,
     yDeltas,
@@ -409,13 +408,17 @@ function assembleHourlyRows(
 // pickInitialEssState builds today's 00:00 ESS state by combining
 // the best available *kWh* signal with the operator-supplied seed
 // price. Order of preference for the kWh leg:
-//   1. Pre-rolled yesterday — the WAC roll's residual kWh is the
-//      most physically calibrated number we have (it tracks the
-//      four directional flows hour-by-hour and absorbs round-trip
-//      losses).
-//   2. Today's hour-0 SOC anchor — % × ємність when the gauge is
-//      readable but yesterday's data is missing.
-//   3. Empty battery — when even the SOC anchor is unavailable.
+//   1. Today's hour-0 SOC anchor — % × ємність. This is the
+//      physical gauge reading at the day boundary, the same number
+//      the "Залишок УЗЕ" table row anchors on, so the cost-basis
+//      and the residual rows always agree at hour 0.
+//   2. Pre-rolled yesterday — used only when SOC is unavailable
+//      (gauge dropout or fresh deployment that hasn't reported
+//      soc_percent yet). Pre-roll is an integration of the
+//      previous day's directional flows starting from an empty
+//      battery, so it can drift several kWh from the gauge over
+//      a 24-hour window.
+//   3. Empty battery — when neither signal is available.
 //
 // The UAH leg is ALWAYS `kwh × tariffs.seedEssCostUahPerKwh`. Past
 // versions of this helper carried yesterday's pre-rolled WAC into
@@ -423,8 +426,7 @@ function assembleHourlyRows(
 // nothing whenever yesterday's flows were healthy. Operators
 // expect the seed to be a direct override — set 10 грн/кВт·год and
 // see 10 грн/кВт·год at hour 0 — so the new contract is exactly
-// that. Yesterday's pre-roll still runs (it's authoritative for
-// the kWh count) but its uah leg is discarded here.
+// that.
 //
 // Kept as a pure helper so the lint rule that complains about
 // double initialisation in the calling effect stays quiet, and
@@ -438,14 +440,14 @@ export function pickInitialEssState(
   soc0Percent: number | undefined,
 ): EssState {
   let kwh = 0
-  if (yFlows && yDeltas && yDamPrices) {
-    kwh = preRollYesterday(yFlows, yDeltas, yDamPrices, tariffs).kwh
-  } else if (
+  if (
     soc0Percent !== undefined &&
     Number.isFinite(soc0Percent) &&
     soc0Percent > 0
   ) {
     kwh = (soc0Percent / 100) * tariffs.essCapacityKwh
+  } else if (yFlows && yDeltas && yDamPrices) {
+    kwh = preRollYesterday(yFlows, yDeltas, yDamPrices, tariffs).kwh
   }
   return seedFromCostPerKwh(kwh, tariffs.seedEssCostUahPerKwh)
 }

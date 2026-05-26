@@ -60,11 +60,41 @@ function makeDamPrices(prices: Record<number, number>): DAMPrice[] {
 }
 
 describe('pickInitialEssState', () => {
-  it('takes kWh from preRollYesterday but applies seed price for UAH', () => {
-    // Yesterday charges 100 kWh from grid in hour 2 at RDN=2 →
-    // pre-roll's WAC would land at uah=200 (avg=2). The new
-    // contract discards that uah and uses seed × kwh instead, so
-    // seedEssCostUahPerKwh=10 produces uah=1000 regardless.
+  it('prefers SOC over preRollYesterday for the kWh leg', () => {
+    // Yesterday's pre-roll would settle at kwh=100 (a 100 kWh
+    // grid charge in hour 2 with no later activity). But SOC at
+    // midnight reads 39.9% × 215 kWh = ~85.8 kWh — the actual
+    // gauge. The cost-basis row should align with the gauge so
+    // the displayed "Залишок УЗЕ" and "Собівартість УЗЕ" rows
+    // can't disagree at hour 0.
+    const tariffs = {
+      ...DEFAULT_TARIFFS,
+      distributionUahPerKwh: 0,
+      transmissionUahPerKwh: 0,
+      supplierMarginUahPerKwh: 0,
+      otherFeesUahPerKwh: 0,
+      degradationUahPerKwh: 0,
+      seedEssCostUahPerKwh: 12,
+      essCapacityKwh: 215,
+    }
+    const yFlows = makeFlowResponse({
+      2: makeFlowHour(2, { grid_to_ess_kwh: 100, ess_charged_kwh: 100 }),
+    })
+    const yDam = makeDamPrices({ 2: 2 })
+    const state = pickInitialEssState(
+      yFlows,
+      makeEmptyDeltas(),
+      yDam,
+      tariffs,
+      39.9,
+    )
+    expect(state.kwh).toBeCloseTo((39.9 / 100) * 215, 6)
+    expect(state.uah).toBeCloseTo((39.9 / 100) * 215 * 12, 6)
+  })
+
+  it('falls back to preRollYesterday when SOC is missing', () => {
+    // Yesterday charges 100 kWh from grid in hour 2 → pre-roll
+    // returns kwh=100. With seed=10 → uah=1000.
     const tariffs = {
       ...DEFAULT_TARIFFS,
       distributionUahPerKwh: 0,
@@ -84,28 +114,18 @@ describe('pickInitialEssState', () => {
   })
 
   it('preserves the kWh balance even when seed=0', () => {
-    // Same yesterday data as the previous test but with seed=0.
-    // The kwh leg still tracks pre-roll (100), the uah leg goes
-    // to 0 because seed × kwh = 0.
+    // SOC=25% × 200 kWh capacity = 50 kWh. Seed=0 → uah=0.
     const tariffs = {
       ...DEFAULT_TARIFFS,
-      distributionUahPerKwh: 0,
-      transmissionUahPerKwh: 0,
-      supplierMarginUahPerKwh: 0,
-      otherFeesUahPerKwh: 0,
-      degradationUahPerKwh: 0,
       seedEssCostUahPerKwh: 0,
+      essCapacityKwh: 200,
     }
-    const yFlows = makeFlowResponse({
-      2: makeFlowHour(2, { grid_to_ess_kwh: 100, ess_charged_kwh: 100 }),
-    })
-    const yDam = makeDamPrices({ 2: 2 })
-    const state = pickInitialEssState(yFlows, makeEmptyDeltas(), yDam, tariffs, undefined)
-    expect(state.kwh).toBeCloseTo(100, 6)
+    const state = pickInitialEssState(null, null, null, tariffs, 25)
+    expect(state.kwh).toBeCloseTo(50, 6)
     expect(state.uah).toBeCloseTo(0, 6)
   })
 
-  it('falls back to seedEssCostUahPerKwh × SOC when yesterday is missing', () => {
+  it('uses seedEssCostUahPerKwh × SOC when both signals are present', () => {
     const tariffs = { ...DEFAULT_TARIFFS, seedEssCostUahPerKwh: 1.5, essCapacityKwh: 200 }
     // SOC = 25% → residual 50 kWh; seed price 1.5 → uah = 75.
     const state = pickInitialEssState(null, null, null, tariffs, 25)
@@ -118,10 +138,9 @@ describe('pickInitialEssState', () => {
     expect(state).toEqual(ZERO_ESS_STATE)
   })
 
-  it('returns ZERO_ESS_STATE when yesterday is partially missing', () => {
-    // yFlows present but yDam absent → we can't pre-roll, so the
-    // kWh leg falls back to SOC (also absent here), then to 0.
-    // seed × 0 = 0.
+  it('returns ZERO_ESS_STATE when yesterday is partially missing and SOC is too', () => {
+    // yFlows present but yDam absent → can't pre-roll. No SOC
+    // either → seed × 0 = ZERO state.
     const yFlows = makeFlowResponse({
       2: makeFlowHour(2, { grid_to_ess_kwh: 100, ess_charged_kwh: 100 }),
     })
