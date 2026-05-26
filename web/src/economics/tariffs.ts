@@ -33,6 +33,15 @@ export type Tariffs = {
   includeVat: boolean
   vatRate: number
   essCapacityKwh: number
+  // seedEssCostUahPerKwh is the фолбек собівартості залишку УЗЕ
+  // на 00:00 коли вчорашні погодинні потоки/ціни недоступні
+  // (новий пристрій, відсутній DAM, помилка fetch). Використовується
+  // лише cost-basis алгоритмом у `costBasis.ts`; не впливає на
+  // спот-розрахунок hourEconomics. Значення 0 трактує seed-кВт·год
+  // як "вільну" енергію — занижує перші розряди дня, поки залишок
+  // не витече, тому оператор може поставити сюди середню ціну
+  // заряду минулого тижня, якщо хоче консервативніший облік.
+  seedEssCostUahPerKwh: number
 }
 
 export const DEFAULT_TARIFFS: Tariffs = {
@@ -45,4 +54,5 @@ export const DEFAULT_TARIFFS: Tariffs = {
   includeVat: false,
   vatRate: 0.2,
   essCapacityKwh: 215,
+  seedEssCostUahPerKwh: 0,
 }

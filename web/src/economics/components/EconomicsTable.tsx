@@ -332,6 +332,30 @@ const METRIC_GROUPS: Array<{ id: string; label: string; rows: MetricRow[] }> = [
         pickHourValue: (row) => row?.essRemainingKwhStart ?? null,
         total: () => null,
       },
+      {
+        // Собівартість УЗЕ — поточна WAC цінність енергії в батареї
+        // на початок години. Сума за добу не має сенсу (це знімок,
+        // як і Залишок), тому Σ = null. Округлення до цін —
+        // 2 знаки після коми, як для тарифів.
+        id: 'ess_cost_basis',
+        label: 'Собівартість УЗЕ',
+        unit: 'грн/кВт·год',
+        kind: 'price',
+        pickHourValue: (row) => row?.essAvgCostUahPerKwhStart ?? null,
+        total: () => null,
+      },
+      {
+        // Списано з УЗЕ — UAH знятого з cost-basis на покриття
+        // розрядів цієї години (УЗЕ→Споживання + УЗЕ→Мережа) за
+        // середньою ціною на початок години. Σ за добу — це
+        // загальна "вартість того, що вийшло з батареї".
+        id: 'ess_withdrawn_cost',
+        label: 'Списано з УЗЕ',
+        unit: 'грн',
+        kind: 'uah',
+        pickHourValue: (row) => row?.essWithdrawnCostUah ?? null,
+        total: (rows) => sumOver(rows, (r) => r?.essWithdrawnCostUah ?? null),
+      },
     ],
   },
   {
@@ -530,12 +554,19 @@ const METRIC_GROUPS: Array<{ id: string; label: string; rows: MetricRow[] }> = [
         total: (rows) => sumOver(rows, pickWhenPriced((r) => r.economics.effect)),
       },
       {
-        id: 'ess_net',
-        label: 'УЗЕ нетто',
+        // Реалізований ефект УЗЕ — cash, який батарея заробила
+        // саме цієї години після зведення з її ж собівартістю.
+        // Дорівнює `revenue_ess_export + revenue_ess_self −
+        // Списано з УЗЕ − degradation`. Це "чистий cash flow ESS"
+        // на противагу spot-варіанту `essNet` (який порівнював
+        // розряд з ціною заряду тієї ж години). Більше підходить
+        // для оцінки реальної економічної віддачі батареї.
+        id: 'ess_realized',
+        label: 'Реалізований ефект УЗЕ',
         unit: 'грн',
         kind: 'uah_signed',
-        pickHourValue: pickWhenPriced((r) => r.economics.essNet),
-        total: (rows) => sumOver(rows, pickWhenPriced((r) => r.economics.essNet)),
+        pickHourValue: (row) => row?.essRealizedProfitUah ?? null,
+        total: (rows) => sumOver(rows, (r) => r?.essRealizedProfitUah ?? null),
       },
     ],
   },

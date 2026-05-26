@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { fetchDAMPrices, fetchEnergyFlowHourly, fetchTimeseries } from '../api'
 import type { DAMPrice, EnergyFlowHourlyResponse, TimeseriesResponse } from '../types'
 import { hourEconomics, type HourEconomicsRow, type HourFlows } from './compute'
+import { rollHour, seedFromCostPerKwh, type EssState, ZERO_ESS_STATE } from './costBasis'
 import type { Tariffs } from './tariffs'
 
 // DAM zone 2 is the unified UA grid; zone 1 is the historical
@@ -100,6 +101,16 @@ export function useEconomicsData(input: Input): EconomicsData {
     const dayEnd = new Date(dayStart.getTime())
     dayEnd.setDate(dayEnd.getDate() + 1)
 
+    // Yesterday's window is needed only to pre-roll the cost-basis
+    // state through the 24 hours preceding the page's calendar day,
+    // so we end up at 00:00 today with a residual UAH/kWh that
+    // reflects what was actually charged into the battery the day
+    // before. When the request fails (network, 404 for new orgs)
+    // the cost-basis pipeline falls back to the seed tariff.
+    const yesterdayStart = new Date(dayStart.getTime())
+    yesterdayStart.setDate(yesterdayStart.getDate() - 1)
+    const yesterdayDate = formatLocalDate(yesterdayStart)
+
     const dayStartIso = dayStart.toISOString()
     const dayEndIso = dayEnd.toISOString()
 
@@ -144,28 +155,74 @@ export function useEconomicsData(input: Input): EconomicsData {
         },
         controller.signal,
       ),
+      // Yesterday's hourly flows (energy-flow-hourly endpoint).
+      // Wrapped in `.catch(returns null)` so a 404 on a brand-new
+      // org / collector outage degrades gracefully to seed-fallback
+      // mode rather than failing the whole page.
+      fetchEnergyFlowHourly(
+        { organizationID: input.organizationID, date: yesterdayDate, tz: LOCAL_TZ },
+        controller.signal,
+      ).catch((err) => {
+        if ((err as DOMException)?.name === 'AbortError') throw err
+        return null
+      }),
+      fetchTimeseries(
+        {
+          organizationID: input.organizationID,
+          metricKeys: PV_GRID_METRIC_KEYS as unknown as string[],
+          from: yesterdayStart.toISOString(),
+          to: dayStartIso,
+          bucket: '1 hour',
+          tz: LOCAL_TZ,
+          aggregation: 'delta',
+        },
+        controller.signal,
+      ).catch((err) => {
+        if ((err as DOMException)?.name === 'AbortError') throw err
+        return null
+      }),
+      fetchDAMPrices(
+        { from: yesterdayDate, to: yesterdayDate, zone: DAM_ZONE },
+        controller.signal,
+      ).catch((err) => {
+        if ((err as DOMException)?.name === 'AbortError') throw err
+        return null
+      }),
     ])
-      .then(([flowsResp, deltasResp, damResp, socResp]) => {
-        const rows = assembleHourlyRows(
+      .then(
+        ([
           flowsResp,
           deltasResp,
-          damResp.prices,
+          damResp,
           socResp,
-          input.tariffs,
-        )
-        const skipDiagnostics = collectSkipDiagnostics(flowsResp)
-        const hoursMissingPrice = rows.reduce(
-          (acc, row) => (row && row.rdnUahPerKwh === null ? acc + 1 : acc),
-          0,
-        )
-        setData({
-          rows,
-          loading: false,
-          error: null,
-          hoursMissingPrice,
-          skipDiagnostics,
-        })
-      })
+          yFlowsResp,
+          yDeltasResp,
+          yDamResp,
+        ]) => {
+          const rows = assembleHourlyRows(
+            flowsResp,
+            deltasResp,
+            damResp.prices,
+            socResp,
+            input.tariffs,
+            yFlowsResp,
+            yDeltasResp,
+            yDamResp?.prices ?? null,
+          )
+          const skipDiagnostics = collectSkipDiagnostics(flowsResp)
+          const hoursMissingPrice = rows.reduce(
+            (acc, row) => (row && row.rdnUahPerKwh === null ? acc + 1 : acc),
+            0,
+          )
+          setData({
+            rows,
+            loading: false,
+            error: null,
+            hoursMissingPrice,
+            skipDiagnostics,
+          })
+        },
+      )
       .catch((err: unknown) => {
         if ((err as DOMException)?.name === 'AbortError') return
         const message =
@@ -195,6 +252,9 @@ function assembleHourlyRows(
   damPrices: DAMPrice[],
   socResp: TimeseriesResponse,
   tariffs: Tariffs,
+  yFlows: EnergyFlowHourlyResponse | null,
+  yDeltas: TimeseriesResponse | null,
+  yDamPrices: DAMPrice[] | null,
 ): Array<HourEconomicsRow | null> {
   const pvByHour = bucketBy(deltas.points.filter((p) => p.metric_key === 'accumulated_pv_energy_yield_kwh'))
   const importByHour = bucketBy(deltas.points.filter((p) => p.metric_key === 'accumulated_electricity_purchased_kwh'))
@@ -208,18 +268,7 @@ function assembleHourlyRows(
     socResp.points.filter((p) => p.metric_key === SOC_METRIC_KEY),
   )
 
-  // DAM hours are 1..24 (hour-ending convention from the source XLS).
-  // Hour 1 covers 00:00–01:00 local, hour 24 covers 23:00–24:00, so
-  // `priceMap[h - 1]` lines up with the 0-indexed hour-of-day used
-  // everywhere else in the model.
-  const priceMap = new Map<number, number>()
-  for (const p of damPrices) {
-    if (p.zone !== DAM_ZONE) continue
-    if (p.price_uah_per_mwh === null || p.price_uah_per_mwh === undefined) continue
-    const idx = p.hour - 1
-    if (idx < 0 || idx >= 24) continue
-    priceMap.set(idx, p.price_uah_per_mwh / 1000)
-  }
+  const priceMap = buildPriceMap(damPrices)
 
   const out: Array<HourEconomicsRow | null> = []
   for (let h = 0; h < 24; h++) {
@@ -256,6 +305,10 @@ function assembleHourlyRows(
       // Anchored on hour 0's SOC and rolled forward by net charge
       // flows below — placeholder until that second pass runs.
       essRemainingKwhStart: null,
+      essCostBasisUahStart: null,
+      essAvgCostUahPerKwhStart: null,
+      essWithdrawnCostUah: null,
+      essRealizedProfitUah: null,
     })
   }
 
@@ -293,7 +346,177 @@ function assembleHourlyRows(
         cur.flow.essToGrid
     }
   }
+
+  // Cost-basis third pass: pre-roll yesterday's 24 hours so we land
+  // at 00:00 today with the actual UAH/kWh that survived overnight,
+  // then roll today's 24 hours filling the four cost-basis fields
+  // on each row. PV→ESS contributes 0 UAH (sun is free), Grid→ESS
+  // contributes `gridToEss · importPrice` (real cash), and
+  // discharges withdraw at the running average (WAC). The initial
+  // state branches on which signals we have for yesterday: full
+  // 48-hour roll when both flows and DAM are available; otherwise
+  // a seed derived from `tariffs.seedEssCostUahPerKwh` × today's
+  // hour-0 residual; otherwise an empty battery.
+  let state: EssState = pickInitialEssState(
+    yFlows,
+    yDeltas,
+    yDamPrices,
+    tariffs,
+    soc0Percent,
+  )
+
+  for (let h = 0; h < 24; h++) {
+    const cur = out[h]
+    if (cur === null) continue
+    // When we don't have a price for this hour we still update the
+    // running state (PV→ESS at 0, Grid→ESS we treat as a no-cash
+    // event because we can't honestly quote a price; discharges
+    // withdraw at whatever running avg exists). The per-row
+    // `essRealizedProfitUah` stays null so the daily total skips
+    // this hour, mirroring how `dailyTotals` skips null-price
+    // hours for the EBITDA framing.
+    const importPrice = cur.economics.importPriceUahPerKwh
+    const exportPrice = cur.economics.exportPriceUahPerKwh
+    const result = rollHour(
+      state,
+      cur.flow,
+      // Use 0 for import price when RDN is missing so charges from
+      // the grid that hour don't pollute the average with a
+      // fabricated number; that hour's grid-charge cost simply isn't
+      // counted for cost-basis purposes.
+      cur.rdnUahPerKwh === null ? 0 : importPrice,
+      cur.rdnUahPerKwh === null ? 0 : exportPrice,
+      tariffs.degradationUahPerKwh,
+    )
+    out[h] = {
+      ...cur,
+      essCostBasisUahStart: state.uah,
+      essAvgCostUahPerKwhStart: result.avgCostStartUahPerKwh,
+      essWithdrawnCostUah:
+        cur.rdnUahPerKwh === null ? null : result.withdrawnCostUah,
+      essRealizedProfitUah:
+        cur.rdnUahPerKwh === null ? null : result.realizedProfitUah,
+    }
+    state = result.next
+  }
   return out
+}
+
+// pickInitialEssState chooses where today's cost-basis pipeline
+// starts. Pre-rolling yesterday is the highest-fidelity option;
+// the seed-from-tariff path is the operator's manual fallback for
+// fresh deployments / DAM outages; an empty battery is the
+// last-ditch default when even the SOC anchor is missing. Kept as
+// a pure helper so the lint rule that complains about double
+// initialisation in the calling effect stays quiet.
+function pickInitialEssState(
+  yFlows: EnergyFlowHourlyResponse | null,
+  yDeltas: TimeseriesResponse | null,
+  yDamPrices: DAMPrice[] | null,
+  tariffs: Tariffs,
+  soc0Percent: number | undefined,
+): EssState {
+  if (yFlows && yDeltas && yDamPrices) {
+    return preRollYesterday(yFlows, yDeltas, yDamPrices, tariffs)
+  }
+  if (soc0Percent !== undefined && Number.isFinite(soc0Percent) && soc0Percent > 0) {
+    const dayStartResidual = (soc0Percent / 100) * tariffs.essCapacityKwh
+    return seedFromCostPerKwh(dayStartResidual, tariffs.seedEssCostUahPerKwh)
+  }
+  return ZERO_ESS_STATE
+}
+
+// preRollYesterday walks the previous day's 24-hour window through
+// the same `rollHour` algorithm (using yesterday's tariffs +
+// flows + RDN prices) and returns the cost-basis state at midnight.
+// Hours with missing RDN are skipped on both sides — the same
+// "we don't fabricate a price" rule applies — so a partly-missing
+// yesterday still produces a useful seed when the populated hours
+// dominated the activity.
+function preRollYesterday(
+  yFlows: EnergyFlowHourlyResponse,
+  yDeltas: TimeseriesResponse,
+  yDamPrices: DAMPrice[],
+  tariffs: Tariffs,
+): EssState {
+  const pvByHour = bucketBy(
+    yDeltas.points.filter((p) => p.metric_key === 'accumulated_pv_energy_yield_kwh'),
+  )
+  const importByHour = bucketBy(
+    yDeltas.points.filter((p) => p.metric_key === 'accumulated_electricity_purchased_kwh'),
+  )
+  const exportByHour = bucketBy(
+    yDeltas.points.filter((p) => p.metric_key === 'accumulated_electricity_sold_kwh'),
+  )
+  const priceMap = buildPriceMap(yDamPrices)
+
+  let state: EssState = seedFromCostPerKwh(0, tariffs.seedEssCostUahPerKwh)
+  for (let h = 0; h < 24; h++) {
+    const flowRow = yFlows.hours[h]
+    if (!flowRow) continue
+    const flow: HourFlows = {
+      pv: pvByHour.get(h) ?? 0,
+      gridImport: importByHour.get(h) ?? 0,
+      gridExport: exportByHour.get(h) ?? 0,
+      essCharged: flowRow.ess_charged_kwh,
+      essDischarged: flowRow.ess_discharged_kwh,
+      pvToEss: flowRow.pv_to_ess_kwh,
+      gridToEss: flowRow.grid_to_ess_kwh,
+      essToLoad: flowRow.ess_to_load_kwh,
+      essToGrid: flowRow.ess_to_grid_kwh,
+    }
+    const rdn = priceMap.has(h) ? (priceMap.get(h) as number) : null
+    if (rdn === null) {
+      // Pull discharges through at the existing avg even without a
+      // price (we don't need a price to know the energy left). The
+      // charge legs that hour aren't priced so we use 0 — matches
+      // the "free" treatment of PV.
+      const result = rollHour(state, flow, 0, 0, tariffs.degradationUahPerKwh)
+      state = result.next
+      continue
+    }
+    const economics = hourEconomics(rdn, flow, tariffs)
+    const result = rollHour(
+      state,
+      flow,
+      economics.importPriceUahPerKwh,
+      economics.exportPriceUahPerKwh,
+      tariffs.degradationUahPerKwh,
+    )
+    state = result.next
+  }
+  return state
+}
+
+// buildPriceMap unpacks a DAM-prices response into a 0-indexed
+// hour → UAH/kWh map. DAM hours are 1..24 (hour-ending) so we
+// shift by 1 to align with the 0-indexed hour-of-day used
+// everywhere else in the model. Same logic as the inline version
+// the today path used to have; extracted so yesterday can reuse
+// it without copy-pasting the filter.
+function buildPriceMap(damPrices: DAMPrice[] | null | undefined): Map<number, number> {
+  const out = new Map<number, number>()
+  if (!damPrices) return out
+  for (const p of damPrices) {
+    if (p.zone !== DAM_ZONE) continue
+    if (p.price_uah_per_mwh === null || p.price_uah_per_mwh === undefined) continue
+    const idx = p.hour - 1
+    if (idx < 0 || idx >= 24) continue
+    out.set(idx, p.price_uah_per_mwh / 1000)
+  }
+  return out
+}
+
+// formatLocalDate turns a JS Date into the YYYY-MM-DD string the
+// economics endpoints accept. We deliberately use `getFullYear()`
+// + `getMonth()` etc. (browser-local) so the result matches the
+// page's calendar-day input — using `toISOString()` would drift
+// to UTC and shift by a day in negative tz offsets.
+function formatLocalDate(d: Date): string {
+  const yyyy = String(d.getFullYear()).padStart(4, '0')
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  return `${yyyy}-${mm}-${dd}`
 }
 
 // bucketSocByHourStart maps each SOC sample to the OPERATOR-FACING

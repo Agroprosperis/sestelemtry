@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { dailyTotals, hourEconomics, deriveDerivedFlows, type HourEconomicsRow, type HourFlows } from '../compute'
+import { rollHour, ZERO_ESS_STATE, type EssState } from '../costBasis'
 import { DEFAULT_TARIFFS } from '../tariffs'
 
 // emptyFlow is a zero-valued HourFlows for assembling specific test
@@ -179,6 +180,10 @@ describe('dailyTotals (spec calibration)', () => {
         flow: flowPerHour,
         economics: hourEconomics(rdn, flowPerHour, tariffs),
         essRemainingKwhStart: null,
+        essCostBasisUahStart: null,
+        essAvgCostUahPerKwhStart: null,
+        essWithdrawnCostUah: null,
+        essRealizedProfitUah: null,
       })
     }
     return out
@@ -265,9 +270,116 @@ describe('dailyTotals (spec calibration)', () => {
         flow: flowPerHour,
         economics: hourEconomics(rdn, flowPerHour, tariffs),
         essRemainingKwhStart: null,
+        essCostBasisUahStart: null,
+        essAvgCostUahPerKwhStart: null,
+        essWithdrawnCostUah: null,
+        essRealizedProfitUah: null,
       })
     }
     const totals = dailyTotals(rows)
     expect(totals.ebitda).toBeCloseTo(totals.effect, 6)
+  })
+})
+
+// dailyTotals + costBasis interplay: hand-craft a tiny day where
+// the battery charges from grid in cheap hours and discharges to
+// load in expensive hours, and verify that the realized profit
+// total reproduces the per-hour math.
+describe('dailyTotals (cost-basis aggregates)', () => {
+  it('aggregates realized profit, withdrawn cost, and EOD avg correctly', () => {
+    const tariffs = {
+      ...DEFAULT_TARIFFS,
+      // No fees so importPrice == RDN, exportPrice == RDN·(1−5%).
+      distributionUahPerKwh: 0,
+      transmissionUahPerKwh: 0,
+      supplierMarginUahPerKwh: 0,
+      otherFeesUahPerKwh: 0,
+      degradationUahPerKwh: 0,
+    }
+    // 24 hours; charge 100 kWh from grid in hour 2 at RDN=2,
+    // discharge 100 kWh to load in hour 18 at RDN=8.
+    const rows: Array<HourEconomicsRow | null> = []
+    let state: EssState = ZERO_ESS_STATE
+    for (let h = 0; h < 24; h++) {
+      const rdn = h === 2 ? 2 : h === 18 ? 8 : 1
+      const flow: HourFlows = {
+        pv: 0,
+        gridImport: h === 2 ? 100 : 0,
+        gridExport: 0,
+        essCharged: h === 2 ? 100 : 0,
+        essDischarged: h === 18 ? 100 : 0,
+        pvToEss: 0,
+        gridToEss: h === 2 ? 100 : 0,
+        essToLoad: h === 18 ? 100 : 0,
+        essToGrid: 0,
+      }
+      const econ = hourEconomics(rdn, flow, tariffs)
+      const out = rollHour(state, flow, econ.importPriceUahPerKwh, econ.exportPriceUahPerKwh, tariffs.degradationUahPerKwh)
+      rows.push({
+        hour: h,
+        hourStart: `2026-05-10T${String(h).padStart(2, '0')}:00:00+03:00`,
+        rdnUahPerKwh: rdn,
+        flow,
+        economics: econ,
+        essRemainingKwhStart: null,
+        essCostBasisUahStart: state.uah,
+        essAvgCostUahPerKwhStart: out.avgCostStartUahPerKwh,
+        essWithdrawnCostUah: out.withdrawnCostUah,
+        essRealizedProfitUah: out.realizedProfitUah,
+      })
+      state = out.next
+    }
+    const totals = dailyTotals(rows)
+    // withdrawn = 100·2 = 200 (charge hour was at avg=2 by EOH 2)
+    expect(totals.essWithdrawnCostUah).toBeCloseTo(200, 6)
+    // revenue = 100·8 (essToLoad·importPrice@hour 18) = 800
+    expect(totals.revenueEssSelf).toBeCloseTo(800, 6)
+    // realized = 800 − 200 − 0 (degradation) = 600
+    expect(totals.essRealizedProfitUah).toBeCloseTo(600, 6)
+    // EOD avg cost: battery is empty, so 0.
+    expect(totals.essAvgCostBasisUahPerKwhEod).toBe(0)
+  })
+
+  it('preserves an EOD non-empty cost basis when the battery is not fully discharged', () => {
+    const tariffs = { ...DEFAULT_TARIFFS, distributionUahPerKwh: 0, transmissionUahPerKwh: 0, supplierMarginUahPerKwh: 0, otherFeesUahPerKwh: 0, degradationUahPerKwh: 0 }
+    // Charge 100 @ RDN=3 in hour 2, discharge nothing → EOD avg 3.
+    const rows: Array<HourEconomicsRow | null> = []
+    let state: EssState = ZERO_ESS_STATE
+    for (let h = 0; h < 24; h++) {
+      const rdn = h === 2 ? 3 : 1
+      const flow: HourFlows = {
+        pv: 0,
+        gridImport: h === 2 ? 100 : 0,
+        gridExport: 0,
+        essCharged: h === 2 ? 100 : 0,
+        essDischarged: 0,
+        pvToEss: 0,
+        gridToEss: h === 2 ? 100 : 0,
+        essToLoad: 0,
+        essToGrid: 0,
+      }
+      const econ = hourEconomics(rdn, flow, tariffs)
+      const out = rollHour(state, flow, econ.importPriceUahPerKwh, econ.exportPriceUahPerKwh, tariffs.degradationUahPerKwh)
+      rows.push({
+        hour: h,
+        hourStart: `2026-05-10T${String(h).padStart(2, '0')}:00:00+03:00`,
+        rdnUahPerKwh: rdn,
+        flow,
+        economics: econ,
+        essRemainingKwhStart: null,
+        essCostBasisUahStart: state.uah,
+        essAvgCostUahPerKwhStart: out.avgCostStartUahPerKwh,
+        essWithdrawnCostUah: out.withdrawnCostUah,
+        essRealizedProfitUah: out.realizedProfitUah,
+      })
+      state = out.next
+    }
+    const totals = dailyTotals(rows)
+    // After hour 2 the battery sits at 100 kWh @ avg 3.
+    // Hours 3..23 see avgCostStart = 3 (no further activity).
+    // EOD avg from the LAST row's `essAvgCostUahPerKwhStart` is 3.
+    expect(totals.essAvgCostBasisUahPerKwhEod).toBeCloseTo(3, 6)
+    expect(totals.essWithdrawnCostUah).toBe(0)
+    expect(totals.essRealizedProfitUah).toBe(0)
   })
 })

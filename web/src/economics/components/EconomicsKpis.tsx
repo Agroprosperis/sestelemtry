@@ -57,7 +57,14 @@ export function EconomicsKpis({ totals, tariffs }: Props) {
   const equivalentCycles = tariffs.essCapacityKwh > 0 ? totals.essDischarged / tariffs.essCapacityKwh : 0
   const avoidedImportKwh = totals.pvToLoad + totals.essToLoad
   const effectClass = totals.effect >= 0 ? 'kpi-card kpi-card-success' : 'kpi-card kpi-card-danger'
-  const essNetClass = totals.essNet >= 0 ? 'kpi-card kpi-card-info' : 'kpi-card kpi-card-warning'
+  // Realized ESS profit replaces the legacy spot `essNet` here:
+  // it's the cash the battery actually earned today after each
+  // discharge was matched to the WAC cost basis it consumed
+  // (PV→УЗЕ at 0 грн, Grid→УЗЕ at the import price of the charge
+  // hour). Carries the same color semantics as before — green
+  // when battery operations were profitable, amber when not.
+  const essRealizedClass =
+    totals.essRealizedProfitUah >= 0 ? 'kpi-card kpi-card-info' : 'kpi-card kpi-card-warning'
 
   return (
     <section className="economics-kpis" aria-label="Ключові показники">
@@ -77,10 +84,12 @@ export function EconomicsKpis({ totals, tariffs }: Props) {
           <span className="kpi-value">{formatUah(totals.effect)}</span>
           <span className="kpi-sub">{totals.effect >= 0 ? 'економія' : 'переплата'} за день</span>
         </div>
-        <div className={essNetClass}>
-          <span className="kpi-label">Чистий ефект УЗЕ</span>
-          <span className="kpi-value">{formatUah(totals.essNet)}</span>
-          <span className="kpi-sub">внесок батареї без СЕС</span>
+        <div className={essRealizedClass}>
+          <span className="kpi-label">Реалізований ефект УЗЕ</span>
+          <span className="kpi-value">{formatUah(totals.essRealizedProfitUah)}</span>
+          <span className="kpi-sub">
+            на завтра — {formatPriceUahPerKwh(totals.essAvgCostBasisUahPerKwhEod)}
+          </span>
         </div>
       </div>
 

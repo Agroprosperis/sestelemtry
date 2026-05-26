@@ -180,6 +180,23 @@ export type DailyTotals = {
   expenseGridCharge: number
   expenseTotal: number
   ebitda: number
+  // Cost-basis aggregates from `costBasis.rollHour`. They are
+  // independent of the EBITDA framing above (which uses spot
+  // prices everywhere) and represent the ESS-only cash effect
+  // when each discharge is matched to the price at which the
+  // energy was originally charged. `essRealizedProfitUah`
+  // equals `revenueEssExport + revenueEssSelf − essWithdrawnCostUah
+  // − essDegradationCostUah` (and `essDegradationCostUah` is
+  // included as an explicit total for transparency, even though
+  // operators usually read it via the existing degradation × kWh
+  // calculation). `essAvgCostBasisUahPerKwhEod` is the average
+  // cost-per-kWh of whatever residual is left at hour 24 — useful
+  // as a "we'll start tomorrow with X грн/кВт·год inside the
+  // battery" indicator on the page.
+  essWithdrawnCostUah: number
+  essRealizedProfitUah: number
+  essDegradationCostUah: number
+  essAvgCostBasisUahPerKwhEod: number
 }
 
 export function dailyTotals(rows: Array<HourEconomicsRow | null>): DailyTotals {
@@ -213,11 +230,21 @@ export function dailyTotals(rows: Array<HourEconomicsRow | null>): DailyTotals {
     expenseGridCharge: 0,
     expenseTotal: 0,
     ebitda: 0,
+    essWithdrawnCostUah: 0,
+    essRealizedProfitUah: 0,
+    essDegradationCostUah: 0,
+    essAvgCostBasisUahPerKwhEod: 0,
   }
   let importLoadKwh = 0
   let exportKwh = 0
   let importPriceUahSum = 0
   let exportPriceUahSum = 0
+  // The EOD basis is "the value reported by the LAST row that
+  // populated cost-basis fields", since rows are passed in
+  // chronological order. We track the last seen value rather than
+  // scanning back so a single-day call still produces a sane
+  // snapshot even when the trailing hours have null prices.
+  let lastAvgCostEod: number | null = null
   for (const row of rows) {
     if (!row) continue
     if (row.rdnUahPerKwh === null) {
@@ -255,6 +282,13 @@ export function dailyTotals(rows: Array<HourEconomicsRow | null>): DailyTotals {
     exportKwh += row.flow.gridExport
     importPriceUahSum += importPrice * row.flow.gridImport
     exportPriceUahSum += exportPrice * row.flow.gridExport
+
+    if (row.essWithdrawnCostUah !== null && Number.isFinite(row.essWithdrawnCostUah)) {
+      acc.essWithdrawnCostUah += row.essWithdrawnCostUah
+    }
+    if (row.essRealizedProfitUah !== null && Number.isFinite(row.essRealizedProfitUah)) {
+      acc.essRealizedProfitUah += row.essRealizedProfitUah
+    }
   }
   acc.avgImportPriceUahPerKwh = importLoadKwh > 0 ? importPriceUahSum / importLoadKwh : 0
   acc.avgExportPriceUahPerKwh = exportKwh > 0 ? exportPriceUahSum / exportKwh : 0
@@ -262,6 +296,25 @@ export function dailyTotals(rows: Array<HourEconomicsRow | null>): DailyTotals {
     acc.revenuePvExport + acc.revenuePvSelf + acc.revenueEssExport + acc.revenueEssSelf
   acc.expenseTotal = acc.expenseGridCharge
   acc.ebitda = acc.revenueTotal - acc.expenseTotal
+  // Realized profit obeys the identity
+  //   profit = essRevenue − withdrawnCost − degradationCost
+  // so we back-solve degradation from the totals to keep all four
+  // numbers internally consistent (same convention `dailyTotals`
+  // already uses for `revenueTotal = Σ legs`).
+  const essRevenue = acc.revenueEssExport + acc.revenueEssSelf
+  acc.essDegradationCostUah =
+    essRevenue - acc.essWithdrawnCostUah - acc.essRealizedProfitUah
+  // Find the EOD avg cost from the last row that populated cost-basis
+  // fields, scanning right-to-left so partial-day data (e.g. last few
+  // hours have null RDN) still produces a sensible value.
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const r = rows[i]
+    if (r && r.essAvgCostUahPerKwhStart !== null) {
+      lastAvgCostEod = r.essAvgCostUahPerKwhStart
+      break
+    }
+  }
+  acc.essAvgCostBasisUahPerKwhEod = lastAvgCostEod ?? 0
   return acc
 }
 
@@ -291,4 +344,22 @@ export type HourEconomicsRow = {
   // a preceding hour had no flow data — we propagate null forward
   // rather than fabricating a value mid-day.
   essRemainingKwhStart: number | null
+  // Cost-basis snapshot at the start of the hour, computed by
+  // `costBasis.rollHour` over a 48-hour window (yesterday seeds
+  // today). `essCostBasisUahStart` is the total UAH inside the
+  // battery before this hour's charges/discharges; the avg
+  // (UAH / kWh) is derived for display. `essWithdrawnCostUah` is
+  // the cost basis removed this hour to back the discharges
+  // (ESS→Load + ESS→Grid). `essRealizedProfitUah` is the ESS-side
+  // cash effect of the hour: discharge revenue at spot prices
+  // minus withdrawn cost minus degradation. PV→УЗЕ enters the
+  // basis at 0 UAH (sunlight is free), Grid→УЗЕ at the hour's
+  // import price (real cash spent). All four fields are null when
+  // there's no cost-basis pipeline running for the hour (missing
+  // RDN price for the hour, missing yesterday seed and seed
+  // tariff = 0 with no charges yet, etc).
+  essCostBasisUahStart: number | null
+  essAvgCostUahPerKwhStart: number | null
+  essWithdrawnCostUah: number | null
+  essRealizedProfitUah: number | null
 }
