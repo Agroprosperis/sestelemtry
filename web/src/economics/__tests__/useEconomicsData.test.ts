@@ -84,14 +84,60 @@ describe('findAnchorAndPreRoll', () => {
     expect(state.uah).toBeCloseTo(200, 6)
   })
 
-  it('returns ZERO_ESS_STATE when no SOC drop ≤10% exists in window', () => {
+  it('seeds from earliest known SOC when no ≤10% anchor exists', () => {
+    // Battery cycled in 35..60% the entire window — no deep
+    // discharge to anchor on. The fallback grabs hour-0 SOC (50%)
+    // as a pseudo-anchor with `kwh = 50% × 200 = 100, uah = 0` and
+    // pre-rolls forward through the rest of the window. With no
+    // charges or discharges or RDN samples populated below, the
+    // state lands unchanged at the seed.
     const history = makeHistory({
       0: { socPercentStart: 50 },
       24: { socPercentStart: 35 },
       47: { socPercentStart: 60 },
     })
     const state = findAnchorAndPreRoll(history, undefined, FLAT_TARIFFS)
+    expect(state.kwh).toBeCloseTo(100, 6)
+    expect(state.uah).toBe(0)
+  })
+
+  it('rolls charges that occur after the pseudo-anchor seed', () => {
+    // Same fallback path, but now hour 10 has a 100 kWh grid charge
+    // at RDN=2. Seed = (50% × 200, 0) = (100, 0); after the charge
+    // = (100 + 100, 0 + 200) = (200, 200). Confirms the fallback
+    // doesn't short-circuit the pre-roll loop.
+    const history = makeHistory({
+      0: { socPercentStart: 50 },
+      10: { flow: chargeFlow(100), rdnUahPerKwh: 2 },
+    })
+    const state = findAnchorAndPreRoll(history, undefined, FLAT_TARIFFS)
+    expect(state.kwh).toBeCloseTo(200, 6)
+    expect(state.uah).toBeCloseTo(200, 6)
+  })
+
+  it('returns ZERO_ESS_STATE when the window has no SOC samples at all', () => {
+    // No SOC reading anywhere — neither a ≤10% anchor nor a fallback
+    // seed exists. The truest "we have nothing to work with" branch:
+    // subsequent today-hour rolls will re-seed the bucket as charges
+    // arrive (matching the legacy behaviour for empty history).
+    const history = makeHistory({})
+    const state = findAnchorAndPreRoll(history, undefined, FLAT_TARIFFS)
     expect(state).toEqual(ZERO_ESS_STATE)
+  })
+
+  it('uses a mid-window SOC sample as fallback seed when earlier hours have no SOC', () => {
+    // Only one SOC sample, sitting at offset 20 (mid-window) at 60%.
+    // Fallback picks it as the pseudo-anchor — seed = 60% × 200 =
+    // 120 kwh, 0 uah. A charge at offset 25 adds 50 kWh @ 4 UAH →
+    // (120 + 50, 0 + 200). Earlier hours (0..19) are ignored
+    // because we have no SOC reading to seed from there.
+    const history = makeHistory({
+      20: { socPercentStart: 60 },
+      25: { flow: chargeFlow(50), rdnUahPerKwh: 4 },
+    })
+    const state = findAnchorAndPreRoll(history, undefined, FLAT_TARIFFS)
+    expect(state.kwh).toBeCloseTo(170, 6)
+    expect(state.uah).toBeCloseTo(200, 6)
   })
 
   it('uses today’s hour-0 SOC directly when it is itself ≤10%', () => {

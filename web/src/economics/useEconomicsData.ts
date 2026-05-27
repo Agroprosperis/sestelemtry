@@ -505,10 +505,26 @@ const ZERO_HOUR_FLOWS: HourFlows = Object.freeze({
 // match — we return `(SOC × capacity, 0)` directly without rolling
 // any prior history, since the relevant reset moment is RIGHT NOW.
 //
-// Returns ZERO_ESS_STATE when no qualifying SOC drop exists in the
-// lookback window (battery has been ≥10% the entire 48 h). That's
-// the safest default: subsequent today-hour rolls will simply
-// re-seed the bucket as charges arrive.
+// When no qualifying ≤10% SOC drop exists in the lookback window
+// (battery cycled in a comfortable 20..80% range all 48 h), we fall
+// back to using the EARLIEST history hour that still has a known
+// SOC sample as a pseudo-anchor: seed with `(SOC × capacity, 0)` and
+// pre-roll the rest of the window forward. This keeps yesterday's
+// EOD cost basis from being silently reset to zero whenever the
+// operator runs a "normal" cycling regime — which is exactly the
+// bug the screenshots from 25.05 → 26.05 surfaced.
+//
+// Trade-off: the fallback treats whatever was inside the battery at
+// the start of the 48 h window as free leftover, so a station that
+// has been in steady-state >>48 h will systematically under-state
+// the WAC of its carry-over. The longer-term fix is to persist EOD
+// state on the backend; this client-side fallback is the simple
+// "carry yesterday's number forward" patch.
+//
+// Returns ZERO_ESS_STATE only when there is no SOC sample in the
+// entire history window — at that point there's nothing to anchor
+// on and subsequent today-hour rolls will simply re-seed the bucket
+// as charges arrive.
 //
 // Exported for unit tests; production code calls it via
 // `assembleHourlyRows`.
@@ -532,6 +548,18 @@ export function findAnchorAndPreRoll(
     if (soc !== null && soc <= SOC_RESET_THRESHOLD_PERCENT) {
       anchorIdx = i
       break
+    }
+  }
+  // No deep-discharge anchor in the 48 h window. Fall back to the
+  // earliest hour with a known SOC sample so yesterday's WAC keeps
+  // flowing into today instead of being silently wiped. See the
+  // doc comment above for the rationale and the steady-state caveat.
+  if (anchorIdx < 0) {
+    for (let i = 0; i < history.length; i++) {
+      if (history[i].socPercentStart !== null) {
+        anchorIdx = i
+        break
+      }
     }
   }
   if (anchorIdx < 0) return { ...ZERO_ESS_STATE }
