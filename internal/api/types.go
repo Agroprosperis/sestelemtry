@@ -381,11 +381,4 @@ type OrgTariffs struct {
 	IncludeVat              bool    `json:"include_vat"`
 	VatRate                 float64 `json:"vat_rate"`
 	EssCapacityKwh          float64 `json:"ess_capacity_kwh"`
-	// SeedEssCostUahPerKwh is the fallback cost basis (UAH/kWh)
-	// applied to the ESS residual on the day-start when the
-	// economics page can't carry it forward from the previous day
-	// (missing yesterday flows or DAM prices). 0 means "treat
-	// inherited energy as free", which is what the dashboard ships
-	// with by default and matches the pre-WAC behaviour.
-	SeedEssCostUahPerKwh float64 `json:"seed_ess_cost_uah_per_kwh"`
 }

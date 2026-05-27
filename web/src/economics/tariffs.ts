@@ -33,16 +33,6 @@ export type Tariffs = {
   includeVat: boolean
   vatRate: number
   essCapacityKwh: number
-  // seedEssCostUahPerKwh — стартова собівартість УЗЕ на 00:00
-  // сьогодні (грн/кВт·год). Це override: незалежно від того, чи
-  // pre-roll вчорашніх потоків відпрацював, чи фолбек на SOC, чи
-  // батарея порожня — UAH-ніжка стартового стану завжди
-  // дорівнює `kwh × seedEssCostUahPerKwh`. 0 означає "залишок
-  // безплатний" (вся попередня енергія від СЕС); ставлять
-  // середню ціну заряду минулого тижня, якщо хочуть консервативно
-  // оцінити залишок. Не впливає на спот-розрахунок `hourEconomics`,
-  // тільки на cost-basis рядки таблиці і KPI.
-  seedEssCostUahPerKwh: number
 }
 
 export const DEFAULT_TARIFFS: Tariffs = {
@@ -55,5 +45,4 @@ export const DEFAULT_TARIFFS: Tariffs = {
   includeVat: false,
   vatRate: 0.2,
   essCapacityKwh: 215,
-  seedEssCostUahPerKwh: 0,
 }

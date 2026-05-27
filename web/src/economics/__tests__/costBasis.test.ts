@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { rollHour, seedFromCostPerKwh, ZERO_ESS_STATE, type EssState } from '../costBasis'
+import { rollHour, ZERO_ESS_STATE, type EssState } from '../costBasis'
 import type { HourFlows } from '../compute'
 
 const emptyFlow: HourFlows = {
@@ -183,20 +183,5 @@ describe('rollHour', () => {
     expect(out.avgCostStartUahPerKwh).toBeCloseTo(2, 9)
     // After charging 100 @ 0 → (200, 200) → avg 1
     expect(out.avgCostEndUahPerKwh).toBeCloseTo(1, 9)
-  })
-})
-
-describe('seedFromCostPerKwh', () => {
-  it('multiplies kwh × price', () => {
-    const s = seedFromCostPerKwh(50, 1.5)
-    expect(s.kwh).toBe(50)
-    expect(s.uah).toBeCloseTo(75, 9)
-  })
-
-  it('clamps negative or non-finite inputs to zero', () => {
-    expect(seedFromCostPerKwh(-1, 5)).toEqual({ kwh: 0, uah: 0 })
-    expect(seedFromCostPerKwh(NaN, 5)).toEqual({ kwh: 0, uah: 0 })
-    expect(seedFromCostPerKwh(Infinity, 5)).toEqual({ kwh: 0, uah: 0 })
-    expect(seedFromCostPerKwh(50, NaN).uah).toBe(0)
   })
 })

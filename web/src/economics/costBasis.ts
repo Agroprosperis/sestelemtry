@@ -148,18 +148,3 @@ export function rollHour(
   }
 }
 
-// seedFromCostPerKwh wraps a residual-kWh-and-price seed pair into
-// an `EssState`. Used when the cost-basis bootstraps from a
-// fallback (`tariffs.seedEssCostUahPerKwh` × residual) or from a
-// previously persisted snapshot. `kwh < 0` and non-finite inputs
-// are clamped to zero so a corrupted seed can never put the
-// algorithm into an undefined state.
-export function seedFromCostPerKwh(
-  residualKwh: number,
-  costPerKwh: number,
-): EssState {
-  const kwh =
-    Number.isFinite(residualKwh) && residualKwh > 0 ? residualKwh : 0
-  const cost = Number.isFinite(costPerKwh) && costPerKwh > 0 ? costPerKwh : 0
-  return { kwh, uah: kwh * cost }
-}

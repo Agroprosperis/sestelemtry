@@ -768,7 +768,6 @@ func validateOrgTariffs(t OrgTariffs) error {
 		{"supplier_margin_uah_per_kwh", t.SupplierMarginUahPerKwh},
 		{"other_fees_uah_per_kwh", t.OtherFeesUahPerKwh},
 		{"degradation_uah_per_kwh", t.DegradationUahPerKwh},
-		{"seed_ess_cost_uah_per_kwh", t.SeedEssCostUahPerKwh},
 	}
 	for _, p := range pairs {
 		if math.IsNaN(p.val) || math.IsInf(p.val, 0) {

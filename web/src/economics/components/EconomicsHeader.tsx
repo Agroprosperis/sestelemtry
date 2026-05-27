@@ -237,14 +237,6 @@ export function EconomicsHeader({
             suffix="кВт·год"
             onChange={(essCapacityKwh) => update({ essCapacityKwh })}
           />
-          <NumericField
-            label="Стартова собівартість УЗЕ на 00:00"
-            value={tariffs.seedEssCostUahPerKwh}
-            step={0.01}
-            min={0}
-            suffix="грн/кВт·год"
-            onChange={(seedEssCostUahPerKwh) => update({ seedEssCostUahPerKwh })}
-          />
           <label className="economics-field economics-field-checkbox">
             <input
               type="checkbox"

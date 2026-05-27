@@ -22,12 +22,13 @@ type OrgTariffsApi = {
   include_vat: boolean
   vat_rate: number
   ess_capacity_kwh: number
-  // seed_ess_cost_uah_per_kwh is read as optional so legacy DB
-  // rows (saved before the field existed) still hydrate without
-  // throwing; we coalesce missing values to 0 in `tariffsFromApi`.
-  // The PUT direction always sends the field so backend
-  // DisallowUnknownFields stays compatible after its struct
-  // gains the matching tag.
+  // seed_ess_cost_uah_per_kwh is the legacy fallback cost-basis
+  // tariff. Kept here as a tolerated optional field so legacy DB
+  // rows still hydrate without DisallowUnknownFields complaints,
+  // but the value is never read by the cost-basis pipeline anymore
+  // (the algorithm anchors on the last ≤10% SOC drop instead).
+  // Dropped from `tariffsToApi` so we stop persisting it; the
+  // server's struct no longer carries the field either.
   seed_ess_cost_uah_per_kwh?: number
 }
 
@@ -42,7 +43,6 @@ function tariffsToApi(t: Tariffs): OrgTariffsApi {
     include_vat: t.includeVat,
     vat_rate: t.vatRate,
     ess_capacity_kwh: t.essCapacityKwh,
-    seed_ess_cost_uah_per_kwh: t.seedEssCostUahPerKwh,
   }
 }
 
@@ -57,11 +57,6 @@ function tariffsFromApi(api: OrgTariffsApi): Tariffs {
     includeVat: api.include_vat,
     vatRate: api.vat_rate,
     essCapacityKwh: api.ess_capacity_kwh,
-    seedEssCostUahPerKwh:
-      typeof api.seed_ess_cost_uah_per_kwh === 'number' &&
-      Number.isFinite(api.seed_ess_cost_uah_per_kwh)
-        ? api.seed_ess_cost_uah_per_kwh
-        : 0,
   }
 }
 
