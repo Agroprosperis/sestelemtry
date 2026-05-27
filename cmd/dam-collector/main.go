@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/nesh/sestelemetry/internal/config"
+	"github.com/nesh/sestelemetry/internal/dam"
 	"github.com/nesh/sestelemetry/internal/oree"
 	"github.com/nesh/sestelemetry/internal/storage"
 )
@@ -162,36 +163,6 @@ func fetchAndStore(
 	cfg config.OREE,
 	deliveryDate time.Time,
 ) error {
-	body, url, err := client.DownloadDAM(ctx, deliveryDate, cfg.Zone, cfg.Retry.Attempts, cfg.Retry.Backoff)
-	if err != nil {
-		return err
-	}
-	rows, err := oree.ParseDAMSheet(body)
-	if err != nil {
-		return err
-	}
-	storeRows := make([]storage.DAMRow, 0, len(rows))
-	for _, r := range rows {
-		storeRows = append(storeRows, storage.DAMRow{
-			DeliveryDate: deliveryDate,
-			Hour:         r.Hour,
-			Zone:         cfg.Zone,
-			Price:        r.Price,
-			SaleVol:      r.SaleVol,
-			BuyVol:       r.BuyVol,
-			DeclSaleVol:  r.DeclSaleVol,
-			DeclBuyVol:   r.DeclBuyVol,
-			SourceURL:    url,
-		})
-	}
-	if err := storage.UpsertDAMRows(ctx, pool, storeRows); err != nil {
-		return err
-	}
-	log.Info("dam_fetch_ok",
-		"delivery_date", deliveryDate.Format("2006-01-02"),
-		"zone", cfg.Zone,
-		"rows", len(storeRows),
-		"url", url,
-	)
-	return nil
+	_, err := dam.FetchAndStore(ctx, log, client, pool, deliveryDate, cfg.Zone, cfg.Retry.Attempts, cfg.Retry.Backoff)
+	return err
 }

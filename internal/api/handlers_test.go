@@ -441,6 +441,159 @@ func TestDAMPricesHidesInternalError(t *testing.T) {
 	}
 }
 
+func TestDAMPricesRefreshRejectsNonPost(t *testing.T) {
+	h := NewHandlers(&mockStore{}, "*")
+	h.SetDAMFetcher(func(_ context.Context, _ time.Time, _ int) (int, error) {
+		return 24, nil
+	}, 2)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/dam-prices/refresh?date=2026-05-25", nil)
+	rec := httptest.NewRecorder()
+	h.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("want 405 got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestDAMPricesRefreshRequiresDate(t *testing.T) {
+	h := NewHandlers(&mockStore{}, "*")
+	h.SetDAMFetcher(func(_ context.Context, _ time.Time, _ int) (int, error) {
+		t.Fatal("fetcher should not be invoked when date is missing")
+		return 0, nil
+	}, 2)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/dam-prices/refresh", nil)
+	rec := httptest.NewRecorder()
+	h.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("want 400 got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestDAMPricesRefreshRejectsBadDate(t *testing.T) {
+	h := NewHandlers(&mockStore{}, "*")
+	h.SetDAMFetcher(func(_ context.Context, _ time.Time, _ int) (int, error) {
+		t.Fatal("fetcher should not be invoked on malformed date")
+		return 0, nil
+	}, 2)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/dam-prices/refresh?date=not-a-date", nil)
+	rec := httptest.NewRecorder()
+	h.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("want 400 got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestDAMPricesRefreshUnconfigured(t *testing.T) {
+	// Fetcher is nil — simulates an API process that started
+	// without an `oree:` config block. The handler must respond
+	// 503 with a clear "not configured" message so the operator
+	// knows to point the deployment at the OREE upstream.
+	h := NewHandlers(&mockStore{}, "*")
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/dam-prices/refresh?date=2026-05-25", nil)
+	rec := httptest.NewRecorder()
+	h.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("want 503 got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "dam refresh not configured") {
+		t.Fatalf("expected configuration hint in body, got %q", rec.Body.String())
+	}
+}
+
+func TestDAMPricesRefreshUpstreamFailure(t *testing.T) {
+	// Fetcher fails — e.g. OREE returned 502, network glitch, or
+	// the parser rejected a malformed XLS. The handler maps that
+	// to 502 (the upstream is the problem, not us) and returns
+	// the underlying err.Error() in the body so the operator can
+	// see the cause without grepping API logs.
+	h := NewHandlers(&mockStore{}, "*")
+	h.SetDAMFetcher(func(_ context.Context, _ time.Time, _ int) (int, error) {
+		return 0, errors.New("oree: status 502")
+	}, 2)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/dam-prices/refresh?date=2026-05-25", nil)
+	rec := httptest.NewRecorder()
+	h.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("want 502 got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "oree: status 502") {
+		t.Fatalf("expected upstream err in body, got %q", rec.Body.String())
+	}
+}
+
+func TestDAMPricesRefreshSuccessReturnsRereadPrices(t *testing.T) {
+	// After a successful fetch the handler re-reads the day via
+	// store.DAMPrices and returns that response so the frontend
+	// can drop the body straight into its price map without a
+	// second round-trip. We verify both the zone propagation and
+	// the readback shape.
+	price := 4200.0
+	store := &mockStore{
+		damResp: DAMPricesResponse{
+			Zone: 2,
+			Prices: []DAMPrice{{
+				DeliveryDate: time.Date(2026, 5, 25, 0, 0, 0, 0, time.UTC),
+				Hour:         3,
+				Zone:         2,
+				PriceUAHPerMWh: &price,
+			}},
+		},
+	}
+	h := NewHandlers(store, "*")
+	var fetchedZone int
+	var fetchedDate time.Time
+	h.SetDAMFetcher(func(_ context.Context, d time.Time, z int) (int, error) {
+		fetchedZone, fetchedDate = z, d
+		return 24, nil
+	}, 2)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/dam-prices/refresh?date=2026-05-25", nil)
+	rec := httptest.NewRecorder()
+	h.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200 got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if fetchedZone != 2 {
+		t.Fatalf("expected default zone=2, got %d", fetchedZone)
+	}
+	wantDate := time.Date(2026, 5, 25, 0, 0, 0, 0, time.UTC)
+	if !fetchedDate.Equal(wantDate) {
+		t.Fatalf("fetched date mismatch: got %v want %v", fetchedDate, wantDate)
+	}
+	if !store.damFrom.Equal(wantDate) || !store.damTo.Equal(wantDate) {
+		t.Fatalf("readback date mismatch: from=%v to=%v", store.damFrom, store.damTo)
+	}
+	var got DAMPricesResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Prices) != 1 || got.Prices[0].Hour != 3 || got.Prices[0].PriceUAHPerMWh == nil || *got.Prices[0].PriceUAHPerMWh != 4200.0 {
+		t.Fatalf("unexpected payload: %#v", got)
+	}
+}
+
+func TestDAMPricesRefreshUsesExplicitZone(t *testing.T) {
+	// `zone=1` overrides the configured default; the fetcher
+	// receives the requested zone and the readback uses it too.
+	store := &mockStore{}
+	h := NewHandlers(store, "*")
+	var fetchedZone int
+	h.SetDAMFetcher(func(_ context.Context, _ time.Time, z int) (int, error) {
+		fetchedZone = z
+		return 0, nil
+	}, 2)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/dam-prices/refresh?date=2026-05-25&zone=1", nil)
+	rec := httptest.NewRecorder()
+	h.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200 got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if fetchedZone != 1 {
+		t.Fatalf("expected zone=1 from query, got %d", fetchedZone)
+	}
+	if store.damZone != 1 {
+		t.Fatalf("readback should use zone=1, got %d", store.damZone)
+	}
+}
+
 func TestWeatherForecastRequiresOrgID(t *testing.T) {
 	h := NewHandlers(&mockStore{}, "*")
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/weather-forecast", nil)

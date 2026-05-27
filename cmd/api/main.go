@@ -13,7 +13,9 @@ import (
 
 	"github.com/nesh/sestelemetry/internal/api"
 	"github.com/nesh/sestelemetry/internal/config"
+	"github.com/nesh/sestelemetry/internal/dam"
 	"github.com/nesh/sestelemetry/internal/energyflow"
+	"github.com/nesh/sestelemetry/internal/oree"
 	"github.com/nesh/sestelemetry/internal/storage"
 )
 
@@ -84,6 +86,21 @@ func main() {
 		} else {
 			svc.SetOrganizations(toOrganizationInfos(cfg.Organizations))
 			svc.SetEnergyFlowOrgs(toEnergyFlowOrgs(cfg.Organizations))
+			if cfg.OREE.Enabled {
+				// On-demand DAM refresh: a single attempt with no
+				// backoff so an operator clicking the dashboard
+				// button gets a result (or an explicit error) within
+				// one HTTP round-trip instead of the multi-minute
+				// retry window the daily collector uses. The
+				// collector daemon already owns the scheduled
+				// catch-up budget; this is the escape hatch.
+				oreeClient := oree.NewClient(cfg.OREE.BaseURL, cfg.OREE.HTTPTimeout, cfg.OREE.UserAgent)
+				fetcher := func(ctx context.Context, date time.Time, zone int) (int, error) {
+					return dam.FetchAndStore(ctx, log, oreeClient, pool, date, zone, 1, 0)
+				}
+				svc.SetDAMFetcher(fetcher, cfg.OREE.Zone)
+				log.Info("api_dam_refresh_enabled", "zone", cfg.OREE.Zone)
+			}
 			log.Info("api_config_loaded", "path", cfgPath, "organizations", len(cfg.Organizations))
 		}
 	}

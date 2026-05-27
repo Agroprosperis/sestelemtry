@@ -330,6 +330,35 @@ export async function fetchDAMPrices(
   return res.json()
 }
 
+// refreshDAMPrices triggers a synchronous server-side pull of one
+// day's DAM XLS from OREE for `date` (+ optional `zone`, defaults to
+// the configured deployment zone). The backend upserts the resulting
+// 24 hourly rows into `market_dam_prices` and returns the same shape
+// as fetchDAMPrices so the caller can drop the response straight
+// into its existing price-map plumbing.
+//
+// Operator escape hatch when the daily collector either hasn't run
+// yet or fetched too early (OREE published the file late, network
+// blip, etc). Error bodies are surfaced verbatim in the thrown
+// message so the operator sees the upstream cause without
+// grep-ing API logs.
+export async function refreshDAMPrices(
+  input: { date: string; zone?: number },
+  signal?: AbortSignal,
+): Promise<DAMPricesResponse> {
+  const url = buildURL('/api/v1/dam-prices/refresh', {
+    date: input.date,
+    zone: input.zone !== undefined ? String(input.zone) : undefined,
+  })
+  const res = await fetch(url, { method: 'POST', signal })
+  if (!res.ok) {
+    const body = await res.text().catch(() => '')
+    const suffix = body ? ` — ${body.trim()}` : ''
+    throw new Error(`dam-prices refresh failed: ${res.status}${suffix}`)
+  }
+  return res.json()
+}
+
 const PV_FORECAST_WEBHOOK_URL =
   'https://granary.app.n8n.cloud/webhook/96bac28d-5020-48b3-8f23-0bc189029c00'
 // Two retries on transient failures (5xx, network) with exponential backoff.

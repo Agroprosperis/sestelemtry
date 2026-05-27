@@ -82,6 +82,46 @@
   background: #f1f5f9;
 }
 
+/* The "Оновити ціни РДН" button mirrors the back-link's chrome so
+   the header reads as one toolbar, but its hover state uses a
+   subtle violet wash to hint at "this triggers a network refresh"
+   without being a primary CTA. Disabled state during the in-flight
+   POST drops opacity to .7 — Safari ignores the standard
+   `disabled` styling on buttons inside flex containers otherwise. */
+.economics-refresh-dam {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 6px 12px;
+  cursor: pointer;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.economics-refresh-dam:hover:not(:disabled) {
+  background: #f5f3ff;
+  border-color: #ddd6fe;
+  color: #5b21b6;
+}
+
+.economics-refresh-dam:disabled {
+  cursor: progress;
+  opacity: 0.7;
+}
+
+.economics-refresh-dam-error {
+  background: #fef2f2;
+  color: #b91c1c;
+  border-color: #fecaca;
+}
+
+.economics-refresh-dam-error:hover:not(:disabled) {
+  background: #fee2e2;
+  border-color: #fca5a5;
+  color: #991b1b;
+}
+
 .economics-tariffs {
   margin-top: 14px;
   background: #ffffff;

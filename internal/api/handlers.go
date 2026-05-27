@@ -19,7 +19,27 @@ type Handlers struct {
 	log            *slog.Logger
 	organizations  []OrganizationInfo
 	energyFlowOrgs map[string]EnergyFlowOrg
+	// damFetcher backs POST /api/v1/dam-prices/refresh. nil when the
+	// API process was started without an `oree:` config block — the
+	// handler responds 503 in that case so operators get a clear
+	// "service not configured" instead of a confusing 500.
+	damFetcher DAMFetcher
+	// damDefaultZone is the zone the refresh handler uses when the
+	// request omits `zone=`. Mirrors the GET /api/v1/dam-prices
+	// default (2 = unified UA grid) but kept as a config-derived
+	// field so a deployment with only zone=1 can refresh without
+	// passing the param every time.
+	damDefaultZone int
 }
+
+// DAMFetcher synchronously pulls one day's DAM XLS, parses it, and
+// upserts the resulting rows into market_dam_prices. The closure is
+// constructed in cmd/api/main.go from internal/dam.FetchAndStore so
+// the handler stays decoupled from oree.Client / pgxpool wiring (the
+// tests just inject a fake function). The returned int is the number
+// of rows written; errors are surfaced verbatim to the operator via
+// the response body so they know which OREE attempt blew up.
+type DAMFetcher func(ctx context.Context, deliveryDate time.Time, zone int) (int, error)
 
 type storeReader interface {
 	Current(ctx context.Context, organizationID string, metricKeys []string, at time.Time) (CurrentResponse, error)
@@ -92,6 +112,24 @@ func (h *Handlers) SetEnergyFlowOrgs(orgs []EnergyFlowOrg) {
 	h.energyFlowOrgs = out
 }
 
+// SetDAMFetcher installs the on-demand DAM refresh closure that
+// POST /api/v1/dam-prices/refresh dispatches to. `defaultZone` is
+// the zone used when a refresh request omits `zone=`; pass the
+// same value the dam-collector daemon uses (typically 2 = unified
+// UA grid) so manual refreshes line up with the scheduled fetch.
+//
+// Calling with a nil fetcher removes a previously-installed one,
+// which is what cmd/api/main.go does when the loaded config no
+// longer has `oree.enabled: true`. The route stays registered
+// either way — the handler checks for a nil fetcher per-request
+// and returns 503.
+func (h *Handlers) SetDAMFetcher(fetcher DAMFetcher, defaultZone int) {
+	h.damFetcher = fetcher
+	if defaultZone > 0 {
+		h.damDefaultZone = defaultZone
+	}
+}
+
 // SetOrganizations replaces the organization metadata served by
 // /api/v1/organizations. The slice is shallow-copied so the caller
 // can mutate the source without affecting in-flight requests; nil /
@@ -119,6 +157,7 @@ func (h *Handlers) Router() http.Handler {
 	mux.HandleFunc("/api/v1/energy-summary", h.energySummary)
 	mux.HandleFunc("/api/v1/energy-flow-hourly", h.energyFlowHourly)
 	mux.HandleFunc("/api/v1/dam-prices", h.damPrices)
+	mux.HandleFunc("/api/v1/dam-prices/refresh", h.damPricesRefresh)
 	mux.HandleFunc("/api/v1/weather-forecast", h.weatherForecast)
 	mux.HandleFunc("/api/v1/organization-tariffs", h.organizationTariffs)
 	mux.HandleFunc("/swagger", h.swaggerUI)
@@ -617,6 +656,100 @@ func (h *Handlers) damPrices(w http.ResponseWriter, r *http.Request) {
 		"duration_ms", dur.Milliseconds(),
 	)
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// damPricesRefresh synchronously pulls one day's DAM prices from
+// OREE and upserts them. Operator-driven escape hatch when the
+// scheduled dam-collector either hasn't run yet or fetched too
+// early (OREE published the file late, network blip, etc).
+//
+// The fetcher is invoked with a single attempt and no backoff so
+// the operator sees the result within an HTTP timeout's worth of
+// time; the dam-collector daemon already burns the multi-attempt
+// retry budget on its own schedule. After a successful upsert the
+// handler re-reads the date through the store and returns the same
+// shape as GET /api/v1/dam-prices so the frontend can drop the
+// response straight into its existing price-map plumbing without
+// a second round-trip.
+func (h *Handlers) damPricesRefresh(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if h.damFetcher == nil {
+		h.log.Warn("api_dam_refresh_unconfigured")
+		http.Error(w, "dam refresh not configured (oree section missing or disabled)", http.StatusServiceUnavailable)
+		return
+	}
+	dateStr := strings.TrimSpace(r.URL.Query().Get("date"))
+	if dateStr == "" {
+		http.Error(w, "date is required (YYYY-MM-DD)", http.StatusBadRequest)
+		return
+	}
+	date, err := time.Parse("2006-01-02", dateStr)
+	if err != nil {
+		http.Error(w, "date must be YYYY-MM-DD", http.StatusBadRequest)
+		return
+	}
+	zone, err := parseRefreshZone(r, h.damDefaultZone)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	start := time.Now()
+	rows, err := h.damFetcher(r.Context(), date, zone)
+	dur := time.Since(start)
+	if err != nil {
+		h.log.Error("api_dam_refresh",
+			"date", dateStr,
+			"zone", zone,
+			"duration_ms", dur.Milliseconds(),
+			"err", err,
+		)
+		// 502 because the failure originated from upstream OREE
+		// (download, parse) or the storage layer — the API itself
+		// is healthy. Body carries the underlying err.Error() so
+		// the operator can see "status 404" / "OLE2 magic check
+		// failed" without grepping API logs.
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	resp, err := h.store.DAMPrices(r.Context(), zone, date, date)
+	if err != nil {
+		h.log.Error("api_dam_refresh_readback",
+			"date", dateStr,
+			"zone", zone,
+			"duration_ms", dur.Milliseconds(),
+			"err", err,
+		)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+	h.log.Info("api_dam_refresh_ok",
+		"date", dateStr,
+		"zone", zone,
+		"rows_written", rows,
+		"prices", len(resp.Prices),
+		"duration_ms", dur.Milliseconds(),
+	)
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// parseRefreshZone reads the optional `zone=` query param for the
+// refresh handler. Defaults to `defaultZone` (configured via
+// SetDAMFetcher) when omitted; falls back to 2 if no default was
+// set so a misconfigured deployment still produces a valid zone
+// instead of zero. Validation matches parseZone (1..99 inclusive).
+func parseRefreshZone(r *http.Request, defaultZone int) (int, error) {
+	raw := strings.TrimSpace(r.URL.Query().Get("zone"))
+	if raw == "" {
+		if defaultZone > 0 {
+			return defaultZone, nil
+		}
+		return 2, nil
+	}
+	return parseZone(r)
 }
 
 // weatherForecast returns the cached Open-Meteo forecast for an

@@ -25,6 +25,12 @@ function formatDateString(d: Date): string {
   return `${y}-${mo}-${da}`
 }
 
+// DamRefreshState mirrors the parent page's small state machine for
+// the "Оновити ціни РДН" button (see EconomicsPage.tsx). Kept as a
+// local type so the prop signature is self-documenting without
+// pulling the page in as a dependency cycle.
+export type DamRefreshState = 'idle' | 'loading' | 'error'
+
 type Props = {
   organizationID: string
   organizationOptions: string[]
@@ -39,6 +45,16 @@ type Props = {
   // and pushes a new history entry. Kept as a callback so the page
   // file can decide whether to use pushState or hard navigate.
   onBackToDashboard: () => void
+  // Operator-driven "fetch DAM prices from OREE right now" hook.
+  // The handler is async; the button reflects the supplied state
+  // (loading / idle / error) so the page owns the lifecycle. When
+  // the request fails, `damRefreshError` carries the upstream
+  // message and the button shows it in its tooltip — clearer than
+  // a toast that's already gone by the time the operator clicks
+  // back.
+  onRefreshDam: () => void | Promise<void>
+  damRefreshState: DamRefreshState
+  damRefreshError: string | null
 }
 
 // statusLabel maps the hook's coarse state machine to the inline
@@ -105,6 +121,22 @@ function NumericField({
   )
 }
 
+// damRefreshLabel maps the small state machine to the button's
+// visible text. Kept stable across renders so the operator can scan
+// the button without it flickering label-to-label on every state
+// transition — the icon-less form is intentional, the surrounding
+// title attribute carries the detail.
+function damRefreshLabel(state: DamRefreshState): string {
+  switch (state) {
+    case 'loading':
+      return 'Оновлюємо…'
+    case 'error':
+      return 'Спробувати ще'
+    default:
+      return 'Оновити ціни РДН'
+  }
+}
+
 export function EconomicsHeader({
   organizationID,
   organizationOptions,
@@ -116,10 +148,17 @@ export function EconomicsHeader({
   tariffsStatus,
   tariffsError,
   onBackToDashboard,
+  onRefreshDam,
+  damRefreshState,
+  damRefreshError,
 }: Props) {
   const update = (patch: Partial<Tariffs>) => onTariffsChange({ ...tariffs, ...patch })
   const statusText = statusLabel(tariffsStatus)
   const statusTitle = tariffsStatus === 'error' && tariffsError ? tariffsError : undefined
+  const damButtonTitle =
+    damRefreshState === 'error' && damRefreshError
+      ? damRefreshError
+      : 'Завантажити свіжі ціни РДН з OREE для обраного дня'
   return (
     <header className="economics-header">
       <div className="economics-header-row">
@@ -147,6 +186,22 @@ export function EconomicsHeader({
             anchor={parseDateString(date)}
             onChange={(next) => onDateChange(formatDateString(next))}
           />
+          <button
+            type="button"
+            className={
+              damRefreshState === 'error'
+                ? 'economics-refresh-dam economics-refresh-dam-error'
+                : 'economics-refresh-dam'
+            }
+            onClick={() => {
+              void onRefreshDam()
+            }}
+            disabled={damRefreshState === 'loading'}
+            title={damButtonTitle}
+            aria-live="polite"
+          >
+            {damRefreshLabel(damRefreshState)}
+          </button>
           <button
             type="button"
             className="economics-back-link"

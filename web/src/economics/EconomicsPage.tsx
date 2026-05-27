@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { refreshDAMPrices } from '../api'
 import { useOrganizationParam } from '../dashboard/hooks/useOrganizationParam'
 import { dailyTotals } from './compute'
 import { EconomicsCharts } from './components/EconomicsCharts'
@@ -9,6 +10,13 @@ import { EconomicsTable } from './components/EconomicsTable'
 import './economics.css'
 import { useEconomicsData } from './useEconomicsData'
 import { useOrgTariffs } from './useOrgTariffs'
+
+// DamRefreshState is the small UI state machine that drives the
+// "Оновити ціни РДН" button and its status hint: idle (clickable),
+// loading (in-flight POST), error (the most recent attempt failed —
+// the button is clickable again, but the error message lives in
+// the title tooltip so the operator can read what went wrong).
+type DamRefreshState = 'idle' | 'loading' | 'error'
 
 // today() returns YYYY-MM-DD in Europe/Kyiv. The economics page is
 // always anchored to local Ukraine time regardless of the operator's
@@ -99,7 +107,29 @@ export function EconomicsPage() {
     updateUrl(date)
   }, [date])
 
-  const data = useEconomicsData({ organizationID, date, tariffs })
+  // refreshKey bumps every time a successful POST to
+  // /api/v1/dam-prices/refresh comes back, forcing useEconomicsData
+  // to re-fire all 8 underlying GETs so the dashboard picks up the
+  // newly-stored RDN prices without a full page reload.
+  const [refreshKey, setRefreshKey] = useState(0)
+  const [damRefreshState, setDamRefreshState] = useState<DamRefreshState>('idle')
+  const [damRefreshError, setDamRefreshError] = useState<string | null>(null)
+
+  const onRefreshDam = useCallback(async () => {
+    setDamRefreshState('loading')
+    setDamRefreshError(null)
+    try {
+      await refreshDAMPrices({ date })
+      setRefreshKey((k) => k + 1)
+      setDamRefreshState('idle')
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      setDamRefreshError(msg)
+      setDamRefreshState('error')
+    }
+  }, [date])
+
+  const data = useEconomicsData({ organizationID, date, tariffs, refreshKey })
 
   const totals = useMemo(() => dailyTotals(data.rows), [data.rows])
 
@@ -127,6 +157,9 @@ export function EconomicsPage() {
         tariffsStatus={tariffsStatus}
         tariffsError={tariffsError}
         onBackToDashboard={onBackToDashboard}
+        onRefreshDam={onRefreshDam}
+        damRefreshState={damRefreshState}
+        damRefreshError={damRefreshError}
       />
 
       {data.error && (

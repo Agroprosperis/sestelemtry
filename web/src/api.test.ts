@@ -3,6 +3,7 @@ import {
   fetchRawSamplesCsv,
   fetchRegisters,
   fetchWeatherForecastFromAPI,
+  refreshDAMPrices,
   resetRegistersCache,
 } from './api'
 
@@ -227,5 +228,70 @@ describe('fetchWeatherForecastFromAPI', () => {
     await expect(
       fetchWeatherForecastFromAPI({ organizationID: 'ze', from: '2026-05-15', to: '2026-05-17' }),
     ).rejects.toThrow(/weather-forecast request failed: 500/)
+  })
+})
+
+describe('refreshDAMPrices', () => {
+  beforeEach(() => {
+    vi.unstubAllGlobals()
+  })
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('POSTs the date+zone query and returns the parsed body on success', async () => {
+    const body = JSON.stringify({
+      zone: 2,
+      prices: [
+        {
+          delivery_date: '2026-05-25T00:00:00Z',
+          hour: 3,
+          zone: 2,
+          price_uah_per_mwh: 4200,
+          sale_volume_mwh: 100,
+          purchase_volume_mwh: 90,
+          declared_sale_volume_mwh: 110,
+          declared_purchase_volume_mwh: 95,
+        },
+      ],
+    })
+    let calledUrl = ''
+    let calledMethod = ''
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        calledUrl = url
+        calledMethod = init?.method ?? 'GET'
+        return new Response(body, {
+          status: 200,
+          headers: new Headers({ 'content-type': 'application/json' }),
+        })
+      }),
+    )
+
+    const got = await refreshDAMPrices({ date: '2026-05-25', zone: 2 })
+
+    expect(calledMethod).toBe('POST')
+    expect(calledUrl).toContain('/api/v1/dam-prices/refresh')
+    expect(calledUrl).toContain('date=2026-05-25')
+    expect(calledUrl).toContain('zone=2')
+    expect(got.zone).toBe(2)
+    expect(got.prices).toHaveLength(1)
+    expect(got.prices[0].price_uah_per_mwh).toBe(4200)
+  })
+
+  it('throws with the upstream error body on non-200 so the operator sees the OREE message', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        new Response('oree: status 502', {
+          status: 502,
+          headers: new Headers({ 'content-type': 'text/plain' }),
+        }),
+      ),
+    )
+    await expect(
+      refreshDAMPrices({ date: '2026-05-25' }),
+    ).rejects.toThrow(/dam-prices refresh failed: 502 — oree: status 502/)
   })
 })

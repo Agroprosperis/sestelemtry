@@ -77,6 +77,12 @@ type Input = {
   // YYYY-MM-DD calendar day in LOCAL_TZ.
   date: string
   tariffs: Tariffs
+  // refreshKey opts the consumer into manually re-firing the fetch
+  // pipeline without changing any of the data inputs. The page bumps
+  // it after a successful POST /api/v1/dam-prices/refresh so the
+  // hook re-pulls all 8 endpoints and picks up the freshly-stored
+  // RDN prices. `undefined` is treated as 0 (no refresh requested).
+  refreshKey?: number
 }
 
 // useEconomicsData fans out the three API calls in parallel and
@@ -270,7 +276,7 @@ export function useEconomicsData(input: Input): EconomicsData {
       })
 
     return () => controller.abort()
-  }, [input.organizationID, input.date, input.tariffs])
+  }, [input.organizationID, input.date, input.tariffs, input.refreshKey])
 
   return data
 }
