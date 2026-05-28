@@ -29,6 +29,19 @@ FROM telemetry_samples
 GROUP BY day, organization_id, metric_key
 WITH NO DATA;
 
+-- Enable real-time aggregation so queries that fall in the
+-- 15-minute window between refresh runs (or today's bucket, which
+-- the policy intentionally never refreshes until tomorrow because
+-- of `end_offset => 15 minutes`) still see fresh raw rows merged in
+-- on read. Without this the /energy-summary endpoint reads today's
+-- accumulated counters as the previous day's values and the day
+-- preset's "СЕС згенерувала" / "Заряд УЗЕ" cards render 0 until
+-- midnight rolls over. TimescaleDB 2.13+ defaults this to TRUE
+-- (materialized-only); we explicitly flip it back so the dashboard
+-- always reads up-to-the-second data regardless of refresh cadence.
+ALTER MATERIALIZED VIEW telemetry_samples_daily
+    SET (timescaledb.materialized_only = false);
+
 SELECT add_continuous_aggregate_policy(
     'telemetry_samples_daily',
     start_offset => NULL,
