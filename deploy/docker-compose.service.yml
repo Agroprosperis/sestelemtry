@@ -33,11 +33,11 @@ services:
     labels:
       - com.centurylinklabs.watchtower.enable=true
 
-  # Opt-in: not started by default. To enable, add `COMPOSE_PROFILES=dam`
-  # to .env.service AND populate the `oree:` section in /etc/sestelemetry/config.yaml.
+  # Activation is gated by `oree.enabled` in /etc/sestelemetry/config.yaml.
+  # When the section is absent or `enabled: false`, the daemon idles without
+  # touching the network — safe to keep in the stack for every deployment.
   dam-collector:
     image: ${SESTELEMETRY_COLLECTOR_IMAGE}
-    profiles: ["dam"]
     restart: unless-stopped
     depends_on:
       timescaledb:
@@ -55,13 +55,12 @@ services:
     labels:
       - com.centurylinklabs.watchtower.enable=true
 
-  # Opt-in: not started by default. To enable, add `weather` to
-  # COMPOSE_PROFILES in .env.service AND populate the `weather:` section
-  # in /etc/sestelemetry/config.yaml with `enabled: true`. The collector
-  # only fetches for organizations that have a `location` block configured.
+  # Activation is gated by `weather.enabled` in /etc/sestelemetry/config.yaml.
+  # When the section is absent or `enabled: false`, the daemon idles without
+  # touching the network. Per-org fetching additionally requires a `location`
+  # block on the organization in question.
   weather-collector:
     image: ${SESTELEMETRY_COLLECTOR_IMAGE}
-    profiles: ["weather"]
     restart: unless-stopped
     depends_on:
       timescaledb:

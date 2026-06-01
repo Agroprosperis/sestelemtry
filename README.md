@@ -174,9 +174,10 @@ fails validation at startup.
 ## Day-Ahead Market collector (RDN)
 
 `dam-collector` downloads the OREE DAM XLS once per day and upserts hourly
-prices/volumes into `market_dam_prices`. The service is **opt-in** behind the
-`dam` Compose profile: existing modbus-only deployments are unaffected by an
-update — `dam-collector` will not start unless you explicitly enable it.
+prices/volumes into `market_dam_prices`. The container is part of every stack
+but the daemon is gated by `oree.enabled` in `config.yaml` — with the section
+absent or `enabled: false` it idles without touching the network, so existing
+modbus-only deployments are unaffected by an update.
 
 Configure under the `oree:` section in `config.yaml` (see
 `config.example.yaml`):
@@ -190,17 +191,17 @@ oree:
   delivery_offset_days: 1     # 1 = fetch tomorrow's prices
 ```
 
-To turn the service on under `docker-compose.service.yml` (production),
-add to `.env.service`:
+To turn the service on, flip `oree.enabled: true` in
+`/etc/sestelemetry/config.yaml` and run `sudo systemctl restart sestelemetry`.
+The service performs an idempotent catch-up on startup (skipped if 24 rows
+are already present for the target date) and then sleeps until the next
+`run_at` in the configured timezone. URL hit per fetch:
+`https://www.oree.com.ua/index.php/PXS/downloadxlsx/DD.MM.YYYY/DAM/{zone}`.
 
-```
-COMPOSE_PROFILES=dam
-```
-
-Then `sudo systemctl restart sestelemetry`. The service performs an idempotent
-catch-up on startup (skipped if 24 rows are already present for the target
-date) and then sleeps until the next `run_at` in the configured timezone. URL
-hit per fetch: `https://www.oree.com.ua/index.php/PXS/downloadxlsx/DD.MM.YYYY/DAM/{zone}`.
+For operator-driven backfill (OREE published late, network blip, etc) the
+API exposes `POST /api/v1/dam-prices/refresh?date=YYYY-MM-DD&zone=N` which
+runs a single synchronous fetch and upsert. The economics dashboard wires
+this up via the "Оновити ціни РДН" button.
 
 ### Safe production update path
 
