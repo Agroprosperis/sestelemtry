@@ -47,6 +47,7 @@ vi.mock('./hooks/useDashboardData', () => ({
     loading: false,
     cardsLoading: false,
     flowsRefreshing: false,
+    flowsLoaded: true,
     refreshFlows: vi.fn(),
     error: null,
   })),

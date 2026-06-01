@@ -18,6 +18,11 @@ type Props = {
   preset: RangePreset
   anchor: Date
   flowsRefreshing: boolean
+  // flowsLoaded marks the first successful /energy-summary completion;
+  // the period-flow card uses it to keep stale-but-valid numbers
+  // on screen during background refreshes instead of blanking to
+  // dashes for the full duration of the on-the-fly allocator.
+  flowsLoaded: boolean
   onRefreshFlows: () => void
   debug: boolean
   registers: Record<string, RegisterMeta> | null
@@ -50,6 +55,7 @@ export function MetricsPanel({
   preset,
   anchor,
   flowsRefreshing,
+  flowsLoaded,
   onRefreshFlows,
   debug,
   registers,
@@ -79,6 +85,7 @@ export function MetricsPanel({
         registers={registers}
         pvForecastTotal={pvForecastTotal}
         loading={flowsRefreshing}
+        flowsLoaded={flowsLoaded}
       />
       {preset === 'day' && (
         <BatteryDayNarrative
@@ -89,6 +96,7 @@ export function MetricsPanel({
           refreshing={flowsRefreshing}
           onRefresh={onRefreshFlows}
           loading={loading}
+          flowsLoaded={flowsLoaded}
         />
       )}
       <AccumulatedSnapshotNarrative

@@ -101,6 +101,16 @@ export type DashboardData = {
   // initial `loading` so explicit refresh actions don't blank
   // the surrounding charts.
   flowsRefreshing: boolean
+  // flowsLoaded becomes true after the first successful
+  // /energy-summary fetch and stays true for the lifetime of the
+  // hook instance. Cards that read from `energyFlows` use it to
+  // distinguish "still loading for the first time" (show placeholders)
+  // from "background refresh in flight" (keep the previous values on
+  // screen — stale-while-revalidate). A failed refresh does not flip
+  // it back to false: the operator keeps seeing the last known good
+  // numbers instead of an alarming row of dashes after a transient
+  // backend hiccup.
+  flowsLoaded: boolean
   // refreshFlows re-fetches /api/v1/energy-summary for the
   // currently selected preset/anchor and refreshes the period
   // flow numbers (plus the cumulative-summary cards on month/
@@ -147,6 +157,7 @@ export function useDashboardData(input: {
   const [loading, setLoading] = useState(true)
   const [cardsLoading, setCardsLoading] = useState(true)
   const [flowsRefreshing, setFlowsRefreshing] = useState(false)
+  const [flowsLoaded, setFlowsLoaded] = useState(false)
   const [error, setError] = useState<string | null>(null)
   // flowsRefreshController keeps the AbortController for the
   // in-flight user-triggered refresh so a rapid second click (or
@@ -530,6 +541,7 @@ export function useDashboardData(input: {
         setEnergyFlows(EMPTY_FLOWS)
         setEnergySummary(energySummaryFromTotals(summaryResp.totals))
       }
+      setFlowsLoaded(true)
       setError(null)
     } catch (e) {
       if (controller.signal.aborted || isAbortError(e)) return
@@ -551,8 +563,17 @@ export function useDashboardData(input: {
   // switching organization or date kicks this off again; the
   // refresh button on the period-flow card stays useful for forced
   // re-runs without reloading the page.
+  //
+  // Reset `flowsLoaded` + `energyFlows` to placeholder state on
+  // scope change so the period-flow card briefly shows dashes
+  // instead of the previous scope's numbers labeled with the new
+  // header (e.g. yesterday's flows under today's date). Manual
+  // refresh button clicks do NOT pass through here, so they keep
+  // the current values on screen during the in-flight fetch.
   useEffect(() => {
     if (preset !== 'day') return
+    setFlowsLoaded(false)
+    setEnergyFlows(EMPTY_FLOWS)
     refreshFlows()
   }, [organizationID, anchorTime, preset, refreshFlows])
 
@@ -571,6 +592,7 @@ export function useDashboardData(input: {
     loading,
     cardsLoading,
     flowsRefreshing,
+    flowsLoaded,
     refreshFlows,
     error,
   }

@@ -49,6 +49,7 @@ export function Dashboard() {
     loading,
     cardsLoading,
     flowsRefreshing,
+    flowsLoaded,
     refreshFlows,
     error,
   } = useDashboardData({
@@ -79,6 +80,7 @@ export function Dashboard() {
           preset={preset}
           anchor={anchor}
           flowsRefreshing={flowsRefreshing}
+          flowsLoaded={flowsLoaded}
           onRefreshFlows={() => void refreshFlows()}
           debug={debug}
           registers={registers}

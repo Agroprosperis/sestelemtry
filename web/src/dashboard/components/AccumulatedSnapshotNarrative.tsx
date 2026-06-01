@@ -34,14 +34,17 @@ function reading(current: CurrentResponse | null, key: string): number | null {
   return typeof v === 'number' && Number.isFinite(v) ? v : null
 }
 
-// PLACEHOLDER replaces stale numbers in the card while a refresh
-// is in flight so the operator can't misread the previous load's
-// values as the new ones.
+// PLACEHOLDER is shown only when we have no data at all (the very
+// first load before /current resolves). On subsequent background
+// refreshes we keep the previous numbers on screen — the spinner in
+// the card header signals "refresh in flight" without leaving the
+// operator staring at dashes for the duration of the request. Stale-
+// while-revalidate matches what the rest of the dashboard already
+// does for charts.
 const PLACEHOLDER = '—'
 
-function formatTotal(value: number | null, loading: boolean): string {
-  if (loading) return PLACEHOLDER
-  if (value === null) return '--'
+function formatTotal(value: number | null): string {
+  if (value === null) return PLACEHOLDER
   return formatEnergyCompactKWhUk(value)
 }
 
@@ -106,7 +109,9 @@ export function AccumulatedSnapshotNarrative({
   // Bar widths normalize against the largest reading so every row
   // has a non-trivial fill — picking an absolute scale would crush
   // small values to a hairline. The card is a relative comparison,
-  // not an absolute one.
+  // not an absolute one. Bars stay rendered during background
+  // refreshes (stale-while-revalidate) so the operator doesn't see
+  // them collapse to zero between live ticks.
   const max = rows.reduce(
     (m, r) => (r.value !== null && r.value > m ? r.value : m),
     0,
@@ -126,11 +131,7 @@ export function AccumulatedSnapshotNarrative({
       </header>
       <ul className="accum-narrative-list">
         {rows.map((r) => {
-          // While loading we collapse all bars to zero — keeping
-          // the previous fill widths would tell a stale story
-          // until the new totals arrive.
-          const pct =
-            !loading && max > 0 && r.value !== null ? (r.value / max) * 100 : 0
+          const pct = max > 0 && r.value !== null ? (r.value / max) * 100 : 0
           return (
             <li key={r.label} className="accum-narrative-item">
               <span className="accum-narrative-icon" aria-hidden="true">
@@ -145,7 +146,7 @@ export function AccumulatedSnapshotNarrative({
                 />
               </span>
               <strong className="accum-narrative-value">
-                {formatTotal(r.value, loading)}
+                {formatTotal(r.value)}
               </strong>
               <span className="accum-narrative-bar" aria-hidden="true">
                 <span

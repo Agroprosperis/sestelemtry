@@ -16,11 +16,17 @@ type Props = {
   // for the org or non-day preset). Drives the radial "% виконання"
   // ring above the segment bars.
   pvForecastTotal: number | null
-  // loading tracks the period-flow allocator. The card stays
-  // visible with last-known values during refresh so the operator
-  // sees what's about to change; the title spinner is the
-  // "fetching new numbers" cue.
+  // loading tracks the period-flow allocator. Drives only the
+  // header spinner (and aria-busy); the actual numbers are gated
+  // by `flowsLoaded` so background refreshes don't wipe stale-
+  // but-correct values from the screen.
   loading?: boolean
+  // flowsLoaded is true after the first successful /energy-summary
+  // fetch. Before that, segment bars / hero / forecast ring render
+  // placeholders so the operator doesn't read all-zero rows as
+  // "the day produced nothing" during the initial allocator call
+  // (it can take 5–15 s on a busy day).
+  flowsLoaded?: boolean
 }
 
 const TITLES: Record<RangePreset, string> = {
@@ -93,18 +99,18 @@ function integerHamilton(rawPcts: number[]): number[] {
 function ForecastRing({
   actualKwh,
   forecastKwh,
-  loading,
+  hasData,
 }: {
   actualKwh: number
   forecastKwh: number | null
-  loading?: boolean
+  hasData: boolean
 }) {
   // The visible arc is clamped to a single full revolution so a
   // big overshoot (e.g. forecast underestimated by 2x) doesn't
   // produce a multi-loop dasharray; the printed percentage stays
   // truthful so 200 %, 250 %, etc. are still legible.
   const rawRatio =
-    !loading && forecastKwh !== null && forecastKwh > 0
+    hasData && forecastKwh !== null && forecastKwh > 0
       ? actualKwh / forecastKwh
       : null
   const displayPct =
@@ -164,20 +170,19 @@ function SegmentBar({
   title,
   totalKwh,
   segments,
-  loading,
+  hasData,
 }: {
   title: string
   totalKwh: number
   segments: Array<{ name: string; valueKwh: number; color: string }>
-  loading?: boolean
+  // hasData drives blank-vs-render: false on the very first load
+  // (before /energy-summary returns), true thereafter. Background
+  // refreshes keep showing the previous values; the header spinner
+  // signals that fresh data is on its way.
+  hasData: boolean
 }) {
-  // While loading, segment bars collapse to zero width and per-row
-  // values fall back to the dash placeholder so the operator can't
-  // misread stale numbers as fresh ones. The list rows still render
-  // (with their colour swatches and labels) so the card height
-  // doesn't reflow once data lands.
   const rawPcts = segments.map((s) =>
-    loading ? 0 : pctOf(s.valueKwh, totalKwh),
+    hasData ? pctOf(s.valueKwh, totalKwh) : 0,
   )
   const intPcts = integerHamilton(rawPcts)
   const safeSegments = segments.map((s, i) => ({
@@ -189,7 +194,7 @@ function SegmentBar({
     <div className="summary-segbar">
       <div className="summary-segbar-head">
         <span>{title}</span>
-        <strong>{loading ? PLACEHOLDER : formatEnergyUk(totalKwh)}</strong>
+        <strong>{hasData ? formatEnergyUk(totalKwh) : PLACEHOLDER}</strong>
       </div>
       <div className="summary-segbar-track" aria-hidden="true">
         {safeSegments.map((s) => (
@@ -212,8 +217,8 @@ function SegmentBar({
               <span className="summary-segbar-name">{s.name}</span>
             </span>
             <span className="summary-segbar-value">
-              {loading ? PLACEHOLDER : formatEnergyUk(s.valueKwh)}
-              {!loading && (
+              {hasData ? formatEnergyUk(s.valueKwh) : PLACEHOLDER}
+              {hasData && (
                 <span className="summary-segbar-pct">
                   {' '}
                   · {formatPercent(s.intPct)}
@@ -235,6 +240,7 @@ export function DailySummaryNarrative({
   registers,
   pvForecastTotal,
   loading,
+  flowsLoaded = false,
 }: Props) {
   const periodLabel = formatPeriodLabel(preset, anchor)
   const pvSegments = [
@@ -275,7 +281,7 @@ export function DailySummaryNarrative({
   ]
   const consumptionTotal =
     consumptionSegments[0].valueKwh + consumptionSegments[1].valueKwh
-  const forecastSummary = loading
+  const forecastSummary = !flowsLoaded
     ? `прогноз ${PLACEHOLDER}`
     : pvForecastTotal !== null && pvForecastTotal > 0
       ? `прогноз ${formatEnergyUk(pvForecastTotal)}`
@@ -305,27 +311,27 @@ export function DailySummaryNarrative({
             />
           </span>
           <strong className="summary-hero-value">
-            {loading ? PLACEHOLDER : formatEnergyUk(flows.pvProducedKwh)}
+            {flowsLoaded ? formatEnergyUk(flows.pvProducedKwh) : PLACEHOLDER}
           </strong>
           <span className="summary-hero-sub">{forecastSummary}</span>
         </div>
         <ForecastRing
           actualKwh={flows.pvProducedKwh}
           forecastKwh={pvForecastTotal}
-          loading={loading}
+          hasData={flowsLoaded}
         />
       </div>
       <SegmentBar
         title="Куди пішла енергія від СЕС"
         totalKwh={pvBreakdownTotal}
         segments={pvSegments}
-        loading={loading}
+        hasData={flowsLoaded}
       />
       <SegmentBar
         title="Споживання приладів"
         totalKwh={consumptionTotal}
         segments={consumptionSegments}
-        loading={loading}
+        hasData={flowsLoaded}
       />
     </section>
   )

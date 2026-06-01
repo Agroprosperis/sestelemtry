@@ -20,6 +20,14 @@ type Props = {
   refreshing: boolean
   onRefresh: () => void
   loading?: boolean
+  // flowsLoaded marks whether `flows` has been populated at least
+  // once from a successful /energy-summary fetch. Used to keep the
+  // segment bars and balance footer rendered with stale-but-correct
+  // values during background refreshes — without it the card would
+  // collapse to dashes every time the slow on-the-fly allocator
+  // re-runs (5–15 s for a busy day). Initial mounts still show
+  // dashes because there is genuinely nothing to show yet.
+  flowsLoaded?: boolean
 }
 
 const TITLES: Record<RangePreset, string> = {
@@ -31,9 +39,11 @@ const TITLES: Record<RangePreset, string> = {
 const RING_RADIUS = 30
 const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS
 
-// PLACEHOLDER replaces stale numbers in the card while a refresh
-// is in flight so the operator can't misread the previous load's
-// values as the new ones.
+// PLACEHOLDER stands in for "no data yet" — used only on the first
+// load before /current or /energy-summary have returned. Background
+// refreshes keep the previous numbers on screen and rely on the
+// header spinner to signal "fresh data is on its way"; stale-while-
+// revalidate matches the rest of the dashboard.
 const PLACEHOLDER = '—'
 
 // formatEnergyUk is an adaptive kWh/MWh formatter; the dashboard's
@@ -115,15 +125,12 @@ function renderRingBatteryIcon(soc: number | null): ReactElement {
 // SocRing mirrors DailySummaryNarrative.ForecastRing so the two
 // hero blocks read as a pair: same radius, stroke width and label
 // typography. The arc length encodes SOC directly (0–100 %) since
-// state-of-charge is already a percentage.
-function SocRing({
-  socPercent,
-  loading,
-}: {
-  socPercent: number | null
-  loading?: boolean
-}) {
-  const visible = loading ? null : socPercent
+// state-of-charge is already a percentage. Rendering is gated by
+// the SOC value alone — once /current has returned a sample we keep
+// the ring on screen even while a background refresh is in flight,
+// because the operator should never lose sight of the battery state.
+function SocRing({ socPercent }: { socPercent: number | null }) {
+  const visible = socPercent
   const ratio = visible === null ? 0 : Math.max(0, Math.min(1, visible / 100))
   const dashOffset = RING_CIRCUMFERENCE * (1 - ratio)
   return (
@@ -169,20 +176,19 @@ function SegmentBar({
   title,
   totalKwh,
   segments,
-  loading,
+  hasData,
 }: {
   title: string
   totalKwh: number
   segments: Array<{ name: string; valueKwh: number; color: string }>
-  loading?: boolean
+  // hasData distinguishes "first load — nothing fetched yet" from
+  // "loaded, but the day happens to have a zero" (e.g. early morning
+  // before any charge cycle). Without it we'd either render "0,00
+  // кВт·год · 0 %" too eagerly or blank the bars on every refresh.
+  hasData: boolean
 }) {
-  // While loading, segment widths collapse to zero and per-row
-  // numbers fall back to the dash placeholder so the operator
-  // can't misread stale values as fresh ones. Rows still render
-  // (with their colour swatches and labels) so the card height
-  // doesn't reflow once data lands.
   const rawPcts = segments.map((s) =>
-    loading ? 0 : pctOf(s.valueKwh, totalKwh),
+    hasData ? pctOf(s.valueKwh, totalKwh) : 0,
   )
   const intPcts = integerHamilton(rawPcts)
   const safeSegments = segments.map((s, i) => ({
@@ -194,7 +200,7 @@ function SegmentBar({
     <div className="summary-segbar">
       <div className="summary-segbar-head">
         <span>{title}</span>
-        <strong>{loading ? PLACEHOLDER : formatEnergyUk(totalKwh)}</strong>
+        <strong>{hasData ? formatEnergyUk(totalKwh) : PLACEHOLDER}</strong>
       </div>
       <div className="summary-segbar-track" aria-hidden="true">
         {safeSegments.map((s) => (
@@ -217,8 +223,8 @@ function SegmentBar({
               <span className="summary-segbar-name">{s.name}</span>
             </span>
             <span className="summary-segbar-value">
-              {loading ? PLACEHOLDER : formatEnergyUk(s.valueKwh)}
-              {!loading && (
+              {hasData ? formatEnergyUk(s.valueKwh) : PLACEHOLDER}
+              {hasData && (
                 <span className="summary-segbar-pct">
                   {' '}
                   · {formatPercent(s.intPct)}
@@ -240,9 +246,14 @@ export function BatteryDayNarrative({
   refreshing,
   onRefresh,
   loading,
+  flowsLoaded = false,
 }: Props) {
   const socPercent = readSoc(current)
   const periodLabel = formatPeriodLabel(preset, anchor)
+  // isBusy now controls only the visual "refreshing" affordances
+  // (spinner + aria-busy). The numbers below are gated by whether
+  // their underlying data has arrived at least once, so a background
+  // refresh no longer wipes the card to dashes.
   const isBusy = loading || refreshing
 
   const chargeSegments = [
@@ -304,36 +315,34 @@ export function BatteryDayNarrative({
         <div className="summary-hero-text">
           <span className="summary-hero-label">Стан заряду</span>
           <strong className="summary-hero-value">
-            {isBusy || socPercent === null
-              ? PLACEHOLDER
-              : `${Math.round(socPercent)}%`}
+            {socPercent === null ? PLACEHOLDER : `${Math.round(socPercent)}%`}
           </strong>
         </div>
-        <SocRing socPercent={socPercent} loading={isBusy} />
+        <SocRing socPercent={socPercent} />
       </div>
       <SegmentBar
         title="Заряд"
         totalKwh={charged}
         segments={chargeSegments}
-        loading={isBusy}
+        hasData={flowsLoaded}
       />
       <SegmentBar
         title="Розряд"
         totalKwh={discharged}
         segments={dischargeSegments}
-        loading={isBusy}
+        hasData={flowsLoaded}
       />
       <p className="battery-narrative-balance-foot">
         Баланс батареї:{' '}
-        {isBusy ? (
-          <strong>{PLACEHOLDER}</strong>
-        ) : (
+        {flowsLoaded ? (
           <strong className={balance >= 0 ? 'is-positive' : 'is-negative'}>
             {balance >= 0 ? '+' : ''}
             {formatEnergyUk(balance)}
           </strong>
+        ) : (
+          <strong>{PLACEHOLDER}</strong>
         )}
-        {!isBusy && (
+        {flowsLoaded && (
           <small>
             {' '}
             ·{' '}
