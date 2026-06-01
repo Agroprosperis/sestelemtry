@@ -451,7 +451,15 @@ func rowsFromCells(cells sheetCells) ([]DAMRow, error) {
 		return nil, errors.New("oree: header row with 'Година' not found")
 	}
 
+	// parseHourLabel already constrains hours to 1..24. We additionally
+	// reject duplicate hours within a single sheet: two rows mapping to
+	// the same hour would silently collapse on the (delivery_date, hour,
+	// zone) upsert, leaving a gap. We deliberately do NOT require exactly
+	// 24 rows — daylight-saving transition days legitimately have 23 or
+	// 25 hours, and forcing 24 would make the collector store nothing for
+	// the whole day.
 	out := make([]DAMRow, 0, 24)
+	seen := make(map[int]struct{}, 24)
 	for r := headerRow + 1; r <= maxRow; r++ {
 		hourCell, ok := cells[[2]int{r, 0}]
 		if !ok || hourCell.kind != 's' {
@@ -461,6 +469,10 @@ func rowsFromCells(cells sheetCells) ([]DAMRow, error) {
 		if !ok {
 			continue
 		}
+		if _, dup := seen[hour]; dup {
+			return nil, fmt.Errorf("oree: duplicate hour %d in sheet", hour)
+		}
+		seen[hour] = struct{}{}
 		out = append(out, DAMRow{
 			Hour:        hour,
 			Price:       numAt(cells, r, 1),

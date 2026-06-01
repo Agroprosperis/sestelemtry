@@ -165,13 +165,21 @@ func Load(path string) (*Root, error) {
 			}
 		}
 	}
+	// Defaults are always applied (harmless and keep the structs sane for
+	// any code that reads them), but strict validation only runs when the
+	// service is enabled. A modbus-only deployment shouldn't fail to load
+	// just because it carries a stale/invalid oree: or weather: block.
 	c.applyOREEDefaults()
-	if err := c.validateOREE(); err != nil {
-		return nil, err
+	if c.OREE.Enabled {
+		if err := c.validateOREE(); err != nil {
+			return nil, err
+		}
 	}
 	c.applyWeatherDefaults()
-	if err := c.validateWeather(); err != nil {
-		return nil, err
+	if c.Weather.Enabled {
+		if err := c.validateWeather(); err != nil {
+			return nil, err
+		}
 	}
 	return &c, nil
 }

@@ -19,6 +19,7 @@ import (
 func main() {
 	configPath := flag.String("config", "config.yaml", "path to YAML config")
 	orgID := flag.String("org", "", "organization id to check (default: first organization)")
+	deviceIdx := flag.Int("device", 0, "index of the org's modbus device to check (default: 0)")
 	delay := flag.Duration("delay", 150*time.Millisecond, "delay between register reads")
 	timeout := flag.Duration("timeout", 0, "optional overall timeout, e.g. 2m")
 	flag.Parse()
@@ -37,6 +38,17 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Resolve the device the same way the collector's runOrg does:
+	// Devices() returns the modbus_devices[] list, or a single device
+	// wrapping the legacy inline `modbus:` block. Reading org.Modbus
+	// directly would be the zero value for modbus_devices orgs.
+	devices := org.Devices()
+	if *deviceIdx < 0 || *deviceIdx >= len(devices) {
+		fmt.Fprintf(os.Stderr, "config: org %q has %d device(s); -device %d is out of range\n", org.ID, len(devices), *deviceIdx)
+		os.Exit(1)
+	}
+	dev := devices[*deviceIdx].Modbus
+
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	if *timeout > 0 {
@@ -46,11 +58,11 @@ func main() {
 	}
 
 	sess, err := modbusclient.Dial(ctx, modbusclient.DialTarget{
-		Host:           org.Modbus.Host,
-		Port:           org.Modbus.Port,
-		UnitID:         org.Modbus.UnitID,
-		ConnectTimeout: org.Modbus.ConnectTimeout,
-		RequestTimeout: org.Modbus.RequestTimeout,
+		Host:           dev.Host,
+		Port:           dev.Port,
+		UnitID:         dev.UnitID,
+		ConnectTimeout: dev.ConnectTimeout,
+		RequestTimeout: dev.RequestTimeout,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "modbus dial error: %v\n", err)
@@ -58,12 +70,12 @@ func main() {
 	}
 	defer func() { _ = sess.Close() }()
 
-	fmt.Printf("Checking org=%s host=%s:%d map=%s registers=%d\n", org.ID, org.Modbus.Host, org.Modbus.Port, cfg.ModbusRegisterMap, len(resolved))
+	fmt.Printf("Checking org=%s device=%d host=%s:%d map=%s registers=%d\n", org.ID, *deviceIdx, dev.Host, dev.Port, cfg.ModbusRegisterMap, len(resolved))
 
 	okCount := 0
 	failCount := 0
 	for _, e := range resolved {
-		readCtx, cancel := context.WithTimeout(ctx, org.Modbus.RequestTimeout)
+		readCtx, cancel := context.WithTimeout(ctx, dev.RequestTimeout)
 		var raw []byte
 		switch cfg.ModbusRegisterMap {
 		case config.MapInput:

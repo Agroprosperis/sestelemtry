@@ -90,12 +90,26 @@ func UpsertDAMRows(ctx context.Context, pool *pgxpool.Pool, rows []DAMRow) error
 			r.SourceURL,
 		)
 	}
-	br := pool.SendBatch(ctx, batch)
-	defer br.Close()
+	// Run the batch inside a transaction so a failure on row N doesn't
+	// leave rows 0..N-1 committed (a partial, e.g. 14/24-hour, day).
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("storage: begin dam upsert tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	br := tx.SendBatch(ctx, batch)
 	for i := 0; i < len(rows); i++ {
 		if _, err := br.Exec(); err != nil {
+			br.Close()
 			return fmt.Errorf("storage: upsert dam row %d: %w", i, err)
 		}
+	}
+	if err := br.Close(); err != nil {
+		return fmt.Errorf("storage: close dam batch: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("storage: commit dam upsert tx: %w", err)
 	}
 	return nil
 }

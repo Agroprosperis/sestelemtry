@@ -39,9 +39,11 @@ const caggDayBucketTZ = "Europe/Kyiv"
 // it is still around from migration 003. Idempotent: safe to call on
 // every collector startup.
 //
-// Real-time aggregation stays enabled (default), so reads above the
-// refresh watermark fall through to raw data automatically without an
-// API-level fallback path.
+// Real-time aggregation is force-enabled (materialized_only = false),
+// so reads above the refresh watermark fall through to raw data
+// automatically without an API-level fallback path. This is set
+// explicitly because TimescaleDB 2.13+ defaults new CAGGs to
+// materialized_only = true.
 func InitContinuousAggregates(ctx context.Context, pool *pgxpool.Pool) error {
 	if pool == nil {
 		return fmt.Errorf("storage: nil pool")
@@ -73,6 +75,15 @@ func InitContinuousAggregates(ctx context.Context, pool *pgxpool.Pool) error {
 	`
 	if _, err := pool.Exec(ctx, createView); err != nil {
 		return fmt.Errorf("storage: create cagg %s: %w", DailyCAGGView, err)
+	}
+
+	// Force real-time aggregation ON. TimescaleDB 2.13+ defaults new
+	// continuous aggregates to materialized_only = true, so reads above
+	// the refresh watermark (e.g. today's bucket) would return stale or
+	// zero values until the next refresh. Migration 004 sets this
+	// explicitly; the programmatic init path must match it. Idempotent.
+	if _, err := pool.Exec(ctx, `ALTER MATERIALIZED VIEW `+DailyCAGGView+` SET (timescaledb.materialized_only = false)`); err != nil {
+		return fmt.Errorf("storage: set cagg %s real-time: %w", DailyCAGGView, err)
 	}
 
 	const policy = `

@@ -66,6 +66,18 @@ func (c *Client) DownloadDAM(ctx context.Context, day time.Time, zone, attempts 
 		if err == nil {
 			return body, url, nil
 		}
+		// Context cancellation/deadline is terminal: stop immediately
+		// instead of burning the remaining retry budget (which can be
+		// minutes of backoff) during shutdown or request timeout.
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return nil, url, err
+		}
+		// Permanent HTTP failures (4xx other than 429) won't recover by
+		// retrying — a bad date/zone would otherwise block the whole
+		// attempts*backoff window. 5xx and 429 stay retryable.
+		if !isRetryable(err) {
+			return nil, url, fmt.Errorf("oree: download %s failed (non-retryable): %w", url, err)
+		}
 		lastErr = err
 	}
 	return nil, url, fmt.Errorf("oree: download %s failed after %d attempts: %w", url, attempts, lastErr)
@@ -86,7 +98,7 @@ func (c *Client) tryDownload(ctx context.Context, url string) ([]byte, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("status %d", resp.StatusCode)
+		return nil, &statusError{Status: resp.StatusCode}
 	}
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -96,6 +108,32 @@ func (c *Client) tryDownload(ctx context.Context, url string) ([]byte, error) {
 		return nil, errors.New("response body is not an OLE2 file (wrong magic header)")
 	}
 	return body, nil
+}
+
+// statusError carries the HTTP status of a non-200 OREE response so the
+// retry loop can distinguish transient (5xx, 429) from permanent (other
+// 4xx) failures.
+type statusError struct {
+	Status int
+}
+
+func (e *statusError) Error() string {
+	return fmt.Sprintf("status %d", e.Status)
+}
+
+// isRetryable reports whether a failed tryDownload is worth retrying.
+// HTTP 4xx (except 429 Too Many Requests) is permanent; everything else
+// (5xx, network errors, malformed OLE2 payloads that may be transient
+// upstream glitches) is retried.
+func isRetryable(err error) bool {
+	var se *statusError
+	if errors.As(err, &se) {
+		if se.Status == http.StatusTooManyRequests {
+			return true
+		}
+		return se.Status < 400 || se.Status >= 500
+	}
+	return true
 }
 
 // looksLikeOLE2 checks for the compound-document magic bytes D0 CF 11 E0 A1 B1 1A E1.

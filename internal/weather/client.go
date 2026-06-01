@@ -138,6 +138,12 @@ func (c *Client) Fetch(
 		if err == nil {
 			return f, url, nil
 		}
+		// Context cancellation/deadline is terminal — bail immediately
+		// rather than retrying through the remaining backoff window
+		// (which would delay shutdown and waste work).
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return nil, url, err
+		}
 		lastErr = err
 		if !isTransient(err) {
 			return nil, url, fmt.Errorf("weather: fetch %s: %w", url, err)
@@ -198,9 +204,16 @@ func (e *decodeError) Unwrap() error {
 }
 
 func isTransient(err error) bool {
+	// Context cancellation/deadline must never be retried — it signals
+	// shutdown or a blown timeout, not a recoverable upstream hiccup.
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
 	var he *httpError
 	if errors.As(err, &he) {
-		return he.Status >= 500
+		// 429 Too Many Requests is worth a backoff+retry; other 4xx
+		// are permanent (bad coordinates, malformed query).
+		return he.Status >= 500 || he.Status == http.StatusTooManyRequests
 	}
 	var de *decodeError
 	if errors.As(err, &de) {

@@ -80,17 +80,23 @@ oree:
 
 func TestLoadRejectsBadOREE(t *testing.T) {
 	dir := t.TempDir()
+	// Validation only runs for an enabled service, so each case enables
+	// oree explicitly — that's the scenario where bad config must fail.
 	cases := map[string]string{
 		"bad zone": `oree:
+  enabled: true
   zone: -1
 `,
 		"bad run_at": `oree:
+  enabled: true
   run_at: "29:99"
 `,
 		"bad timezone": `oree:
+  enabled: true
   timezone: "Mars/Olympus"
 `,
 		"bad offset": `oree:
+  enabled: true
   delivery_offset_days: 999
 `,
 	}
@@ -151,11 +157,15 @@ weather:
 
 func TestLoadRejectsBadWeather(t *testing.T) {
 	dir := t.TempDir()
+	// Validation only runs for an enabled service, so each case enables
+	// weather explicitly — that's the scenario where bad config must fail.
 	cases := map[string]string{
 		"too short": `weather:
+  enabled: true
   interval: 30s
 `,
 		"too long": `weather:
+  enabled: true
   interval: 25h
 `,
 	}

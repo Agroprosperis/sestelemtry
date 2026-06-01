@@ -930,10 +930,13 @@ func (s *Store) UpsertOrgTariffs(ctx context.Context, organizationID string, tar
 }
 
 // EnergyFlowSources streams the source-counter rows the recompute
-// pipeline needs for [from, to], inclusive at both ends. The window
-// is padded by `lookback` so the very first bucket can find a
-// "previous" snapshot to subtract against; without that the first
-// interval of a freshly recomputed period would be silently dropped.
+// pipeline needs for the half-open window [from, to) — `to` itself is
+// excluded so a sample landing exactly on the next-day midnight isn't
+// attributed to hour 0 of the requested day (matching /samples and the
+// energy-summary half-open semantics). The window is padded by
+// `lookback` so the very first bucket can find a "previous" snapshot to
+// subtract against; without that the first interval of a freshly
+// recomputed period would be silently dropped.
 //
 // The query is a plain index scan rather than a server-side
 // time_bucket()+last() aggregation on purpose: a hash aggregate over
@@ -981,7 +984,7 @@ func (s *Store) EnergyFlowSources(
 		WHERE organization_id = $1
 			AND metric_key = ANY($2)
 			AND time >= $3
-			AND time <= $4
+			AND time < $4
 		ORDER BY time ASC, metric_key ASC
 	`, organizationID, EnergyFlowRecomputeSourceMetrics, from.UTC().Add(-lookback), to.UTC())
 	if err != nil {

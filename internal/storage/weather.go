@@ -143,12 +143,24 @@ func UpsertWeatherHourly(ctx context.Context, pool *pgxpool.Pool, rows []Weather
 			r.SourceURL,
 		)
 	}
-	br := pool.SendBatch(ctx, batch)
-	defer br.Close()
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("storage: begin weather hourly upsert tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	br := tx.SendBatch(ctx, batch)
 	for i := 0; i < len(rows); i++ {
 		if _, err := br.Exec(); err != nil {
+			br.Close()
 			return fmt.Errorf("storage: upsert weather hourly row %d: %w", i, err)
 		}
+	}
+	if err := br.Close(); err != nil {
+		return fmt.Errorf("storage: close weather hourly batch: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("storage: commit weather hourly upsert tx: %w", err)
 	}
 	return nil
 }
@@ -199,12 +211,24 @@ func UpsertWeatherDaily(ctx context.Context, pool *pgxpool.Pool, rows []WeatherD
 			r.SourceURL,
 		)
 	}
-	br := pool.SendBatch(ctx, batch)
-	defer br.Close()
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("storage: begin weather daily upsert tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	br := tx.SendBatch(ctx, batch)
 	for i := 0; i < len(rows); i++ {
 		if _, err := br.Exec(); err != nil {
+			br.Close()
 			return fmt.Errorf("storage: upsert weather daily row %d: %w", i, err)
 		}
+	}
+	if err := br.Close(); err != nil {
+		return fmt.Errorf("storage: close weather daily batch: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("storage: commit weather daily upsert tx: %w", err)
 	}
 	return nil
 }

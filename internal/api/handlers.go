@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/csv"
 	"encoding/json"
@@ -78,6 +79,14 @@ const (
 	maxSamplesLimit      = 5_000_000
 	maxSamplesRange      = 31 * 24 * time.Hour
 	maxSamplesMetricKeys = 20
+	// maxTimeseriesRange caps the explicit window for the bucketed
+	// timeseries endpoint. Year presets need a generous bound, but an
+	// open-ended multi-year span would scan the raw hypertable for any
+	// sub-day bucket. 366 days covers the widest dashboard preset.
+	maxTimeseriesRange = 366 * 24 * time.Hour
+	// maxDAMRange caps the DAM price date span; mirrors the spirit of
+	// the weather endpoint's bound to keep result sets sane.
+	maxDAMRange = 366 * 24 * time.Hour
 )
 
 func NewHandlers(store storeReader, allowOrigin string) *Handlers {
@@ -287,6 +296,24 @@ func (h *Handlers) timeseries(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
+	}
+	// Validate tz here (like /samples) so an unknown zone yields a clean
+	// 400 instead of leaking a Postgres time_bucket error as a 500.
+	if _, err := loadLocation(tz); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	// When both bounds are explicit, reject inverted/oversized windows up
+	// front. Omitted bounds fall back to the store's default window.
+	if !from.IsZero() && !to.IsZero() {
+		if !to.After(from) {
+			http.Error(w, "to must be after from", http.StatusBadRequest)
+			return
+		}
+		if to.Sub(from) > maxTimeseriesRange {
+			http.Error(w, fmt.Sprintf("range must be <= %s", maxTimeseriesRange), http.StatusBadRequest)
+			return
+		}
 	}
 	aggregation, err := parseAggregation(r)
 	if err != nil {
@@ -632,6 +659,12 @@ func (h *Handlers) damPrices(w http.ResponseWriter, r *http.Request) {
 	from, to, err := parseDateRange(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	// Cap the span so a misclick on a multi-year range can't trigger an
+	// unbounded scan of market_dam_prices.
+	if to.Sub(from) > maxDAMRange {
+		http.Error(w, fmt.Sprintf("range must be <= %s", maxDAMRange), http.StatusBadRequest)
 		return
 	}
 	start := time.Now()
@@ -1092,13 +1125,13 @@ func parseRange(r *http.Request) (from time.Time, to time.Time, bucket, tz strin
 	if fromStr != "" {
 		from, err = time.Parse(time.RFC3339, fromStr)
 		if err != nil {
-			return time.Time{}, time.Time{}, "", "", err
+			return time.Time{}, time.Time{}, "", "", fmt.Errorf("from must be an RFC3339 timestamp")
 		}
 	}
 	if toStr != "" {
 		to, err = time.Parse(time.RFC3339, toStr)
 		if err != nil {
-			return time.Time{}, time.Time{}, "", "", err
+			return time.Time{}, time.Time{}, "", "", fmt.Errorf("to must be an RFC3339 timestamp")
 		}
 	}
 	return from, to, bucket, tz, nil
@@ -1111,7 +1144,7 @@ func (h *Handlers) withCORS(next http.Handler) http.Handler {
 			origin = "*"
 		}
 		w.Header().Set("Access-Control-Allow-Origin", origin)
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
@@ -1131,9 +1164,19 @@ func (h *Handlers) withSecurityHeaders(next http.Handler) http.Handler {
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
+	// Encode into a buffer first. encoding/json rejects NaN/±Inf in
+	// float64 fields with an error; if we encoded straight to the
+	// ResponseWriter we'd have already written the status header and
+	// would emit a truncated body with Content-Type: application/json.
+	// Buffering lets us fall back to a clean 500 instead of corrupt JSON.
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(v); err != nil {
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
+	_, _ = w.Write(buf.Bytes())
 }
 
 func (h *Handlers) swaggerUI(w http.ResponseWriter, r *http.Request) {
