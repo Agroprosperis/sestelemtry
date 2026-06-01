@@ -287,18 +287,25 @@ export function DailySummaryNarrative({
       ? `прогноз ${formatEnergyUk(pvForecastTotal)}`
       : 'прогноз недоступний'
 
+  // The in-header spinner only fires before the first successful
+  // /energy-summary lands — subsequent background refreshes run
+  // silently so the operator isn't watching a loader animate every
+  // few seconds while perfectly valid numbers sit underneath.
+  const showFirstLoadSpinner = loading && !flowsLoaded
   return (
     <section
       className="metrics-group summary-narrative"
       aria-labelledby="daily-narrative-title"
-      aria-busy={loading || undefined}
+      aria-busy={showFirstLoadSpinner || undefined}
     >
       <header className="metrics-group-header">
         <h2 id="daily-narrative-title" className="metrics-group-title">
           {TITLES[preset]}
           <span className="metrics-group-subtitle"> · {periodLabel}</span>
         </h2>
-        {loading && <LoadingSpinner label="Завантаження підсумку" />}
+        {showFirstLoadSpinner && (
+          <LoadingSpinner label="Завантаження підсумку" />
+        )}
       </header>
       <div className="summary-hero">
         <div className="summary-hero-text">

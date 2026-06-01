@@ -250,11 +250,15 @@ export function BatteryDayNarrative({
 }: Props) {
   const socPercent = readSoc(current)
   const periodLabel = formatPeriodLabel(preset, anchor)
-  // isBusy now controls only the visual "refreshing" affordances
-  // (spinner + aria-busy). The numbers below are gated by whether
-  // their underlying data has arrived at least once, so a background
-  // refresh no longer wipes the card to dashes.
-  const isBusy = loading || refreshing
+  // showFirstLoadSpinner gates the in-header LoadingSpinner.
+  // We only show it while we genuinely have nothing to display —
+  // background refreshes (the /current 1s poll and the on-the-fly
+  // /energy-summary refetch) run silently so the operator isn't
+  // confronted with a perpetually-spinning glyph next to numbers
+  // that are already on screen. The "Оновити перетік" button keeps
+  // its own `is-spinning` icon for the manual-refresh case.
+  const showFirstLoadSpinner =
+    (loading && current === null) || (refreshing && !flowsLoaded)
 
   const chargeSegments = [
     { name: 'Від сонця → УЗЕ', valueKwh: flows.pvToEssKwh, color: '#f59e0b' },
@@ -292,14 +296,16 @@ export function BatteryDayNarrative({
     <section
       className="metrics-group summary-narrative"
       aria-labelledby="battery-day-title"
-      aria-busy={isBusy || undefined}
+      aria-busy={showFirstLoadSpinner || undefined}
     >
       <header className="metrics-group-header">
         <h2 id="battery-day-title" className="metrics-group-title">
           {TITLES[preset]}
           <span className="metrics-group-subtitle"> · {periodLabel}</span>
         </h2>
-        {isBusy && <LoadingSpinner label="Завантаження стану батареї" />}
+        {showFirstLoadSpinner && (
+          <LoadingSpinner label="Завантаження стану батареї" />
+        )}
         <button
           type="button"
           className={`metrics-group-refresh${refreshing ? ' is-spinning' : ''}`}

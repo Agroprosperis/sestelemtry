@@ -30,7 +30,7 @@ function makeFlows(): EnergyFlows {
 const anchor = new Date('2026-06-01T00:00:00+03:00')
 
 describe('BatteryDayNarrative', () => {
-  it('shows placeholders when flows have not loaded yet', () => {
+  it('shows placeholders and the spinner when nothing has loaded yet', () => {
     render(
       <BatteryDayNarrative
         flows={EMPTY_FLOWS}
@@ -45,6 +45,9 @@ describe('BatteryDayNarrative', () => {
     )
     expect(screen.getAllByText('—').length).toBeGreaterThan(3)
     expect(screen.queryByText(/53,9 кВт·год/)).toBeNull()
+    expect(
+      screen.getByLabelText('Завантаження стану батареї'),
+    ).toBeInTheDocument()
   })
 
   it('keeps SOC visible across a /current refresh', () => {
@@ -66,10 +69,13 @@ describe('BatteryDayNarrative', () => {
     expect(screen.getByText('52%')).toBeInTheDocument()
   })
 
-  it('keeps flow values visible during a background refresh', () => {
+  it('keeps flow values visible during a background refresh and hides the spinner', () => {
     // Stale-while-revalidate: flowsLoaded=true means we have valid
     // previous numbers, so the card stays populated even when
     // refreshing=true (e.g. the operator clicked "Оновити перетік").
+    // The in-header LoadingSpinner is suppressed because we have
+    // data; the refresh button's own "is-spinning" indicator is
+    // enough of a cue that something is happening.
     render(
       <BatteryDayNarrative
         flows={makeFlows()}
@@ -82,14 +88,12 @@ describe('BatteryDayNarrative', () => {
         flowsLoaded
       />,
     )
-    // 4 segment rows + 2 segment-bar header totals + 1 balance
-    // line all render as "X кВт·год" entries. The exact number
-    // formatting is jsdom-locale-dependent, so we only require
-    // that enough kWh strings appear and no dash placeholders are
-    // shown for the headline figures.
     expect(screen.getAllByText(/кВт·год/).length).toBeGreaterThanOrEqual(6)
     expect(screen.queryAllByText('—').length).toBe(0)
     expect(screen.getByText('52%')).toBeInTheDocument()
+    expect(
+      screen.queryByLabelText('Завантаження стану батареї'),
+    ).toBeNull()
   })
 
   it('renders the balance description once flows are loaded', () => {

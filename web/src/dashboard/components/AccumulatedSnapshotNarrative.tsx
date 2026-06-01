@@ -117,17 +117,25 @@ export function AccumulatedSnapshotNarrative({
     0,
   )
 
+  // The header spinner is only rendered before the very first
+  // /current sample arrives. After that, background refreshes run
+  // silently — the dashboard polls /current once a second, so a
+  // visible spinner on every tick would feel like the card is
+  // constantly broken even though it isn't.
+  const showFirstLoadSpinner = loading && current === null
   return (
     <section
       className="metrics-group accum-narrative"
       aria-labelledby="accumulated-snapshot-title"
-      aria-busy={loading}
+      aria-busy={showFirstLoadSpinner}
     >
       <header className="metrics-group-header">
         <h2 id="accumulated-snapshot-title" className="metrics-group-title">
           Накопичувальні показники
         </h2>
-        {loading && <LoadingSpinner label="Завантаження лічильників" />}
+        {showFirstLoadSpinner && (
+          <LoadingSpinner label="Завантаження лічильників" />
+        )}
       </header>
       <ul className="accum-narrative-list">
         {rows.map((r) => {

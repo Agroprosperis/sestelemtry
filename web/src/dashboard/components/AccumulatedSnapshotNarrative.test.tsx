@@ -40,7 +40,7 @@ function makeCurrent(): CurrentResponse {
 }
 
 describe('AccumulatedSnapshotNarrative', () => {
-  it('shows placeholder values when no /current has loaded yet', () => {
+  it('shows placeholder values and the spinner when no /current has loaded yet', () => {
     render(
       <AccumulatedSnapshotNarrative
         current={null}
@@ -53,17 +53,18 @@ describe('AccumulatedSnapshotNarrative', () => {
     // the underlying value is missing.
     const dashes = screen.getAllByText('—')
     expect(dashes.length).toBeGreaterThanOrEqual(7)
+    // The header LoadingSpinner is visible for first-load only —
+    // its aria-label is the unique handle.
+    expect(
+      screen.getByLabelText('Завантаження лічильників'),
+    ).toBeInTheDocument()
   })
 
-  it('keeps the previous values on screen while a refresh is in flight', () => {
-    // Stale-while-revalidate is the whole point of the new behavior:
-    // a periodic /current tick must not wipe the card to dashes for
-    // the operator while the next sample is being fetched. Assert
-    // the unit string is rendered and the dash-fallback fired no
-    // more than once (the spinner label). Locale-specific separators
-    // and grouping are jsdom-dependent, so the assertion checks unit
-    // presence + a dash-count ceiling rather than the exact decimal
-    // formatting.
+  it('keeps the previous values on screen during a background refresh and hides the spinner', () => {
+    // Stale-while-revalidate is the whole point of the new behavior.
+    // The /current poll runs every 1s; showing a spinner each tick
+    // would feel like the card is constantly broken, so once data
+    // exists we silently refresh and leave the numbers in place.
     render(
       <AccumulatedSnapshotNarrative
         current={makeCurrent()}
@@ -72,9 +73,11 @@ describe('AccumulatedSnapshotNarrative', () => {
         registers={null}
       />,
     )
-    const mwhMatches = screen.getAllByText(/МВт·год/)
-    expect(mwhMatches.length).toBeGreaterThanOrEqual(7)
+    expect(screen.getAllByText(/МВт·год/).length).toBeGreaterThanOrEqual(7)
     expect(screen.queryAllByText('—').length).toBe(0)
+    expect(
+      screen.queryByLabelText('Завантаження лічильників'),
+    ).toBeNull()
   })
 
   it('renders values normally when not loading', () => {
@@ -88,5 +91,8 @@ describe('AccumulatedSnapshotNarrative', () => {
     )
     expect(screen.getAllByText(/МВт·год/).length).toBeGreaterThanOrEqual(7)
     expect(screen.queryAllByText('—').length).toBe(0)
+    expect(
+      screen.queryByLabelText('Завантаження лічильників'),
+    ).toBeNull()
   })
 })

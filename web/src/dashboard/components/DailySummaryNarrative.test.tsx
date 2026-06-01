@@ -19,7 +19,7 @@ function makeFlows(): EnergyFlows {
 const anchor = new Date('2026-06-01T00:00:00+03:00')
 
 describe('DailySummaryNarrative', () => {
-  it('shows placeholders before /energy-summary has returned', () => {
+  it('shows placeholders and the spinner before /energy-summary has returned', () => {
     render(
       <DailySummaryNarrative
         flows={EMPTY_FLOWS}
@@ -34,13 +34,17 @@ describe('DailySummaryNarrative', () => {
     )
     expect(screen.getByText(/прогноз —/)).toBeInTheDocument()
     expect(screen.getAllByText('—').length).toBeGreaterThan(2)
+    expect(
+      screen.getByLabelText('Завантаження підсумку'),
+    ).toBeInTheDocument()
   })
 
-  it('keeps the period numbers on screen during a background refresh', () => {
-    // The on-the-fly allocator can take 5–15 s on a busy day; we
-    // explicitly do NOT blank the card while a refresh is in flight
-    // — the previous values stay valid and the header spinner
-    // already signals "fresh data coming".
+  it('keeps the period numbers visible during a background refresh and suppresses the spinner', () => {
+    // Stale-while-revalidate: the on-the-fly allocator can take
+    // 5–15 s on a busy day. Once we have one good response we hold
+    // the numbers on screen and refresh silently — the spinner
+    // would otherwise animate on every periodic re-fetch and feel
+    // like a permanent loading state.
     render(
       <DailySummaryNarrative
         flows={makeFlows()}
@@ -53,11 +57,8 @@ describe('DailySummaryNarrative', () => {
         flowsLoaded
       />,
     )
-    // Hero figure + 5 segment rows + 2 segment-bar totals + forecast
-    // line all produce "кВт·год" strings; exact decimal formatting
-    // is jsdom-locale-dependent.
     expect(screen.getAllByText(/кВт·год/).length).toBeGreaterThanOrEqual(6)
-    expect(screen.getByText(/прогноз/)).toBeInTheDocument()
     expect(screen.queryAllByText('—').length).toBe(0)
+    expect(screen.queryByLabelText('Завантаження підсумку')).toBeNull()
   })
 })
