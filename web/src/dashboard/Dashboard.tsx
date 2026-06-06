@@ -61,7 +61,10 @@ export function Dashboard() {
 
   return (
     <main className="dashboard-page">
-      <DashboardHeader organizationID={organizationID} />
+      <DashboardHeader
+        organizationID={organizationID}
+        onExportClick={() => setExportOpen(true)}
+      />
 
       {error && (
         <section className="error-banner" role="alert" aria-live="polite">
@@ -96,7 +99,6 @@ export function Dashboard() {
             onPresetChange={setPreset}
             anchor={anchor}
             onAnchorChange={setAnchor}
-            onExportClick={() => setExportOpen(true)}
             debug={debug}
             onDebugToggle={toggleDebug}
           />

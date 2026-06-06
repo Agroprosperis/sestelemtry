@@ -52,6 +52,14 @@
   min-width: 0;
 }
 
+.dashboard-header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+  flex-wrap: wrap;
+}
+
 .dashboard-header-titles {
   display: flex;
   flex-direction: column;
