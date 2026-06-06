@@ -225,4 +225,24 @@ func TestParseHistoryRow(t *testing.T) {
 	if s2.Fields["total_yield"] != 1.5 {
 		t.Errorf("flat total_yield = %v, want 1.5", s2.Fields["total_yield"])
 	}
+
+	// dataItems is the shape the live eu5 OpenAPI returns (verified
+	// against the real endpoint); nulls must be dropped.
+	items := json.RawMessage(`{"devDn":"NE=179121695","collectTime":1777593600000,"dataItems":{"total_yield":419213.66,"ac_total_discharge_energy":null,"total_charge":159145.31}}`)
+	s3, ok, err := parseHistoryRow(items)
+	if err != nil || !ok {
+		t.Fatalf("dataItems parse failed: ok=%v err=%v", ok, err)
+	}
+	if s3.Fields["total_yield"] != 419213.66 {
+		t.Errorf("dataItems total_yield = %v, want 419213.66", s3.Fields["total_yield"])
+	}
+	if s3.Fields["total_charge"] != 159145.31 {
+		t.Errorf("dataItems total_charge = %v, want 159145.31", s3.Fields["total_charge"])
+	}
+	if _, present := s3.Fields["ac_total_discharge_energy"]; present {
+		t.Errorf("null ac_total_discharge_energy should be dropped")
+	}
+	if _, present := s3.Fields["devDn"]; present {
+		t.Errorf("devDn must not be parsed as a field")
+	}
 }

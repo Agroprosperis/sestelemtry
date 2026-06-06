@@ -36,10 +36,21 @@ type Handlers struct {
 	// passing the param every time.
 	damDefaultZone int
 	// fusionImporter backs POST /api/v1/fusionsolar/import. Always
-	// installed at startup (no env / secrets needed) — the operator
-	// supplies the FusionSolar access token and optional API base in
-	// the request body from the import page.
+	// installed at startup — the operator supplies the FusionSolar
+	// access token (or refresh token) and optional API base in the
+	// request body from the import page.
 	fusionImporter FusionSolarImporter
+	// fusionClientID / fusionClientSecret / fusionOAuthBase are the
+	// server-side OAuth client used to exchange a refresh token for an
+	// access token. They let the import page ask for ONLY the refresh
+	// token; the fixed app secret never leaves the server. A value in
+	// the request body still overrides these.
+	fusionClientID     string
+	fusionClientSecret string
+	fusionOAuthBase    string
+	// fusionOAuthClient optionally pins the OAuth host to a specific
+	// IP (DNS-misroute workaround); nil uses the default client.
+	fusionOAuthClient *http.Client
 }
 
 // FusionSolarImporter synchronously pulls historical device data from
@@ -171,6 +182,28 @@ func (h *Handlers) SetDAMFetcher(fetcher DAMFetcher, defaultZone int) {
 // per-request and returns 503.
 func (h *Handlers) SetFusionSolarImporter(importer FusionSolarImporter) {
 	h.fusionImporter = importer
+}
+
+// SetFusionSolarOAuth configures the server-side OAuth client used to
+// exchange a refresh token for an access token, so the import page can
+// collect only the refresh token. clientID and oauthBase fall back to
+// the package defaults when empty; an empty clientSecret simply means
+// the operator must supply one in the request body.
+// firstNonEmpty returns the first trimmed-non-empty string, or "".
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if s := strings.TrimSpace(v); s != "" {
+			return s
+		}
+	}
+	return ""
+}
+
+func (h *Handlers) SetFusionSolarOAuth(clientID, clientSecret, oauthBase string, httpClient *http.Client) {
+	h.fusionClientID = strings.TrimSpace(clientID)
+	h.fusionClientSecret = strings.TrimSpace(clientSecret)
+	h.fusionOAuthBase = strings.TrimSpace(oauthBase)
+	h.fusionOAuthClient = httpClient
 }
 
 // SetOrganizations replaces the organization metadata served by
@@ -866,11 +899,16 @@ func (h *Handlers) fusionSolarImport(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body struct {
-		AccessToken string `json:"access_token"`
-		APIBase     string `json:"api_base"`
+		AccessToken  string `json:"access_token"`
+		APIBase      string `json:"api_base"`
+		RefreshToken string `json:"refresh_token"`
+		ClientID     string `json:"client_id"`
+		ClientSecret string `json:"client_secret"`
+		OAuthBase    string `json:"oauth_base"`
+		OAuthResolve string `json:"oauth_resolve"`
 	}
 	if r.Body != nil {
-		// Cap the body: the payload is two short strings.
+		// Cap the body: a handful of short credential strings.
 		dec := json.NewDecoder(io.LimitReader(r.Body, 1<<16))
 		if err := dec.Decode(&body); err != nil && err != io.EOF {
 			http.Error(w, "invalid JSON body", http.StatusBadRequest)
@@ -878,11 +916,46 @@ func (h *Handlers) fusionSolarImport(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	accessToken := strings.TrimSpace(body.AccessToken)
-	if accessToken == "" {
-		http.Error(w, "access_token is required (FusionSolar Northbound API token)", http.StatusBadRequest)
-		return
-	}
+	refreshToken := strings.TrimSpace(body.RefreshToken)
 	apiBase := strings.TrimSpace(body.APIBase)
+
+	// Two supported auth styles (per the FusionSolar handoff): a ready
+	// access token, or a long-lived refresh token that we exchange for
+	// one via the OAuth server. The data API accepts access tokens
+	// only, so a refresh token must always go through this exchange.
+	if accessToken == "" {
+		if refreshToken == "" {
+			http.Error(w, "provide a refresh_token (or an access_token)", http.StatusBadRequest)
+			return
+		}
+		// Request body overrides server config; otherwise use the
+		// app's fixed OAuth client so the page only needs the refresh
+		// token.
+		clientID := firstNonEmpty(body.ClientID, h.fusionClientID)
+		clientSecret := firstNonEmpty(body.ClientSecret, h.fusionClientSecret)
+		oauthBase := firstNonEmpty(body.OAuthBase, h.fusionOAuthBase)
+		if clientSecret == "" {
+			http.Error(w, "client_secret is not configured on the server; set FUSIONSOLAR_CLIENT_SECRET or pass client_secret", http.StatusBadRequest)
+			return
+		}
+		// A resolve IP in the request body pins the OAuth host for this
+		// import (DNS-misroute workaround), overriding the server-wide
+		// FUSIONSOLAR_OAUTH_RESOLVE client.
+		oauthClient := h.fusionOAuthClient
+		if rv := strings.TrimSpace(body.OAuthResolve); rv != "" {
+			oauthClient = fusionsolar.NewResolvingHTTPClient(rv, 30*time.Second)
+		}
+		tok, err := fusionsolar.RefreshAccessToken(r.Context(), oauthClient, oauthBase, clientID, clientSecret, refreshToken)
+		if err != nil {
+			h.log.Error("api_fusionsolar_oauth", "organization_id", orgID, "err", err)
+			// Upstream OAuth failure (bad/expired refresh token, wrong
+			// secret) — surface verbatim so the operator sees the cause.
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		accessToken = tok.AccessToken
+		h.log.Info("api_fusionsolar_oauth_ok", "organization_id", orgID, "expires_in", tok.ExpiresIn, "rotated_refresh", tok.RefreshToken != "")
+	}
 
 	// A multi-day import streams sequential upstream requests well past
 	// the 30s WriteTimeout; disable the write deadline for this handler

@@ -110,11 +110,11 @@ func (c *Client) DeviceHistory(
 		return nil, fmt.Errorf("fusionsolar: build request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	// OpenAPI authenticates with the OAuth bearer token ONLY. Do not
+	// also send XSRF-TOKEN: the gateway then treats the call as a
+	// classic /thirdData session and rejects it with failCode=305
+	// USER_MUST_RELOGIN (confirmed against the live eu5 endpoint).
 	httpReq.Header.Set("Authorization", "Bearer "+c.token)
-	// Some SmartPVMS gateways also accept the session token via the
-	// XSRF-TOKEN header; sending both is harmless and survives the two
-	// auth styles the handoff describes.
-	httpReq.Header.Set("XSRF-TOKEN", c.token)
 
 	resp, err := c.http.Do(httpReq)
 	if err != nil {
@@ -185,17 +185,24 @@ func parseHistoryRow(raw json.RawMessage) (HistorySample, bool, error) {
 		return HistorySample{}, false, nil
 	}
 
+	// The live OpenAPI nests values under `dataItems`; the classic
+	// Northbound shape uses `dataItemMap`; some gateways flatten them
+	// onto the row. Prefer a nested container, else fall back to the
+	// top-level keys.
 	fieldSource := row
-	if dim, ok := row["dataItemMap"]; ok {
-		var nested map[string]json.RawMessage
-		if err := json.Unmarshal(dim, &nested); err == nil && len(nested) > 0 {
-			fieldSource = nested
+	for _, key := range []string{"dataItems", "dataItemMap"} {
+		if dim, ok := row[key]; ok {
+			var nested map[string]json.RawMessage
+			if err := json.Unmarshal(dim, &nested); err == nil && len(nested) > 0 {
+				fieldSource = nested
+				break
+			}
 		}
 	}
 
 	fields := make(map[string]float64, len(fieldSource))
 	for k, v := range fieldSource {
-		if k == "collectTime" || k == "devDn" || k == "dataItemMap" {
+		if k == "collectTime" || k == "devDn" || k == "dataItems" || k == "dataItemMap" {
 			continue
 		}
 		if f, ok := rawToFloat(v); ok {

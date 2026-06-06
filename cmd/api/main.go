@@ -129,7 +129,24 @@ func main() {
 		client := fusionsolar.NewClient(apiBase, accessToken, 60*time.Second)
 		return importer.Import(ctx, client, orgID, from, to)
 	})
-	log.Info("api_fusionsolar_import_enabled")
+	// Server-side OAuth client so the import page only needs the
+	// long-lived refresh token; the fixed app secret never leaves the
+	// server. client_id defaults to fusionsolar.DefaultClientID.
+	fusionClientID := strings.TrimSpace(os.Getenv("FUSIONSOLAR_CLIENT_ID"))
+	fusionClientSecret := strings.TrimSpace(os.Getenv("FUSIONSOLAR_CLIENT_SECRET"))
+	fusionOAuthBase := strings.TrimSpace(os.Getenv("FUSIONSOLAR_OAUTH_BASE"))
+	// Optional: pin the OAuth host to a specific IP when DNS routes
+	// oauth2.fusionsolar.huawei.com to the wrong regional cluster
+	// (returns invalid_client). e.g. FUSIONSOLAR_OAUTH_RESOLVE=80.158.45.213.
+	fusionOAuthResolve := strings.TrimSpace(os.Getenv("FUSIONSOLAR_OAUTH_RESOLVE"))
+	var fusionOAuthClient *http.Client
+	if fusionOAuthResolve != "" {
+		fusionOAuthClient = fusionsolar.NewResolvingHTTPClient(fusionOAuthResolve, 30*time.Second)
+	}
+	svc.SetFusionSolarOAuth(fusionClientID, fusionClientSecret, fusionOAuthBase, fusionOAuthClient)
+	log.Info("api_fusionsolar_import_enabled",
+		"oauth_client_secret_configured", fusionClientSecret != "",
+		"oauth_resolve_pinned", fusionOAuthResolve != "")
 
 	server := &http.Server{
 		Addr:              *listenAddr,

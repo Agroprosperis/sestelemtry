@@ -90,7 +90,7 @@ func TestFusionImportRequiresToken(t *testing.T) {
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("want 400 got %d body=%s", rec.Code, rec.Body.String())
 	}
-	if !strings.Contains(rec.Body.String(), "access_token is required") {
+	if !strings.Contains(rec.Body.String(), "access_token") || !strings.Contains(rec.Body.String(), "refresh_token") {
 		t.Fatalf("expected token hint, got %q", rec.Body.String())
 	}
 }

@@ -381,18 +381,24 @@ export type FusionSolarImportResult = {
 // history from the Huawei Northbound API, normalizes the cumulative
 // counters into telemetry_samples, and returns a summary.
 //
-// The `accessToken` (and optional `apiBase`) are entered by the
-// operator on the import page and travel in the JSON body — never the
-// query string — so they don't land in access logs. Error bodies are
-// surfaced verbatim (e.g. an upstream failCode) so the operator sees
-// the cause without grepping API logs.
+// Auth is one of two styles, both travelling in the JSON body (never
+// the query string, so they don't land in access logs): a ready
+// `accessToken`, or a long-lived `refreshToken` + `clientSecret` that
+// the backend exchanges for an access token via the FusionSolar OAuth
+// server. Error bodies are surfaced verbatim (e.g. an upstream
+// failCode) so the operator sees the cause without grepping API logs.
 export async function runFusionSolarImport(
   input: {
     organizationID: string
     from: string
     to: string
-    accessToken: string
+    accessToken?: string
     apiBase?: string
+    refreshToken?: string
+    clientId?: string
+    clientSecret?: string
+    oauthBase?: string
+    oauthResolve?: string
   },
   signal?: AbortSignal,
 ): Promise<FusionSolarImportResult> {
@@ -405,8 +411,13 @@ export async function runFusionSolarImport(
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      access_token: input.accessToken,
+      access_token: input.accessToken || undefined,
       api_base: input.apiBase || undefined,
+      refresh_token: input.refreshToken || undefined,
+      client_id: input.clientId || undefined,
+      client_secret: input.clientSecret || undefined,
+      oauth_base: input.oauthBase || undefined,
+      oauth_resolve: input.oauthResolve || undefined,
     }),
     signal,
   })
