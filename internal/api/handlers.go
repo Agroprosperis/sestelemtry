@@ -261,6 +261,7 @@ func (h *Handlers) Router() http.Handler {
 	mux.HandleFunc("/api/v1/energy-flow-hourly", h.energyFlowHourly)
 	mux.HandleFunc("/api/v1/dam-prices", h.damPrices)
 	mux.HandleFunc("/api/v1/dam-prices/refresh", h.damPricesRefresh)
+	mux.HandleFunc("/api/v1/dam-prices/refresh-range", h.damPricesRefreshRange)
 	mux.HandleFunc("/api/v1/fusionsolar/import", h.fusionSolarImport)
 	mux.HandleFunc("/api/v1/fusionsolar/config", h.fusionSolarConfig)
 	mux.HandleFunc("/api/v1/weather-forecast", h.weatherForecast)
@@ -863,6 +864,124 @@ func (h *Handlers) damPricesRefresh(w http.ResponseWriter, r *http.Request) {
 		"duration_ms", dur.Milliseconds(),
 	)
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// DAMDayError records a single day that failed during a range refresh
+// so the operator can see which deliveries are missing (e.g. OREE never
+// published that date) without the whole import aborting.
+type DAMDayError struct {
+	Date  string `json:"date"`
+	Error string `json:"error"`
+}
+
+// DAMRefreshRangeResult summarizes a bulk DAM price import over a
+// [from, to] inclusive date span. Per-day failures are tolerated and
+// collected in Errors (capped) so a year-long backfill doesn't abort on
+// a single missing publication.
+type DAMRefreshRangeResult struct {
+	From        string        `json:"from"`
+	To          string        `json:"to"`
+	Zone        int           `json:"zone"`
+	Days        int           `json:"days"`
+	DaysOK      int           `json:"days_ok"`
+	DaysFailed  int           `json:"days_failed"`
+	RowsWritten int           `json:"rows_written"`
+	Errors      []DAMDayError `json:"errors,omitempty"`
+}
+
+// maxDAMRangeErrors caps the per-day error list in a range refresh so a
+// pathological run (e.g. wrong zone → every day 404s) returns a bounded
+// response instead of thousands of lines.
+const maxDAMRangeErrors = 50
+
+// damPricesRefreshRange pulls DAM prices for every delivery date in the
+// inclusive [from, to] span and upserts them, looping day-by-day over
+// the same single-attempt fetcher damPricesRefresh uses. Built for the
+// import page so an operator can backfill a month or a year of РДН
+// prices in one call. Per-day failures (a date OREE never published)
+// are tolerated: they're counted and listed, but the run continues.
+//
+//	POST /api/v1/dam-prices/refresh-range?from=YYYY-MM-DD&to=YYYY-MM-DD&zone=2
+func (h *Handlers) damPricesRefreshRange(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if h.damFetcher == nil {
+		h.log.Warn("api_dam_refresh_range_unconfigured")
+		http.Error(w, "dam refresh not configured (oree section missing or disabled)", http.StatusServiceUnavailable)
+		return
+	}
+	fromStr := strings.TrimSpace(r.URL.Query().Get("from"))
+	toStr := strings.TrimSpace(r.URL.Query().Get("to"))
+	if fromStr == "" || toStr == "" {
+		http.Error(w, "from and to are required (YYYY-MM-DD)", http.StatusBadRequest)
+		return
+	}
+	from, err := time.Parse("2006-01-02", fromStr)
+	if err != nil {
+		http.Error(w, "from must be YYYY-MM-DD", http.StatusBadRequest)
+		return
+	}
+	to, err := time.Parse("2006-01-02", toStr)
+	if err != nil {
+		http.Error(w, "to must be YYYY-MM-DD", http.StatusBadRequest)
+		return
+	}
+	if to.Before(from) {
+		http.Error(w, "to must be on or after from", http.StatusBadRequest)
+		return
+	}
+	if to.Sub(from) > maxDAMRange {
+		http.Error(w, fmt.Sprintf("range must be <= %s", maxDAMRange), http.StatusBadRequest)
+		return
+	}
+	zone, err := parseRefreshZone(r, h.damDefaultZone)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// A multi-day pull issues one sequential OREE download per day,
+	// easily exceeding the 30s WriteTimeout; drop the write deadline so
+	// the response isn't truncated mid-import. The request context still
+	// bounds the work if the client disconnects.
+	if rc := http.NewResponseController(w); rc != nil {
+		_ = rc.SetWriteDeadline(time.Time{})
+	}
+
+	start := time.Now()
+	result := DAMRefreshRangeResult{From: fromStr, To: toStr, Zone: zone}
+	for day := from; !day.After(to); day = day.AddDate(0, 0, 1) {
+		if err := r.Context().Err(); err != nil {
+			break
+		}
+		result.Days++
+		rows, ferr := h.damFetcher(r.Context(), day, zone)
+		if ferr != nil {
+			result.DaysFailed++
+			if len(result.Errors) < maxDAMRangeErrors {
+				result.Errors = append(result.Errors, DAMDayError{
+					Date:  day.Format("2006-01-02"),
+					Error: ferr.Error(),
+				})
+			}
+			continue
+		}
+		result.DaysOK++
+		result.RowsWritten += rows
+	}
+	h.log.Info("api_dam_refresh_range_ok",
+		"from", fromStr,
+		"to", toStr,
+		"zone", zone,
+		"days", result.Days,
+		"days_ok", result.DaysOK,
+		"days_failed", result.DaysFailed,
+		"rows_written", result.RowsWritten,
+		"duration_ms", time.Since(start).Milliseconds(),
+	)
+	writeJSON(w, http.StatusOK, result)
 }
 
 // fusionSolarConfig returns the non-secret server-side FusionSolar

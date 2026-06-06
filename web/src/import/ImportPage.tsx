@@ -1,5 +1,10 @@
 import { useCallback, useState } from 'react'
-import { runFusionSolarImport, type FusionSolarImportResult } from '../api'
+import {
+  refreshDAMPricesRange,
+  runFusionSolarImport,
+  type DAMRefreshRangeResult,
+  type FusionSolarImportResult,
+} from '../api'
 import { OrganizationSelect } from '../dashboard/components/OrganizationSelect'
 import { useOrganizationParam } from '../dashboard/hooks/useOrganizationParam'
 import './import.css'
@@ -54,6 +59,29 @@ function backToDashboard() {
 }
 
 export function ImportPage() {
+  return (
+    <main className="import-page">
+      <header className="import-header">
+        <button type="button" className="import-back" onClick={backToDashboard}>
+          ← Дашборд
+        </button>
+        <div className="import-heading">
+          <h1>Імпорт даних</h1>
+          <p className="import-subtitle">
+            Архівна телеметрія FusionSolar і ціни РДН (OREE)
+          </p>
+        </div>
+      </header>
+
+      <FusionSolarImportCard />
+      <DamPricesImportCard />
+    </main>
+  )
+}
+
+// ---- FusionSolar archive telemetry --------------------------------------
+
+function FusionSolarImportCard() {
   const { organizationID, options, change: onOrganizationChange } = useOrganizationParam()
   // Default to the last importable archive day so the picker never
   // opens inside the live-data region (which the backend rejects).
@@ -100,71 +128,57 @@ export function ImportPage() {
   }, [organizationID, fromDate, toDate])
 
   return (
-    <main className="import-page">
-      <header className="import-header">
-        <button type="button" className="import-back" onClick={backToDashboard}>
-          ← Дашборд
-        </button>
-        <div className="import-heading">
-          <h1>Імпорт архіву FusionSolar</h1>
-          <p className="import-subtitle">
-            Backfill 5-хвилинної історії зі SmartLogger / УЗЕ в базу телеметрії
-          </p>
-        </div>
-      </header>
-
-      <section className="import-card">
-        <span className="import-card-accent" aria-hidden="true" />
-        <div className="import-card-head">
-          <h2 className="import-section-title">Параметри імпорту</h2>
-          <span className="import-pill import-pill-ok">● Підключення на сервері</span>
-        </div>
-        <p className="import-section-sub">
-          Оберіть станцію й діапазон дат. Доступно лише по{' '}
-          <strong>{ARCHIVE_LAST_DAY}</strong> включно — з 01.05.2026 працюють реальні дані.
-        </p>
-        <div className="import-controls">
-          <OrganizationSelect
-            value={organizationID}
-            options={options}
-            onChange={onOrganizationChange}
+    <section className="import-card">
+      <span className="import-card-accent" aria-hidden="true" />
+      <div className="import-card-head">
+        <h2 className="import-section-title">Архів телеметрії FusionSolar</h2>
+        <span className="import-pill import-pill-ok">● Підключення на сервері</span>
+      </div>
+      <p className="import-section-sub">
+        Оберіть станцію й діапазон дат. Доступно лише по{' '}
+        <strong>{ARCHIVE_LAST_DAY}</strong> включно — з 01.05.2026 працюють реальні дані.
+      </p>
+      <div className="import-controls">
+        <OrganizationSelect
+          value={organizationID}
+          options={options}
+          onChange={onOrganizationChange}
+        />
+        <label className="import-field">
+          <span>Від</span>
+          <input
+            type="date"
+            value={fromDate}
+            max={toDate || ARCHIVE_LAST_DAY}
+            onChange={(e) => setFromDate(e.target.value)}
           />
-          <label className="import-field">
-            <span>Від</span>
-            <input
-              type="date"
-              value={fromDate}
-              max={toDate || ARCHIVE_LAST_DAY}
-              onChange={(e) => setFromDate(e.target.value)}
-            />
-          </label>
-          <label className="import-field">
-            <span>До (включно)</span>
-            <input
-              type="date"
-              value={toDate}
-              min={fromDate || undefined}
-              max={ARCHIVE_LAST_DAY}
-              onChange={(e) => setToDate(e.target.value)}
-            />
-          </label>
-          <button
-            type="button"
-            className="import-run"
-            onClick={onRun}
-            disabled={state === 'loading'}
-          >
-            {state === 'loading' ? (
-              <>
-                <span className="import-spinner" aria-hidden="true" />
-                Імпортуємо…
-              </>
-            ) : (
-              'Запустити імпорт'
-            )}
-          </button>
-        </div>
-      </section>
+        </label>
+        <label className="import-field">
+          <span>До (включно)</span>
+          <input
+            type="date"
+            value={toDate}
+            min={fromDate || undefined}
+            max={ARCHIVE_LAST_DAY}
+            onChange={(e) => setToDate(e.target.value)}
+          />
+        </label>
+        <button
+          type="button"
+          className="import-run"
+          onClick={onRun}
+          disabled={state === 'loading'}
+        >
+          {state === 'loading' ? (
+            <>
+              <span className="import-spinner" aria-hidden="true" />
+              Імпортуємо…
+            </>
+          ) : (
+            'Запустити імпорт'
+          )}
+        </button>
+      </div>
 
       <p className="import-hint">
         Завантажує 5-хвилинні архівні дані зі SmartLogger / УЗЕ через FusionSolar
@@ -173,20 +187,17 @@ export function ImportPage() {
         діапазону перезаписує раніше імпортовані дані (ідемпотентно) — перезапис
         зачіпає <strong>лише</strong> рядки з позначкою архіву (source=fusionsolar),
         тож реальні дані ніколи не видаляються.
-        {' '}
-        Завантаження можливе тільки по <strong>{ARCHIVE_LAST_DAY}</strong> включно:
-        з 01.05.2026 працюють реальні дані, і затерти їх не можна.
       </p>
 
       {state === 'error' && error && (
-        <section className="import-banner import-banner-error" role="alert">
+        <div className="import-banner import-banner-error" role="alert">
           Помилка імпорту: {error}
-        </section>
+        </div>
       )}
 
       {state === 'done' && result && (
-        <section className="import-result" role="status">
-          <h2>Готово</h2>
+        <div className="import-result" role="status">
+          <h3>Готово</h3>
           <dl className="import-summary">
             <div>
               <dt>Станція</dt>
@@ -237,7 +248,7 @@ export function ImportPage() {
 
           {result.warnings && result.warnings.length > 0 && (
             <div className="import-warnings">
-              <h3>Попередження</h3>
+              <h4>Попередження</h4>
               <ul>
                 {result.warnings.map((w, i) => (
                   <li key={i}>{w}</li>
@@ -245,8 +256,162 @@ export function ImportPage() {
               </ul>
             </div>
           )}
-        </section>
+        </div>
       )}
-    </main>
+    </section>
+  )
+}
+
+// ---- DAM (РДН) market prices --------------------------------------------
+
+function DamPricesImportCard() {
+  const [fromDate, setFromDate] = useState<string>(() => kyivDate(-30))
+  // DAM is published a day ahead, so "tomorrow" is a valid delivery date.
+  const [toDate, setToDate] = useState<string>(() => kyivDate(1))
+  const [zone, setZone] = useState<string>('')
+  const [state, setState] = useState<RunState>('idle')
+  const [error, setError] = useState<string | null>(null)
+  const [result, setResult] = useState<DAMRefreshRangeResult | null>(null)
+
+  const onRun = useCallback(async () => {
+    if (!fromDate || !toDate) {
+      setError('Вкажіть діапазон дат')
+      setState('error')
+      return
+    }
+    if (toDate < fromDate) {
+      setError('Кінцева дата раніше за початкову')
+      setState('error')
+      return
+    }
+    const zoneNum = zone.trim() === '' ? undefined : Number(zone.trim())
+    if (zoneNum !== undefined && (!Number.isInteger(zoneNum) || zoneNum < 1 || zoneNum > 99)) {
+      setError('Зона має бути цілим числом 1–99')
+      setState('error')
+      return
+    }
+    setState('loading')
+    setError(null)
+    setResult(null)
+    try {
+      const res = await refreshDAMPricesRange({ from: fromDate, to: toDate, zone: zoneNum })
+      setResult(res)
+      setState('done')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+      setState('error')
+    }
+  }, [fromDate, toDate, zone])
+
+  return (
+    <section className="import-card">
+      <span className="import-card-accent import-card-accent-amber" aria-hidden="true" />
+      <div className="import-card-head">
+        <h2 className="import-section-title">Ціни РДН (OREE)</h2>
+        <span className="import-pill import-pill-amber">₴ Ринок на добу наперед</span>
+      </div>
+      <p className="import-section-sub">
+        Завантаження цін РДН за діапазон дат (можна за місяць чи рік). День за днем
+        тягне XLS з OREE й оновлює <code>market_dam_prices</code>. Дні без публікації
+        пропускаються без помилки.
+      </p>
+      <div className="import-controls import-controls-dam">
+        <label className="import-field">
+          <span>Від</span>
+          <input
+            type="date"
+            value={fromDate}
+            max={toDate || undefined}
+            onChange={(e) => setFromDate(e.target.value)}
+          />
+        </label>
+        <label className="import-field">
+          <span>До (включно)</span>
+          <input
+            type="date"
+            value={toDate}
+            min={fromDate || undefined}
+            onChange={(e) => setToDate(e.target.value)}
+          />
+        </label>
+        <label className="import-field">
+          <span>Зона</span>
+          <input
+            type="number"
+            min={1}
+            max={99}
+            value={zone}
+            placeholder="за замовч."
+            onChange={(e) => setZone(e.target.value)}
+          />
+        </label>
+        <button
+          type="button"
+          className="import-run"
+          onClick={onRun}
+          disabled={state === 'loading'}
+        >
+          {state === 'loading' ? (
+            <>
+              <span className="import-spinner" aria-hidden="true" />
+              Завантажуємо…
+            </>
+          ) : (
+            'Завантажити ціни'
+          )}
+        </button>
+      </div>
+
+      {state === 'error' && error && (
+        <div className="import-banner import-banner-error" role="alert">
+          Помилка завантаження: {error}
+        </div>
+      )}
+
+      {state === 'done' && result && (
+        <div className="import-result" role="status">
+          <h3>Готово</h3>
+          <dl className="import-summary">
+            <div>
+              <dt>Період</dt>
+              <dd>
+                {result.from} → {result.to}
+              </dd>
+            </div>
+            <div>
+              <dt>Зона</dt>
+              <dd>{result.zone}</dd>
+            </div>
+            <div>
+              <dt>Днів оброблено</dt>
+              <dd>{result.days}</dd>
+            </div>
+            <div>
+              <dt>Успішно / без даних</dt>
+              <dd>
+                {result.days_ok} / {result.days_failed}
+              </dd>
+            </div>
+            <div>
+              <dt>Записано рядків</dt>
+              <dd>{result.rows_written.toLocaleString('uk-UA')}</dd>
+            </div>
+          </dl>
+
+          {result.errors && result.errors.length > 0 && (
+            <div className="import-warnings">
+              <h4>Дні без даних ({result.days_failed})</h4>
+              <ul>
+                {result.errors.map((e) => (
+                  <li key={e.date}>
+                    {e.date}: {e.error}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+    </section>
   )
 }

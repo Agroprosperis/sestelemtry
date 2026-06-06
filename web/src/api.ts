@@ -359,6 +359,43 @@ export async function refreshDAMPrices(
   return res.json()
 }
 
+// DAMRefreshRangeResult mirrors `internal/api.DAMRefreshRangeResult`:
+// a bulk DAM-price backfill over an inclusive [from, to] day span.
+// Per-day failures are tolerated and listed in `errors`.
+export type DAMRefreshRangeResult = {
+  from: string
+  to: string
+  zone: number
+  days: number
+  days_ok: number
+  days_failed: number
+  rows_written: number
+  errors?: { date: string; error: string }[]
+}
+
+// refreshDAMPricesRange triggers a synchronous server-side backfill of
+// DAM (РДН) prices for every delivery date in [from, to] (YYYY-MM-DD,
+// inclusive). The backend loops day-by-day pulling each OREE XLS and
+// upserting it; missing publications are counted, not fatal. Use it to
+// load a month or a year of prices at once.
+export async function refreshDAMPricesRange(
+  input: { from: string; to: string; zone?: number },
+  signal?: AbortSignal,
+): Promise<DAMRefreshRangeResult> {
+  const url = buildURL('/api/v1/dam-prices/refresh-range', {
+    from: input.from,
+    to: input.to,
+    zone: input.zone !== undefined ? String(input.zone) : undefined,
+  })
+  const res = await fetch(url, { method: 'POST', signal })
+  if (!res.ok) {
+    const body = await res.text().catch(() => '')
+    const suffix = body ? ` — ${body.trim()}` : ''
+    throw new Error(`dam-prices range refresh failed: ${res.status}${suffix}`)
+  }
+  return res.json()
+}
+
 // FusionSolarConfig is the non-secret server-side default set returned
 // by GET /api/v1/fusionsolar/config so the import page can prefill its
 // form. Secrets are never sent — only booleans say whether they exist.
