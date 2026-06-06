@@ -105,48 +105,64 @@ export function ImportPage() {
         <button type="button" className="import-back" onClick={backToDashboard}>
           ← Дашборд
         </button>
-        <h1>Імпорт архіву FusionSolar</h1>
+        <div className="import-heading">
+          <h1>Імпорт архіву FusionSolar</h1>
+          <p className="import-subtitle">
+            Backfill 5-хвилинної історії зі SmartLogger / УЗЕ в базу телеметрії
+          </p>
+        </div>
       </header>
 
       <section className="import-card">
-        <h2 className="import-section-title">Параметри імпорту</h2>
+        <span className="import-card-accent" aria-hidden="true" />
+        <div className="import-card-head">
+          <h2 className="import-section-title">Параметри імпорту</h2>
+          <span className="import-pill import-pill-ok">● Підключення на сервері</span>
+        </div>
         <p className="import-section-sub">
-          Підключення до FusionSolar налаштоване на сервері — оберіть станцію й діапазон дат.
-          Доступно лише по {ARCHIVE_LAST_DAY} включно: з 01.05.2026 працюють реальні дані.
+          Оберіть станцію й діапазон дат. Доступно лише по{' '}
+          <strong>{ARCHIVE_LAST_DAY}</strong> включно — з 01.05.2026 працюють реальні дані.
         </p>
         <div className="import-controls">
-        <OrganizationSelect
-          value={organizationID}
-          options={options}
-          onChange={onOrganizationChange}
-        />
-        <label className="import-field">
-          <span>Від</span>
-          <input
-            type="date"
-            value={fromDate}
-            max={toDate || ARCHIVE_LAST_DAY}
-            onChange={(e) => setFromDate(e.target.value)}
+          <OrganizationSelect
+            value={organizationID}
+            options={options}
+            onChange={onOrganizationChange}
           />
-        </label>
-        <label className="import-field">
-          <span>До (включно)</span>
-          <input
-            type="date"
-            value={toDate}
-            min={fromDate || undefined}
-            max={ARCHIVE_LAST_DAY}
-            onChange={(e) => setToDate(e.target.value)}
-          />
-        </label>
-        <button
-          type="button"
-          className="import-run"
-          onClick={onRun}
-          disabled={state === 'loading'}
-        >
-          {state === 'loading' ? 'Імпортуємо…' : 'Запустити імпорт'}
-        </button>
+          <label className="import-field">
+            <span>Від</span>
+            <input
+              type="date"
+              value={fromDate}
+              max={toDate || ARCHIVE_LAST_DAY}
+              onChange={(e) => setFromDate(e.target.value)}
+            />
+          </label>
+          <label className="import-field">
+            <span>До (включно)</span>
+            <input
+              type="date"
+              value={toDate}
+              min={fromDate || undefined}
+              max={ARCHIVE_LAST_DAY}
+              onChange={(e) => setToDate(e.target.value)}
+            />
+          </label>
+          <button
+            type="button"
+            className="import-run"
+            onClick={onRun}
+            disabled={state === 'loading'}
+          >
+            {state === 'loading' ? (
+              <>
+                <span className="import-spinner" aria-hidden="true" />
+                Імпортуємо…
+              </>
+            ) : (
+              'Запустити імпорт'
+            )}
+          </button>
         </div>
       </section>
 
