@@ -5,13 +5,17 @@ import (
 	"context"
 	"encoding/csv"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"math"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/nesh/sestelemetry/internal/fusionsolar"
 )
 
 type Handlers struct {
@@ -31,7 +35,22 @@ type Handlers struct {
 	// field so a deployment with only zone=1 can refresh without
 	// passing the param every time.
 	damDefaultZone int
+	// fusionImporter backs POST /api/v1/fusionsolar/import. Always
+	// installed at startup (no env / secrets needed) — the operator
+	// supplies the FusionSolar access token and optional API base in
+	// the request body from the import page.
+	fusionImporter FusionSolarImporter
 }
+
+// FusionSolarImporter synchronously pulls historical device data from
+// the FusionSolar Northbound API for one organization + window using
+// the per-request access token / API base, normalizes the cumulative
+// counters into telemetry_samples, and returns a JSON-serializable
+// summary. The closure is constructed in cmd/api/main.go from
+// internal/fusionsolar so the handler stays decoupled from the HTTP
+// client / pgxpool wiring (and tests can inject a fake). Errors are
+// surfaced verbatim to the operator.
+type FusionSolarImporter func(ctx context.Context, organizationID, accessToken, apiBase string, from, to time.Time) (any, error)
 
 // DAMFetcher synchronously pulls one day's DAM XLS, parses it, and
 // upserts the resulting rows into market_dam_prices. The closure is
@@ -87,6 +106,12 @@ const (
 	// maxDAMRange caps the DAM price date span; mirrors the spirit of
 	// the weather endpoint's bound to keep result sets sane.
 	maxDAMRange = 366 * 24 * time.Hour
+	// maxFusionImportRange caps a single archive-import request. The
+	// importer loops one FusionSolar device/history call per device per
+	// 24h window, so a year is ~365 windows × ~5 devices of sequential
+	// upstream calls — bounded here to keep one click from launching an
+	// unbounded multi-hour job inside a synchronous request.
+	maxFusionImportRange = 366 * 24 * time.Hour
 )
 
 func NewHandlers(store storeReader, allowOrigin string) *Handlers {
@@ -139,6 +164,15 @@ func (h *Handlers) SetDAMFetcher(fetcher DAMFetcher, defaultZone int) {
 	}
 }
 
+// SetFusionSolarImporter installs the on-demand archive-import closure
+// that POST /api/v1/fusionsolar/import dispatches to. Calling with a
+// nil importer removes a previously-installed one; the route stays
+// registered either way and the handler checks for a nil importer
+// per-request and returns 503.
+func (h *Handlers) SetFusionSolarImporter(importer FusionSolarImporter) {
+	h.fusionImporter = importer
+}
+
 // SetOrganizations replaces the organization metadata served by
 // /api/v1/organizations. The slice is shallow-copied so the caller
 // can mutate the source without affecting in-flight requests; nil /
@@ -167,6 +201,7 @@ func (h *Handlers) Router() http.Handler {
 	mux.HandleFunc("/api/v1/energy-flow-hourly", h.energyFlowHourly)
 	mux.HandleFunc("/api/v1/dam-prices", h.damPrices)
 	mux.HandleFunc("/api/v1/dam-prices/refresh", h.damPricesRefresh)
+	mux.HandleFunc("/api/v1/fusionsolar/import", h.fusionSolarImport)
 	mux.HandleFunc("/api/v1/weather-forecast", h.weatherForecast)
 	mux.HandleFunc("/api/v1/organization-tariffs", h.organizationTariffs)
 	mux.HandleFunc("/swagger", h.swaggerUI)
@@ -767,6 +802,126 @@ func (h *Handlers) damPricesRefresh(w http.ResponseWriter, r *http.Request) {
 		"duration_ms", dur.Milliseconds(),
 	)
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// fusionSolarImport backfills historical telemetry for one
+// organization from the FusionSolar Northbound API. It mirrors the
+// damPricesRefresh shape: POST, query params, a structured JSON result,
+// and upstream failures surfaced as 502 with the cause in the body.
+//
+//	POST /api/v1/fusionsolar/import?organization_id=ab&from=...&to=...
+//	body: {"access_token": "...", "api_base": "https://eu5..."}
+//
+// `from` / `to` are RFC3339 timestamps. The access token (and optional
+// API base) travel in the JSON body, not the query string, so they
+// never land in access logs. A backfill can fetch many days of
+// 5-minute data sequentially, so we clear the response write deadline
+// (the server's 30s WriteTimeout would otherwise truncate a long
+// import) — the request context still bounds the work if the client
+// disconnects.
+func (h *Handlers) fusionSolarImport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if h.fusionImporter == nil {
+		h.log.Warn("api_fusionsolar_import_unconfigured")
+		http.Error(w, "fusionsolar import not available", http.StatusServiceUnavailable)
+		return
+	}
+	orgID := strings.TrimSpace(r.URL.Query().Get("organization_id"))
+	if orgID == "" {
+		http.Error(w, "organization_id is required", http.StatusBadRequest)
+		return
+	}
+	fromStr := strings.TrimSpace(r.URL.Query().Get("from"))
+	toStr := strings.TrimSpace(r.URL.Query().Get("to"))
+	if fromStr == "" || toStr == "" {
+		http.Error(w, "from and to are required (RFC3339)", http.StatusBadRequest)
+		return
+	}
+	from, err := time.Parse(time.RFC3339, fromStr)
+	if err != nil {
+		http.Error(w, "from must be an RFC3339 timestamp", http.StatusBadRequest)
+		return
+	}
+	to, err := time.Parse(time.RFC3339, toStr)
+	if err != nil {
+		http.Error(w, "to must be an RFC3339 timestamp", http.StatusBadRequest)
+		return
+	}
+	if !to.After(from) {
+		http.Error(w, "to must be after from", http.StatusBadRequest)
+		return
+	}
+	if to.Sub(from) > maxFusionImportRange {
+		http.Error(w, fmt.Sprintf("range too wide: max %s per import", maxFusionImportRange), http.StatusBadRequest)
+		return
+	}
+	// Safety guard: archive imports may not reach the live-data region.
+	// The window is half-open [from, to), so to == cutoff is allowed.
+	if to.After(fusionsolar.ArchiveCutoff) {
+		http.Error(w, fmt.Sprintf("archive import forbidden on/after %s (live data) — set `to` no later than the cutoff", fusionsolar.ArchiveCutoff.Format(time.RFC3339)), http.StatusBadRequest)
+		return
+	}
+
+	var body struct {
+		AccessToken string `json:"access_token"`
+		APIBase     string `json:"api_base"`
+	}
+	if r.Body != nil {
+		// Cap the body: the payload is two short strings.
+		dec := json.NewDecoder(io.LimitReader(r.Body, 1<<16))
+		if err := dec.Decode(&body); err != nil && err != io.EOF {
+			http.Error(w, "invalid JSON body", http.StatusBadRequest)
+			return
+		}
+	}
+	accessToken := strings.TrimSpace(body.AccessToken)
+	if accessToken == "" {
+		http.Error(w, "access_token is required (FusionSolar Northbound API token)", http.StatusBadRequest)
+		return
+	}
+	apiBase := strings.TrimSpace(body.APIBase)
+
+	// A multi-day import streams sequential upstream requests well past
+	// the 30s WriteTimeout; disable the write deadline for this handler
+	// so the response isn't cut off mid-import. Best-effort — older
+	// servers without ResponseController support just keep the default.
+	if rc := http.NewResponseController(w); rc != nil {
+		_ = rc.SetWriteDeadline(time.Time{})
+	}
+
+	start := time.Now()
+	result, err := h.fusionImporter(r.Context(), orgID, accessToken, apiBase, from, to)
+	dur := time.Since(start)
+	if err != nil {
+		h.log.Error("api_fusionsolar_import",
+			"organization_id", orgID,
+			"from", fromStr,
+			"to", toStr,
+			"duration_ms", dur.Milliseconds(),
+			"err", err,
+		)
+		// The cutoff guard is a client error (bad window), not an
+		// upstream failure — surface it as 400.
+		if errors.Is(err, fusionsolar.ErrAfterCutoff) {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		// 502: the failure originated upstream (FusionSolar API) or in
+		// the storage layer — the API process itself is healthy. Body
+		// carries the underlying err so the operator sees the cause.
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	h.log.Info("api_fusionsolar_import_ok",
+		"organization_id", orgID,
+		"from", fromStr,
+		"to", toStr,
+		"duration_ms", dur.Milliseconds(),
+	)
+	writeJSON(w, http.StatusOK, result)
 }
 
 // parseRefreshZone reads the optional `zone=` query param for the

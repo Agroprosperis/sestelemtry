@@ -133,6 +133,57 @@ func DeleteSamplesInRange(
 	return tag.RowsAffected(), nil
 }
 
+// DeleteArchiveSamplesInRange removes only the rows tagged with the
+// given source label (labels->>'source' = source) for
+// (organization_id, metric_key ∈ metricKeys, [from, to]). Used by the
+// FusionSolar importer to make a re-import idempotent WITHOUT ever
+// touching live Modbus samples: those carry no `source` label, so a
+// re-import deletes and rewrites strictly its own archive rows. The
+// source tag also lets an operator wipe + re-pull the archive later.
+//
+// The bound is right-closed (time <= to) to mirror the query side;
+// combined with the source filter, real data is safe even if a
+// timestamp coincides.
+func DeleteArchiveSamplesInRange(
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	organizationID string,
+	metricKeys []string,
+	source string,
+	from, to time.Time,
+) (int64, error) {
+	if pool == nil {
+		return 0, fmt.Errorf("storage: nil pool")
+	}
+	if organizationID == "" {
+		return 0, fmt.Errorf("storage: organization_id is required")
+	}
+	if len(metricKeys) == 0 {
+		return 0, fmt.Errorf("storage: metric_keys is required")
+	}
+	if strings.TrimSpace(source) == "" {
+		return 0, fmt.Errorf("storage: source is required")
+	}
+	if from.IsZero() || to.IsZero() {
+		return 0, fmt.Errorf("storage: from and to are required")
+	}
+	if !to.After(from) {
+		return 0, fmt.Errorf("storage: to must be after from")
+	}
+	tag, err := pool.Exec(ctx, `
+		DELETE FROM telemetry_samples
+		WHERE organization_id = $1
+			AND metric_key = ANY($2)
+			AND labels->>'source' = $3
+			AND time >= $4
+			AND time <= $5
+	`, organizationID, metricKeys, source, from.UTC(), to.UTC())
+	if err != nil {
+		return 0, fmt.Errorf("storage: delete archive samples in range: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
 func toCopyRows(samples []Sample) ([][]any, error) {
 	rows := make([][]any, len(samples))
 	for i, s := range samples {

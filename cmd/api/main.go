@@ -15,6 +15,7 @@ import (
 	"github.com/nesh/sestelemetry/internal/config"
 	"github.com/nesh/sestelemetry/internal/dam"
 	"github.com/nesh/sestelemetry/internal/energyflow"
+	"github.com/nesh/sestelemetry/internal/fusionsolar"
 	"github.com/nesh/sestelemetry/internal/oree"
 	"github.com/nesh/sestelemetry/internal/storage"
 )
@@ -79,11 +80,13 @@ func main() {
 	if cfgPath == "" {
 		cfgPath = strings.TrimSpace(os.Getenv("CONFIG_PATH"))
 	}
+	var loadedCfg *config.Root
 	if cfgPath != "" {
 		cfg, err := config.Load(cfgPath)
 		if err != nil {
 			log.Warn("api_config_load", "path", cfgPath, "err", err)
 		} else {
+			loadedCfg = cfg
 			svc.SetOrganizations(toOrganizationInfos(cfg.Organizations))
 			svc.SetEnergyFlowOrgs(toEnergyFlowOrgs(cfg.Organizations))
 			if cfg.OREE.Enabled {
@@ -104,6 +107,30 @@ func main() {
 			log.Info("api_config_loaded", "path", cfgPath, "organizations", len(cfg.Organizations))
 		}
 	}
+
+	// FusionSolar archive importer behind POST
+	// /api/v1/fusionsolar/import. Always enabled — no secrets in env or
+	// YAML; the operator enters the Northbound API access token (and
+	// optional API base) on the import page and it travels in the
+	// request body. The per-org device_host label mirrors what the
+	// live collector stamps, so backfilled rows classify identically in
+	// the energy-flow allocator.
+	hostByOrg := map[string]string{}
+	if loadedCfg != nil {
+		for _, o := range loadedCfg.Organizations {
+			devices := o.Devices()
+			if len(devices) > 0 {
+				hostByOrg[o.ID] = strings.TrimSpace(devices[0].Host)
+			}
+		}
+	}
+	importer := fusionsolar.NewImporter(pool, log, hostByOrg)
+	svc.SetFusionSolarImporter(func(ctx context.Context, orgID, accessToken, apiBase string, from, to time.Time) (any, error) {
+		client := fusionsolar.NewClient(apiBase, accessToken, 60*time.Second)
+		return importer.Import(ctx, client, orgID, from, to)
+	})
+	log.Info("api_fusionsolar_import_enabled")
+
 	server := &http.Server{
 		Addr:              *listenAddr,
 		Handler:           svc.Router(),

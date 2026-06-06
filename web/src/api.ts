@@ -359,6 +359,65 @@ export async function refreshDAMPrices(
   return res.json()
 }
 
+// FusionSolarImportResult mirrors `internal/fusionsolar.ImportResult`.
+// Returned by POST /api/v1/fusionsolar/import after a backfill run so
+// the import page can report how many rows landed (and any per-pack
+// warnings) without re-querying the dashboard endpoints.
+export type FusionSolarImportResult = {
+  organization_id: string
+  plant_code: string
+  from: string
+  to: string
+  windows: number
+  rows_written: number
+  deleted_rows: number
+  per_metric: Record<string, number>
+  warnings?: string[]
+}
+
+// runFusionSolarImport triggers a synchronous server-side backfill of
+// historical FusionSolar telemetry for `organizationID` over the
+// [from, to) window (RFC3339). The backend pulls 5-minute device
+// history from the Huawei Northbound API, normalizes the cumulative
+// counters into telemetry_samples, and returns a summary.
+//
+// The `accessToken` (and optional `apiBase`) are entered by the
+// operator on the import page and travel in the JSON body — never the
+// query string — so they don't land in access logs. Error bodies are
+// surfaced verbatim (e.g. an upstream failCode) so the operator sees
+// the cause without grepping API logs.
+export async function runFusionSolarImport(
+  input: {
+    organizationID: string
+    from: string
+    to: string
+    accessToken: string
+    apiBase?: string
+  },
+  signal?: AbortSignal,
+): Promise<FusionSolarImportResult> {
+  const url = buildURL('/api/v1/fusionsolar/import', {
+    organization_id: input.organizationID,
+    from: input.from,
+    to: input.to,
+  })
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      access_token: input.accessToken,
+      api_base: input.apiBase || undefined,
+    }),
+    signal,
+  })
+  if (!res.ok) {
+    const body = await res.text().catch(() => '')
+    const suffix = body ? ` — ${body.trim()}` : ''
+    throw new Error(`fusionsolar import failed: ${res.status}${suffix}`)
+  }
+  return res.json()
+}
+
 const PV_FORECAST_WEBHOOK_URL =
   'https://granary.app.n8n.cloud/webhook/96bac28d-5020-48b3-8f23-0bc189029c00'
 // Two retries on transient failures (5xx, network) with exponential backoff.
