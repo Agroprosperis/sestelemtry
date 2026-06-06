@@ -1,0 +1,11 @@
+# FusionSolar import defaults (server-side, kept out of env vars).
+# Point the API at it with: -fusionsolar-config /path/to/fusionsolar.yaml
+# (or the FUSIONSOLAR_CONFIG env var). Any value entered on the import
+# page overrides the matching default here. refresh_token / client_secret
+# are never sent back to the browser — the page only learns they exist.
+refresh_token: ""                                       # довгоживучий refresh token з OAuth
+client_id: "602196255"                                  # App ID
+client_secret: ""                                       # App key / OAuth client_secret
+oauth_base: "https://oauth2.fusionsolar.huawei.com"     # OAuth host (за замовчуванням)
+oauth_resolve: "80.158.45.213"                          # пін IP для OAuth-хоста, якщо DNS глючить
+api_base: "https://eu5.fusionsolar.huawei.com"          # Northbound API base

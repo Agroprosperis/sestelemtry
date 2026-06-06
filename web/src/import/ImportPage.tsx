@@ -60,28 +60,11 @@ export function ImportPage() {
   const defaultDay = kyivDate(-1) > ARCHIVE_LAST_DAY ? ARCHIVE_LAST_DAY : kyivDate(-1)
   const [fromDate, setFromDate] = useState<string>(() => defaultDay)
   const [toDate, setToDate] = useState<string>(() => defaultDay)
-  const [authMode, setAuthMode] = useState<'refresh' | 'access'>('refresh')
-  const [accessToken, setAccessToken] = useState<string>('')
-  const [refreshToken, setRefreshToken] = useState<string>('')
-  const [clientId, setClientId] = useState<string>('602196255')
-  const [clientSecret, setClientSecret] = useState<string>('')
-  const [oauthResolve, setOauthResolve] = useState<string>('')
-  const [apiBase, setApiBase] = useState<string>('')
   const [state, setState] = useState<RunState>('idle')
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<FusionSolarImportResult | null>(null)
 
   const onRun = useCallback(async () => {
-    if (authMode === 'access' && !accessToken.trim()) {
-      setError('Вкажіть access token FusionSolar')
-      setState('error')
-      return
-    }
-    if (authMode === 'refresh' && (!refreshToken.trim() || !clientSecret.trim())) {
-      setError('Вкажіть refresh token і client secret (App key)')
-      setState('error')
-      return
-    }
     if (!fromDate || !toDate) {
       setError('Вкажіть діапазон дат')
       setState('error')
@@ -107,15 +90,6 @@ export function ImportPage() {
         organizationID,
         from: dayStartIso(fromDate),
         to: dayAfterIso(toDate),
-        apiBase: apiBase.trim() || undefined,
-        ...(authMode === 'access'
-          ? { accessToken: accessToken.trim() }
-          : {
-              refreshToken: refreshToken.trim(),
-              clientId: clientId.trim() || undefined,
-              clientSecret: clientSecret.trim() || undefined,
-              oauthResolve: oauthResolve.trim() || undefined,
-            }),
       })
       setResult(res)
       setState('done')
@@ -123,18 +97,7 @@ export function ImportPage() {
       setError(err instanceof Error ? err.message : String(err))
       setState('error')
     }
-  }, [
-    organizationID,
-    fromDate,
-    toDate,
-    authMode,
-    accessToken,
-    refreshToken,
-    clientId,
-    clientSecret,
-    oauthResolve,
-    apiBase,
-  ])
+  }, [organizationID, fromDate, toDate])
 
   return (
     <main className="import-page">
@@ -145,81 +108,13 @@ export function ImportPage() {
         <h1>Імпорт архіву FusionSolar</h1>
       </header>
 
-      <section className="import-connection">
-        <label className="import-field import-field-wide">
-          <span>Спосіб автентифікації</span>
-          <select value={authMode} onChange={(e) => setAuthMode(e.target.value as 'refresh' | 'access')}>
-            <option value="refresh">Refresh token (OAuth автоматично)</option>
-            <option value="access">Access token (готовий Bearer)</option>
-          </select>
-        </label>
-
-        {authMode === 'refresh' ? (
-          <>
-            <label className="import-field import-field-wide">
-              <span>Refresh token</span>
-              <input
-                type="password"
-                value={refreshToken}
-                autoComplete="off"
-                placeholder="Довгоживучий refresh token"
-                onChange={(e) => setRefreshToken(e.target.value)}
-              />
-            </label>
-            <label className="import-field import-field-wide">
-              <span>Client secret (App key)</span>
-              <input
-                type="password"
-                value={clientSecret}
-                autoComplete="off"
-                placeholder="OAuth client_secret"
-                onChange={(e) => setClientSecret(e.target.value)}
-              />
-            </label>
-            <label className="import-field">
-              <span>Client ID (App ID)</span>
-              <input
-                type="text"
-                value={clientId}
-                placeholder="602196255"
-                onChange={(e) => setClientId(e.target.value)}
-              />
-            </label>
-            <label className="import-field">
-              <span>OAuth IP (необов'язково)</span>
-              <input
-                type="text"
-                value={oauthResolve}
-                placeholder="80.158.45.213 — якщо DNS глючить"
-                onChange={(e) => setOauthResolve(e.target.value)}
-              />
-            </label>
-          </>
-        ) : (
-          <label className="import-field import-field-wide">
-            <span>FusionSolar access token</span>
-            <input
-              type="password"
-              value={accessToken}
-              autoComplete="off"
-              placeholder="Bearer-токен Northbound API"
-              onChange={(e) => setAccessToken(e.target.value)}
-            />
-          </label>
-        )}
-
-        <label className="import-field import-field-wide">
-          <span>API base (необов'язково)</span>
-          <input
-            type="text"
-            value={apiBase}
-            placeholder="https://eu5.fusionsolar.huawei.com"
-            onChange={(e) => setApiBase(e.target.value)}
-          />
-        </label>
-      </section>
-
-      <section className="import-controls">
+      <section className="import-card">
+        <h2 className="import-section-title">Параметри імпорту</h2>
+        <p className="import-section-sub">
+          Підключення до FusionSolar налаштоване на сервері — оберіть станцію й діапазон дат.
+          Доступно лише по {ARCHIVE_LAST_DAY} включно: з 01.05.2026 працюють реальні дані.
+        </p>
+        <div className="import-controls">
         <OrganizationSelect
           value={organizationID}
           options={options}
@@ -252,6 +147,7 @@ export function ImportPage() {
         >
           {state === 'loading' ? 'Імпортуємо…' : 'Запустити імпорт'}
         </button>
+        </div>
       </section>
 
       <p className="import-hint">

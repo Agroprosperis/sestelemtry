@@ -31,23 +31,35 @@
   border-color: var(--accent, #4493f8);
 }
 
-.import-connection {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 16px;
-  padding: 16px;
+.import-card {
+  padding: 18px 18px 20px;
   margin-bottom: 16px;
   border: 1px solid var(--border, #30363d);
-  border-radius: 12px;
+  border-radius: 14px;
   background: var(--panel, #161b22);
 }
 
-.import-field-wide {
-  flex: 1 1 320px;
+.import-section-title {
+  margin: 0 0 4px;
+  font-size: 0.95rem;
+  font-weight: 600;
 }
 
-.import-field-wide input {
-  width: 100%;
+.import-section-sub {
+  margin: 0 0 16px;
+  font-size: 0.8rem;
+  color: var(--text-muted, #8b949e);
+  line-height: 1.45;
+}
+
+.import-connection {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 16px;
+}
+
+.import-field-wide {
+  grid-column: 1 / -1;
 }
 
 .import-controls {
@@ -55,26 +67,52 @@
   flex-wrap: wrap;
   align-items: flex-end;
   gap: 16px;
-  padding: 16px;
-  border: 1px solid var(--border, #30363d);
-  border-radius: 12px;
-  background: var(--panel, #161b22);
 }
 
 .import-field {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  font-size: 0.8rem;
+  gap: 5px;
+  font-size: 0.78rem;
+  color: var(--text-muted, #8b949e);
+  min-width: 0;
 }
 
-.import-field input {
+.import-field > span {
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+
+.import-field input,
+.import-field select {
   background: var(--panel-2, #0d1117);
-  color: inherit;
+  color: var(--text, #e6edf3);
   border: 1px solid var(--border, #30363d);
   border-radius: 8px;
-  padding: 6px 10px;
+  padding: 8px 11px;
   font-size: 0.9rem;
+  width: 100%;
+  box-sizing: border-box;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.import-field input:focus,
+.import-field select:focus {
+  outline: none;
+  border-color: var(--accent, #4493f8);
+  box-shadow: 0 0 0 3px rgba(68, 147, 248, 0.18);
+}
+
+.import-field input[type='password'],
+.import-field input[type='text'] {
+  font-feature-settings: 'tnum';
+}
+
+.import-divider {
+  grid-column: 1 / -1;
+  height: 1px;
+  background: var(--border, #30363d);
+  margin: 2px 0;
 }
 
 .import-run {
@@ -82,14 +120,24 @@
   color: #fff;
   border: none;
   border-radius: 8px;
-  padding: 9px 18px;
+  padding: 10px 22px;
   font-size: 0.9rem;
   font-weight: 600;
   cursor: pointer;
+  margin-left: auto;
+  transition: background 0.15s ease, transform 0.05s ease;
+}
+
+.import-run:hover:not(:disabled) {
+  background: #3b86ec;
+}
+
+.import-run:active:not(:disabled) {
+  transform: translateY(1px);
 }
 
 .import-run:disabled {
-  opacity: 0.6;
+  opacity: 0.55;
   cursor: default;
 }
 

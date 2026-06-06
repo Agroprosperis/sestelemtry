@@ -48,6 +48,9 @@ type Handlers struct {
 	fusionClientID     string
 	fusionClientSecret string
 	fusionOAuthBase    string
+	fusionOAuthResolve string
+	fusionRefreshToken string
+	fusionAPIBase      string
 	// fusionOAuthClient optionally pins the OAuth host to a specific
 	// IP (DNS-misroute workaround); nil uses the default client.
 	fusionOAuthClient *http.Client
@@ -199,11 +202,35 @@ func firstNonEmpty(vals ...string) string {
 	return ""
 }
 
-func (h *Handlers) SetFusionSolarOAuth(clientID, clientSecret, oauthBase string, httpClient *http.Client) {
-	h.fusionClientID = strings.TrimSpace(clientID)
-	h.fusionClientSecret = strings.TrimSpace(clientSecret)
-	h.fusionOAuthBase = strings.TrimSpace(oauthBase)
-	h.fusionOAuthClient = httpClient
+// FusionSolarDefaults are the server-side connection defaults (from the
+// separate fusionsolar.yaml). Any field the import request body sets
+// overrides the matching default; secrets are never echoed back to the
+// client.
+type FusionSolarDefaults struct {
+	RefreshToken string
+	ClientID     string
+	ClientSecret string
+	OAuthBase    string
+	OAuthResolve string
+	APIBase      string
+}
+
+// SetFusionSolarDefaults installs the server-side connection defaults so
+// the import page can leave credential fields blank. When OAuthResolve
+// is set it pins the OAuth host IP (DNS-misroute workaround) for imports
+// that don't override it in the body.
+func (h *Handlers) SetFusionSolarDefaults(d FusionSolarDefaults) {
+	h.fusionClientID = strings.TrimSpace(d.ClientID)
+	h.fusionClientSecret = strings.TrimSpace(d.ClientSecret)
+	h.fusionOAuthBase = strings.TrimSpace(d.OAuthBase)
+	h.fusionOAuthResolve = strings.TrimSpace(d.OAuthResolve)
+	h.fusionRefreshToken = strings.TrimSpace(d.RefreshToken)
+	h.fusionAPIBase = strings.TrimSpace(d.APIBase)
+	if h.fusionOAuthResolve != "" {
+		h.fusionOAuthClient = fusionsolar.NewResolvingHTTPClient(h.fusionOAuthResolve, 30*time.Second)
+	} else {
+		h.fusionOAuthClient = nil
+	}
 }
 
 // SetOrganizations replaces the organization metadata served by
@@ -235,6 +262,7 @@ func (h *Handlers) Router() http.Handler {
 	mux.HandleFunc("/api/v1/dam-prices", h.damPrices)
 	mux.HandleFunc("/api/v1/dam-prices/refresh", h.damPricesRefresh)
 	mux.HandleFunc("/api/v1/fusionsolar/import", h.fusionSolarImport)
+	mux.HandleFunc("/api/v1/fusionsolar/config", h.fusionSolarConfig)
 	mux.HandleFunc("/api/v1/weather-forecast", h.weatherForecast)
 	mux.HandleFunc("/api/v1/organization-tariffs", h.organizationTariffs)
 	mux.HandleFunc("/swagger", h.swaggerUI)
@@ -837,6 +865,29 @@ func (h *Handlers) damPricesRefresh(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// fusionSolarConfig returns the non-secret server-side FusionSolar
+// defaults so the import page can prefill its form and leave credential
+// fields blank when the server already holds them. Secrets (refresh
+// token, client secret) are never returned — only booleans indicating
+// whether they're configured.
+//
+//	GET /api/v1/fusionsolar/config
+func (h *Handlers) fusionSolarConfig(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	resp := map[string]any{
+		"client_id":                h.fusionClientID,
+		"api_base":                 h.fusionAPIBase,
+		"oauth_base":               h.fusionOAuthBase,
+		"oauth_resolve":            h.fusionOAuthResolve,
+		"refresh_token_configured": h.fusionRefreshToken != "",
+		"client_secret_configured": h.fusionClientSecret != "",
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
 // fusionSolarImport backfills historical telemetry for one
 // organization from the FusionSolar Northbound API. It mirrors the
 // damPricesRefresh shape: POST, query params, a structured JSON result,
@@ -916,8 +967,9 @@ func (h *Handlers) fusionSolarImport(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	accessToken := strings.TrimSpace(body.AccessToken)
-	refreshToken := strings.TrimSpace(body.RefreshToken)
-	apiBase := strings.TrimSpace(body.APIBase)
+	// Request body overrides the server-side defaults (fusionsolar.yaml).
+	refreshToken := firstNonEmpty(body.RefreshToken, h.fusionRefreshToken)
+	apiBase := firstNonEmpty(body.APIBase, h.fusionAPIBase)
 
 	// Two supported auth styles (per the FusionSolar handoff): a ready
 	// access token, or a long-lived refresh token that we exchange for
@@ -928,19 +980,16 @@ func (h *Handlers) fusionSolarImport(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "provide a refresh_token (or an access_token)", http.StatusBadRequest)
 			return
 		}
-		// Request body overrides server config; otherwise use the
-		// app's fixed OAuth client so the page only needs the refresh
-		// token.
 		clientID := firstNonEmpty(body.ClientID, h.fusionClientID)
 		clientSecret := firstNonEmpty(body.ClientSecret, h.fusionClientSecret)
 		oauthBase := firstNonEmpty(body.OAuthBase, h.fusionOAuthBase)
 		if clientSecret == "" {
-			http.Error(w, "client_secret is not configured on the server; set FUSIONSOLAR_CLIENT_SECRET or pass client_secret", http.StatusBadRequest)
+			http.Error(w, "client_secret is not configured; set it in fusionsolar.yaml or pass client_secret", http.StatusBadRequest)
 			return
 		}
 		// A resolve IP in the request body pins the OAuth host for this
 		// import (DNS-misroute workaround), overriding the server-wide
-		// FUSIONSOLAR_OAUTH_RESOLVE client.
+		// configured client.
 		oauthClient := h.fusionOAuthClient
 		if rv := strings.TrimSpace(body.OAuthResolve); rv != "" {
 			oauthClient = fusionsolar.NewResolvingHTTPClient(rv, 30*time.Second)

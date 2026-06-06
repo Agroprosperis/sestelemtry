@@ -87,7 +87,12 @@ services:
     environment:
       DATABASE_URL: ${SESTELEMETRY_DATABASE_URL}
     entrypoint: ["/usr/local/bin/api"]
-    command: ["-listen", ":8080", "-allow-origin", "${SESTELEMETRY_API_ALLOW_ORIGIN}"]
+    command: ["-listen", ":8080", "-allow-origin", "${SESTELEMETRY_API_ALLOW_ORIGIN}", "-fusionsolar-config", "/etc/sestelemetry/fusionsolar.yaml"]
+    volumes:
+      # Server-side FusionSolar archive-import credentials. Create the
+      # host file BEFORE starting the container (a missing path makes
+      # Docker bind-mount a directory). Defaults next to config.yaml.
+      - ${SESTELEMETRY_HOST_FUSIONSOLAR_PATH:-/etc/sestelemetry/fusionsolar.yaml}:/etc/sestelemetry/fusionsolar.yaml:ro
     ports:
       - "8080:8080"
     healthcheck:

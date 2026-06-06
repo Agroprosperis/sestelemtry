@@ -359,6 +359,24 @@ export async function refreshDAMPrices(
   return res.json()
 }
 
+// FusionSolarConfig is the non-secret server-side default set returned
+// by GET /api/v1/fusionsolar/config so the import page can prefill its
+// form. Secrets are never sent — only booleans say whether they exist.
+export type FusionSolarConfig = {
+  client_id: string
+  api_base: string
+  oauth_base: string
+  oauth_resolve: string
+  refresh_token_configured: boolean
+  client_secret_configured: boolean
+}
+
+export async function fetchFusionSolarConfig(signal?: AbortSignal): Promise<FusionSolarConfig> {
+  const res = await fetch(buildURL('/api/v1/fusionsolar/config', {}), { signal })
+  if (!res.ok) throw new Error(`fusionsolar config failed: ${res.status}`)
+  return res.json()
+}
+
 // FusionSolarImportResult mirrors `internal/fusionsolar.ImportResult`.
 // Returned by POST /api/v1/fusionsolar/import after a backfill run so
 // the import page can report how many rows landed (and any per-pack

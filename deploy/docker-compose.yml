@@ -51,8 +51,12 @@ services:
     # frontend features that depend on it (e.g. weather widget) hide.
     volumes:
       - ${SESTELEMETRY_HOST_CONFIG_PATH:-/etc/sestelemetry/config.yaml}:/etc/sestelemetry/config.yaml:ro
+      # Server-side FusionSolar archive-import credentials. Create the
+      # host file BEFORE starting the container (a missing path makes
+      # Docker bind-mount a directory). Defaults next to config.yaml.
+      - ${SESTELEMETRY_HOST_FUSIONSOLAR_PATH:-/etc/sestelemetry/fusionsolar.yaml}:/etc/sestelemetry/fusionsolar.yaml:ro
     entrypoint: ["/usr/local/bin/api"]
-    command: ["-listen", ":8080", "-allow-origin", "*", "-config", "/etc/sestelemetry/config.yaml"]
+    command: ["-listen", ":8080", "-allow-origin", "*", "-config", "/etc/sestelemetry/config.yaml", "-fusionsolar-config", "/etc/sestelemetry/fusionsolar.yaml"]
     ports:
       - "8080:8080"
 

@@ -20,11 +20,19 @@ import (
 	"github.com/nesh/sestelemetry/internal/storage"
 )
 
+func firstNonEmptyStr(a, b string) string {
+	if strings.TrimSpace(a) != "" {
+		return a
+	}
+	return b
+}
+
 func main() {
 	listenAddr := flag.String("listen", ":8080", "HTTP listen address")
 	defaultDB := flag.String("database-url", "", "PostgreSQL connection string (fallback if DATABASE_URL is unset)")
 	allowOrigin := flag.String("allow-origin", "*", "Allowed CORS origin")
 	configPath := flag.String("config", "", "YAML config path (optional; enables /api/v1/organizations)")
+	fusionConfigPath := flag.String("fusionsolar-config", "", "Separate YAML with FusionSolar import defaults (optional; falls back to FUSIONSOLAR_CONFIG)")
 	flag.Parse()
 
 	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
@@ -132,21 +140,46 @@ func main() {
 	// Server-side OAuth client so the import page only needs the
 	// long-lived refresh token; the fixed app secret never leaves the
 	// server. client_id defaults to fusionsolar.DefaultClientID.
-	fusionClientID := strings.TrimSpace(os.Getenv("FUSIONSOLAR_CLIENT_ID"))
-	fusionClientSecret := strings.TrimSpace(os.Getenv("FUSIONSOLAR_CLIENT_SECRET"))
-	fusionOAuthBase := strings.TrimSpace(os.Getenv("FUSIONSOLAR_OAUTH_BASE"))
-	// Optional: pin the OAuth host to a specific IP when DNS routes
-	// oauth2.fusionsolar.huawei.com to the wrong regional cluster
-	// (returns invalid_client). e.g. FUSIONSOLAR_OAUTH_RESOLVE=80.158.45.213.
-	fusionOAuthResolve := strings.TrimSpace(os.Getenv("FUSIONSOLAR_OAUTH_RESOLVE"))
-	var fusionOAuthClient *http.Client
-	if fusionOAuthResolve != "" {
-		fusionOAuthClient = fusionsolar.NewResolvingHTTPClient(fusionOAuthResolve, 30*time.Second)
+	// FusionSolar connection defaults: a separate YAML file
+	// (-fusionsolar-config / FUSIONSOLAR_CONFIG), with env vars as a
+	// fallback for each field. The import page may leave matching fields
+	// blank; any value posted in the request body still overrides these.
+	fusionDefaults := api.FusionSolarDefaults{
+		RefreshToken: strings.TrimSpace(os.Getenv("FUSIONSOLAR_REFRESH_TOKEN")),
+		ClientID:     strings.TrimSpace(os.Getenv("FUSIONSOLAR_CLIENT_ID")),
+		ClientSecret: strings.TrimSpace(os.Getenv("FUSIONSOLAR_CLIENT_SECRET")),
+		OAuthBase:    strings.TrimSpace(os.Getenv("FUSIONSOLAR_OAUTH_BASE")),
+		OAuthResolve: strings.TrimSpace(os.Getenv("FUSIONSOLAR_OAUTH_RESOLVE")),
+		APIBase:      strings.TrimSpace(os.Getenv("FUSIONSOLAR_API_BASE")),
 	}
-	svc.SetFusionSolarOAuth(fusionClientID, fusionClientSecret, fusionOAuthBase, fusionOAuthClient)
+	fusionCfgPath := strings.TrimSpace(*fusionConfigPath)
+	if fusionCfgPath == "" {
+		fusionCfgPath = strings.TrimSpace(os.Getenv("FUSIONSOLAR_CONFIG"))
+	}
+	if fusionCfgPath != "" {
+		if s, err := fusionsolar.LoadSettings(fusionCfgPath); err != nil {
+			if os.IsNotExist(err) {
+				log.Warn("api_fusionsolar_config_missing", "path", fusionCfgPath)
+			} else {
+				log.Error("api_fusionsolar_config_load", "path", fusionCfgPath, "err", err)
+				os.Exit(1)
+			}
+		} else {
+			// File values take precedence over env for any non-empty field.
+			fusionDefaults.RefreshToken = firstNonEmptyStr(s.RefreshToken, fusionDefaults.RefreshToken)
+			fusionDefaults.ClientID = firstNonEmptyStr(s.ClientID, fusionDefaults.ClientID)
+			fusionDefaults.ClientSecret = firstNonEmptyStr(s.ClientSecret, fusionDefaults.ClientSecret)
+			fusionDefaults.OAuthBase = firstNonEmptyStr(s.OAuthBase, fusionDefaults.OAuthBase)
+			fusionDefaults.OAuthResolve = firstNonEmptyStr(s.OAuthResolve, fusionDefaults.OAuthResolve)
+			fusionDefaults.APIBase = firstNonEmptyStr(s.APIBase, fusionDefaults.APIBase)
+			log.Info("api_fusionsolar_config_loaded", "path", fusionCfgPath)
+		}
+	}
+	svc.SetFusionSolarDefaults(fusionDefaults)
 	log.Info("api_fusionsolar_import_enabled",
-		"oauth_client_secret_configured", fusionClientSecret != "",
-		"oauth_resolve_pinned", fusionOAuthResolve != "")
+		"refresh_token_configured", fusionDefaults.RefreshToken != "",
+		"client_secret_configured", fusionDefaults.ClientSecret != "",
+		"oauth_resolve_pinned", fusionDefaults.OAuthResolve != "")
 
 	server := &http.Server{
 		Addr:              *listenAddr,
