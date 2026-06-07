@@ -482,17 +482,20 @@ export function useDashboardData(input: {
     }
   }, [organizationID, preset, anchorTime, metricsAtTime])
 
-  // Period flows are NOT loaded automatically. The on-the-fly
-  // allocator inside /energy-summary scans every telemetry_samples
-  // row in the window and pins a Postgres backend for several
-  // seconds, which slows down the concurrent /current and /timeseries
-  // requests that drive the live diagram and the daily counters.
-  // Running it on every page mount made the rest of the dashboard
-  // feel "frozen" for 10–20 s, so we now require the operator to
-  // ask for it explicitly via the refresh button on the period-flow
-  // card (see `refreshFlows` below). Until the button is clicked
-  // `energyFlows` stays at `EMPTY_FLOWS` and the card renders its
-  // own empty state.
+  // Period flows live on an independent pipeline from the
+  // /timeseries chart fetch. The on-the-fly allocator inside
+  // /energy-summary scans every telemetry_samples row in the
+  // window and pins a Postgres backend for several seconds, which
+  // would slow down the concurrent /current and /timeseries
+  // requests that drive the live diagram and the daily counters
+  // if we awaited it inside `tickCharts`'s Promise.all. So
+  // /energy-summary runs in its own effect (see below): it fires
+  // once on scope change to populate the narrative cards, and
+  // then re-fires on `DASHBOARD_CHART_REFRESH_MS` so the period-
+  // flow numbers don't drift behind the chart as the day
+  // progresses (previously the chart hit ~4 MWh by evening while
+  // the narrative card was still showing ~1.7 MWh captured at
+  // mid-day — same accumulator, different staleness).
 
   // refreshFlows refetches /energy-summary for the currently selected
   // preset / anchor and rebuilds the period-flow numbers from the
@@ -557,25 +560,44 @@ export function useDashboardData(input: {
   // Auto-trigger the flow allocator on `day` preset so the
   // BatteryDayNarrative / DailySummaryNarrative cards (which read
   // pvToLoad / pvToEss / pvToGrid / essCharged / essDischarged out
-  // of `energyFlows`) have data on first paint instead of zeros.
-  // The allocator is still gated to `day` because the on-the-fly
-  // allocator is meaningless for month/year aggregates. A user
-  // switching organization or date kicks this off again; the
-  // refresh button on the period-flow card stays useful for forced
-  // re-runs without reloading the page.
+  // of `energyFlows`) have data on first paint instead of zeros,
+  // and re-fire on the same cadence as the chart so the narrative
+  // numbers track the day forward instead of freezing at whatever
+  // accumulator snapshot the first fetch captured. The refresh
+  // button on the period-flow card stays useful as a force-now
+  // override (it shares `refreshFlows`, so it also cancels the
+  // in-flight background request via the AbortController).
   //
   // Reset `flowsLoaded` + `energyFlows` to placeholder state on
   // scope change so the period-flow card briefly shows dashes
   // instead of the previous scope's numbers labeled with the new
-  // header (e.g. yesterday's flows under today's date). Manual
-  // refresh button clicks do NOT pass through here, so they keep
-  // the current values on screen during the in-flight fetch.
+  // header (e.g. yesterday's flows under today's date). Background
+  // re-fires inside the interval keep the previous values on
+  // screen (stale-while-revalidate) — only scope changes blank
+  // them out.
+  //
+  // Historical snapshots (`metricsAt != null`) fire once and skip
+  // the interval: the period is immutable so there is no fresher
+  // data to chase.
   useEffect(() => {
     if (preset !== 'day') return
     setFlowsLoaded(false)
     setEnergyFlows(EMPTY_FLOWS)
-    refreshFlows()
-  }, [organizationID, anchorTime, preset, refreshFlows])
+    void refreshFlows()
+    if (metricsAtTime !== null) return
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'hidden') return
+      void refreshFlows()
+    }, DASHBOARD_CHART_REFRESH_MS)
+    function onVisibilityChange() {
+      if (document.visibilityState === 'visible') void refreshFlows()
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    return () => {
+      window.clearInterval(timer)
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+    }
+  }, [organizationID, anchorTime, preset, metricsAtTime, refreshFlows])
 
   return {
     config,
