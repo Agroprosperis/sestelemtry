@@ -11,10 +11,11 @@ type CacheEntry = {
 }
 
 // Module-level cache shared across hook instances. Keyed by
-// `${orgID}` because the backend response carries the full
-// yesterday..tomorrow window in one payload — flipping the WeatherCard
-// anchor between those three days hits the same cache entry and
-// avoids re-fetching the identical 3-day forecast for each click.
+// `${orgID}:${from}:${to}` — the requested date window is part of the
+// key so navigating to an archive day doesn't reuse a different
+// anchor's cached window (which wouldn't contain the archive day and
+// would render the card as "forecast unavailable" even though the data
+// exists for the correct range).
 const cache = new Map<string, CacheEntry>()
 
 function readFreshCache(key: string, now: number): OpenMeteoForecast | null {
@@ -81,7 +82,10 @@ export function useWeather(input: {
   const { organizationID, latitude, longitude } = input
   const enabled = input.enabled !== false
   const canFetch = enabled && latitude !== null && longitude !== null
-  const key = canFetch ? organizationID : null
+  const range = canFetch ? fetchRangeForAnchor(input.anchor) : null
+  const from = range?.from ?? null
+  const to = range?.to ?? null
+  const key = range ? `${organizationID}:${range.from}:${range.to}` : null
 
   const [state, setState] = useState<FetchState>({
     key: null,
@@ -90,7 +94,8 @@ export function useWeather(input: {
   })
 
   useEffect(() => {
-    if (!key || latitude === null || longitude === null) return
+    if (!key || latitude === null || longitude === null || from === null || to === null)
+      return
 
     let cancelled = false
     const controller = new AbortController()
@@ -105,7 +110,7 @@ export function useWeather(input: {
       }
     }
 
-    const range = fetchRangeForAnchor(input.anchor)
+    const range = { from, to }
     void (async () => {
       let data: OpenMeteoForecast | null = null
       try {
@@ -143,7 +148,7 @@ export function useWeather(input: {
       cancelled = true
       controller.abort()
     }
-  }, [key, organizationID, latitude, longitude, input.anchor])
+  }, [key, organizationID, latitude, longitude, from, to])
 
   if (!key) return { data: null, loading: false, error: null }
   if (state.key !== key) return { data: null, loading: true, error: null }

@@ -111,8 +111,9 @@ type OREE struct {
 // future backend models (economic, PV) have a stable source of truth.
 //
 // The collector polls every `Interval` and upserts (organization, hour)
-// rows — there is no forecast history, each refresh overwrites
-// previously stored values.
+// rows. Elapsed hours/days are frozen (never overwritten), so past days
+// keep the forecast as it stood; `PastDays` re-pulls recent history to
+// backfill gaps without clobbering frozen rows.
 type Weather struct {
 	Enabled     bool          `yaml:"enabled"`
 	BaseURL     string        `yaml:"base_url"`
@@ -120,6 +121,13 @@ type Weather struct {
 	HTTPTimeout time.Duration `yaml:"http_timeout"`
 	UserAgent   string        `yaml:"user_agent"`
 	Retry       OREERetry     `yaml:"retry"`
+	// PastDays asks Open-Meteo for this many days of recent past data
+	// in addition to today + the forecast horizon. It lets the
+	// collector backfill freeze-on-past rows for days/orgs it missed
+	// (e.g. a newly added org or a window where the collector was down)
+	// instead of leaving a permanent gap that the dashboard can never
+	// fill — the direct Open-Meteo fallback has no access to the past.
+	PastDays int `yaml:"past_days"`
 }
 
 type Root struct {
@@ -257,6 +265,9 @@ func (c *Root) applyWeatherDefaults() {
 	if w.Retry.Backoff <= 0 {
 		w.Retry.Backoff = 5 * time.Second
 	}
+	if w.PastDays <= 0 {
+		w.PastDays = 7
+	}
 }
 
 func (c *Root) validateWeather() error {
@@ -266,6 +277,10 @@ func (c *Root) validateWeather() error {
 	}
 	if w.Interval > 24*time.Hour {
 		return fmt.Errorf("config: weather.interval must be <= 24h, got %s", w.Interval)
+	}
+	// Open-Meteo caps past_days at 92 on the /v1/forecast endpoint.
+	if w.PastDays > 92 {
+		return fmt.Errorf("config: weather.past_days must be <= 92, got %d", w.PastDays)
 	}
 	return nil
 }

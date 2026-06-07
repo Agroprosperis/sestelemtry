@@ -138,11 +138,15 @@ organizations:
 
 # Open-Meteo forecast cache. The weather-collector fetches a fresh
 # forecast every `interval` for each org with a `location` block and
-# upserts (organization_id, hour) rows — no history is kept. Set
+# upserts (organization_id, hour) rows. Elapsed hours/days are frozen
+# (never overwritten), so the dashboard can render the archived
+# forecast for past days. `past_days` re-pulls recent history each tick
+# to backfill gaps (e.g. a newly added org or downtime). Set
 # enabled: false to skip running the collector in this environment.
 weather:
   enabled: true
   interval: 1h
+  past_days: 7
   retry:
     attempts: 3
     backoff: 5s

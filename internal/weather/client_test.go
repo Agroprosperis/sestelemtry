@@ -11,7 +11,7 @@ import (
 
 func mustNewClient(t *testing.T, baseURL string) *Client {
 	t.Helper()
-	c, err := NewClient(baseURL, time.Second, "")
+	c, err := NewClient(baseURL, time.Second, "", 7)
 	if err != nil {
 		t.Fatalf("NewClient(%q): %v", baseURL, err)
 	}
@@ -24,7 +24,7 @@ func TestNewClientRejectsBadBaseURL(t *testing.T) {
 		"not-an-absolute-url",
 	}
 	for _, s := range cases {
-		if _, err := NewClient(s, 0, ""); err == nil {
+		if _, err := NewClient(s, 0, "", 0); err == nil {
 			t.Fatalf("NewClient(%q): expected error", s)
 		}
 	}
@@ -43,6 +43,7 @@ func TestBuildURLIncludesAllParams(t *testing.T) {
 		"daily=sunrise%2Csunset%2Cdaylight_duration%2Csunshine_duration%2Cshortwave_radiation_sum",
 		"hourly=temperature_2m",
 		"global_tilted_irradiance_instant",
+		"past_days=7",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("BuildURL: missing %q in %q", want, got)

@@ -164,6 +164,11 @@ weather:
   enabled: true
   base_url: "https://api.open-meteo.com/v1/forecast"
   interval: 1h
+  # Re-pull this many recent past days each tick to backfill the
+  # freeze-on-past cache for days/orgs the collector missed (newly
+  # added org, downtime). Existing frozen rows are never overwritten.
+  # Max 92 (Open-Meteo limit); defaults to 7 when unset.
+  past_days: 7
   http_timeout: 30s
   user_agent: "sestelemetry-weather/1.0"
   retry:

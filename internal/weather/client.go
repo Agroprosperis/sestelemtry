@@ -66,13 +66,15 @@ type Client struct {
 	baseURL   *url.URL
 	http      *http.Client
 	userAgent string
+	pastDays  int
 }
 
 // NewClient constructs a Client with sane defaults. Returns an error
 // when `baseURL` (typically supplied by config) isn't a parseable URL —
 // fail-fast at boot beats silently producing a malformed request URL
-// on every fetch.
-func NewClient(baseURL string, timeout time.Duration, userAgent string) (*Client, error) {
+// on every fetch. `pastDays` (clamped to [0, 92]) is added to every
+// request so the collector can backfill recent past days.
+func NewClient(baseURL string, timeout time.Duration, userAgent string, pastDays int) (*Client, error) {
 	if baseURL == "" {
 		baseURL = OpenMeteoBaseURL
 	}
@@ -89,10 +91,17 @@ func NewClient(baseURL string, timeout time.Duration, userAgent string) (*Client
 	if userAgent == "" {
 		userAgent = "sestelemetry-weather/1.0"
 	}
+	if pastDays < 0 {
+		pastDays = 0
+	}
+	if pastDays > 92 {
+		pastDays = 92
+	}
 	return &Client{
 		baseURL:   u,
 		http:      &http.Client{Timeout: timeout},
 		userAgent: userAgent,
+		pastDays:  pastDays,
 	}, nil
 }
 
@@ -107,6 +116,13 @@ func (c *Client) BuildURL(latitude, longitude float64) string {
 	q.Set("daily", dailyVars)
 	q.Set("hourly", hourlyVars)
 	q.Set("timezone", "auto")
+	// past_days backfills recent history into the freeze-on-past cache.
+	// The frozen-row upsert only INSERTs rows that don't already exist
+	// (it refuses to overwrite elapsed hours/days), so re-pulling past
+	// days fills gaps without clobbering previously stored forecasts.
+	if c.pastDays > 0 {
+		q.Set("past_days", strconv.Itoa(c.pastDays))
+	}
 	u.RawQuery = q.Encode()
 	return u.String()
 }

@@ -73,7 +73,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	client, err := weather.NewClient(cfg.Weather.BaseURL, cfg.Weather.HTTPTimeout, cfg.Weather.UserAgent)
+	client, err := weather.NewClient(cfg.Weather.BaseURL, cfg.Weather.HTTPTimeout, cfg.Weather.UserAgent, cfg.Weather.PastDays)
 	if err != nil {
 		log.Error("weather_client", "err", err)
 		os.Exit(1)
