@@ -518,94 +518,11 @@
   cursor: not-allowed;
 }
 
-@media (prefers-color-scheme: dark) {
-  .economics-tariff-schedule {
-    background: #0f172a;
-    border-color: #1e293b;
-  }
-  .economics-tariff-schedule-head h3 {
-    color: #e2e8f0;
-  }
-  .economics-tariff-schedule-head p,
-  .economics-tariff-schedule-empty,
-  .economics-tariff-schedule-add-hint {
-    color: #94a3b8;
-  }
-  .economics-tariff-schedule-add {
-    background: #1e293b;
-    border-color: #334155;
-  }
-  .economics-tariff-schedule-save {
-    background: #f1f5f9;
-    color: #0f172a;
-    border-color: #f1f5f9;
-  }
-  .economics-tariff-schedule-save:hover:not(:disabled) {
-    background: #e2e8f0;
-  }
-  .economics-tariff-schedule-save:disabled {
-    background: #475569;
-    border-color: #475569;
-    color: #cbd5e1;
-  }
-  .economics-tariff-schedule-table-wrap {
-    background: #1e293b;
-    border-color: #334155;
-  }
-  .economics-tariff-schedule-table th {
-    background: #0b1322;
-    color: #cbd5e1;
-  }
-  .economics-tariff-schedule-table th small {
-    color: #64748b;
-  }
-  .economics-tariff-schedule-table th,
-  .economics-tariff-schedule-table td {
-    border-bottom-color: #1e293b;
-    color: #cbd5e1;
-  }
-  .economics-tariff-schedule-table tbody tr:hover {
-    background: #0f172a;
-  }
-  .economics-tariff-schedule-eff {
-    color: #f1f5f9;
-  }
-  .economics-tariff-schedule-eff-epoch {
-    background: #334155;
-    color: #cbd5e1;
-  }
-  .economics-tariff-schedule-eff-sub {
-    color: #64748b;
-  }
-  .economics-tariff-schedule-del {
-    color: #fca5a5;
-    border-color: #7f1d1d;
-  }
-  .economics-tariff-schedule-del:hover:not(:disabled) {
-    background: rgba(220, 38, 38, 0.18);
-    border-color: #b91c1c;
-  }
-  .economics-banner-ok {
-    background: rgba(16, 185, 129, 0.12);
-    border-color: rgba(16, 185, 129, 0.4);
-    border-left-color: #10b981;
-    color: #6ee7b7;
-  }
-  .economics-modal {
-    background: #0f172a;
-    border-color: #334155;
-    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
-  }
-  .economics-modal-head h2 {
-    color: #e2e8f0;
-  }
-  .economics-modal-close {
-    color: #94a3b8;
-  }
-  .economics-modal-close:hover:not(:disabled) {
-    color: #f1f5f9;
-  }
-}
+/* The app uses a single light theme (see web/src/index.css — no
+ * dark variant exists at the document level). We deliberately do
+ * not gate styles on `prefers-color-scheme: dark` so the cards
+ * keep matching the always-light surrounding page even when the
+ * operator's OS is in dark mode. */
 
 .economics-banner {
   background: #fef3c7;

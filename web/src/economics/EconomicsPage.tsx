@@ -3,6 +3,7 @@ import { refreshDAMPrices } from '../api'
 import { useOrganizationParam } from '../dashboard/hooks/useOrganizationParam'
 import { dailyTotals } from './compute'
 import { EconomicsCharts } from './components/EconomicsCharts'
+import { EconomicsDamPricesModal } from './components/EconomicsDamPricesModal'
 import { EconomicsHeader } from './components/EconomicsHeader'
 import { EconomicsKpis } from './components/EconomicsKpis'
 import { EconomicsRecomputeModal } from './components/EconomicsRecomputeModal'
@@ -116,6 +117,7 @@ export function EconomicsPage() {
   const [damRefreshState, setDamRefreshState] = useState<DamRefreshState>('idle')
   const [damRefreshError, setDamRefreshError] = useState<string | null>(null)
   const [recomputeOpen, setRecomputeOpen] = useState(false)
+  const [damImportOpen, setDamImportOpen] = useState(false)
 
   const onRefreshDam = useCallback(async () => {
     setDamRefreshState('loading')
@@ -163,6 +165,7 @@ export function EconomicsPage() {
         damRefreshState={damRefreshState}
         damRefreshError={damRefreshError}
         onOpenRecompute={() => setRecomputeOpen(true)}
+        onOpenDamImport={() => setDamImportOpen(true)}
       />
 
       {recomputeOpen && (
@@ -170,6 +173,13 @@ export function EconomicsPage() {
           onClose={() => setRecomputeOpen(false)}
           organizationOptions={options}
           initialOrganizationID={organizationID}
+          onDone={() => setRefreshKey((k) => k + 1)}
+        />
+      )}
+
+      {damImportOpen && (
+        <EconomicsDamPricesModal
+          onClose={() => setDamImportOpen(false)}
           onDone={() => setRefreshKey((k) => k + 1)}
         />
       )}

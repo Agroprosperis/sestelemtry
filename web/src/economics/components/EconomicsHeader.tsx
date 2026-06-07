@@ -58,6 +58,10 @@ type Props = {
   damRefreshError: string | null
   // Opens the server-side economics recompute dialog.
   onOpenRecompute: () => void
+  // Opens the bulk OREE DAM-price import dialog. The single-day
+  // `onRefreshDam` button stays for the common "refresh today"
+  // shortcut; this hook is the date-range backfill.
+  onOpenDamImport: () => void
 }
 
 // statusLabel maps the hook's coarse state machine to the inline
@@ -155,6 +159,7 @@ export function EconomicsHeader({
   damRefreshState,
   damRefreshError,
   onOpenRecompute,
+  onOpenDamImport,
 }: Props) {
   const update = (patch: Partial<Tariffs>) => onTariffsChange({ ...tariffs, ...patch })
   const statusText = statusLabel(tariffsStatus)
@@ -205,6 +210,14 @@ export function EconomicsHeader({
             aria-live="polite"
           >
             {damRefreshLabel(damRefreshState)}
+          </button>
+          <button
+            type="button"
+            className="economics-recompute-btn"
+            onClick={onOpenDamImport}
+            title="Завантажити архів цін РДН з OREE за діапазон дат"
+          >
+            Імпорт цін РДН
           </button>
           <button
             type="button"
