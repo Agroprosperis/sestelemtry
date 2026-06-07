@@ -326,20 +326,25 @@
 }
 
 .economics-tariff-schedule {
-  margin-top: 18px;
-  padding-top: 14px;
-  border-top: 1px solid #e2e8f0;
+  margin-top: 20px;
+  padding: 16px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
 }
 
 .economics-tariff-schedule-head h3 {
   margin: 0 0 4px;
   font-size: 14px;
+  font-weight: 600;
   color: #0f172a;
+  letter-spacing: 0.01em;
 }
 
 .economics-tariff-schedule-head p {
-  margin: 0 0 10px;
+  margin: 0 0 14px;
   font-size: 12px;
+  line-height: 1.5;
   color: #64748b;
   max-width: 720px;
 }
@@ -349,7 +354,46 @@
   align-items: end;
   gap: 12px;
   flex-wrap: wrap;
-  margin-bottom: 12px;
+  padding: 10px 12px;
+  margin-bottom: 14px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+}
+
+.economics-tariff-schedule-add-field {
+  min-width: 160px;
+}
+
+.economics-tariff-schedule-save {
+  height: fit-content;
+  align-self: end;
+  padding: 7px 14px;
+  background: #0f172a;
+  color: #f8fafc;
+  border: 1px solid #0f172a;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.economics-tariff-schedule-save:hover:not(:disabled) {
+  background: #1e293b;
+}
+
+.economics-tariff-schedule-save:disabled {
+  background: #94a3b8;
+  border-color: #94a3b8;
+  cursor: not-allowed;
+}
+
+.economics-tariff-schedule-add-hint {
+  align-self: center;
+  margin-left: auto;
+  font-size: 12px;
+  color: #64748b;
 }
 
 .economics-tariff-schedule-error {
@@ -364,57 +408,182 @@
   margin: 0;
 }
 
+.economics-tariff-schedule-table-wrap {
+  overflow-x: auto;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+}
+
 .economics-tariff-schedule-table {
   width: 100%;
   border-collapse: collapse;
   font-size: 13px;
+  font-variant-numeric: tabular-nums;
 }
 
 .economics-tariff-schedule-table th,
 .economics-tariff-schedule-table td {
   text-align: left;
-  padding: 6px 10px;
+  padding: 10px 14px;
   border-bottom: 1px solid #eef2f7;
   color: #334155;
+  vertical-align: middle;
+}
+
+.economics-tariff-schedule-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.economics-tariff-schedule-table tbody tr:hover {
+  background: #f8fafc;
 }
 
 .economics-tariff-schedule-table th {
-  color: #64748b;
+  background: #f1f5f9;
+  color: #475569;
+  font-size: 11px;
   font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+
+.economics-tariff-schedule-table th small {
+  display: block;
+  margin-top: 2px;
+  font-size: 10.5px;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
+  color: #94a3b8;
+}
+
+.economics-tariff-schedule-table th.num,
+.economics-tariff-schedule-table td.num {
+  text-align: right;
+}
+
+.economics-tariff-schedule-table th.actions,
+.economics-tariff-schedule-table td.actions {
+  width: 1%;
+  white-space: nowrap;
+  text-align: right;
+}
+
+.economics-tariff-schedule-eff {
+  display: inline-block;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.economics-tariff-schedule-eff-epoch {
+  padding: 2px 8px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #475569;
+  background: #e2e8f0;
+  border-radius: 999px;
+}
+
+.economics-tariff-schedule-eff-sub {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  font-weight: 400;
+  color: #94a3b8;
 }
 
 .economics-tariff-schedule-del {
-  background: #fef2f2;
+  background: transparent;
   border: 1px solid #fecaca;
   border-radius: 6px;
   padding: 4px 10px;
   cursor: pointer;
   color: #b91c1c;
   font-size: 12px;
+  font-weight: 500;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease;
 }
 
-.economics-tariff-schedule-del:hover {
-  background: #fee2e2;
+.economics-tariff-schedule-del:hover:not(:disabled) {
+  background: #fef2f2;
+  border-color: #fca5a5;
+}
+
+.economics-tariff-schedule-del:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 @media (prefers-color-scheme: dark) {
   .economics-tariff-schedule {
-    border-top-color: #334155;
+    background: #0f172a;
+    border-color: #1e293b;
   }
   .economics-tariff-schedule-head h3 {
     color: #e2e8f0;
   }
   .economics-tariff-schedule-head p,
-  .economics-tariff-schedule-empty {
+  .economics-tariff-schedule-empty,
+  .economics-tariff-schedule-add-hint {
     color: #94a3b8;
   }
+  .economics-tariff-schedule-add {
+    background: #1e293b;
+    border-color: #334155;
+  }
+  .economics-tariff-schedule-save {
+    background: #f1f5f9;
+    color: #0f172a;
+    border-color: #f1f5f9;
+  }
+  .economics-tariff-schedule-save:hover:not(:disabled) {
+    background: #e2e8f0;
+  }
+  .economics-tariff-schedule-save:disabled {
+    background: #475569;
+    border-color: #475569;
+    color: #cbd5e1;
+  }
+  .economics-tariff-schedule-table-wrap {
+    background: #1e293b;
+    border-color: #334155;
+  }
   .economics-tariff-schedule-table th {
-    color: #94a3b8;
+    background: #0b1322;
+    color: #cbd5e1;
+  }
+  .economics-tariff-schedule-table th small {
+    color: #64748b;
   }
   .economics-tariff-schedule-table th,
   .economics-tariff-schedule-table td {
     border-bottom-color: #1e293b;
     color: #cbd5e1;
+  }
+  .economics-tariff-schedule-table tbody tr:hover {
+    background: #0f172a;
+  }
+  .economics-tariff-schedule-eff {
+    color: #f1f5f9;
+  }
+  .economics-tariff-schedule-eff-epoch {
+    background: #334155;
+    color: #cbd5e1;
+  }
+  .economics-tariff-schedule-eff-sub {
+    color: #64748b;
+  }
+  .economics-tariff-schedule-del {
+    color: #fca5a5;
+    border-color: #7f1d1d;
+  }
+  .economics-tariff-schedule-del:hover:not(:disabled) {
+    background: rgba(220, 38, 38, 0.18);
+    border-color: #b91c1c;
   }
   .economics-banner-ok {
     background: rgba(16, 185, 129, 0.12);

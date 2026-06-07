@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   deleteTariffScheduleVersion,
   fetchTariffSchedule,
@@ -6,6 +6,35 @@ import {
   type TariffScheduleVersion,
 } from '../orgTariffsClient'
 import type { Tariffs } from '../tariffs'
+
+// EPOCH_EFFECTIVE_FROM is the sentinel date the backend writes for
+// the initial / catch-all tariff version. The UNIX epoch shows up
+// raw and confuses operators ("did I really set tariffs in 1970?"),
+// so we surface it as a labelled badge in the table instead of the
+// literal "1970-01-01" string.
+const EPOCH_EFFECTIVE_FROM = '1970-01-01'
+
+function formatEffectiveFrom(iso: string): { primary: string; secondary?: string } {
+  if (iso === EPOCH_EFFECTIVE_FROM) {
+    return {
+      primary: 'Початкова версія',
+      secondary: 'діє за замовчуванням',
+    }
+  }
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso)
+  if (!m) return { primary: iso }
+  return { primary: `${m[3]}.${m[2]}.${m[1]}` }
+}
+
+const UK_NUMBER = new Intl.NumberFormat('uk-UA', {
+  minimumFractionDigits: 0,
+  maximumFractionDigits: 5,
+})
+
+function formatNumber(value: number): string {
+  if (!Number.isFinite(value)) return '—'
+  return UK_NUMBER.format(value)
+}
 
 type Props = {
   organizationID: string
@@ -91,19 +120,30 @@ export function TariffScheduleEditor({ organizationID, tariffs, defaultEffective
     [organizationID, reload],
   )
 
+  const sortedVersions = useMemo(
+    () => [...versions].sort((a, b) => b.effectiveFrom.localeCompare(a.effectiveFrom)),
+    [versions],
+  )
+
   return (
-    <div className="economics-tariff-schedule">
-      <div className="economics-tariff-schedule-head">
-        <h3>Версії тарифів за датами</h3>
+    <section className="economics-tariff-schedule" aria-labelledby="tariff-schedule-title">
+      <header className="economics-tariff-schedule-head">
+        <h3 id="tariff-schedule-title">Версії тарифів за датами</h3>
         <p>
           Кожен історичний день використовує останню версію, що діє на цю дату.
           Збереження бере поточні значення форми вище. Зміни застосуються після
           перерахунку економіки (сторінка «Імпорт даних»).
         </p>
-      </div>
+      </header>
 
-      <div className="economics-tariff-schedule-add">
-        <label className="economics-field">
+      <form
+        className="economics-tariff-schedule-add"
+        onSubmit={(e) => {
+          e.preventDefault()
+          void onSaveVersion()
+        }}
+      >
+        <label className="economics-field economics-tariff-schedule-add-field">
           <span>Діє з</span>
           <input
             type="date"
@@ -112,14 +152,16 @@ export function TariffScheduleEditor({ organizationID, tariffs, defaultEffective
           />
         </label>
         <button
-          type="button"
-          className="economics-tariffs-reset"
-          onClick={() => void onSaveVersion()}
+          type="submit"
+          className="economics-tariff-schedule-save"
           disabled={status === 'saving'}
         >
           {status === 'saving' ? 'Зберігаємо…' : 'Зберегти версію'}
         </button>
-      </div>
+        <span className="economics-tariff-schedule-add-hint">
+          Зберігаються поточні значення з форми вище.
+        </span>
+      </form>
 
       {error && (
         <p className="economics-tariff-schedule-error" role="alert">
@@ -129,44 +171,78 @@ export function TariffScheduleEditor({ organizationID, tariffs, defaultEffective
 
       {status === 'loading' ? (
         <p className="economics-tariff-schedule-empty">Завантаження…</p>
-      ) : versions.length === 0 ? (
+      ) : sortedVersions.length === 0 ? (
         <p className="economics-tariff-schedule-empty">Версій ще немає.</p>
       ) : (
-        <table className="economics-tariff-schedule-table">
-          <thead>
-            <tr>
-              <th>Діє з</th>
-              <th>Розподіл</th>
-              <th>Передача</th>
-              <th>Деградація</th>
-              <th>Ємність</th>
-              <th aria-label="дії" />
-            </tr>
-          </thead>
-          <tbody>
-            {versions.map((v) => (
-              <tr key={v.effectiveFrom}>
-                <td>{v.effectiveFrom}</td>
-                <td>{v.tariffs.distributionUahPerKwh}</td>
-                <td>{v.tariffs.transmissionUahPerKwh}</td>
-                <td>{v.tariffs.degradationUahPerKwh}</td>
-                <td>{v.tariffs.essCapacityKwh}</td>
-                <td>
-                  <button
-                    type="button"
-                    className="economics-tariff-schedule-del"
-                    onClick={() => void onDelete(v.effectiveFrom)}
-                    disabled={status === 'saving'}
-                    title="Видалити версію"
-                  >
-                    Видалити
-                  </button>
-                </td>
+        <div className="economics-tariff-schedule-table-wrap">
+          <table className="economics-tariff-schedule-table">
+            <thead>
+              <tr>
+                <th scope="col">Діє з</th>
+                <th scope="col" className="num">
+                  Розподіл
+                  <small>грн/кВт·год</small>
+                </th>
+                <th scope="col" className="num">
+                  Передача
+                  <small>грн/кВт·год</small>
+                </th>
+                <th scope="col" className="num">
+                  Деградація
+                  <small>грн/кВт·год</small>
+                </th>
+                <th scope="col" className="num">
+                  Ємність
+                  <small>кВт·год</small>
+                </th>
+                <th scope="col" className="actions" aria-label="Дії" />
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {sortedVersions.map((v) => {
+                const eff = formatEffectiveFrom(v.effectiveFrom)
+                const isEpoch = v.effectiveFrom === EPOCH_EFFECTIVE_FROM
+                return (
+                  <tr key={v.effectiveFrom}>
+                    <td>
+                      <span
+                        className={
+                          isEpoch
+                            ? 'economics-tariff-schedule-eff economics-tariff-schedule-eff-epoch'
+                            : 'economics-tariff-schedule-eff'
+                        }
+                      >
+                        {eff.primary}
+                      </span>
+                      {eff.secondary && (
+                        <span className="economics-tariff-schedule-eff-sub">
+                          {eff.secondary}
+                        </span>
+                      )}
+                    </td>
+                    <td className="num">{formatNumber(v.tariffs.distributionUahPerKwh)}</td>
+                    <td className="num">{formatNumber(v.tariffs.transmissionUahPerKwh)}</td>
+                    <td className="num">{formatNumber(v.tariffs.degradationUahPerKwh)}</td>
+                    <td className="num">{formatNumber(v.tariffs.essCapacityKwh)}</td>
+                    <td className="actions">
+                      <button
+                        type="button"
+                        className="economics-tariff-schedule-del"
+                        onClick={() => void onDelete(v.effectiveFrom)}
+                        disabled={status === 'saving'}
+                        title="Видалити версію"
+                        aria-label={`Видалити версію, що діє з ${eff.primary}`}
+                      >
+                        Видалити
+                      </button>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
       )}
-    </div>
+    </section>
   )
 }
