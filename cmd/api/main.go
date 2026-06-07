@@ -133,9 +133,9 @@ func main() {
 		}
 	}
 	importer := fusionsolar.NewImporter(pool, log, hostByOrg)
-	svc.SetFusionSolarImporter(func(ctx context.Context, orgID, accessToken, apiBase string, from, to time.Time) (any, error) {
+	svc.SetFusionSolarImporter(func(ctx context.Context, orgID, accessToken, apiBase string, from, to time.Time, onProgress api.FusionProgressFunc) (any, error) {
 		client := fusionsolar.NewClient(apiBase, accessToken, 60*time.Second)
-		return importer.Import(ctx, client, orgID, from, to)
+		return importer.Import(ctx, client, orgID, from, to, onProgress)
 	})
 	// Server-side OAuth client so the import page only needs the
 	// long-lived refresh token; the fixed app secret never leaves the

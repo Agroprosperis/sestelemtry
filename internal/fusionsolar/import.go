@@ -72,7 +72,10 @@ func NewImporter(pool *pgxpool.Pool, log *slog.Logger, hostByOrg map[string]stri
 // 24h device windows, normalizes the cumulative SmartLogger / ESS
 // counters into metric_keys, deletes any previously-imported rows in
 // the window (idempotency), and bulk-inserts the fresh samples.
-func (im *Importer) Import(ctx context.Context, client *Client, orgID string, from, to time.Time) (*ImportResult, error) {
+// onProgress, when non-nil, is invoked after each 24h window is fetched
+// with (windowsDone, windowsTotal) so the HTTP handler can stream a
+// progress feed to the operator during a long (e.g. year-long) backfill.
+func (im *Importer) Import(ctx context.Context, client *Client, orgID string, from, to time.Time, onProgress func(done, total int)) (*ImportResult, error) {
 	if client == nil {
 		return nil, fmt.Errorf("fusionsolar: missing API client")
 	}
@@ -102,7 +105,19 @@ func (im *Importer) Import(ctx context.Context, client *Client, orgID string, fr
 
 	acc := newSampleAccumulator(orgID, host, topo)
 
+	// Total 24h windows the loop will cover, for the progress feed.
+	totalWindows := int(to.Sub(from) / maxHistoryWindow)
+	if to.Sub(from)%maxHistoryWindow != 0 {
+		totalWindows++
+	}
+
 	for windowStart := from; windowStart.Before(to); windowStart = windowStart.Add(maxHistoryWindow) {
+		// Honour cancellation between windows so an operator's "cancel"
+		// (client disconnect → ctx cancel) stops promptly even if the
+		// next upstream call would otherwise be quick.
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		windowEnd := windowStart.Add(maxHistoryWindow)
 		if windowEnd.After(to) {
 			windowEnd = to
@@ -139,6 +154,10 @@ func (im *Importer) Import(ctx context.Context, client *Client, orgID string, fr
 				continue
 			}
 			acc.addEssDevice(essSamples, windowStart, windowEnd)
+		}
+
+		if onProgress != nil {
+			onProgress(result.Windows, totalWindows)
 		}
 	}
 

@@ -13,7 +13,7 @@ import (
 
 func TestFusionImportRejectsNonPost(t *testing.T) {
 	h := NewHandlers(&mockStore{}, "*")
-	h.SetFusionSolarImporter(func(context.Context, string, string, string, time.Time, time.Time) (any, error) {
+	h.SetFusionSolarImporter(func(context.Context, string, string, string, time.Time, time.Time, FusionProgressFunc) (any, error) {
 		t.Fatal("importer should not run on GET")
 		return nil, nil
 	})
@@ -37,7 +37,7 @@ func TestFusionImportUnconfigured(t *testing.T) {
 
 func TestFusionImportRequiresOrg(t *testing.T) {
 	h := NewHandlers(&mockStore{}, "*")
-	h.SetFusionSolarImporter(func(context.Context, string, string, string, time.Time, time.Time) (any, error) {
+	h.SetFusionSolarImporter(func(context.Context, string, string, string, time.Time, time.Time, FusionProgressFunc) (any, error) {
 		t.Fatal("importer should not run without org")
 		return nil, nil
 	})
@@ -51,7 +51,7 @@ func TestFusionImportRequiresOrg(t *testing.T) {
 
 func TestFusionImportRequiresDates(t *testing.T) {
 	h := NewHandlers(&mockStore{}, "*")
-	h.SetFusionSolarImporter(func(context.Context, string, string, string, time.Time, time.Time) (any, error) {
+	h.SetFusionSolarImporter(func(context.Context, string, string, string, time.Time, time.Time, FusionProgressFunc) (any, error) {
 		t.Fatal("importer should not run without dates")
 		return nil, nil
 	})
@@ -65,7 +65,7 @@ func TestFusionImportRequiresDates(t *testing.T) {
 
 func TestFusionImportRejectsBackwardsRange(t *testing.T) {
 	h := NewHandlers(&mockStore{}, "*")
-	h.SetFusionSolarImporter(func(context.Context, string, string, string, time.Time, time.Time) (any, error) {
+	h.SetFusionSolarImporter(func(context.Context, string, string, string, time.Time, time.Time, FusionProgressFunc) (any, error) {
 		t.Fatal("importer should not run on inverted range")
 		return nil, nil
 	})
@@ -79,7 +79,7 @@ func TestFusionImportRejectsBackwardsRange(t *testing.T) {
 
 func TestFusionImportRequiresToken(t *testing.T) {
 	h := NewHandlers(&mockStore{}, "*")
-	h.SetFusionSolarImporter(func(context.Context, string, string, string, time.Time, time.Time) (any, error) {
+	h.SetFusionSolarImporter(func(context.Context, string, string, string, time.Time, time.Time, FusionProgressFunc) (any, error) {
 		t.Fatal("importer should not run without a token")
 		return nil, nil
 	})
@@ -101,7 +101,7 @@ func TestFusionImportRequiresToken(t *testing.T) {
 // be overwritten.
 func TestFusionImportRejectsAfterCutoff(t *testing.T) {
 	h := NewHandlers(&mockStore{}, "*")
-	h.SetFusionSolarImporter(func(context.Context, string, string, string, time.Time, time.Time) (any, error) {
+	h.SetFusionSolarImporter(func(context.Context, string, string, string, time.Time, time.Time, FusionProgressFunc) (any, error) {
 		t.Fatal("importer must not run for a post-cutoff window")
 		return nil, nil
 	})
@@ -123,7 +123,7 @@ func TestFusionImportRejectsAfterCutoff(t *testing.T) {
 func TestFusionImportAllowsToEqualCutoff(t *testing.T) {
 	ran := false
 	h := NewHandlers(&mockStore{}, "*")
-	h.SetFusionSolarImporter(func(context.Context, string, string, string, time.Time, time.Time) (any, error) {
+	h.SetFusionSolarImporter(func(context.Context, string, string, string, time.Time, time.Time, FusionProgressFunc) (any, error) {
 		ran = true
 		return map[string]any{"rows_written": 0}, nil
 	})
@@ -140,17 +140,21 @@ func TestFusionImportAllowsToEqualCutoff(t *testing.T) {
 
 func TestFusionImportUpstreamFailure(t *testing.T) {
 	h := NewHandlers(&mockStore{}, "*")
-	h.SetFusionSolarImporter(func(context.Context, string, string, string, time.Time, time.Time) (any, error) {
+	h.SetFusionSolarImporter(func(context.Context, string, string, string, time.Time, time.Time, FusionProgressFunc) (any, error) {
 		return nil, errors.New("fusionsolar: device/history failCode=305 token expired")
 	})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/fusionsolar/import?organization_id=ab&from=2026-04-29T00:00:00Z&to=2026-04-30T00:00:00Z", strings.NewReader(`{"access_token":"t"}`))
 	rec := httptest.NewRecorder()
 	h.Router().ServeHTTP(rec, req)
-	if rec.Code != http.StatusBadGateway {
-		t.Fatalf("want 502 got %d body=%s", rec.Code, rec.Body.String())
+	// Validation/auth passed, so the handler has switched to the NDJSON
+	// stream (HTTP 200); an upstream failure surfaces as an "error"
+	// event carrying the verbatim cause, not a non-200 status.
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200 (streaming) got %d body=%s", rec.Code, rec.Body.String())
 	}
-	if !strings.Contains(rec.Body.String(), "failCode=305") {
-		t.Fatalf("expected upstream err in body, got %q", rec.Body.String())
+	if !strings.Contains(rec.Body.String(), `"type":"error"`) ||
+		!strings.Contains(rec.Body.String(), "failCode=305") {
+		t.Fatalf("expected an error event with the upstream cause, got %q", rec.Body.String())
 	}
 }
 
@@ -158,7 +162,7 @@ func TestFusionImportSuccessPassesParams(t *testing.T) {
 	var gotOrg, gotToken, gotBase string
 	var gotFrom, gotTo time.Time
 	h := NewHandlers(&mockStore{}, "*")
-	h.SetFusionSolarImporter(func(_ context.Context, org, token, base string, from, to time.Time) (any, error) {
+	h.SetFusionSolarImporter(func(_ context.Context, org, token, base string, from, to time.Time, _ FusionProgressFunc) (any, error) {
 		gotOrg, gotToken, gotBase, gotFrom, gotTo = org, token, base, from, to
 		return map[string]any{"organization_id": org, "rows_written": 42}, nil
 	})
@@ -183,13 +187,36 @@ func TestFusionImportSuccessPassesParams(t *testing.T) {
 	if !gotFrom.Equal(wantFrom) || !gotTo.Equal(wantTo) {
 		t.Errorf("range from=%v to=%v, want %v..%v", gotFrom, gotTo, wantFrom, wantTo)
 	}
-	var resp map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatal(err)
-	}
+	// The handler streams NDJSON; the final "done" line carries the result.
+	resp := lastResultFromStream(t, rec.Body.Bytes())
 	if resp["organization_id"] != "sm" {
 		t.Errorf("response org = %v", resp["organization_id"])
 	}
+}
+
+// lastResultFromStream parses an NDJSON import stream and returns the
+// `result` object of the terminating "done" event (or fails the test).
+func lastResultFromStream(t *testing.T, body []byte) map[string]any {
+	t.Helper()
+	dec := json.NewDecoder(strings.NewReader(string(body)))
+	for {
+		var ev struct {
+			Type   string         `json:"type"`
+			Error  string         `json:"error"`
+			Result map[string]any `json:"result"`
+		}
+		if err := dec.Decode(&ev); err != nil {
+			break
+		}
+		if ev.Type == "error" {
+			t.Fatalf("stream error event: %s", ev.Error)
+		}
+		if ev.Type == "done" {
+			return ev.Result
+		}
+	}
+	t.Fatalf("no done event in stream: %s", body)
+	return nil
 }
 
 // TestFusionImportTokenNotInQuery is a guard that the handler reads the
@@ -197,7 +224,7 @@ func TestFusionImportSuccessPassesParams(t *testing.T) {
 // access logs). A token passed only in the query must be rejected.
 func TestFusionImportTokenNotInQuery(t *testing.T) {
 	h := NewHandlers(&mockStore{}, "*")
-	h.SetFusionSolarImporter(func(context.Context, string, string, string, time.Time, time.Time) (any, error) {
+	h.SetFusionSolarImporter(func(context.Context, string, string, string, time.Time, time.Time, FusionProgressFunc) (any, error) {
 		t.Fatal("importer should not run when token only in query")
 		return nil, nil
 	})

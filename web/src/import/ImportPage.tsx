@@ -1,13 +1,41 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import {
   refreshDAMPricesRange,
   runFusionSolarImport,
   type DAMRefreshRangeResult,
   type FusionSolarImportResult,
+  type ImportProgress,
 } from '../api'
 import { OrganizationSelect } from '../dashboard/components/OrganizationSelect'
 import { useOrganizationParam } from '../dashboard/hooks/useOrganizationParam'
 import './import.css'
+
+// isAbortError detects a fetch cancelled by the operator's "cancel"
+// button (AbortController.abort), so the UI shows a neutral "скасовано"
+// note instead of a red error banner.
+function isAbortError(err: unknown): boolean {
+  return err instanceof DOMException && err.name === 'AbortError'
+}
+
+// ImportProgressBar renders the live "done / total" feed streamed by the
+// backend during a long import, plus an optional label (e.g. the date).
+function ImportProgressBar({ progress, unit }: { progress: ImportProgress; unit: string }) {
+  const pct = progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : 0
+  return (
+    <div className="import-progress" role="status" aria-live="polite">
+      <div className="import-progress-head">
+        <span>
+          {unit} {progress.done}/{progress.total}
+          {progress.label ? ` — ${progress.label}` : ''}
+        </span>
+        <span className="import-progress-pct">{pct}%</span>
+      </div>
+      <div className="import-progress-track">
+        <div className="import-progress-fill" style={{ width: `${pct}%` }} />
+      </div>
+    </div>
+  )
+}
 
 // today / yesterday in Europe/Kyiv (YYYY-MM-DD). The dashboard and
 // economics views anchor to local Ukraine time, so the import range
@@ -90,7 +118,14 @@ function FusionSolarImportCard() {
   const [toDate, setToDate] = useState<string>(() => defaultDay)
   const [state, setState] = useState<RunState>('idle')
   const [error, setError] = useState<string | null>(null)
+  const [cancelled, setCancelled] = useState(false)
+  const [progress, setProgress] = useState<ImportProgress | null>(null)
   const [result, setResult] = useState<FusionSolarImportResult | null>(null)
+  const abortRef = useRef<AbortController | null>(null)
+
+  const onCancel = useCallback(() => {
+    abortRef.current?.abort()
+  }, [])
 
   const onRun = useCallback(async () => {
     if (!fromDate || !toDate) {
@@ -110,20 +145,35 @@ function FusionSolarImportCard() {
       setState('error')
       return
     }
+    const controller = new AbortController()
+    abortRef.current = controller
     setState('loading')
     setError(null)
+    setCancelled(false)
+    setProgress(null)
     setResult(null)
     try {
-      const res = await runFusionSolarImport({
-        organizationID,
-        from: dayStartIso(fromDate),
-        to: dayAfterIso(toDate),
-      })
+      const res = await runFusionSolarImport(
+        {
+          organizationID,
+          from: dayStartIso(fromDate),
+          to: dayAfterIso(toDate),
+        },
+        { signal: controller.signal, onProgress: setProgress },
+      )
       setResult(res)
       setState('done')
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-      setState('error')
+      if (isAbortError(err)) {
+        setCancelled(true)
+        setState('idle')
+      } else {
+        setError(err instanceof Error ? err.message : String(err))
+        setState('error')
+      }
+    } finally {
+      abortRef.current = null
+      setProgress(null)
     }
   }, [organizationID, fromDate, toDate])
 
@@ -163,22 +213,31 @@ function FusionSolarImportCard() {
             onChange={(e) => setToDate(e.target.value)}
           />
         </label>
-        <button
-          type="button"
-          className="import-run"
-          onClick={onRun}
-          disabled={state === 'loading'}
-        >
-          {state === 'loading' ? (
-            <>
-              <span className="import-spinner" aria-hidden="true" />
-              Імпортуємо…
-            </>
-          ) : (
-            'Запустити імпорт'
+        <div className="import-actions">
+          {state === 'loading' && (
+            <button type="button" className="import-cancel" onClick={onCancel}>
+              Скасувати
+            </button>
           )}
-        </button>
+          <button
+            type="button"
+            className="import-run"
+            onClick={onRun}
+            disabled={state === 'loading'}
+          >
+            {state === 'loading' ? (
+              <>
+                <span className="import-spinner" aria-hidden="true" />
+                Імпортуємо…
+              </>
+            ) : (
+              'Запустити імпорт'
+            )}
+          </button>
+        </div>
       </div>
+
+      {state === 'loading' && progress && <ImportProgressBar progress={progress} unit="Вікно" />}
 
       <p className="import-hint">
         Завантажує 5-хвилинні архівні дані зі SmartLogger / УЗЕ через FusionSolar
@@ -186,8 +245,15 @@ function FusionSolarImportCard() {
         сторінка економіки читали їх як звичайні дані. Повторний запуск того ж
         діапазону перезаписує раніше імпортовані дані (ідемпотентно) — перезапис
         зачіпає <strong>лише</strong> рядки з позначкою архіву (source=fusionsolar),
-        тож реальні дані ніколи не видаляються.
+        тож реальні дані ніколи не видаляються. Скасування перериває процес одразу —
+        нічого не записується (дані вносяться лише після повного завантаження).
       </p>
+
+      {cancelled && (
+        <div className="import-banner import-banner-info" role="status">
+          Імпорт скасовано — дані не змінювалися.
+        </div>
+      )}
 
       {state === 'error' && error && (
         <div className="import-banner import-banner-error" role="alert">
@@ -271,7 +337,14 @@ function DamPricesImportCard() {
   const [zone, setZone] = useState<string>('')
   const [state, setState] = useState<RunState>('idle')
   const [error, setError] = useState<string | null>(null)
+  const [cancelled, setCancelled] = useState(false)
+  const [progress, setProgress] = useState<ImportProgress | null>(null)
   const [result, setResult] = useState<DAMRefreshRangeResult | null>(null)
+  const abortRef = useRef<AbortController | null>(null)
+
+  const onCancel = useCallback(() => {
+    abortRef.current?.abort()
+  }, [])
 
   const onRun = useCallback(async () => {
     if (!fromDate || !toDate) {
@@ -290,16 +363,31 @@ function DamPricesImportCard() {
       setState('error')
       return
     }
+    const controller = new AbortController()
+    abortRef.current = controller
     setState('loading')
     setError(null)
+    setCancelled(false)
+    setProgress(null)
     setResult(null)
     try {
-      const res = await refreshDAMPricesRange({ from: fromDate, to: toDate, zone: zoneNum })
+      const res = await refreshDAMPricesRange(
+        { from: fromDate, to: toDate, zone: zoneNum },
+        { signal: controller.signal, onProgress: setProgress },
+      )
       setResult(res)
       setState('done')
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-      setState('error')
+      if (isAbortError(err)) {
+        setCancelled(true)
+        setState('idle')
+      } else {
+        setError(err instanceof Error ? err.message : String(err))
+        setState('error')
+      }
+    } finally {
+      abortRef.current = null
+      setProgress(null)
     }
   }, [fromDate, toDate, zone])
 
@@ -345,22 +433,37 @@ function DamPricesImportCard() {
             onChange={(e) => setZone(e.target.value)}
           />
         </label>
-        <button
-          type="button"
-          className="import-run"
-          onClick={onRun}
-          disabled={state === 'loading'}
-        >
-          {state === 'loading' ? (
-            <>
-              <span className="import-spinner" aria-hidden="true" />
-              Завантажуємо…
-            </>
-          ) : (
-            'Завантажити ціни'
+        <div className="import-actions">
+          {state === 'loading' && (
+            <button type="button" className="import-cancel" onClick={onCancel}>
+              Скасувати
+            </button>
           )}
-        </button>
+          <button
+            type="button"
+            className="import-run"
+            onClick={onRun}
+            disabled={state === 'loading'}
+          >
+            {state === 'loading' ? (
+              <>
+                <span className="import-spinner" aria-hidden="true" />
+                Завантажуємо…
+              </>
+            ) : (
+              'Завантажити ціни'
+            )}
+          </button>
+        </div>
       </div>
+
+      {state === 'loading' && progress && <ImportProgressBar progress={progress} unit="День" />}
+
+      {cancelled && (
+        <div className="import-banner import-banner-info" role="status">
+          Завантаження скасовано. Уже завантажені дні залишилися в базі.
+        </div>
+      )}
 
       {state === 'error' && error && (
         <div className="import-banner import-banner-error" role="alert">

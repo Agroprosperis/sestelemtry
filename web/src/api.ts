@@ -380,20 +380,21 @@ export type DAMRefreshRangeResult = {
 // load a month or a year of prices at once.
 export async function refreshDAMPricesRange(
   input: { from: string; to: string; zone?: number },
-  signal?: AbortSignal,
+  opts?: ImportRunOptions,
 ): Promise<DAMRefreshRangeResult> {
   const url = buildURL('/api/v1/dam-prices/refresh-range', {
     from: input.from,
     to: input.to,
     zone: input.zone !== undefined ? String(input.zone) : undefined,
   })
-  const res = await fetch(url, { method: 'POST', signal })
-  if (!res.ok) {
-    const body = await res.text().catch(() => '')
-    const suffix = body ? ` — ${body.trim()}` : ''
-    throw new Error(`dam-prices range refresh failed: ${res.status}${suffix}`)
+  const res = await fetch(url, { method: 'POST', signal: opts?.signal })
+  try {
+    return await consumeImportStream<DAMRefreshRangeResult>(res, opts?.onProgress)
+  } catch (err) {
+    if (isAbortError(err)) throw err
+    if (err instanceof Error) throw new Error(`dam-prices range refresh failed: ${err.message}`, { cause: err })
+    throw err
   }
-  return res.json()
 }
 
 // FusionSolarConfig is the non-secret server-side default set returned
@@ -412,6 +413,80 @@ export async function fetchFusionSolarConfig(signal?: AbortSignal): Promise<Fusi
   const res = await fetch(buildURL('/api/v1/fusionsolar/config', {}), { signal })
   if (!res.ok) throw new Error(`fusionsolar config failed: ${res.status}`)
   return res.json()
+}
+
+// ImportProgress is one progress tick from a streaming import: how many
+// units (24h windows for FusionSolar, days for DAM) are done out of the
+// total, plus an optional label (e.g. the date being processed).
+export type ImportProgress = { done: number; total: number; label?: string }
+
+// ImportRunOptions carries an AbortSignal (so the operator's cancel
+// button can interrupt the request — the server cancels its work when
+// the connection drops) and an onProgress callback fed by the NDJSON
+// progress stream.
+export type ImportRunOptions = {
+  signal?: AbortSignal
+  onProgress?: (progress: ImportProgress) => void
+}
+
+// consumeImportStream reads the NDJSON progress stream the long-running
+// import endpoints emit (one JSON object per line: progress | done |
+// error) and resolves with the final `result`. It tolerates an older,
+// non-streaming server that returns a single JSON result object.
+async function consumeImportStream<T>(res: Response, onProgress?: ImportRunOptions['onProgress']): Promise<T> {
+  if (!res.ok) {
+    const body = await res.text().catch(() => '')
+    const suffix = body ? ` — ${body.trim()}` : ''
+    throw new Error(`${res.status}${suffix}`)
+  }
+  if (!res.body) {
+    return (await res.json()) as T
+  }
+
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let result: T | undefined
+
+  const handleLine = (raw: string) => {
+    const line = raw.trim()
+    if (!line) return
+    const ev = JSON.parse(line) as {
+      type?: string
+      done?: number
+      total?: number
+      label?: string
+      error?: string
+      result?: T
+    }
+    if (ev.type === 'progress') {
+      onProgress?.({ done: ev.done ?? 0, total: ev.total ?? 0, label: ev.label })
+    } else if (ev.type === 'error') {
+      throw new Error(ev.error || 'import failed')
+    } else if (ev.type === 'done') {
+      result = ev.result
+    } else if (ev.type === undefined) {
+      // Legacy non-streaming server: the line is the result object.
+      result = ev as unknown as T
+    }
+  }
+
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    let nl: number
+    while ((nl = buffer.indexOf('\n')) >= 0) {
+      handleLine(buffer.slice(0, nl))
+      buffer = buffer.slice(nl + 1)
+    }
+  }
+  handleLine(buffer)
+
+  if (result === undefined) {
+    throw new Error('import stream ended without a result')
+  }
+  return result
 }
 
 // FusionSolarImportResult mirrors `internal/fusionsolar.ImportResult`.
@@ -455,7 +530,7 @@ export async function runFusionSolarImport(
     oauthBase?: string
     oauthResolve?: string
   },
-  signal?: AbortSignal,
+  opts?: ImportRunOptions,
 ): Promise<FusionSolarImportResult> {
   const url = buildURL('/api/v1/fusionsolar/import', {
     organization_id: input.organizationID,
@@ -474,14 +549,15 @@ export async function runFusionSolarImport(
       oauth_base: input.oauthBase || undefined,
       oauth_resolve: input.oauthResolve || undefined,
     }),
-    signal,
+    signal: opts?.signal,
   })
-  if (!res.ok) {
-    const body = await res.text().catch(() => '')
-    const suffix = body ? ` — ${body.trim()}` : ''
-    throw new Error(`fusionsolar import failed: ${res.status}${suffix}`)
+  try {
+    return await consumeImportStream<FusionSolarImportResult>(res, opts?.onProgress)
+  } catch (err) {
+    if (isAbortError(err)) throw err
+    if (err instanceof Error) throw new Error(`fusionsolar import failed: ${err.message}`, { cause: err })
+    throw err
   }
-  return res.json()
 }
 
 const PV_FORECAST_WEBHOOK_URL =

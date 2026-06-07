@@ -190,7 +190,7 @@ func TestImportCutoffGuard(t *testing.T) {
 
 	from := ArchiveCutoff.Add(-24 * time.Hour)
 	to := ArchiveCutoff.Add(24 * time.Hour) // past the cutoff
-	_, err := im.Import(context.Background(), client, "ab", from, to)
+	_, err := im.Import(context.Background(), client, "ab", from, to, nil)
 	if !errors.Is(err, ErrAfterCutoff) {
 		t.Fatalf("want ErrAfterCutoff, got %v", err)
 	}

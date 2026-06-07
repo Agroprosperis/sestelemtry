@@ -178,9 +178,35 @@
   box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.18);
 }
 
-.import-run {
+.import-actions {
   grid-column: 1 / -1;
-  justify-self: end;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+}
+
+.import-cancel {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: #ffffff;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
+  border-radius: 9px;
+  padding: 11px 20px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.import-cancel:hover {
+  background: #fef2f2;
+  border-color: #fca5a5;
+}
+
+.import-run {
   display: inline-flex;
   align-items: center;
   gap: 9px;
@@ -226,6 +252,39 @@
   }
 }
 
+.import-progress {
+  margin-top: 16px;
+}
+
+.import-progress-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 0.8rem;
+  color: #475569;
+  margin-bottom: 6px;
+}
+
+.import-progress-pct {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.import-progress-track {
+  height: 8px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  overflow: hidden;
+}
+
+.import-progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #3b82f6, #22c55e);
+  transition: width 0.25s ease;
+}
+
 .import-hint {
   margin: 16px 2px 0;
   font-size: 0.82rem;
@@ -248,6 +307,12 @@
   background: #fee2e2;
   border: 1px solid #fecaca;
   color: #b91c1c;
+}
+
+.import-banner-info {
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  color: #1d4ed8;
 }
 
 .import-result {
@@ -336,8 +401,13 @@
     grid-template-columns: 1fr;
   }
 
-  .import-run {
-    justify-self: stretch;
+  .import-actions {
+    flex-direction: column-reverse;
+  }
+
+  .import-run,
+  .import-cancel {
+    width: 100%;
     justify-content: center;
   }
 }

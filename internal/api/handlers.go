@@ -64,7 +64,27 @@ type Handlers struct {
 // internal/fusionsolar so the handler stays decoupled from the HTTP
 // client / pgxpool wiring (and tests can inject a fake). Errors are
 // surfaced verbatim to the operator.
-type FusionSolarImporter func(ctx context.Context, organizationID, accessToken, apiBase string, from, to time.Time) (any, error)
+type FusionSolarImporter func(ctx context.Context, organizationID, accessToken, apiBase string, from, to time.Time, onProgress FusionProgressFunc) (any, error)
+
+// FusionProgressFunc is invoked by the importer after each 24h window so
+// the handler can stream a progress feed. nil is passed when no client
+// is listening for progress.
+type FusionProgressFunc func(done, total int)
+
+// progressEvent is one line of the NDJSON stream the long-running import
+// handlers emit (Content-Type: application/x-ndjson). Type is one of
+// "progress" | "done" | "error"; the frontend updates a progress bar on
+// "progress", renders the summary on "done", and shows the message on
+// "error". Streaming lets the operator watch a month/year backfill and
+// keeps the connection from idling out behind a proxy.
+type progressEvent struct {
+	Type   string `json:"type"`
+	Done   int    `json:"done,omitempty"`
+	Total  int    `json:"total,omitempty"`
+	Label  string `json:"label,omitempty"`
+	Error  string `json:"error,omitempty"`
+	Result any    `json:"result,omitempty"`
+}
 
 // DAMFetcher synchronously pulls one day's DAM XLS, parses it, and
 // upserts the resulting rows into market_dam_prices. The closure is
@@ -942,23 +962,45 @@ func (h *Handlers) damPricesRefreshRange(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// A multi-day pull issues one sequential OREE download per day,
-	// easily exceeding the 30s WriteTimeout; drop the write deadline so
-	// the response isn't truncated mid-import. The request context still
-	// bounds the work if the client disconnects.
+	// From here we stream NDJSON progress (one "progress" line per day,
+	// a final "done"). A multi-day pull issues one sequential OREE
+	// download per day, easily exceeding the 30s WriteTimeout; drop the
+	// write deadline so the stream isn't truncated. The request context
+	// bounds the work and is cancelled when the client aborts (cancel).
 	if rc := http.NewResponseController(w); rc != nil {
 		_ = rc.SetWriteDeadline(time.Time{})
 	}
+	w.Header().Set("Content-Type", "application/x-ndjson")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("X-Accel-Buffering", "no")
+	enc := json.NewEncoder(w)
+	flusher, _ := w.(http.Flusher)
+	emit := func(ev progressEvent) {
+		_ = enc.Encode(ev)
+		if flusher != nil {
+			flusher.Flush()
+		}
+	}
+
+	// Total days in the inclusive [from, to] span, for the progress bar.
+	totalDays := int(to.Sub(from)/(24*time.Hour)) + 1
 
 	start := time.Now()
 	result := DAMRefreshRangeResult{From: fromStr, To: toStr, Zone: zone}
+	cancelled := false
 	for day := from; !day.After(to); day = day.AddDate(0, 0, 1) {
 		if err := r.Context().Err(); err != nil {
+			cancelled = true
 			break
 		}
 		result.Days++
 		rows, ferr := h.damFetcher(r.Context(), day, zone)
 		if ferr != nil {
+			// A cancelled fetch isn't a "missing publication" — stop.
+			if r.Context().Err() != nil {
+				cancelled = true
+				break
+			}
 			result.DaysFailed++
 			if len(result.Errors) < maxDAMRangeErrors {
 				result.Errors = append(result.Errors, DAMDayError{
@@ -966,10 +1008,16 @@ func (h *Handlers) damPricesRefreshRange(w http.ResponseWriter, r *http.Request)
 					Error: ferr.Error(),
 				})
 			}
-			continue
+		} else {
+			result.DaysOK++
+			result.RowsWritten += rows
 		}
-		result.DaysOK++
-		result.RowsWritten += rows
+		emit(progressEvent{Type: "progress", Done: result.Days, Total: totalDays, Label: day.Format("2006-01-02")})
+	}
+	if cancelled {
+		h.log.Info("api_dam_refresh_range_cancelled", "from", fromStr, "to", toStr, "zone", zone, "days", result.Days)
+		emit(progressEvent{Type: "error", Error: "import cancelled"})
+		return
 	}
 	h.log.Info("api_dam_refresh_range_ok",
 		"from", fromStr,
@@ -981,7 +1029,7 @@ func (h *Handlers) damPricesRefreshRange(w http.ResponseWriter, r *http.Request)
 		"rows_written", result.RowsWritten,
 		"duration_ms", time.Since(start).Milliseconds(),
 	)
-	writeJSON(w, http.StatusOK, result)
+	emit(progressEvent{Type: "done", Result: result})
 }
 
 // fusionSolarConfig returns the non-secret server-side FusionSolar
@@ -1125,18 +1173,44 @@ func (h *Handlers) fusionSolarImport(w http.ResponseWriter, r *http.Request) {
 		h.log.Info("api_fusionsolar_oauth_ok", "organization_id", orgID, "expires_in", tok.ExpiresIn, "rotated_refresh", tok.RefreshToken != "")
 	}
 
-	// A multi-day import streams sequential upstream requests well past
-	// the 30s WriteTimeout; disable the write deadline for this handler
-	// so the response isn't cut off mid-import. Best-effort — older
-	// servers without ResponseController support just keep the default.
+	// Everything above could still fail validation/auth with a proper
+	// HTTP status. From here we stream NDJSON progress (status is 200
+	// once the first byte is written), so the import itself runs under a
+	// 200 with per-window "progress" lines and a final "done"/"error".
+	// A multi-day import issues many sequential upstream requests well
+	// past the 30s WriteTimeout; drop the write deadline so the stream
+	// isn't truncated. The request context still bounds the work and is
+	// cancelled when the client aborts (the operator's cancel button).
 	if rc := http.NewResponseController(w); rc != nil {
 		_ = rc.SetWriteDeadline(time.Time{})
 	}
+	w.Header().Set("Content-Type", "application/x-ndjson")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("X-Accel-Buffering", "no")
+	enc := json.NewEncoder(w)
+	flusher, _ := w.(http.Flusher)
+	emit := func(ev progressEvent) {
+		_ = enc.Encode(ev)
+		if flusher != nil {
+			flusher.Flush()
+		}
+	}
+
+	onProgress := func(done, total int) {
+		emit(progressEvent{Type: "progress", Done: done, Total: total})
+	}
 
 	start := time.Now()
-	result, err := h.fusionImporter(r.Context(), orgID, accessToken, apiBase, from, to)
+	result, err := h.fusionImporter(r.Context(), orgID, accessToken, apiBase, from, to, onProgress)
 	dur := time.Since(start)
 	if err != nil {
+		// Client cancellation is expected (operator hit cancel) — log it
+		// at info, not error, but still surface it on the stream.
+		if errors.Is(err, context.Canceled) || r.Context().Err() != nil {
+			h.log.Info("api_fusionsolar_import_cancelled", "organization_id", orgID, "duration_ms", dur.Milliseconds())
+			emit(progressEvent{Type: "error", Error: "import cancelled"})
+			return
+		}
 		h.log.Error("api_fusionsolar_import",
 			"organization_id", orgID,
 			"from", fromStr,
@@ -1144,16 +1218,7 @@ func (h *Handlers) fusionSolarImport(w http.ResponseWriter, r *http.Request) {
 			"duration_ms", dur.Milliseconds(),
 			"err", err,
 		)
-		// The cutoff guard is a client error (bad window), not an
-		// upstream failure — surface it as 400.
-		if errors.Is(err, fusionsolar.ErrAfterCutoff) {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		// 502: the failure originated upstream (FusionSolar API) or in
-		// the storage layer — the API process itself is healthy. Body
-		// carries the underlying err so the operator sees the cause.
-		http.Error(w, err.Error(), http.StatusBadGateway)
+		emit(progressEvent{Type: "error", Error: err.Error()})
 		return
 	}
 	h.log.Info("api_fusionsolar_import_ok",
@@ -1162,7 +1227,7 @@ func (h *Handlers) fusionSolarImport(w http.ResponseWriter, r *http.Request) {
 		"to", toStr,
 		"duration_ms", dur.Milliseconds(),
 	)
-	writeJSON(w, http.StatusOK, result)
+	emit(progressEvent{Type: "done", Result: result})
 }
 
 // parseRefreshZone reads the optional `zone=` query param for the
