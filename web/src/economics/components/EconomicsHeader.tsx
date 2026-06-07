@@ -4,6 +4,7 @@ import { PeriodPicker } from '../../dashboard/components/PeriodPicker'
 import { formatOrganizationLabel } from '../../dashboard/config'
 import { DEFAULT_TARIFFS, type Tariffs } from '../tariffs'
 import type { OrgTariffsStatus } from '../useOrgTariffs'
+import { TariffScheduleEditor } from './TariffScheduleEditor'
 
 // parseDateString and formatDateString translate between the
 // "YYYY-MM-DD" string the economics page already keeps in state
@@ -309,6 +310,11 @@ export function EconomicsHeader({
             Скинути
           </button>
         </div>
+        <TariffScheduleEditor
+          organizationID={organizationID}
+          tariffs={tariffs}
+          defaultEffectiveFrom={date}
+        />
       </details>
     </header>
   )

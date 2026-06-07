@@ -64,6 +64,10 @@
   background: linear-gradient(90deg, #f59e0b, #ef4444 90%);
 }
 
+.import-card-accent-violet {
+  background: linear-gradient(90deg, #8b5cf6, #6366f1 90%);
+}
+
 .import-card-head {
   display: flex;
   align-items: center;
@@ -111,6 +115,12 @@
   color: #b45309;
   background: #fef3c7;
   border: 1px solid #fde68a;
+}
+
+.import-pill-violet {
+  color: #6d28d9;
+  background: #ede9fe;
+  border: 1px solid #ddd6fe;
 }
 
 .import-section-sub code {

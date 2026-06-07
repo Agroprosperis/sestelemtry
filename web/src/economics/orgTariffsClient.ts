@@ -81,6 +81,78 @@ export async function fetchOrgTariffs(
   return tariffsFromApi(body)
 }
 
+// TariffScheduleVersion is one effective-dated tariff version managed
+// by the schedule endpoints. effectiveFrom is a YYYY-MM-DD civil date.
+export type TariffScheduleVersion = {
+  effectiveFrom: string
+  tariffs: Tariffs
+}
+
+// fetchTariffSchedule lists the org's date-versioned tariffs (ascending
+// by effective_from). The server resolves the effective version per day
+// when it computes economics; this list lets the operator review/edit
+// the schedule.
+export async function fetchTariffSchedule(
+  organizationID: string,
+  signal?: AbortSignal,
+): Promise<TariffScheduleVersion[]> {
+  const url = buildURL('/api/v1/organization-tariff-schedule', {
+    organization_id: organizationID,
+  })
+  const res = await fetch(url, { signal })
+  if (!res.ok) {
+    throw new Error(`tariff-schedule request failed: ${res.status}`)
+  }
+  const body = (await res.json()) as {
+    versions: { effective_from: string; tariffs: OrgTariffsApi }[]
+  }
+  return (body.versions ?? []).map((v) => ({
+    effectiveFrom: v.effective_from,
+    tariffs: tariffsFromApi(v.tariffs),
+  }))
+}
+
+// saveTariffScheduleVersion upserts one effective-dated tariff version.
+export async function saveTariffScheduleVersion(
+  organizationID: string,
+  effectiveFrom: string,
+  tariffs: Tariffs,
+  signal?: AbortSignal,
+): Promise<void> {
+  const url = buildURL('/api/v1/organization-tariff-schedule', {
+    organization_id: organizationID,
+  })
+  const res = await fetch(url, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ effective_from: effectiveFrom, tariffs: tariffsToApi(tariffs) }),
+    signal,
+  })
+  if (!res.ok) {
+    const body = await res.text().catch(() => '')
+    const trimmed = body.trim()
+    throw new Error(
+      `tariff-schedule save failed: ${res.status}${trimmed ? ` ${trimmed}` : ''}`,
+    )
+  }
+}
+
+// deleteTariffScheduleVersion removes one effective-dated tariff version.
+export async function deleteTariffScheduleVersion(
+  organizationID: string,
+  effectiveFrom: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  const url = buildURL('/api/v1/organization-tariff-schedule', {
+    organization_id: organizationID,
+    effective_from: effectiveFrom,
+  })
+  const res = await fetch(url, { method: 'DELETE', signal })
+  if (!res.ok && res.status !== 404) {
+    throw new Error(`tariff-schedule delete failed: ${res.status}`)
+  }
+}
+
 // saveOrgTariffs upserts the tariff bundle for one organization. The
 // backend validates each numeric field (range + finite-ness) and
 // rejects unknown JSON fields; we surface the server's text body in

@@ -14,6 +14,7 @@ import (
 	"github.com/nesh/sestelemetry/internal/api"
 	"github.com/nesh/sestelemetry/internal/config"
 	"github.com/nesh/sestelemetry/internal/dam"
+	"github.com/nesh/sestelemetry/internal/economics"
 	"github.com/nesh/sestelemetry/internal/energyflow"
 	"github.com/nesh/sestelemetry/internal/fusionsolar"
 	"github.com/nesh/sestelemetry/internal/oree"
@@ -62,6 +63,13 @@ func main() {
 	// without an external migration step.
 	if err := storage.InitTariffsSchema(ctx, pool); err != nil {
 		log.Error("db_init_tariffs", "err", err)
+		os.Exit(1)
+	}
+	// Economics tables (date-versioned tariff schedule + persisted
+	// hourly/daily results). Idempotent; also seeds the schedule from
+	// any legacy single-blob organization_tariffs row.
+	if err := storage.InitEconomicsSchema(ctx, pool); err != nil {
+		log.Error("db_init_economics", "err", err)
 		os.Exit(1)
 	}
 
@@ -180,6 +188,13 @@ func main() {
 		"refresh_token_configured", fusionDefaults.RefreshToken != "",
 		"client_secret_configured", fusionDefaults.ClientSecret != "",
 		"oauth_resolve_pinned", fusionDefaults.OAuthResolve != "")
+
+	// Server-side economics: compute + persist + read-through serve.
+	// The backend adapter reuses the energy-flow allocator and the
+	// store queries; the service owns the date-versioned tariffs and
+	// the economics_hourly / economics_daily tables.
+	svc.SetEconomicsService(economics.NewService(api.NewEconomicsBackend(svc, store)))
+	log.Info("api_economics_enabled")
 
 	server := &http.Server{
 		Addr:              *listenAddr,

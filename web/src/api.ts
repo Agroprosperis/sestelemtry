@@ -314,6 +314,108 @@ export async function fetchEnergyFlowHourly(
   return res.json()
 }
 
+// EconomicsHourApi is one hour of the server-computed economics result
+// (flat snake_case, mirroring internal/api.EconomicsHour). Nullable
+// fields (no RDN price, missing SOC anchor) arrive as null.
+export type EconomicsHourApi = {
+  hour: number
+  hour_start: string
+  rdn_uah_per_kwh: number | null
+  pv_kwh: number
+  grid_import_kwh: number
+  grid_export_kwh: number
+  ess_charged_kwh: number
+  ess_discharged_kwh: number
+  pv_to_ess_kwh: number
+  grid_to_ess_kwh: number
+  ess_to_load_kwh: number
+  ess_to_grid_kwh: number
+  load_kwh: number
+  pv_to_load_kwh: number
+  pv_to_grid_kwh: number
+  grid_to_load_kwh: number
+  import_price_uah_per_kwh: number
+  export_price_uah_per_kwh: number
+  baseline_cost_uah: number
+  actual_cost_uah: number
+  effect_uah: number
+  ess_net_uah: number
+  ess_remaining_kwh_start: number | null
+  ess_cost_basis_uah_start: number | null
+  ess_avg_cost_uah_per_kwh_start: number | null
+  ess_withdrawn_cost_uah: number | null
+  ess_realized_profit_uah: number | null
+  ess_cost_basis_uah_end: number | null
+  ess_avg_cost_uah_per_kwh_end: number | null
+  ess_residual_kwh_end: number | null
+}
+
+// EconomicsDailyResponse mirrors internal/api.EconomicsDailyResponse:
+// the 24 server-computed hourly economics rows for one day. `hours`
+// entries are null for hours with no flow data.
+export type EconomicsDailyResponse = {
+  organization_id: string
+  date: string
+  tz: string
+  is_final: boolean
+  hours_missing_price: number
+  hours: Array<EconomicsHourApi | null>
+}
+
+// fetchEconomicsDaily reads the server-computed economics for one day.
+// The backend serves a final day from cache and recomputes non-final
+// (today/recent) days on read, so the dashboard always reads the table.
+export async function fetchEconomicsDaily(
+  input: { organizationID: string; date: string; tz?: string },
+  signal?: AbortSignal,
+): Promise<EconomicsDailyResponse> {
+  const url = buildURL('/api/v1/economics/daily', {
+    organization_id: input.organizationID,
+    date: input.date,
+    tz: input.tz || undefined,
+  })
+  const res = await fetch(url, { signal })
+  if (!res.ok) {
+    const body = await res.text().catch(() => '')
+    const suffix = body ? ` — ${body.trim()}` : ''
+    throw new Error(`economics/daily request failed: ${res.status}${suffix}`)
+  }
+  return res.json()
+}
+
+// EconomicsRecomputeResult mirrors internal/economics.RangeResult.
+export type EconomicsRecomputeResult = {
+  from: string
+  to: string
+  days: number
+  days_ok: number
+  days_failed: number
+  errors?: { date: string; error: string }[]
+}
+
+// recomputeEconomics recomputes (and persists) economics for every day
+// in [from, to] (YYYY-MM-DD, inclusive), streaming NDJSON progress so a
+// month/year backfill can show a progress bar and be cancelled.
+export async function recomputeEconomics(
+  input: { organizationID: string; from: string; to: string; tz?: string },
+  opts?: ImportRunOptions,
+): Promise<EconomicsRecomputeResult> {
+  const url = buildURL('/api/v1/economics/recompute', {
+    organization_id: input.organizationID,
+    from: input.from,
+    to: input.to,
+    tz: input.tz || undefined,
+  })
+  const res = await fetch(url, { method: 'POST', signal: opts?.signal })
+  try {
+    return await consumeImportStream<EconomicsRecomputeResult>(res, opts?.onProgress)
+  } catch (err) {
+    if (isAbortError(err)) throw err
+    if (err instanceof Error) throw new Error(`economics recompute failed: ${err.message}`, { cause: err })
+    throw err
+  }
+}
+
 export async function fetchDAMPrices(
   input: { from: string; to: string; zone?: number },
   signal?: AbortSignal,

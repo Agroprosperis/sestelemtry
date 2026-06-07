@@ -929,6 +929,70 @@ func (s *Store) UpsertOrgTariffs(ctx context.Context, organizationID string, tar
 	return storage.UpsertOrgTariffs(ctx, s.pool, organizationID, payload)
 }
 
+// TariffScheduleVersion is one effective-dated tariff version exposed by
+// the schedule endpoints. The bundle shape matches OrgTariffs.
+type TariffScheduleVersion struct {
+	EffectiveFrom string     `json:"effective_from"`
+	Tariffs       OrgTariffs `json:"tariffs"`
+}
+
+// GetTariffScheduleVersions returns the org's date-versioned tariffs
+// ordered ascending by effective_from (decoding the JSONB blob into the
+// canonical OrgTariffs struct).
+func (s *Store) GetTariffScheduleVersions(ctx context.Context, organizationID string) ([]TariffScheduleVersion, error) {
+	entries, err := storage.GetTariffSchedule(ctx, s.pool, organizationID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]TariffScheduleVersion, 0, len(entries))
+	for _, e := range entries {
+		var t OrgTariffs
+		if err := json.Unmarshal(e.Tariffs, &t); err != nil {
+			return nil, fmt.Errorf("decode tariff schedule entry: %w", err)
+		}
+		out = append(out, TariffScheduleVersion{
+			EffectiveFrom: e.EffectiveFrom.Format("2006-01-02"),
+			Tariffs:       t,
+		})
+	}
+	return out, nil
+}
+
+// UpsertTariffScheduleVersion stores one effective-dated tariff version.
+func (s *Store) UpsertTariffScheduleVersion(ctx context.Context, organizationID string, effectiveFrom time.Time, tariffs OrgTariffs) error {
+	payload, err := json.Marshal(tariffs)
+	if err != nil {
+		return fmt.Errorf("encode tariff schedule entry: %w", err)
+	}
+	return storage.UpsertTariffScheduleEntry(ctx, s.pool, organizationID, effectiveFrom, payload)
+}
+
+// DeleteTariffScheduleVersion removes one effective-dated tariff version.
+func (s *Store) DeleteTariffScheduleVersion(ctx context.Context, organizationID string, effectiveFrom time.Time) (int64, error) {
+	return storage.DeleteTariffScheduleEntry(ctx, s.pool, organizationID, effectiveFrom)
+}
+
+// SaveEconomicsHourly persists the per-hour economics rows (upsert by
+// org + hour_start).
+func (s *Store) SaveEconomicsHourly(ctx context.Context, rows []storage.EconomicsHourlyRow) error {
+	return storage.UpsertEconomicsHourly(ctx, s.pool, rows)
+}
+
+// SaveEconomicsDaily persists the per-day economics summary.
+func (s *Store) SaveEconomicsDaily(ctx context.Context, row storage.EconomicsDailyRow) error {
+	return storage.UpsertEconomicsDaily(ctx, s.pool, row)
+}
+
+// GetEconomicsHourly returns persisted per-hour rows for [from, to).
+func (s *Store) GetEconomicsHourly(ctx context.Context, organizationID string, from, to time.Time) ([]storage.EconomicsHourlyRow, error) {
+	return storage.GetEconomicsHourly(ctx, s.pool, organizationID, from, to)
+}
+
+// GetEconomicsDaily returns the per-day summary for (org, day).
+func (s *Store) GetEconomicsDaily(ctx context.Context, organizationID string, day time.Time) (storage.EconomicsDailyRow, bool, error) {
+	return storage.GetEconomicsDaily(ctx, s.pool, organizationID, day)
+}
+
 // EnergyFlowSources streams the source-counter rows the recompute
 // pipeline needs for the half-open window [from, to) — `to` itself is
 // excluded so a sample landing exactly on the next-day midnight isn't

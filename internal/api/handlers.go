@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nesh/sestelemetry/internal/economics"
 	"github.com/nesh/sestelemetry/internal/fusionsolar"
 )
 
@@ -54,6 +55,9 @@ type Handlers struct {
 	// fusionOAuthClient optionally pins the OAuth host to a specific
 	// IP (DNS-misroute workaround); nil uses the default client.
 	fusionOAuthClient *http.Client
+	// economics backs the /api/v1/economics/* routes. nil when the
+	// service wasn't wired at startup — the handlers respond 503.
+	economics *economics.Service
 }
 
 // FusionSolarImporter synchronously pulls historical device data from
@@ -111,6 +115,15 @@ type storeReader interface {
 	// UpsertOrgTariffs replaces the persisted tariff bundle for
 	// `organizationID` (last-writer-wins).
 	UpsertOrgTariffs(ctx context.Context, organizationID string, tariffs OrgTariffs) error
+	// GetTariffScheduleVersions returns the org's date-versioned tariffs
+	// (ascending by effective_from). Empty when none saved yet.
+	GetTariffScheduleVersions(ctx context.Context, organizationID string) ([]TariffScheduleVersion, error)
+	// UpsertTariffScheduleVersion stores one effective-dated tariff
+	// version.
+	UpsertTariffScheduleVersion(ctx context.Context, organizationID string, effectiveFrom time.Time, tariffs OrgTariffs) error
+	// DeleteTariffScheduleVersion removes one effective-dated version;
+	// returns rows affected.
+	DeleteTariffScheduleVersion(ctx context.Context, organizationID string, effectiveFrom time.Time) (int64, error)
 	Ready(ctx context.Context) error
 }
 
@@ -286,6 +299,9 @@ func (h *Handlers) Router() http.Handler {
 	mux.HandleFunc("/api/v1/fusionsolar/config", h.fusionSolarConfig)
 	mux.HandleFunc("/api/v1/weather-forecast", h.weatherForecast)
 	mux.HandleFunc("/api/v1/organization-tariffs", h.organizationTariffs)
+	mux.HandleFunc("/api/v1/organization-tariff-schedule", h.organizationTariffSchedule)
+	mux.HandleFunc("/api/v1/economics/daily", h.economicsDaily)
+	mux.HandleFunc("/api/v1/economics/recompute", h.economicsRecompute)
 	mux.HandleFunc("/swagger", h.swaggerUI)
 	mux.HandleFunc("/swagger/", h.swaggerUI)
 	mux.HandleFunc("/swagger/openapi.yaml", h.swaggerSpec)

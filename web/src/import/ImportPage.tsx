@@ -1,8 +1,10 @@
 import { useCallback, useRef, useState } from 'react'
 import {
+  recomputeEconomics,
   refreshDAMPricesRange,
   runFusionSolarImport,
   type DAMRefreshRangeResult,
+  type EconomicsRecomputeResult,
   type FusionSolarImportResult,
   type ImportProgress,
 } from '../api'
@@ -103,9 +105,12 @@ export function ImportPage() {
 
       <FusionSolarImportCard />
       <DamPricesImportCard />
+      <EconomicsRecomputeCard />
     </main>
   )
 }
+
+const ECON_LOCAL_TZ = 'Europe/Kyiv'
 
 // ---- FusionSolar archive telemetry --------------------------------------
 
@@ -318,6 +323,176 @@ function FusionSolarImportCard() {
               <ul>
                 {result.warnings.map((w, i) => (
                   <li key={i}>{w}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+    </section>
+  )
+}
+
+// ---- Economics recompute ------------------------------------------------
+
+function EconomicsRecomputeCard() {
+  const { organizationID, options, change: onOrganizationChange } = useOrganizationParam()
+  const [fromDate, setFromDate] = useState<string>(() => kyivDate(-30))
+  const [toDate, setToDate] = useState<string>(() => kyivDate(-1))
+  const [state, setState] = useState<RunState>('idle')
+  const [error, setError] = useState<string | null>(null)
+  const [cancelled, setCancelled] = useState(false)
+  const [progress, setProgress] = useState<ImportProgress | null>(null)
+  const [result, setResult] = useState<EconomicsRecomputeResult | null>(null)
+  const abortRef = useRef<AbortController | null>(null)
+
+  const onCancel = useCallback(() => {
+    abortRef.current?.abort()
+  }, [])
+
+  const onRun = useCallback(async () => {
+    if (!fromDate || !toDate) {
+      setError('Вкажіть діапазон дат')
+      setState('error')
+      return
+    }
+    if (toDate < fromDate) {
+      setError('Кінцева дата раніше за початкову')
+      setState('error')
+      return
+    }
+    const controller = new AbortController()
+    abortRef.current = controller
+    setState('loading')
+    setError(null)
+    setCancelled(false)
+    setProgress(null)
+    setResult(null)
+    try {
+      const res = await recomputeEconomics(
+        { organizationID, from: fromDate, to: toDate, tz: ECON_LOCAL_TZ },
+        { signal: controller.signal, onProgress: setProgress },
+      )
+      setResult(res)
+      setState('done')
+    } catch (err) {
+      if (isAbortError(err)) {
+        setCancelled(true)
+        setState('idle')
+      } else {
+        setError(err instanceof Error ? err.message : String(err))
+        setState('error')
+      }
+    } finally {
+      abortRef.current = null
+      setProgress(null)
+    }
+  }, [organizationID, fromDate, toDate])
+
+  return (
+    <section className="import-card">
+      <span className="import-card-accent import-card-accent-violet" aria-hidden="true" />
+      <div className="import-card-head">
+        <h2 className="import-section-title">Економіка (перерахунок)</h2>
+        <span className="import-pill import-pill-violet">∑ Розрахунок на сервері</span>
+      </div>
+      <p className="import-section-sub">
+        Перераховує погодинну економіку за діапазон дат і зберігає результат у базі.
+        Запускайте після імпорту архіву чи зміни тарифів/цін РДН — дашборд економіки
+        читає збережені дані.
+      </p>
+      <div className="import-controls">
+        <OrganizationSelect
+          value={organizationID}
+          options={options}
+          onChange={onOrganizationChange}
+        />
+        <label className="import-field">
+          <span>Від</span>
+          <input
+            type="date"
+            value={fromDate}
+            max={toDate || undefined}
+            onChange={(e) => setFromDate(e.target.value)}
+          />
+        </label>
+        <label className="import-field">
+          <span>До (включно)</span>
+          <input
+            type="date"
+            value={toDate}
+            min={fromDate || undefined}
+            onChange={(e) => setToDate(e.target.value)}
+          />
+        </label>
+        <div className="import-actions">
+          {state === 'loading' && (
+            <button type="button" className="import-cancel" onClick={onCancel}>
+              Скасувати
+            </button>
+          )}
+          <button
+            type="button"
+            className="import-run"
+            onClick={onRun}
+            disabled={state === 'loading'}
+          >
+            {state === 'loading' ? (
+              <>
+                <span className="import-spinner" aria-hidden="true" />
+                Рахуємо…
+              </>
+            ) : (
+              'Перерахувати'
+            )}
+          </button>
+        </div>
+      </div>
+
+      {state === 'loading' && progress && <ImportProgressBar progress={progress} unit="День" />}
+
+      {cancelled && (
+        <div className="import-banner import-banner-info" role="status">
+          Перерахунок скасовано. Уже пораховані дні збережено.
+        </div>
+      )}
+
+      {state === 'error' && error && (
+        <div className="import-banner import-banner-error" role="alert">
+          Помилка перерахунку: {error}
+        </div>
+      )}
+
+      {state === 'done' && result && (
+        <div className="import-result" role="status">
+          <h3>Готово</h3>
+          <dl className="import-summary">
+            <div>
+              <dt>Період</dt>
+              <dd>
+                {result.from} → {result.to}
+              </dd>
+            </div>
+            <div>
+              <dt>Днів оброблено</dt>
+              <dd>{result.days}</dd>
+            </div>
+            <div>
+              <dt>Успішно / з помилкою</dt>
+              <dd>
+                {result.days_ok} / {result.days_failed}
+              </dd>
+            </div>
+          </dl>
+
+          {result.errors && result.errors.length > 0 && (
+            <div className="import-warnings">
+              <h4>Дні з помилкою ({result.days_failed})</h4>
+              <ul>
+                {result.errors.map((e) => (
+                  <li key={e.date}>
+                    {e.date}: {e.error}
+                  </li>
                 ))}
               </ul>
             </div>

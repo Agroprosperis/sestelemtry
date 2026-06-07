@@ -142,6 +142,18 @@ func (m *mockStore) UpsertOrgTariffs(_ context.Context, organizationID string, t
 	return nil
 }
 
+func (m *mockStore) GetTariffScheduleVersions(_ context.Context, _ string) ([]TariffScheduleVersion, error) {
+	return nil, nil
+}
+
+func (m *mockStore) UpsertTariffScheduleVersion(_ context.Context, _ string, _ time.Time, _ OrgTariffs) error {
+	return nil
+}
+
+func (m *mockStore) DeleteTariffScheduleVersion(_ context.Context, _ string, _ time.Time) (int64, error) {
+	return 0, nil
+}
+
 func TestCurrentRequiresOrganizationID(t *testing.T) {
 	h := NewHandlers(&mockStore{}, "*")
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/current", nil)
