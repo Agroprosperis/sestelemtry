@@ -82,12 +82,19 @@ type DayInput struct {
 
 	DamToday   []DAMHour
 	DamHistory []DAMHour // 2-day history window
+
+	// Canonical is the FusionSolar daily KPI for the target day. When
+	// set, today's flows are scaled to match it (reconciliation);
+	// nil leaves the computed flows untouched (parity with live).
+	Canonical *CanonicalDaily
 }
 
 // AssembleDay builds the 24-element HourRow slice for the target day.
 // Port of TS `assembleHourlyRows` (+ the SOC-residual and cost-basis
-// passes). nil entries mean the hour had no flow row.
-func AssembleDay(in DayInput) []*HourRow {
+// passes). nil entries mean the hour had no flow row. The second return
+// value carries the reconciliation diagnostics (Applied=false when no
+// canonical KPI was supplied).
+func AssembleDay(in DayInput) ([]*HourRow, ReconcileResult) {
 	dayStart := in.DayStart
 	pvByHour := bucketByHourOfDay(filterMetric(in.DeltaPoints, "accumulated_pv_energy_yield_kwh"), dayStart)
 	importByHour := bucketByHourOfDay(filterMetric(in.DeltaPoints, "accumulated_electricity_purchased_kwh"), dayStart)
@@ -96,14 +103,18 @@ func AssembleDay(in DayInput) []*HourRow {
 
 	priceMap := buildPriceMap(in.DamToday)
 
+	// Build the per-hour flow envelopes first so reconciliation can
+	// scale them before any economics / cost-basis math runs.
 	out := make([]*HourRow, 24)
+	flows := make([]*HourFlows, 24)
+	rdns := make([]*float64, 24)
+	starts := make([]time.Time, 24)
 	for h := 0; h < 24; h++ {
 		if h >= len(in.TodayFlows) {
-			out[h] = nil
 			continue
 		}
 		flowRow := in.TodayFlows[h]
-		flow := HourFlows{
+		f := HourFlows{
 			PV:            pvByHour[h],
 			GridImport:    importByHour[h],
 			GridExport:    exportByHour[h],
@@ -114,11 +125,23 @@ func AssembleDay(in DayInput) []*HourRow {
 			EssToLoad:     flowRow.EssToLoad,
 			EssToGrid:     flowRow.EssToGrid,
 		}
-		var rdn *float64
+		flows[h] = &f
+		starts[h] = flowRow.From
 		if p, ok := priceMap[h]; ok {
 			v := p
-			rdn = &v
+			rdns[h] = &v
 		}
+	}
+
+	recon := reconcileFlows(flows, in.Canonical)
+
+	for h := 0; h < 24; h++ {
+		if flows[h] == nil {
+			out[h] = nil
+			continue
+		}
+		flow := *flows[h]
+		rdn := rdns[h]
 		var econ HourEconomics
 		if rdn == nil {
 			econ = HourEconomicsFor(0, flow, in.Tariffs)
@@ -127,7 +150,7 @@ func AssembleDay(in DayInput) []*HourRow {
 		}
 		out[h] = &HourRow{
 			Hour:      h,
-			HourStart: flowRow.From,
+			HourStart: starts[h],
 			Rdn:       rdn,
 			Flow:      flow,
 			Econ:      econ,
@@ -196,7 +219,7 @@ func AssembleDay(in DayInput) []*HourRow {
 		cur.EssResidualKwhEnd = &endKwh
 		state = result.Next
 	}
-	return out
+	return out, recon
 }
 
 // hourHistoryRecord is one hour of pre-today data: flow envelope, RDN

@@ -993,6 +993,12 @@ func (s *Store) GetEconomicsDaily(ctx context.Context, organizationID string, da
 	return storage.GetEconomicsDaily(ctx, s.pool, organizationID, day)
 }
 
+// GetFusionDailyKpi returns the canonical FusionSolar daily KPI for
+// (org, day), used to reconcile computed economics.
+func (s *Store) GetFusionDailyKpi(ctx context.Context, organizationID string, day time.Time) (storage.FusionDailyKpiRow, bool, error) {
+	return storage.GetFusionDailyKpi(ctx, s.pool, organizationID, day)
+}
+
 // EnergyFlowSources streams the source-counter rows the recompute
 // pipeline needs for the half-open window [from, to) — `to` itself is
 // excluded so a sample landing exactly on the next-day midnight isn't

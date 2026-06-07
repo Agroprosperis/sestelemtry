@@ -57,6 +57,14 @@ type EconomicsDailyResponse struct {
 	IsFinal           bool             `json:"is_final"`
 	HoursMissingPrice int              `json:"hours_missing_price"`
 	Hours             []*EconomicsHour `json:"hours"`
+
+	// Reconciled is true when the day's flows were scaled to the
+	// canonical FusionSolar daily KPIs. QualityFlags carries diagnostics
+	// (e.g. "load_mismatch:0.07"); Reconciliation maps each measured
+	// quantity to its computed/canonical/factor detail.
+	Reconciled     bool                                  `json:"reconciled"`
+	QualityFlags   []string                              `json:"quality_flags,omitempty"`
+	Reconciliation map[string]economics.ReconcileField   `json:"reconciliation,omitempty"`
 }
 
 func economicsHourToJSON(r *economics.HourRow) *EconomicsHour {
@@ -144,6 +152,9 @@ func (h *Handlers) economicsDaily(w http.ResponseWriter, r *http.Request) {
 		Tz:             loc.String(),
 		IsFinal:        day.IsFinal,
 		Hours:          make([]*EconomicsHour, len(day.Rows)),
+		Reconciled:     day.Totals.Reconciled,
+		QualityFlags:   day.Totals.QualityFlags,
+		Reconciliation: day.Totals.Reconciliation,
 	}
 	for i, row := range day.Rows {
 		resp.Hours[i] = economicsHourToJSON(row)

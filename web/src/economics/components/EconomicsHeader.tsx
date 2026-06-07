@@ -56,6 +56,8 @@ type Props = {
   onRefreshDam: () => void | Promise<void>
   damRefreshState: DamRefreshState
   damRefreshError: string | null
+  // Opens the server-side economics recompute dialog.
+  onOpenRecompute: () => void
 }
 
 // statusLabel maps the hook's coarse state machine to the inline
@@ -152,6 +154,7 @@ export function EconomicsHeader({
   onRefreshDam,
   damRefreshState,
   damRefreshError,
+  onOpenRecompute,
 }: Props) {
   const update = (patch: Partial<Tariffs>) => onTariffsChange({ ...tariffs, ...patch })
   const statusText = statusLabel(tariffsStatus)
@@ -202,6 +205,14 @@ export function EconomicsHeader({
             aria-live="polite"
           >
             {damRefreshLabel(damRefreshState)}
+          </button>
+          <button
+            type="button"
+            className="economics-recompute-btn"
+            onClick={onOpenRecompute}
+            title="Перерахувати погодинну економіку за діапазон дат і зберегти в базі"
+          >
+            Перерахунок економіки
           </button>
           <button
             type="button"

@@ -22,6 +22,11 @@ export type EconomicsData = {
   // server-side pipeline no longer surfaces per-day allocator
   // warnings here, so it's always null.
   skipDiagnostics: string | null
+  // reconciled is true when the day's flows were scaled to the canonical
+  // FusionSolar daily KPIs; qualityFlags carries the reconciliation
+  // diagnostics (e.g. "load_mismatch:0.07").
+  reconciled: boolean
+  qualityFlags: string[]
 }
 
 type Input = {
@@ -48,6 +53,8 @@ export function useEconomicsData(input: Input): EconomicsData {
     error: null,
     hoursMissingPrice: 0,
     skipDiagnostics: null,
+    reconciled: false,
+    qualityFlags: [],
   }))
 
   useEffect(() => {
@@ -58,6 +65,8 @@ export function useEconomicsData(input: Input): EconomicsData {
         error: null,
         hoursMissingPrice: 0,
         skipDiagnostics: null,
+        reconciled: false,
+        qualityFlags: [],
       })
       return
     }
@@ -76,6 +85,8 @@ export function useEconomicsData(input: Input): EconomicsData {
           error: null,
           hoursMissingPrice: resp.hours_missing_price,
           skipDiagnostics: null,
+          reconciled: resp.reconciled ?? false,
+          qualityFlags: resp.quality_flags ?? [],
         })
       })
       .catch((err: unknown) => {

@@ -21,6 +21,11 @@ const DefaultAPIBase = "https://eu5.fusionsolar.huawei.com"
 // 5-minute historical device data, one device and <= 24h per request.
 const deviceHistoryPath = "/rest/openapi/pvms/nbi/v1/device/history"
 
+// stationDayPath is the canonical daily-KPI endpoint. One call returns
+// every day of the month containing the supplied collectTime; used to
+// reconcile the computed daily totals against FusionSolar UI numbers.
+const stationDayPath = "/thirdData/getKpiStationDay"
+
 // maxHistoryWindow is Huawei's documented per-request cap for the
 // device/history endpoint. The importer chunks any wider range into
 // successive sub-windows.
@@ -150,6 +155,107 @@ func (c *Client) DeviceHistory(
 		if ok {
 			out = append(out, sample)
 		}
+	}
+	return out, nil
+}
+
+// StationDailyKPI is one day's canonical plant KPIs from
+// getKpiStationDay. Day is the UTC midnight of the collectTime Huawei
+// returned; the fields are the daily totals the dashboard reconciles
+// against. Missing fields stay at zero (FusionSolar omits nulls).
+type StationDailyKPI struct {
+	Day           time.Time
+	PVYield       float64 // PV generation, kWh
+	UsePower      float64 // site consumption, kWh
+	BuyPower      float64 // grid import, kWh
+	OnGridPower   float64 // grid export, kWh
+	ChargeCap     float64 // ESS charge total, kWh
+	DischargeCap  float64 // ESS discharge total, kWh
+	SelfUsePower  float64 // PV consumed (PVYield - export), kWh
+}
+
+type stationDayRequest struct {
+	StationCodes string `json:"stationCodes"`
+	CollectTime  int64  `json:"collectTime"`
+}
+
+// StationDaily fetches the canonical daily KPIs for the calendar month
+// containing `monthAnchor` (Huawei returns the whole month for any
+// collectTime inside it). `loc` is the plant's timezone, used to map
+// each returned collectTime instant to its civil day (Huawei stamps the
+// local-midnight boundary, which in a positive-offset zone falls on the
+// previous UTC day). It targets the classic /thirdData Northbound
+// endpoint authenticated with the OAuth bearer; if the gateway rejects
+// that (e.g. failCode=305, requiring the classic XSRF session), the
+// caller treats the error as non-fatal and skips reconciliation.
+func (c *Client) StationDaily(ctx context.Context, stationCode string, monthAnchor time.Time, loc *time.Location) ([]StationDailyKPI, error) {
+	if loc == nil {
+		loc = time.UTC
+	}
+	if c.token == "" {
+		return nil, fmt.Errorf("fusionsolar: missing access token")
+	}
+	reqBody := stationDayRequest{
+		StationCodes: stationCode,
+		CollectTime:  monthAnchor.UTC().UnixMilli(),
+	}
+	buf, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("fusionsolar: marshal station-day request: %w", err)
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+stationDayPath, bytes.NewReader(buf))
+	if err != nil {
+		return nil, fmt.Errorf("fusionsolar: build station-day request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Bearer "+c.token)
+
+	resp, err := c.http.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("fusionsolar: getKpiStationDay request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
+	if err != nil {
+		return nil, fmt.Errorf("fusionsolar: read station-day response: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("fusionsolar: getKpiStationDay HTTP %d: %s", resp.StatusCode, snippet(body))
+	}
+
+	var parsed historyResponse
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return nil, fmt.Errorf("fusionsolar: decode station-day response: %w (body: %s)", err, snippet(body))
+	}
+	if parsed.Success != nil && !*parsed.Success || parsed.FailCode != 0 {
+		return nil, fmt.Errorf("fusionsolar: getKpiStationDay failCode=%d %s", parsed.FailCode, strings.TrimSpace(parsed.Message))
+	}
+
+	out := make([]StationDailyKPI, 0, len(parsed.Data))
+	for _, raw := range parsed.Data {
+		sample, ok, err := parseHistoryRow(raw)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			continue
+		}
+		f := sample.Fields
+		// collectTime is the local-day boundary; resolve the civil day
+		// in the plant tz and store it as a UTC-midnight key so the
+		// economics lookup (civil Y/M/D) matches regardless of session tz.
+		local := sample.Time.In(loc)
+		out = append(out, StationDailyKPI{
+			Day:          time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, time.UTC),
+			PVYield:      f["PVYield"],
+			UsePower:     f["use_power"],
+			BuyPower:     f["buyPower"],
+			OnGridPower:  f["ongrid_power"],
+			ChargeCap:    f["chargeCap"],
+			DischargeCap: f["dischargeCap"],
+			SelfUsePower: f["selfUsePower"],
+		})
 	}
 	return out, nil
 }

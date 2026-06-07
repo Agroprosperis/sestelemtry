@@ -2,6 +2,7 @@ package fusionsolar
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -42,7 +43,20 @@ type ImportResult struct {
 	RowsWritten    int            `json:"rows_written"`
 	DeletedRows    int64          `json:"deleted_rows"`
 	PerMetric      map[string]int `json:"per_metric"`
+	KpiDaysWritten int            `json:"kpi_days_written"`
 	Warnings       []string       `json:"warnings,omitempty"`
+}
+
+// kpiKyiv is the timezone used to bucket getKpiStationDay rows into
+// civil days, matching the economics dashboard's Europe/Kyiv day grid.
+var kpiKyiv = mustLoadKyiv()
+
+func mustLoadKyiv() *time.Location {
+	loc, err := time.LoadLocation("Europe/Kyiv")
+	if err != nil {
+		return time.UTC
+	}
+	return loc
 }
 
 // Importer writes FusionSolar device history into telemetry_samples.
@@ -161,6 +175,16 @@ func (im *Importer) Import(ctx context.Context, client *Client, orgID string, fr
 		}
 	}
 
+	// Canonical daily KPIs (getKpiStationDay) for reconciliation. Best
+	// effort: a failure here (e.g. the /thirdData endpoint rejecting the
+	// OAuth bearer) must never abort the 5-min telemetry import.
+	if kpiDays, err := im.fetchDailyKpi(ctx, client, orgID, topo.PlantCode, from, to); err != nil {
+		im.log.Warn("fusionsolar_kpi_fetch_failed", "organization_id", orgID, "err", err)
+		result.Warnings = append(result.Warnings, fmt.Sprintf("daily KPI reconciliation unavailable: %v", err))
+	} else {
+		result.KpiDaysWritten = kpiDays
+	}
+
 	samples := acc.samples()
 	for _, s := range samples {
 		result.PerMetric[s.MetricKey]++
@@ -200,6 +224,63 @@ func (im *Importer) Import(ctx context.Context, client *Client, orgID string, fr
 		"windows", result.Windows,
 		"rows_written", result.RowsWritten,
 		"deleted_rows", result.DeletedRows,
+		"kpi_days_written", result.KpiDaysWritten,
 	)
 	return result, nil
+}
+
+// fetchDailyKpi pulls getKpiStationDay for each calendar month spanning
+// [from, to) and upserts the canonical daily totals (keyed by Europe/Kyiv
+// civil day) used to reconcile economics. Only days inside the import
+// window are kept. Returns the number of day rows written.
+func (im *Importer) fetchDailyKpi(ctx context.Context, client *Client, orgID, plantCode string, from, to time.Time) (int, error) {
+	// Floor `from` to the first day of its month (UTC) and iterate
+	// month by month; one call returns the whole month.
+	monthStart := time.Date(from.Year(), from.Month(), 1, 0, 0, 0, 0, time.UTC)
+	var collected []storage.FusionDailyKpiRow
+	seen := map[string]bool{}
+	for m := monthStart; m.Before(to); m = m.AddDate(0, 1, 0) {
+		if err := ctx.Err(); err != nil {
+			return 0, err
+		}
+		days, err := client.StationDaily(ctx, plantCode, m, kpiKyiv)
+		if err != nil {
+			return 0, err
+		}
+		for _, d := range days {
+			// Keep only days within the imported window (half-open).
+			if d.Day.Before(dayFloorUTC(from)) || !d.Day.Before(to) {
+				continue
+			}
+			key := d.Day.Format("2006-01-02")
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			raw, _ := json.Marshal(d)
+			collected = append(collected, storage.FusionDailyKpiRow{
+				OrganizationID: orgID,
+				Day:            d.Day,
+				PlantCode:      plantCode,
+				PVYield:        d.PVYield,
+				UsePower:       d.UsePower,
+				BuyPower:       d.BuyPower,
+				OnGridPower:    d.OnGridPower,
+				ChargeCap:      d.ChargeCap,
+				DischargeCap:   d.DischargeCap,
+				SelfUsePower:   d.SelfUsePower,
+				Raw:            raw,
+			})
+		}
+	}
+	if len(collected) == 0 {
+		return 0, nil
+	}
+	return storage.UpsertFusionDailyKpi(ctx, im.pool, collected)
+}
+
+// dayFloorUTC returns the UTC midnight of t's calendar day.
+func dayFloorUTC(t time.Time) time.Time {
+	u := t.UTC()
+	return time.Date(u.Year(), u.Month(), u.Day(), 0, 0, 0, 0, time.UTC)
 }

@@ -353,6 +353,14 @@ export type EconomicsHourApi = {
 // EconomicsDailyResponse mirrors internal/api.EconomicsDailyResponse:
 // the 24 server-computed hourly economics rows for one day. `hours`
 // entries are null for hours with no flow data.
+// EconomicsReconcileField is one quantity's reconciliation detail:
+// computed daily sum, canonical FusionSolar KPI, and applied scale factor.
+export type EconomicsReconcileField = {
+  computed: number
+  canonical: number
+  factor: number
+}
+
 export type EconomicsDailyResponse = {
   organization_id: string
   date: string
@@ -360,6 +368,11 @@ export type EconomicsDailyResponse = {
   is_final: boolean
   hours_missing_price: number
   hours: Array<EconomicsHourApi | null>
+  // reconciled is true when the day's flows were scaled to the canonical
+  // FusionSolar daily KPIs; quality_flags / reconciliation are diagnostics.
+  reconciled?: boolean
+  quality_flags?: string[]
+  reconciliation?: Record<string, EconomicsReconcileField>
 }
 
 // fetchEconomicsDaily reads the server-computed economics for one day.

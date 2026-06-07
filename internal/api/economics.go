@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"github.com/nesh/sestelemetry/internal/economics"
@@ -88,6 +89,24 @@ func (b *economicsBackend) TariffSchedule(ctx context.Context, orgID string) (ec
 		})
 	}
 	return out, nil
+}
+
+func (b *economicsBackend) CanonicalDaily(ctx context.Context, orgID string, day time.Time) (economics.CanonicalDaily, bool, error) {
+	// Key by the civil date (UTC midnight) so the lookup matches the
+	// importer's Europe/Kyiv day keying regardless of the request tz.
+	key := time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, time.UTC)
+	row, ok, err := b.store.GetFusionDailyKpi(ctx, orgID, key)
+	if err != nil || !ok {
+		return economics.CanonicalDaily{}, false, err
+	}
+	return economics.CanonicalDaily{
+		PV:            row.PVYield,
+		Load:          row.UsePower,
+		GridImport:    row.BuyPower,
+		GridExport:    row.OnGridPower,
+		EssCharged:    row.ChargeCap,
+		EssDischarged: row.DischargeCap,
+	}, true, nil
 }
 
 func (b *economicsBackend) SaveDay(ctx context.Context, day economics.StoredDay) error {
@@ -227,6 +246,12 @@ func storageToHourRow(hour int, r *storage.EconomicsHourlyRow) *economics.HourRo
 
 func dailyToStorage(day economics.StoredDay) storage.EconomicsDailyRow {
 	t := day.Totals
+	var reconciliation json.RawMessage
+	if len(t.Reconciliation) > 0 {
+		if buf, err := json.Marshal(t.Reconciliation); err == nil {
+			reconciliation = buf
+		}
+	}
 	return storage.EconomicsDailyRow{
 		OrganizationID:    day.OrganizationID,
 		Day:               day.Day,
@@ -267,10 +292,17 @@ func dailyToStorage(day economics.StoredDay) storage.EconomicsDailyRow {
 		HoursWithData:      t.HoursWithData,
 		HoursMissingPrice:  t.HoursMissingPrice,
 		IsFinal:            day.IsFinal,
+		Reconciled:         t.Reconciled,
+		QualityFlags:       t.QualityFlags,
+		Reconciliation:     reconciliation,
 	}
 }
 
 func storageToDailyTotals(r storage.EconomicsDailyRow) economics.DailyTotals {
+	var reconciliation map[string]economics.ReconcileField
+	if len(r.Reconciliation) > 0 {
+		_ = json.Unmarshal(r.Reconciliation, &reconciliation)
+	}
 	return economics.DailyTotals{
 		BaselineCost:      r.BaselineCost,
 		ActualCost:        r.ActualCost,
@@ -307,5 +339,8 @@ func storageToDailyTotals(r storage.EconomicsDailyRow) economics.DailyTotals {
 		EssAvgCostBasisEod: r.EssAvgCostBasisEod,
 		EssResidualKwhEod:  r.EssResidualKwhEod,
 		EssCostBasisUahEod: r.EssCostBasisUahEod,
+		Reconciled:         r.Reconciled,
+		QualityFlags:       r.QualityFlags,
+		Reconciliation:     reconciliation,
 	}
 }

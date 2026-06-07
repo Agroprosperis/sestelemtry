@@ -127,6 +127,13 @@ type DailyTotals struct {
 	EssAvgCostBasisEod float64
 	EssResidualKwhEod  float64
 	EssCostBasisUahEod float64
+
+	// Reconciliation diagnostics (set by the service from the
+	// ReconcileResult). Reconciled is true when the day's flows were
+	// scaled to the canonical FusionSolar KPIs.
+	Reconciled     bool
+	QualityFlags   []string
+	Reconciliation map[string]ReconcileField
 }
 
 // ComputeDailyTotals sums a 24-element row slice into DailyTotals. nil

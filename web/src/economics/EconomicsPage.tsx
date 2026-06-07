@@ -5,6 +5,7 @@ import { dailyTotals } from './compute'
 import { EconomicsCharts } from './components/EconomicsCharts'
 import { EconomicsHeader } from './components/EconomicsHeader'
 import { EconomicsKpis } from './components/EconomicsKpis'
+import { EconomicsRecomputeModal } from './components/EconomicsRecomputeModal'
 import { EconomicsRevenuePanel } from './components/EconomicsRevenuePanel'
 import { EconomicsTable } from './components/EconomicsTable'
 import './economics.css'
@@ -114,6 +115,7 @@ export function EconomicsPage() {
   const [refreshKey, setRefreshKey] = useState(0)
   const [damRefreshState, setDamRefreshState] = useState<DamRefreshState>('idle')
   const [damRefreshError, setDamRefreshError] = useState<string | null>(null)
+  const [recomputeOpen, setRecomputeOpen] = useState(false)
 
   const onRefreshDam = useCallback(async () => {
     setDamRefreshState('loading')
@@ -160,7 +162,17 @@ export function EconomicsPage() {
         onRefreshDam={onRefreshDam}
         damRefreshState={damRefreshState}
         damRefreshError={damRefreshError}
+        onOpenRecompute={() => setRecomputeOpen(true)}
       />
+
+      {recomputeOpen && (
+        <EconomicsRecomputeModal
+          onClose={() => setRecomputeOpen(false)}
+          organizationOptions={options}
+          initialOrganizationID={organizationID}
+          onDone={() => setRefreshKey((k) => k + 1)}
+        />
+      )}
 
       {data.error && (
         <section className="economics-banner economics-banner-error" role="alert">
@@ -178,6 +190,16 @@ export function EconomicsPage() {
       {!data.error && data.skipDiagnostics && (
         <section className="economics-banner" role="status">
           Алокатор повідомив про неповні дані: {data.skipDiagnostics}
+        </section>
+      )}
+
+      {!data.error && !data.loading && data.reconciled && (
+        <section className="economics-banner economics-banner-ok" role="status">
+          <span className="economics-reconciled-badge">Звірено з FusionSolar</span>
+          Денні підсумки масштабовано під канонічні KPI станції.
+          {data.qualityFlags.length > 0 && (
+            <> Розбіжності: {data.qualityFlags.join(', ')}.</>
+          )}
         </section>
       )}
 

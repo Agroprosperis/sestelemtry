@@ -15,6 +15,8 @@ type fakeBackend struct {
 	dam      []DAMHour
 	schedule Schedule
 
+	canonical map[string]CanonicalDaily // keyed by YYYY-MM-DD
+
 	saved      map[string]StoredDay // keyed by YYYY-MM-DD
 	saveCount  int
 	flowsCalls int
@@ -47,6 +49,14 @@ func (b *fakeBackend) DAMPrices(_ context.Context, _ int, _, _ time.Time) ([]DAM
 
 func (b *fakeBackend) TariffSchedule(_ context.Context, _ string) (Schedule, error) {
 	return b.schedule, nil
+}
+
+func (b *fakeBackend) CanonicalDaily(_ context.Context, _ string, day time.Time) (CanonicalDaily, bool, error) {
+	if b.canonical == nil {
+		return CanonicalDaily{}, false, nil
+	}
+	c, ok := b.canonical[day.Format("2006-01-02")]
+	return c, ok, nil
 }
 
 func (b *fakeBackend) SaveDay(_ context.Context, day StoredDay) error {
@@ -107,6 +117,43 @@ func TestServiceComputeDayPersists(t *testing.T) {
 	// Hour 12 (index) corresponds to DAM hour 13 → priced.
 	if day.Rows[12] == nil || day.Rows[12].Rdn == nil {
 		t.Errorf("hour 12 should be priced")
+	}
+}
+
+func TestServiceComputeDayReconciles(t *testing.T) {
+	b, loc := newKyivBackend(t)
+	dayStart := time.Date(2026, 4, 1, 0, 0, 0, 0, loc)
+	// Priced hour 13 (index 12) with PV + import deltas in that hour.
+	b.dam = []DAMHour{{DeliveryDate: mustDate("2026-04-01"), Hour: 13, Zone: 2, PriceUAHPerMWh: ptr(2000)}}
+	b.deltas = []Point{
+		{Time: dayStart.Add(12*time.Hour + 5*time.Minute), MetricKey: "accumulated_pv_energy_yield_kwh", Value: 10},
+		{Time: dayStart.Add(12*time.Hour + 5*time.Minute), MetricKey: "accumulated_electricity_purchased_kwh", Value: 5},
+	}
+	b.canonical = map[string]CanonicalDaily{
+		"2026-04-01": {PV: 100, GridImport: 50, Load: 0},
+	}
+	svc := NewService(b)
+	day, err := svc.ComputeDay(context.Background(), "org1", "2026-04-01", "Europe/Kyiv")
+	if err != nil {
+		t.Fatalf("ComputeDay: %v", err)
+	}
+	if !day.Totals.Reconciled {
+		t.Fatal("day should be reconciled when canonical present")
+	}
+	near(t, "daily PV scaled to canonical", day.Totals.PV, 100)
+	near(t, "daily import scaled to canonical", day.Totals.GridImport, 50)
+}
+
+func TestServiceComputeDayNoCanonical(t *testing.T) {
+	b, _ := newKyivBackend(t)
+	b.dam = []DAMHour{{DeliveryDate: mustDate("2026-04-01"), Hour: 13, Zone: 2, PriceUAHPerMWh: ptr(2000)}}
+	svc := NewService(b)
+	day, err := svc.ComputeDay(context.Background(), "org1", "2026-04-01", "Europe/Kyiv")
+	if err != nil {
+		t.Fatalf("ComputeDay: %v", err)
+	}
+	if day.Totals.Reconciled {
+		t.Error("day should not be reconciled without canonical KPIs")
 	}
 }
 

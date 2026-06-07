@@ -72,6 +72,12 @@ func main() {
 		log.Error("db_init_economics", "err", err)
 		os.Exit(1)
 	}
+	// Canonical daily KPIs (getKpiStationDay) used to reconcile archive
+	// economics against the FusionSolar UI totals. Idempotent.
+	if err := storage.InitFusionKpiSchema(ctx, pool); err != nil {
+		log.Error("db_init_fusionsolar_kpi", "err", err)
+		os.Exit(1)
+	}
 
 	store := api.NewStore(pool)
 	// Boot-time feature detection: if the collector has run migration 004

@@ -58,6 +58,10 @@ type Backend interface {
 	DAMPrices(ctx context.Context, zone int, from, to time.Time) ([]DAMHour, error)
 	// TariffSchedule returns the org's date-versioned tariff schedule.
 	TariffSchedule(ctx context.Context, orgID string) (Schedule, error)
+	// CanonicalDaily returns the canonical FusionSolar daily KPIs for
+	// the day (local midnight). The bool is false when none are stored
+	// (then the day is computed without reconciliation).
+	CanonicalDaily(ctx context.Context, orgID string, day time.Time) (CanonicalDaily, bool, error)
 	// SaveDay persists a computed day (hourly rows + daily summary).
 	SaveDay(ctx context.Context, day StoredDay) error
 	// LoadDay returns a previously-persisted day. The bool is false
@@ -125,7 +129,15 @@ func (s *Service) ComputeDay(ctx context.Context, orgID, date, tz string) (Store
 	}
 	damHistory, _ := s.backend.DAMPrices(ctx, DAMZone, dayStart.AddDate(0, 0, -2), dayStart.AddDate(0, 0, -1))
 
-	rows := AssembleDay(DayInput{
+	// Canonical daily KPIs for reconciliation (best-effort: absence
+	// just means the day is computed straight from the allocator).
+	var canonical *CanonicalDaily
+	if c, ok, cerr := s.backend.CanonicalDaily(ctx, orgID, dayStart); cerr == nil && ok {
+		cc := c
+		canonical = &cc
+	}
+
+	rows, recon := AssembleDay(DayInput{
 		DayStart:           dayStart,
 		Tariffs:            tariffs,
 		TodayFlows:         todayFlows,
@@ -136,8 +148,12 @@ func (s *Service) ComputeDay(ctx context.Context, orgID, date, tz string) (Store
 		SocPoints:          socPoints,
 		DamToday:           damToday,
 		DamHistory:         damHistory,
+		Canonical:          canonical,
 	})
 	totals := ComputeDailyTotals(rows)
+	totals.Reconciled = recon.Applied
+	totals.QualityFlags = recon.Flags
+	totals.Reconciliation = recon.Detail
 
 	// A day is final once it has fully elapsed in tz — no more
 	// telemetry is expected, so the cache can be served verbatim.

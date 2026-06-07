@@ -113,6 +113,13 @@ func InitEconomicsSchema(ctx context.Context, pool *pgxpool.Pool) error {
 			computed_at        timestamptz NOT NULL DEFAULT now(),
 			PRIMARY KEY (organization_id, day)
 		)`,
+		// Reconciliation columns (added incrementally so existing
+		// deployments upgrade in place). reconciled flags that the day's
+		// flows were scaled to the canonical FusionSolar daily KPIs;
+		// quality_flags / reconciliation record the diagnostics.
+		`ALTER TABLE economics_daily ADD COLUMN IF NOT EXISTS reconciled boolean NOT NULL DEFAULT false`,
+		`ALTER TABLE economics_daily ADD COLUMN IF NOT EXISTS quality_flags text[]`,
+		`ALTER TABLE economics_daily ADD COLUMN IF NOT EXISTS reconciliation jsonb`,
 	}
 	for _, s := range stmts {
 		if _, err := pool.Exec(ctx, s); err != nil {
@@ -429,6 +436,14 @@ type EconomicsDailyRow struct {
 	HoursMissingPrice int
 	SkipDiagnostics   string
 	IsFinal           bool
+
+	// Reconciled is true when the day's flows were scaled to canonical
+	// FusionSolar daily KPIs. QualityFlags lists diagnostics (e.g.
+	// "load_mismatch:0.07"); Reconciliation is the per-field
+	// computed/canonical/factor JSON (nil when not reconciled).
+	Reconciled    bool
+	QualityFlags  []string
+	Reconciliation json.RawMessage
 }
 
 // UpsertEconomicsDaily replaces the per-day summary by (org, day).
@@ -447,10 +462,12 @@ func UpsertEconomicsDaily(ctx context.Context, pool *pgxpool.Pool, r EconomicsDa
 			expense_grid_charge_uah, expense_total_uah, ebitda_uah,
 			ess_withdrawn_cost_uah, ess_realized_profit_uah, ess_degradation_cost_uah,
 			ess_avg_cost_basis_uah_per_kwh_eod, ess_residual_kwh_eod, ess_cost_basis_uah_eod,
-			hours_with_data, hours_missing_price, skip_diagnostics, is_final, computed_at
+			hours_with_data, hours_missing_price, skip_diagnostics, is_final,
+			reconciled, quality_flags, reconciliation, computed_at
 		) VALUES (
 			$1,$2::date,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,
-			$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40, now()
+			$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,
+			$41,$42,$43::jsonb, now()
 		)
 		ON CONFLICT (organization_id, day) DO UPDATE SET
 			tz = EXCLUDED.tz,
@@ -491,8 +508,15 @@ func UpsertEconomicsDaily(ctx context.Context, pool *pgxpool.Pool, r EconomicsDa
 			hours_missing_price = EXCLUDED.hours_missing_price,
 			skip_diagnostics = EXCLUDED.skip_diagnostics,
 			is_final = EXCLUDED.is_final,
+			reconciled = EXCLUDED.reconciled,
+			quality_flags = EXCLUDED.quality_flags,
+			reconciliation = EXCLUDED.reconciliation,
 			computed_at = now()
 	`
+	var reconciliation []byte
+	if len(r.Reconciliation) > 0 {
+		reconciliation = []byte(r.Reconciliation)
+	}
 	if _, err := pool.Exec(ctx, stmt,
 		r.OrganizationID, r.Day, r.Tz,
 		r.BaselineCost, r.ActualCost, r.Effect, r.EssNet,
@@ -504,6 +528,7 @@ func UpsertEconomicsDaily(ctx context.Context, pool *pgxpool.Pool, r EconomicsDa
 		r.EssWithdrawnCost, r.EssRealizedProfit, r.EssDegradationCost,
 		r.EssAvgCostBasisEod, r.EssResidualKwhEod, r.EssCostBasisUahEod,
 		r.HoursWithData, r.HoursMissingPrice, r.SkipDiagnostics, r.IsFinal,
+		r.Reconciled, r.QualityFlags, reconciliation,
 	); err != nil {
 		return fmt.Errorf("storage: upsert economics daily: %w", err)
 	}
@@ -528,7 +553,8 @@ func GetEconomicsDaily(ctx context.Context, pool *pgxpool.Pool, organizationID s
 			expense_grid_charge_uah, expense_total_uah, ebitda_uah,
 			ess_withdrawn_cost_uah, ess_realized_profit_uah, ess_degradation_cost_uah,
 			ess_avg_cost_basis_uah_per_kwh_eod, ess_residual_kwh_eod, ess_cost_basis_uah_eod,
-			hours_with_data, hours_missing_price, skip_diagnostics, is_final
+			hours_with_data, hours_missing_price, skip_diagnostics, is_final,
+			reconciled, quality_flags, reconciliation
 		FROM economics_daily
 		WHERE organization_id = $1 AND day = $2::date
 	`, organizationID, day).Scan(
@@ -542,6 +568,7 @@ func GetEconomicsDaily(ctx context.Context, pool *pgxpool.Pool, organizationID s
 		&r.EssWithdrawnCost, &r.EssRealizedProfit, &r.EssDegradationCost,
 		&r.EssAvgCostBasisEod, &r.EssResidualKwhEod, &r.EssCostBasisUahEod,
 		&r.HoursWithData, &r.HoursMissingPrice, &r.SkipDiagnostics, &r.IsFinal,
+		&r.Reconciled, &r.QualityFlags, &r.Reconciliation,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
