@@ -999,7 +999,7 @@ func (s *Store) GetFusionDailyKpi(ctx context.Context, organizationID string, da
 	return storage.GetFusionDailyKpi(ctx, s.pool, organizationID, day)
 }
 
-// EnergyFlowSources returns the source-counter rows the recompute
+// EnergyFlowSources streams the source-counter rows the recompute
 // pipeline needs for the half-open window [from, to) — `to` itself is
 // excluded so a sample landing exactly on the next-day midnight isn't
 // attributed to hour 0 of the requested day (matching /samples and the
@@ -1008,38 +1008,14 @@ func (s *Store) GetFusionDailyKpi(ctx context.Context, organizationID string, da
 // subtract against; without that the first interval of a freshly
 // recomputed period would be silently dropped.
 //
-// Per-minute reduction (why this is NOT a raw row stream):
-// energyflow.IterateIntervals already collapses its input into fixed
-// 60-second buckets and keeps only the latest non-sentinel reading
-// per metric inside each bucket — every intermediate sample within a
-// minute is discarded before Allocate runs. With second-by-second
-// live telemetry that meant shipping ~860k rows/day (10 metrics ×
-// ~86k samples) across the wire and through the Go allocator just to
-// throw 59/60 of them away. We now perform that exact reduction in
-// SQL: one `last(value, time)` per (metric_key, device_host, minute),
-// returning ≈1/60th the rows with byte-identical allocator output.
-//
-// Two details make the reduction provably equivalent to the old raw
-// path rather than merely approximate:
-//
-//   - Bucket boundary: we group by `ceil(epoch/60)` so the minute
-//     boundary is right-closed, matching energyflow.bucketEnd exactly
-//     (a sample at HH:MM:00 belongs to the bucket ending at HH:MM:00,
-//     not the next one). The emitted timestamp is the group's max(time)
-//     — the same representative sample IterateIntervals would have kept
-//     — so re-bucketing on the Go side lands it in the identical bucket.
-//   - Sentinel / non-finite filter: the SmartLogger UINT32 "all-ones"
-//     sentinels (0xFFFFFFFF × {0.01, 0.001, 0.1}) and NaN/Inf are
-//     excluded in the WHERE clause, mirroring energyflow.cleanRawValues.
-//     Without this, last() could return a sentinel as the minute's
-//     representative and — since the minute is now a single row — there
-//     would be no earlier sample for the Go cleaner to fall back to.
-//
-// Each day's reduction is a bounded hash aggregate over a single
-// chunk's index range (max 36h window, enforced by the callers), so
-// it returns quickly and ships far less data than the previous
-// streaming scan that the live-density measurements showed growing to
-// several seconds per day.
+// The query is a plain index scan rather than a server-side
+// time_bucket()+last() aggregation on purpose: a hash aggregate over
+// a day's worth of telemetry rows pins a Postgres backend on CPU and
+// memory until the entire result is materialised, which starves the
+// concurrent /current and /timeseries lookups the dashboard depends
+// on. The streaming SELECT keeps Postgres latency-friendly and
+// pushes the (cheap) per-minute reduction into energyflow.Recompute,
+// where it costs a few milliseconds of Go time.
 //
 // Rows are ordered by (time ASC, metric_key ASC) so the bucketing
 // inside energyflow.Recompute can rely on monotonic input. The
@@ -1069,39 +1045,16 @@ func (s *Store) EnergyFlowSources(
 		lookback = 0
 	}
 	rows, err := s.pool.Query(ctx, `
-		WITH filtered AS (
-			SELECT
-				time,
-				metric_key,
-				value,
-				COALESCE(labels->>'device_host', '') AS device_host
-			FROM telemetry_samples
-			WHERE organization_id = $1
-				AND metric_key = ANY($2)
-				AND time >= $3
-				AND time < $4
-				-- Drop NaN (value = value is false for NaN) and infinities,
-				-- mirroring energyflow.cleanRawValues' isFiniteFloat guard.
-				AND value = value
-				AND value <> 'Infinity'::float8
-				AND value <> '-Infinity'::float8
-				-- Drop the SmartLogger UINT32 all-ones sentinels scaled by
-				-- the three Huawei catalogue gains, mirroring
-				-- energyflow.IsInvalidUint32Scaled (|value-invalid| < gain*10).
-				AND abs(value - 42949672.95) >= 0.1
-				AND abs(value - 4294967.295) >= 0.01
-				AND abs(value - 429496729.5) >= 1.0
-		)
 		SELECT
-			max(time) AS time,
+			time,
 			metric_key,
-			last(value, time) AS value,
-			device_host
-		FROM filtered
-		GROUP BY
-			metric_key,
-			device_host,
-			ceil(extract(epoch FROM time) / 60.0)
+			value,
+			COALESCE(labels->>'device_host', '') AS device_host
+		FROM telemetry_samples
+		WHERE organization_id = $1
+			AND metric_key = ANY($2)
+			AND time >= $3
+			AND time < $4
 		ORDER BY time ASC, metric_key ASC
 	`, organizationID, EnergyFlowRecomputeSourceMetrics, from.UTC().Add(-lookback), to.UTC())
 	if err != nil {
