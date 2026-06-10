@@ -151,6 +151,7 @@ func (b *economicsBackend) LoadDay(ctx context.Context, orgID string, dayStart t
 		Rows:           rows,
 		Totals:         storageToDailyTotals(daily),
 		IsFinal:        daily.IsFinal,
+		ComputedAt:     daily.ComputedAt,
 	}, true, nil
 }
 

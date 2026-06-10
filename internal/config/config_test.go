@@ -188,6 +188,115 @@ organizations:
 	}
 }
 
+func TestLoadAppliesEconomicsDefaults(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	content := `register_catalog: registers/huawei_smartlogger.yaml
+organizations:
+  - id: org-a
+    modbus:
+      host: 127.0.0.1
+economics:
+  enabled: true
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load error: %v", err)
+	}
+	e := cfg.Economics
+	if e.RunAt != "03:00" {
+		t.Fatalf("run_at default: %q", e.RunAt)
+	}
+	if e.Timezone != "Europe/Kyiv" {
+		t.Fatalf("timezone default: %q", e.Timezone)
+	}
+	if e.FinalizeDays != 3 {
+		t.Fatalf("finalize_days default: %d", e.FinalizeDays)
+	}
+	if e.TodayInterval != time.Hour {
+		t.Fatalf("today_interval default: %v", e.TodayInterval)
+	}
+	if e.MaxConcurrency != 2 {
+		t.Fatalf("max_concurrency default: %d", e.MaxConcurrency)
+	}
+}
+
+func TestLoadRejectsBadEconomics(t *testing.T) {
+	dir := t.TempDir()
+	// Validation only runs for an enabled service, so each case enables
+	// economics explicitly.
+	cases := map[string]string{
+		"bad run_at": `economics:
+  enabled: true
+  run_at: "25:00"
+`,
+		"bad timezone": `economics:
+  enabled: true
+  timezone: "Mars/Olympus"
+`,
+		"finalize_days too high": `economics:
+  enabled: true
+  finalize_days: 999
+`,
+		"today_interval too short": `economics:
+  enabled: true
+  today_interval: 30s
+`,
+		"today_interval too long": `economics:
+  enabled: true
+  today_interval: 25h
+`,
+		"max_concurrency too high": `economics:
+  enabled: true
+  max_concurrency: 99
+`,
+	}
+	for name, econ := range cases {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(dir, name+".yaml")
+			content := `register_catalog: registers/huawei_smartlogger.yaml
+organizations:
+  - id: org-a
+    modbus:
+      host: 127.0.0.1
+` + econ
+			if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := Load(path); err == nil {
+				t.Fatal("expected validation error, got nil")
+			}
+		})
+	}
+}
+
+// TestLoadIgnoresDisabledEconomics confirms a stale/invalid economics
+// block does not fail loading when the service is disabled, mirroring
+// the oree/weather gating.
+func TestLoadIgnoresDisabledEconomics(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	content := `register_catalog: registers/huawei_smartlogger.yaml
+organizations:
+  - id: org-a
+    modbus:
+      host: 127.0.0.1
+economics:
+  enabled: false
+  run_at: "99:99"
+  today_interval: 1s
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err != nil {
+		t.Fatalf("disabled economics with bad fields must still load: %v", err)
+	}
+}
+
 func TestParseRunAt(t *testing.T) {
 	cases := []struct {
 		in     string

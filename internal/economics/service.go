@@ -40,6 +40,10 @@ type StoredDay struct {
 	Rows           []*HourRow
 	Totals         DailyTotals
 	IsFinal        bool
+	// ComputedAt is when the persisted row was last written. Zero for a
+	// freshly computed (not-yet-reloaded) day. GetDay uses it to decide
+	// whether a cached non-final day is recent enough to serve.
+	ComputedAt time.Time
 }
 
 // Backend is the data + persistence surface the Service depends on. The
@@ -73,11 +77,28 @@ type Backend interface {
 // (final days from cache, non-final days recomputed on read).
 type Service struct {
 	backend Backend
+	// freshTodayWindow, when > 0, lets GetDay serve a cached non-final
+	// day (i.e. today) from storage instead of recomputing it live, as
+	// long as it was written within this window. It is set when the
+	// economics-recompute daemon keeps the current day warm, so the
+	// dashboard reads the cache instead of paying the slow live
+	// recompute on every request. 0 (the default) preserves the
+	// always-recompute-non-final behaviour.
+	freshTodayWindow time.Duration
 }
 
 // NewService wires the economics service to a Backend.
 func NewService(backend Backend) *Service {
 	return &Service{backend: backend}
+}
+
+// SetFreshTodayWindow enables serving cached non-final days that were
+// written within d. Pass 0 to disable (always recompute non-final days).
+func (s *Service) SetFreshTodayWindow(d time.Duration) {
+	if d < 0 {
+		d = 0
+	}
+	s.freshTodayWindow = d
 }
 
 // ComputeDay computes economics for one calendar day, persists the
@@ -191,6 +212,16 @@ func (s *Service) GetDay(ctx context.Context, orgID, date, tz string) (StoredDay
 		return StoredDay{}, fmt.Errorf("load day: %w", err)
 	}
 	if ok && stored.IsFinal {
+		return stored, nil
+	}
+	// A still-open day is normally recomputed on read so the dashboard
+	// never shows stale intraday numbers. But when the
+	// economics-recompute daemon keeps today warm, serve its recent
+	// cache instead — that turns the slow live recompute into a fast
+	// cache hit. We only trust the cache inside freshTodayWindow so a
+	// stopped daemon transparently falls back to live recompute.
+	if ok && s.freshTodayWindow > 0 && !stored.ComputedAt.IsZero() &&
+		time.Since(stored.ComputedAt) < s.freshTodayWindow {
 		return stored, nil
 	}
 	return s.ComputeDay(ctx, orgID, date, tz)

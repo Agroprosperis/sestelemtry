@@ -437,6 +437,12 @@ type EconomicsDailyRow struct {
 	SkipDiagnostics   string
 	IsFinal           bool
 
+	// ComputedAt is when this row was last written (now() on upsert).
+	// Read-through callers use it to decide whether a still-open day
+	// cached by the economics-recompute daemon is fresh enough to serve
+	// without a live recompute.
+	ComputedAt time.Time
+
 	// Reconciled is true when the day's flows were scaled to canonical
 	// FusionSolar daily KPIs. QualityFlags lists diagnostics (e.g.
 	// "load_mismatch:0.07"); Reconciliation is the per-field
@@ -554,7 +560,7 @@ func GetEconomicsDaily(ctx context.Context, pool *pgxpool.Pool, organizationID s
 			ess_withdrawn_cost_uah, ess_realized_profit_uah, ess_degradation_cost_uah,
 			ess_avg_cost_basis_uah_per_kwh_eod, ess_residual_kwh_eod, ess_cost_basis_uah_eod,
 			hours_with_data, hours_missing_price, skip_diagnostics, is_final,
-			reconciled, quality_flags, reconciliation
+			reconciled, quality_flags, reconciliation, computed_at
 		FROM economics_daily
 		WHERE organization_id = $1 AND day = $2::date
 	`, organizationID, day).Scan(
@@ -568,7 +574,7 @@ func GetEconomicsDaily(ctx context.Context, pool *pgxpool.Pool, organizationID s
 		&r.EssWithdrawnCost, &r.EssRealizedProfit, &r.EssDegradationCost,
 		&r.EssAvgCostBasisEod, &r.EssResidualKwhEod, &r.EssCostBasisUahEod,
 		&r.HoursWithData, &r.HoursMissingPrice, &r.SkipDiagnostics, &r.IsFinal,
-		&r.Reconciled, &r.QualityFlags, &r.Reconciliation,
+		&r.Reconciled, &r.QualityFlags, &r.Reconciliation, &r.ComputedAt,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {

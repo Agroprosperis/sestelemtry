@@ -201,7 +201,20 @@ func main() {
 	// The backend adapter reuses the energy-flow allocator and the
 	// store queries; the service owns the date-versioned tariffs and
 	// the economics_hourly / economics_daily tables.
-	svc.SetEconomicsService(economics.NewService(api.NewEconomicsBackend(svc, store)))
+	econSvc := economics.NewService(api.NewEconomicsBackend(svc, store))
+	// When the economics-recompute daemon is enabled it keeps the
+	// current (non-final) day warm in economics_daily. Let the
+	// read-through serve that cache while it is fresh (2x the daemon's
+	// refresh interval, so a single missed tick still counts as fresh)
+	// instead of paying a slow live recompute on every dashboard read.
+	// Disabled (window 0) when the scheduler isn't configured, so the
+	// API keeps recomputing non-final days live as before.
+	if loadedCfg != nil && loadedCfg.Economics.Enabled {
+		window := 2 * loadedCfg.Economics.TodayInterval
+		econSvc.SetFreshTodayWindow(window)
+		log.Info("api_economics_fresh_today_window", "window", window.String())
+	}
+	svc.SetEconomicsService(econSvc)
 	log.Info("api_economics_enabled")
 
 	server := &http.Server{

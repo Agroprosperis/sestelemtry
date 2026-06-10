@@ -7,6 +7,8 @@ Modbus telemetry collector for Huawei SmartLogger + dashboard stack.
 - `collector` (Go): polls Modbus and writes telemetry to TimescaleDB
 - `api` (Go): serves dashboard endpoints from TimescaleDB
 - `dam-collector` (Go): once per day, fetches Day-Ahead Market (RDN) prices from oree.com.ua and stores them in `market_dam_prices`
+- `weather-collector` (Go): caches Open-Meteo forecasts per org in TimescaleDB
+- `economics-recompute` (Go): on a schedule, recomputes + persists hourly/daily economics into `economics_hourly` / `economics_daily` so the dashboard reads a warm cache (reads only the local DB; no external API)
 - `web` (React + Vite): dashboard UI
 
 ## API endpoints
@@ -202,6 +204,43 @@ For operator-driven backfill (OREE published late, network blip, etc) the
 API exposes `POST /api/v1/dam-prices/refresh?date=YYYY-MM-DD&zone=N` which
 runs a single synchronous fetch and upsert. The economics dashboard wires
 this up via the "Оновити ціни РДН" button.
+
+## Economics recompute scheduler
+
+`economics-recompute` recomputes and persists economics in the background so
+the dashboard always reads the stored `economics_hourly` / `economics_daily`
+tables instead of triggering a slow live recompute on each request. The
+container ships with every stack but is gated by `economics.enabled` in
+`config.yaml` — absent or `enabled: false` and the daemon idles. It reads only
+the local database (telemetry, DAM prices, tariffs, any already-imported
+canonical KPIs) and never calls FusionSolar or any other external API.
+
+Two schedules run concurrently for all configured organizations:
+
+- nightly at `run_at`: recompute the last `finalize_days` days (ending
+  yesterday). Those days are final, so the API serves them straight from cache.
+- every `today_interval`: recompute the current, still-open day so the
+  dashboard's "today" stays fresh. The API serves this cached non-final day
+  while it is within `2 x today_interval` of being written, falling back to a
+  live recompute if the daemon is stopped.
+
+Configure under the `economics:` section in `config.yaml` (see
+`config.example.yaml`):
+
+```yaml
+economics:
+  enabled: true
+  run_at: "03:00"             # local time of day in `timezone`
+  timezone: "Europe/Kyiv"
+  finalize_days: 3            # nightly: recompute the last N days
+  today_interval: 1h          # refresh the current day this often
+  max_concurrency: 2          # how many orgs to recompute in parallel
+```
+
+The manual recompute dialog on the economics dashboard still works (forced
+backfills after tariff/DAM edits); FusionSolar reconciliation still requires
+the manual archive import. The daemon supports a one-shot `-once` flag (single
+finalize + today pass, then exit) for cron or testing.
 
 ### Safe production update path
 

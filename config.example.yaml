@@ -174,3 +174,16 @@ weather:
   retry:
     attempts: 3
     backoff: 5s
+
+# Scheduled economics recompute (consumed by economics-recompute).
+# Recomputes + persists hourly/daily economics in the background so the
+# dashboard always reads a warm cache instead of triggering a slow live
+# recompute. Reads only the local database — never calls FusionSolar.
+# Set enabled: false to skip running the economics-recompute daemon.
+economics:
+  enabled: true
+  run_at: "03:00"               # HH:MM in `timezone`: nightly finalize pass
+  timezone: "Europe/Kyiv"
+  finalize_days: 3              # nightly: recompute the last N days (ending yesterday)
+  today_interval: 1h            # refresh the current (non-final) day this often
+  max_concurrency: 2            # how many orgs to recompute in parallel

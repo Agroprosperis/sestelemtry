@@ -130,6 +130,29 @@ type Weather struct {
 	PastDays int `yaml:"past_days"`
 }
 
+// Economics configures the optional economics-recompute service that
+// recomputes and persists hourly/daily economics on a schedule, so the
+// dashboard always reads a warm cache and the heavy compute runs
+// unattended instead of being triggered by hand from the browser.
+//
+// All inputs are read from the local database (telemetry samples, DAM
+// prices, tariffs, and any already-imported canonical KPIs) — the
+// service never calls FusionSolar or any other external API.
+//
+// Behaviour: nightly at RunAt it recomputes the last FinalizeDays days
+// (which are now final, so the dashboard serves them from cache
+// forever); every TodayInterval it recomputes the current, still-open
+// day so the dashboard's "today" stays fresh without a live recompute
+// on each read.
+type Economics struct {
+	Enabled        bool          `yaml:"enabled"`
+	RunAt          string        `yaml:"run_at"`
+	Timezone       string        `yaml:"timezone"`
+	FinalizeDays   int           `yaml:"finalize_days"`
+	TodayInterval  time.Duration `yaml:"today_interval"`
+	MaxConcurrency int           `yaml:"max_concurrency"`
+}
+
 type Root struct {
 	DatabaseURL        string             `yaml:"database_url"`
 	RegisterCatalog    string             `yaml:"register_catalog"`
@@ -138,6 +161,7 @@ type Root struct {
 	Organizations      []Organization     `yaml:"organizations"`
 	OREE               OREE               `yaml:"oree"`
 	Weather            Weather            `yaml:"weather"`
+	Economics          Economics          `yaml:"economics"`
 }
 
 // Load reads YAML config from path and applies defaults.
@@ -186,6 +210,12 @@ func Load(path string) (*Root, error) {
 	c.applyWeatherDefaults()
 	if c.Weather.Enabled {
 		if err := c.validateWeather(); err != nil {
+			return nil, err
+		}
+	}
+	c.applyEconomicsDefaults()
+	if c.Economics.Enabled {
+		if err := c.validateEconomics(); err != nil {
 			return nil, err
 		}
 	}
@@ -268,6 +298,48 @@ func (c *Root) applyWeatherDefaults() {
 	if w.PastDays <= 0 {
 		w.PastDays = 7
 	}
+}
+
+func (c *Root) applyEconomicsDefaults() {
+	e := &c.Economics
+	if strings.TrimSpace(e.RunAt) == "" {
+		e.RunAt = "03:00"
+	}
+	if strings.TrimSpace(e.Timezone) == "" {
+		e.Timezone = "Europe/Kyiv"
+	}
+	if e.FinalizeDays <= 0 {
+		e.FinalizeDays = 3
+	}
+	if e.TodayInterval <= 0 {
+		e.TodayInterval = time.Hour
+	}
+	if e.MaxConcurrency <= 0 {
+		e.MaxConcurrency = 2
+	}
+}
+
+func (c *Root) validateEconomics() error {
+	e := &c.Economics
+	if _, _, err := ParseRunAt(e.RunAt); err != nil {
+		return fmt.Errorf("config: economics.run_at: %w", err)
+	}
+	if _, err := time.LoadLocation(e.Timezone); err != nil {
+		return fmt.Errorf("config: economics.timezone: %w", err)
+	}
+	if e.FinalizeDays < 1 || e.FinalizeDays > 90 {
+		return fmt.Errorf("config: economics.finalize_days must be in [1..90], got %d", e.FinalizeDays)
+	}
+	if e.TodayInterval < 5*time.Minute {
+		return fmt.Errorf("config: economics.today_interval must be >= 5m, got %s", e.TodayInterval)
+	}
+	if e.TodayInterval > 24*time.Hour {
+		return fmt.Errorf("config: economics.today_interval must be <= 24h, got %s", e.TodayInterval)
+	}
+	if e.MaxConcurrency < 1 || e.MaxConcurrency > 16 {
+		return fmt.Errorf("config: economics.max_concurrency must be in [1..16], got %d", e.MaxConcurrency)
+	}
+	return nil
 }
 
 func (c *Root) validateWeather() error {

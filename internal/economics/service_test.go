@@ -181,6 +181,59 @@ func TestServiceGetDayReadThroughFinal(t *testing.T) {
 	}
 }
 
+// TestServiceGetDayFreshTodayWindow covers the read-through behaviour
+// for a still-open (non-final) day that the economics-recompute daemon
+// keeps warm: with no window it always recomputes; with a window it
+// serves a recent cache but recomputes a stale one.
+func TestServiceGetDayFreshTodayWindow(t *testing.T) {
+	b, loc := newKyivBackend(t)
+	svc := NewService(b)
+	now := time.Now().In(loc)
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
+	todayStr := today.Format("2006-01-02")
+
+	seed := func(computedAt time.Time) {
+		b.saved = map[string]StoredDay{
+			todayStr: {
+				OrganizationID: "org1",
+				Day:            today,
+				Tz:             loc.String(),
+				IsFinal:        false,
+				ComputedAt:     computedAt,
+			},
+		}
+		b.saveCount = 0
+	}
+
+	// 1. Default (window 0): a non-final day always recomputes on read.
+	seed(now)
+	if _, err := svc.GetDay(context.Background(), "org1", todayStr, "Europe/Kyiv"); err != nil {
+		t.Fatalf("GetDay: %v", err)
+	}
+	if b.saveCount == 0 {
+		t.Error("with no fresh window, a non-final day must recompute (save)")
+	}
+
+	// 2. Fresh window + recently-written cache: serve cache, no recompute.
+	svc.SetFreshTodayWindow(time.Hour)
+	seed(now)
+	if _, err := svc.GetDay(context.Background(), "org1", todayStr, "Europe/Kyiv"); err != nil {
+		t.Fatalf("GetDay: %v", err)
+	}
+	if b.saveCount != 0 {
+		t.Errorf("fresh non-final day should be cache-served, got %d saves", b.saveCount)
+	}
+
+	// 3. Fresh window + stale cache: fall back to recompute.
+	seed(now.Add(-2 * time.Hour))
+	if _, err := svc.GetDay(context.Background(), "org1", todayStr, "Europe/Kyiv"); err != nil {
+		t.Fatalf("GetDay: %v", err)
+	}
+	if b.saveCount == 0 {
+		t.Error("stale non-final cache should recompute (save)")
+	}
+}
+
 func TestServiceRecomputeRange(t *testing.T) {
 	b, _ := newKyivBackend(t)
 	svc := NewService(b)
