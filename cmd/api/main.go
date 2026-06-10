@@ -138,15 +138,27 @@ func main() {
 	// live collector stamps, so backfilled rows classify identically in
 	// the energy-flow allocator.
 	hostByOrg := map[string]string{}
+	boundsByOrg := map[string]fusionsolar.ArchiveBounds{}
 	if loadedCfg != nil {
 		for _, o := range loadedCfg.Organizations {
 			devices := o.Devices()
 			if len(devices) > 0 {
 				hostByOrg[o.ID] = strings.TrimSpace(devices[0].Host)
 			}
+			// A live-data start (upper bound) is required to enable
+			// archive import; operation_start (lower bound) is optional.
+			cutoff, ok := parseCivilDate(o.LiveDataStart)
+			if !ok {
+				continue
+			}
+			start, _ := parseCivilDate(o.OperationStart)
+			boundsByOrg[o.ID] = fusionsolar.ArchiveBounds{Start: start, Cutoff: cutoff}
 		}
 	}
-	importer := fusionsolar.NewImporter(pool, log, hostByOrg)
+	// Per-org archive bounds guard the importer (HTTP layer + importer
+	// itself) and are surfaced to the import page via OrganizationInfo.
+	svc.SetArchiveBounds(boundsByOrg)
+	importer := fusionsolar.NewImporter(pool, log, hostByOrg, boundsByOrg)
 	svc.SetFusionSolarImporter(func(ctx context.Context, orgID, accessToken, apiBase string, from, to time.Time, onProgress api.FusionProgressFunc) (any, error) {
 		client := fusionsolar.NewClient(apiBase, accessToken, 60*time.Second)
 		return importer.Import(ctx, client, orgID, from, to, onProgress)
@@ -280,7 +292,31 @@ func toOrganizationInfos(orgs []config.Organization) []api.OrganizationInfo {
 				City:      o.Location.City,
 			}
 		}
+		// Expose the importable archive range so the import page can cap
+		// its date pickers per station: last day = day before go-live,
+		// first day = operation start.
+		if c, ok := parseCivilDate(o.LiveDataStart); ok {
+			info.ArchiveLastDay = c.AddDate(0, 0, -1).Format("2006-01-02")
+		}
+		if s, ok := parseCivilDate(o.OperationStart); ok {
+			info.ArchiveFirstDay = s.Format("2006-01-02")
+		}
 		out = append(out, info)
 	}
 	return out
+}
+
+// parseCivilDate parses a YYYY-MM-DD civil date into its UTC-midnight
+// instant. Returns ok=false for an empty or unparseable value so the
+// caller can treat it as "not configured".
+func parseCivilDate(s string) (time.Time, bool) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return time.Time{}, false
+	}
+	d, err := time.Parse("2006-01-02", s)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return time.Date(d.Year(), d.Month(), d.Day(), 0, 0, 0, 0, time.UTC), true
 }

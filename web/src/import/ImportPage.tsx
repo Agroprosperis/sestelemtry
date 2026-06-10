@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import {
   runFusionSolarImport,
   type FusionSolarImportResult,
@@ -6,8 +6,9 @@ import {
 } from '../api'
 import { OrganizationSelect } from '../dashboard/components/OrganizationSelect'
 import { useOrganizationParam } from '../dashboard/hooks/useOrganizationParam'
+import { useOrganizations } from '../dashboard/hooks/useOrganizations'
 import './import.css'
-import { ImportProgressBar, isAbortError, kyivDate, type RunState } from './shared'
+import { ImportProgressBar, isAbortError, type RunState } from './shared'
 
 // dayToIso converts a YYYY-MM-DD local day into an RFC3339 UTC instant
 // at the given day offset's midnight UTC. We send the importer a
@@ -22,14 +23,6 @@ function dayAfterIso(date: string): string {
   d.setUTCDate(d.getUTCDate() + 1)
   return d.toISOString()
 }
-
-// ARCHIVE_LAST_DAY is the last day an archive import may cover. Live
-// telemetry runs from 2026-05-01 onward, so the importer (backend
-// fusionsolar.ArchiveCutoff) refuses any window reaching it. The
-// pickers cap at the day before so a "to-inclusive" selection lands on
-// the half-open boundary (dayAfter == cutoff), which the backend
-// allows. Keep this in sync with internal/fusionsolar.ArchiveCutoff.
-const ARCHIVE_LAST_DAY = '2026-04-30'
 
 function backToDashboard() {
   if (typeof window === 'undefined') return
@@ -61,11 +54,26 @@ export function ImportPage() {
 
 function FusionSolarImportCard() {
   const { organizationID, options, change: onOrganizationChange } = useOrganizationParam()
-  // Default to the last importable archive day so the picker never
-  // opens inside the live-data region (which the backend rejects).
-  const defaultDay = kyivDate(-1) > ARCHIVE_LAST_DAY ? ARCHIVE_LAST_DAY : kyivDate(-1)
-  const [fromDate, setFromDate] = useState<string>(() => defaultDay)
-  const [toDate, setToDate] = useState<string>(() => defaultDay)
+  const { data: orgInfos } = useOrganizations()
+  // archiveLastDay is the per-station upper bound (inclusive), the day
+  // before that org's live-data start. Empty when the org has no
+  // configured go-live date — archive import is then disabled so live
+  // telemetry can never be overwritten.
+  const orgInfo = useMemo(
+    () => orgInfos.find((o) => o.id === organizationID),
+    [orgInfos, organizationID],
+  )
+  const archiveLastDay = orgInfo?.archive_last_day ?? ''
+  // archiveFirstDay is the per-station lower bound (operation start),
+  // inclusive. Empty when no lower bound is configured.
+  const archiveFirstDay = orgInfo?.archive_first_day ?? ''
+  const importDisabled = archiveLastDay === ''
+  const [fromDate, setFromDate] = useState<string>('')
+  const [toDate, setToDate] = useState<string>('')
+  // Before the operator picks a range, default both ends to the last
+  // importable day so the picker never opens inside the live region.
+  const fromValue = fromDate || archiveLastDay
+  const toValue = toDate || archiveLastDay
   const [state, setState] = useState<RunState>('idle')
   const [error, setError] = useState<string | null>(null)
   const [cancelled, setCancelled] = useState(false)
@@ -78,19 +86,33 @@ function FusionSolarImportCard() {
   }, [])
 
   const onRun = useCallback(async () => {
-    if (!fromDate || !toDate) {
+    const from = fromDate || archiveLastDay
+    const to = toDate || archiveLastDay
+    if (!archiveLastDay) {
+      setError('Дата початку live-даних не налаштована для цієї станції — імпорт вимкнено')
+      setState('error')
+      return
+    }
+    if (!from || !to) {
       setError('Вкажіть діапазон дат')
       setState('error')
       return
     }
-    if (toDate < fromDate) {
+    if (to < from) {
       setError('Кінцева дата раніше за початкову')
       setState('error')
       return
     }
-    if (toDate > ARCHIVE_LAST_DAY) {
+    if (to > archiveLastDay) {
       setError(
-        `Архів можна вантажити лише по ${ARCHIVE_LAST_DAY} включно — з 01.05.2026 працюють реальні дані`,
+        `Архів можна вантажити лише по ${archiveLastDay} включно — далі працюють реальні дані`,
+      )
+      setState('error')
+      return
+    }
+    if (archiveFirstDay && from < archiveFirstDay) {
+      setError(
+        `Архів доступний лише з ${archiveFirstDay} — раніше станція ще не працювала`,
       )
       setState('error')
       return
@@ -106,8 +128,8 @@ function FusionSolarImportCard() {
       const res = await runFusionSolarImport(
         {
           organizationID,
-          from: dayStartIso(fromDate),
-          to: dayAfterIso(toDate),
+          from: dayStartIso(from),
+          to: dayAfterIso(to),
         },
         { signal: controller.signal, onProgress: setProgress },
       )
@@ -125,7 +147,7 @@ function FusionSolarImportCard() {
       abortRef.current = null
       setProgress(null)
     }
-  }, [organizationID, fromDate, toDate])
+  }, [organizationID, fromDate, toDate, archiveLastDay, archiveFirstDay])
 
   return (
     <section className="import-card">
@@ -135,8 +157,21 @@ function FusionSolarImportCard() {
         <span className="import-pill import-pill-ok">● Підключення на сервері</span>
       </div>
       <p className="import-section-sub">
-        Оберіть станцію й діапазон дат. Доступно лише по{' '}
-        <strong>{ARCHIVE_LAST_DAY}</strong> включно — з 01.05.2026 працюють реальні дані.
+        Оберіть станцію й діапазон дат.{' '}
+        {importDisabled ? (
+          <>Для цієї станції не вказано дату початку live-даних — імпорт вимкнено.</>
+        ) : (
+          <>
+            Доступно{' '}
+            {archiveFirstDay ? (
+              <>
+                з <strong>{archiveFirstDay}</strong>{' '}
+              </>
+            ) : null}
+            по <strong>{archiveLastDay}</strong> включно — далі працюють реальні дані цієї
+            станції.
+          </>
+        )}
       </p>
       <div className="import-controls">
         <OrganizationSelect
@@ -148,8 +183,10 @@ function FusionSolarImportCard() {
           <span>Від</span>
           <input
             type="date"
-            value={fromDate}
-            max={toDate || ARCHIVE_LAST_DAY}
+            value={fromValue}
+            min={archiveFirstDay || undefined}
+            max={toValue || archiveLastDay || undefined}
+            disabled={importDisabled}
             onChange={(e) => setFromDate(e.target.value)}
           />
         </label>
@@ -157,9 +194,10 @@ function FusionSolarImportCard() {
           <span>До (включно)</span>
           <input
             type="date"
-            value={toDate}
-            min={fromDate || undefined}
-            max={ARCHIVE_LAST_DAY}
+            value={toValue}
+            min={fromValue || archiveFirstDay || undefined}
+            max={archiveLastDay || undefined}
+            disabled={importDisabled}
             onChange={(e) => setToDate(e.target.value)}
           />
         </label>
@@ -173,7 +211,7 @@ function FusionSolarImportCard() {
             type="button"
             className="import-run"
             onClick={onRun}
-            disabled={state === 'loading'}
+            disabled={state === 'loading' || importDisabled}
           >
             {state === 'loading' ? (
               <>
@@ -186,6 +224,14 @@ function FusionSolarImportCard() {
           </button>
         </div>
       </div>
+
+      {importDisabled && (
+        <div className="import-banner import-banner-info" role="status">
+          Дата початку live-даних не налаштована для станції «{organizationID}». Задайте{' '}
+          <code>live_data_start</code> для цієї організації в конфігу, щоб увімкнути імпорт
+          архіву.
+        </div>
+      )}
 
       {state === 'loading' && progress && <ImportProgressBar progress={progress} unit="Вікно" />}
 

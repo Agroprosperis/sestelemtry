@@ -72,6 +72,17 @@ organizations:
   - id: ab
     name: Агродар Бар
     poll_interval: 1s
+    # Day this site went live on the Modbus collector (YYYY-MM-DD). It is
+    # the per-org upper bound for FusionSolar archive imports: the
+    # backfill may only write/delete strictly before this date, so it can
+    # never overwrite real telemetry. Omit it to disable archive import
+    # for the org until the go-live date is known.
+    live_data_start: "2026-05-01"
+    # Day this site began operating (YYYY-MM-DD) — the earliest date with
+    # any archive data and the per-org lower bound for archive imports: a
+    # window starting before it is rejected. Optional; omit for no lower
+    # bound. Must be before live_data_start.
+    operation_start: "2026-01-15"
     location:
       latitude: 49.0406538
       longitude: 27.7419296

@@ -115,6 +115,15 @@ export type OrganizationInfo = {
   id: string
   name?: string
   location?: OrganizationLocation
+  // archive_last_day is the last day (inclusive, YYYY-MM-DD) the
+  // FusionSolar archive importer may cover for this org — the day
+  // before its live-data start. Absent when no go-live date is
+  // configured, in which case archive import is disabled for the org.
+  archive_last_day?: string
+  // archive_first_day is the earliest day (inclusive, YYYY-MM-DD) the
+  // archive importer may cover — the org's operation start. Absent when
+  // no lower bound is configured.
+  archive_first_day?: string
 }
 
 export type OrganizationsResponse = {

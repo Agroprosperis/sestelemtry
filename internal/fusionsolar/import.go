@@ -18,18 +18,37 @@ import (
 // buffering an entire year of rows before the first write.
 const insertBatchSize = 5000
 
-// ArchiveCutoff is the hard upper bound for archive imports: real live
-// telemetry runs from this instant onward (2026-05-01 inclusive), so
-// the importer refuses any window that would write or delete at or
-// after it. The import range is half-open [from, to), so a `to` equal
-// to the cutoff is allowed (it covers up to but excluding the cutoff);
-// anything past it is rejected.
-var ArchiveCutoff = time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
-
 // ErrAfterCutoff is returned (and wrapped) when an import would reach
-// into the live-data region. The HTTP handler maps it to 400 so the
-// operator sees a clear validation error rather than an upstream 502.
-var ErrAfterCutoff = errors.New("fusionsolar: import window reaches live data on/after the archive cutoff")
+// into the live-data region: `to` is after the organization's live-data
+// start instant. The import range is half-open [from, to), so a `to`
+// equal to the cutoff is allowed (it covers up to but excluding the
+// cutoff); anything past it is rejected. The HTTP handler maps it to
+// 400 so the operator sees a clear validation error rather than an
+// upstream 502.
+var ErrAfterCutoff = errors.New("fusionsolar: import window reaches live data on/after the organization's live-data start")
+
+// ErrNoCutoff is returned when the organization has no live-data start
+// date configured. Per policy the importer refuses to run rather than
+// risk overwriting live telemetry, so the site's go-live date must be
+// configured (live_data_start in the org YAML) before any archive
+// import is allowed.
+var ErrNoCutoff = errors.New("fusionsolar: no live-data start date configured for organization")
+
+// ErrBeforeStart is returned (and wrapped) when an import window starts
+// before the organization's operation-start date (the earliest date
+// with any data). The HTTP handler maps it to 400.
+var ErrBeforeStart = errors.New("fusionsolar: import window starts before the organization's operation-start date")
+
+// ArchiveBounds is the per-organization importable date range for the
+// FusionSolar archive backfill. Cutoff is the live-data start (the
+// exclusive upper bound: a window may reach up to but not past it);
+// a zero Cutoff means archive import is disabled for the org. Start is
+// the operation-start (the inclusive lower bound: a window may not
+// begin before it); a zero Start means no lower bound is enforced.
+type ArchiveBounds struct {
+	Start  time.Time
+	Cutoff time.Time
+}
 
 // ImportResult is the structured summary returned to the operator after
 // a backfill run. It is JSON-tagged so the HTTP handler can hand it
@@ -68,17 +87,26 @@ type Importer struct {
 	pool      *pgxpool.Pool
 	log       *slog.Logger
 	hostByOrg map[string]string
+	// boundsByOrg maps an org id to its importable archive date range
+	// (operation-start lower bound + live-data-start upper bound). An
+	// org with no entry (or a zero Cutoff) has archive import disabled
+	// (ErrNoCutoff).
+	boundsByOrg map[string]ArchiveBounds
 }
 
 // NewImporter wires a ready-to-use importer. `hostByOrg` maps an org id
 // to the Modbus host label the live collector stamps on its samples;
 // the importer copies it onto `labels.device_host` so the energy-flow
 // allocator classifies archive rows exactly as it would live data.
-func NewImporter(pool *pgxpool.Pool, log *slog.Logger, hostByOrg map[string]string) *Importer {
+// `boundsByOrg` maps an org id to its importable archive date range
+// (operation-start .. live-data-start); orgs missing from the map (or
+// with a zero Cutoff) are refused (ErrNoCutoff) so live data is never
+// overwritten.
+func NewImporter(pool *pgxpool.Pool, log *slog.Logger, hostByOrg map[string]string, boundsByOrg map[string]ArchiveBounds) *Importer {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Importer{pool: pool, log: log, hostByOrg: hostByOrg}
+	return &Importer{pool: pool, log: log, hostByOrg: hostByOrg, boundsByOrg: boundsByOrg}
 }
 
 // Import backfills [from, to) for one organization using the supplied
@@ -98,10 +126,20 @@ func (im *Importer) Import(ctx context.Context, client *Client, orgID string, fr
 	}
 	from = from.UTC()
 	to = to.UTC()
-	// Safety guard: never write or delete in the live-data region.
-	// Half-open [from, to) means to == ArchiveCutoff is fine.
-	if to.After(ArchiveCutoff) {
-		return nil, fmt.Errorf("%w: to=%s cutoff=%s", ErrAfterCutoff, to.Format(time.RFC3339), ArchiveCutoff.Format(time.RFC3339))
+	// Safety guard: never write or delete in the live-data region. The
+	// boundary is per-organization (its live_data_start); an org with no
+	// configured date is refused outright. Half-open [from, to) means
+	// to == cutoff is fine. The optional operation_start lower bound
+	// rejects windows that begin before the site had any data.
+	bounds, ok := im.boundsByOrg[orgID]
+	if !ok || bounds.Cutoff.IsZero() {
+		return nil, fmt.Errorf("%w: %q", ErrNoCutoff, orgID)
+	}
+	if to.After(bounds.Cutoff) {
+		return nil, fmt.Errorf("%w: to=%s cutoff=%s", ErrAfterCutoff, to.Format(time.RFC3339), bounds.Cutoff.Format(time.RFC3339))
+	}
+	if !bounds.Start.IsZero() && from.Before(bounds.Start) {
+		return nil, fmt.Errorf("%w: from=%s start=%s", ErrBeforeStart, from.Format(time.RFC3339), bounds.Start.Format(time.RFC3339))
 	}
 	topo, ok := Topology[orgID]
 	if !ok {
