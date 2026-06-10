@@ -628,23 +628,6 @@ components:
           example: ZE
         location:
           $ref: "#/components/schemas/LocationInfo"
-        archive_last_day:
-          type: string
-          format: date
-          description: |
-            Last day (inclusive) the FusionSolar archive importer may
-            cover for this org — the day before its configured live-data
-            start. Omitted when no go-live date is configured (archive
-            import disabled for the org).
-          example: "2026-04-30"
-        archive_first_day:
-          type: string
-          format: date
-          description: |
-            Earliest day (inclusive) the archive importer may cover —
-            the org's configured operation start. Omitted when no lower
-            bound is configured.
-          example: "2026-01-15"
       required: [id]
     OrganizationsResponse:
       type: object

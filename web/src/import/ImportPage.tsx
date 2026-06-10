@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import {
   runFusionSolarImport,
   type FusionSolarImportResult,
@@ -6,7 +6,6 @@ import {
 } from '../api'
 import { OrganizationSelect } from '../dashboard/components/OrganizationSelect'
 import { useOrganizationParam } from '../dashboard/hooks/useOrganizationParam'
-import { useOrganizations } from '../dashboard/hooks/useOrganizations'
 import './import.css'
 import { ImportProgressBar, isAbortError, type RunState } from './shared'
 
@@ -22,6 +21,18 @@ function dayAfterIso(date: string): string {
   const d = new Date(`${date}T00:00:00Z`)
   d.setUTCDate(d.getUTCDate() + 1)
   return d.toISOString()
+}
+
+// kyivDate returns the YYYY-MM-DD civil day in Europe/Kyiv, offset by
+// `offsetDays`. Used only to seed sensible default picker values.
+function kyivDate(offsetDays = 0): string {
+  const now = new Date()
+  const kyiv = new Date(now.toLocaleString('en-US', { timeZone: 'Europe/Kyiv' }))
+  kyiv.setDate(kyiv.getDate() + offsetDays)
+  const y = kyiv.getFullYear()
+  const m = String(kyiv.getMonth() + 1).padStart(2, '0')
+  const d = String(kyiv.getDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
 }
 
 function backToDashboard() {
@@ -54,26 +65,8 @@ export function ImportPage() {
 
 function FusionSolarImportCard() {
   const { organizationID, options, change: onOrganizationChange } = useOrganizationParam()
-  const { data: orgInfos } = useOrganizations()
-  // archiveLastDay is the per-station upper bound (inclusive), the day
-  // before that org's live-data start. Empty when the org has no
-  // configured go-live date — archive import is then disabled so live
-  // telemetry can never be overwritten.
-  const orgInfo = useMemo(
-    () => orgInfos.find((o) => o.id === organizationID),
-    [orgInfos, organizationID],
-  )
-  const archiveLastDay = orgInfo?.archive_last_day ?? ''
-  // archiveFirstDay is the per-station lower bound (operation start),
-  // inclusive. Empty when no lower bound is configured.
-  const archiveFirstDay = orgInfo?.archive_first_day ?? ''
-  const importDisabled = archiveLastDay === ''
-  const [fromDate, setFromDate] = useState<string>('')
-  const [toDate, setToDate] = useState<string>('')
-  // Before the operator picks a range, default both ends to the last
-  // importable day so the picker never opens inside the live region.
-  const fromValue = fromDate || archiveLastDay
-  const toValue = toDate || archiveLastDay
+  const [fromDate, setFromDate] = useState<string>(() => kyivDate(-1))
+  const [toDate, setToDate] = useState<string>(() => kyivDate(-1))
   const [state, setState] = useState<RunState>('idle')
   const [error, setError] = useState<string | null>(null)
   const [cancelled, setCancelled] = useState(false)
@@ -86,13 +79,8 @@ function FusionSolarImportCard() {
   }, [])
 
   const onRun = useCallback(async () => {
-    const from = fromDate || archiveLastDay
-    const to = toDate || archiveLastDay
-    if (!archiveLastDay) {
-      setError('Дата початку live-даних не налаштована для цієї станції — імпорт вимкнено')
-      setState('error')
-      return
-    }
+    const from = fromDate
+    const to = toDate
     if (!from || !to) {
       setError('Вкажіть діапазон дат')
       setState('error')
@@ -100,20 +88,6 @@ function FusionSolarImportCard() {
     }
     if (to < from) {
       setError('Кінцева дата раніше за початкову')
-      setState('error')
-      return
-    }
-    if (to > archiveLastDay) {
-      setError(
-        `Архів можна вантажити лише по ${archiveLastDay} включно — далі працюють реальні дані`,
-      )
-      setState('error')
-      return
-    }
-    if (archiveFirstDay && from < archiveFirstDay) {
-      setError(
-        `Архів доступний лише з ${archiveFirstDay} — раніше станція ще не працювала`,
-      )
       setState('error')
       return
     }
@@ -147,7 +121,7 @@ function FusionSolarImportCard() {
       abortRef.current = null
       setProgress(null)
     }
-  }, [organizationID, fromDate, toDate, archiveLastDay, archiveFirstDay])
+  }, [organizationID, fromDate, toDate])
 
   return (
     <section className="import-card">
@@ -157,21 +131,8 @@ function FusionSolarImportCard() {
         <span className="import-pill import-pill-ok">● Підключення на сервері</span>
       </div>
       <p className="import-section-sub">
-        Оберіть станцію й діапазон дат.{' '}
-        {importDisabled ? (
-          <>Для цієї станції не вказано дату початку live-даних — імпорт вимкнено.</>
-        ) : (
-          <>
-            Доступно{' '}
-            {archiveFirstDay ? (
-              <>
-                з <strong>{archiveFirstDay}</strong>{' '}
-              </>
-            ) : null}
-            по <strong>{archiveLastDay}</strong> включно — далі працюють реальні дані цієї
-            станції.
-          </>
-        )}
+        Оберіть станцію й діапазон дат. Дні, за які вже є реальні (live) дані,
+        пропускаються автоматично — архів заповнює лише дні без live-даних.
       </p>
       <div className="import-controls">
         <OrganizationSelect
@@ -183,10 +144,8 @@ function FusionSolarImportCard() {
           <span>Від</span>
           <input
             type="date"
-            value={fromValue}
-            min={archiveFirstDay || undefined}
-            max={toValue || archiveLastDay || undefined}
-            disabled={importDisabled}
+            value={fromDate}
+            max={toDate || undefined}
             onChange={(e) => setFromDate(e.target.value)}
           />
         </label>
@@ -194,10 +153,8 @@ function FusionSolarImportCard() {
           <span>До (включно)</span>
           <input
             type="date"
-            value={toValue}
-            min={fromValue || archiveFirstDay || undefined}
-            max={archiveLastDay || undefined}
-            disabled={importDisabled}
+            value={toDate}
+            min={fromDate || undefined}
             onChange={(e) => setToDate(e.target.value)}
           />
         </label>
@@ -211,7 +168,7 @@ function FusionSolarImportCard() {
             type="button"
             className="import-run"
             onClick={onRun}
-            disabled={state === 'loading' || importDisabled}
+            disabled={state === 'loading'}
           >
             {state === 'loading' ? (
               <>
@@ -225,24 +182,16 @@ function FusionSolarImportCard() {
         </div>
       </div>
 
-      {importDisabled && (
-        <div className="import-banner import-banner-info" role="status">
-          Дата початку live-даних не налаштована для станції «{organizationID}». Задайте{' '}
-          <code>live_data_start</code> для цієї організації в конфігу, щоб увімкнути імпорт
-          архіву.
-        </div>
-      )}
-
       {state === 'loading' && progress && <ImportProgressBar progress={progress} unit="Вікно" />}
 
       <p className="import-hint">
         Завантажує 5-хвилинні архівні дані зі SmartLogger / УЗЕ через FusionSolar
         Northbound API і записує накопичувальні лічильники в базу так, щоб дашборд і
-        сторінка економіки читали їх як звичайні дані. Повторний запуск того ж
-        діапазону перезаписує раніше імпортовані дані (ідемпотентно) — перезапис
-        зачіпає <strong>лише</strong> рядки з позначкою архіву (source=fusionsolar),
-        тож реальні дані ніколи не видаляються. Скасування перериває процес одразу —
-        нічого не записується (дані вносяться лише після повного завантаження).
+        сторінка економіки читали їх як звичайні дані. Перед записом кожного дня
+        перевіряється, чи є за цей день реальні (live) дані: якщо є — день
+        пропускається й не змінюється; якщо ні — записується (повторний запуск
+        оновлює лише раніше імпортовані архівні рядки з позначкою source=fusionsolar).
+        Реальні дані ніколи не перезаписуються. Скасування перериває процес одразу.
       </p>
 
       {cancelled && (
@@ -276,6 +225,10 @@ function FusionSolarImportCard() {
             <div>
               <dt>Вікон (по 24 год)</dt>
               <dd>{result.windows}</dd>
+            </div>
+            <div>
+              <dt>Пропущено (є live-дані)</dt>
+              <dd>{(result.skipped_live_windows ?? 0).toLocaleString('uk-UA')}</dd>
             </div>
             <div>
               <dt>Записано рядків</dt>

@@ -135,15 +135,16 @@ func DeleteSamplesInRange(
 
 // DeleteArchiveSamplesInRange removes only the rows tagged with the
 // given source label (labels->>'source' = source) for
-// (organization_id, metric_key ∈ metricKeys, [from, to]). Used by the
-// FusionSolar importer to make a re-import idempotent WITHOUT ever
-// touching live Modbus samples: those carry no `source` label, so a
-// re-import deletes and rewrites strictly its own archive rows. The
-// source tag also lets an operator wipe + re-pull the archive later.
+// (organization_id, metric_key ∈ metricKeys) in the half-open window
+// [from, to). Used by the FusionSolar importer to make a re-import
+// idempotent WITHOUT ever touching live Modbus samples: those carry no
+// `source` label, so a re-import deletes and rewrites strictly its own
+// archive rows. The source tag also lets an operator wipe + re-pull the
+// archive later.
 //
-// The bound is right-closed (time <= to) to mirror the query side;
-// combined with the source filter, real data is safe even if a
-// timestamp coincides.
+// The bound is half-open (time < to) to mirror the importer's per-window
+// write side, so a boundary sample is attributed to exactly one window
+// and the closing instant is never double-handled.
 func DeleteArchiveSamplesInRange(
 	ctx context.Context,
 	pool *pgxpool.Pool,
@@ -176,12 +177,60 @@ func DeleteArchiveSamplesInRange(
 			AND metric_key = ANY($2)
 			AND labels->>'source' = $3
 			AND time >= $4
-			AND time <= $5
+			AND time < $5
 	`, organizationID, metricKeys, source, from.UTC(), to.UTC())
 	if err != nil {
 		return 0, fmt.Errorf("storage: delete archive samples in range: %w", err)
 	}
 	return tag.RowsAffected(), nil
+}
+
+// HasLiveSamplesInRange reports whether any *live* (non-archive)
+// telemetry already exists for organization_id in the half-open window
+// [from, to). "Live" means any row NOT tagged with the archive `source`
+// label: live Modbus samples carry no `source` label, so the predicate
+// `labels->>'source' IS DISTINCT FROM source` matches every real row and
+// ignores only the importer's own archive rows. The check is deliberately
+// metric-agnostic — if the site reported anything at all that day, the
+// day is treated as live. The FusionSolar importer uses this to leave any
+// day that already has real data completely untouched, so it can never
+// overwrite, duplicate, or interleave with live telemetry.
+func HasLiveSamplesInRange(
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	organizationID string,
+	source string,
+	from, to time.Time,
+) (bool, error) {
+	if pool == nil {
+		return false, fmt.Errorf("storage: nil pool")
+	}
+	if organizationID == "" {
+		return false, fmt.Errorf("storage: organization_id is required")
+	}
+	if strings.TrimSpace(source) == "" {
+		return false, fmt.Errorf("storage: source is required")
+	}
+	if from.IsZero() || to.IsZero() {
+		return false, fmt.Errorf("storage: from and to are required")
+	}
+	if !to.After(from) {
+		return false, fmt.Errorf("storage: to must be after from")
+	}
+	var exists bool
+	err := pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM telemetry_samples
+			WHERE organization_id = $1
+				AND labels->>'source' IS DISTINCT FROM $2
+				AND time >= $3
+				AND time < $4
+		)
+	`, organizationID, source, from.UTC(), to.UTC()).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("storage: check live samples in range: %w", err)
+	}
+	return exists, nil
 }
 
 func toCopyRows(samples []Sample) ([][]any, error) {

@@ -1,9 +1,7 @@
 package fusionsolar
 
 import (
-	"context"
 	"encoding/json"
-	"errors"
 	"testing"
 	"time"
 
@@ -177,57 +175,6 @@ func TestWindowDedup(t *testing.T) {
 	}
 	if count != 1 {
 		t.Errorf("boundary sample written %d times, want 1", count)
-	}
-}
-
-// TestImportCutoffGuard verifies the importer itself refuses a window
-// that crosses the live-data cutoff (defense in depth behind the HTTP
-// handler), returning the ErrAfterCutoff sentinel before any network
-// or DB access.
-func TestImportCutoffGuard(t *testing.T) {
-	cutoff := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
-	im := NewImporter(nil, nil, nil, map[string]ArchiveBounds{"ab": {Cutoff: cutoff}})
-	client := NewClient("https://example.invalid", "tok", time.Second)
-
-	from := cutoff.Add(-24 * time.Hour)
-	to := cutoff.Add(24 * time.Hour) // past the cutoff
-	_, err := im.Import(context.Background(), client, "ab", from, to, nil)
-	if !errors.Is(err, ErrAfterCutoff) {
-		t.Fatalf("want ErrAfterCutoff, got %v", err)
-	}
-}
-
-// TestImportNoCutoffBlocks verifies the importer refuses any org without
-// a configured live-data start date, so a missing go-live date can never
-// let a backfill touch live telemetry.
-func TestImportNoCutoffBlocks(t *testing.T) {
-	im := NewImporter(nil, nil, nil, nil)
-	client := NewClient("https://example.invalid", "tok", time.Second)
-
-	from := time.Date(2026, 4, 29, 0, 0, 0, 0, time.UTC)
-	to := time.Date(2026, 4, 30, 0, 0, 0, 0, time.UTC)
-	_, err := im.Import(context.Background(), client, "ab", from, to, nil)
-	if !errors.Is(err, ErrNoCutoff) {
-		t.Fatalf("want ErrNoCutoff, got %v", err)
-	}
-}
-
-// TestImportBeforeStartBlocks verifies the importer refuses a window
-// that begins before the org's operation-start date.
-func TestImportBeforeStartBlocks(t *testing.T) {
-	bounds := ArchiveBounds{
-		Start:  time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC),
-		Cutoff: time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC),
-	}
-	im := NewImporter(nil, nil, nil, map[string]ArchiveBounds{"ab": bounds})
-	client := NewClient("https://example.invalid", "tok", time.Second)
-
-	// from = 2026-01-15 is before the operation start -> forbidden.
-	from := time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC)
-	to := time.Date(2026, 1, 20, 0, 0, 0, 0, time.UTC)
-	_, err := im.Import(context.Background(), client, "ab", from, to, nil)
-	if !errors.Is(err, ErrBeforeStart) {
-		t.Fatalf("want ErrBeforeStart, got %v", err)
 	}
 }
 

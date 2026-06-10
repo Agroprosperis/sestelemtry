@@ -25,12 +25,6 @@ type Handlers struct {
 	log            *slog.Logger
 	organizations  []OrganizationInfo
 	energyFlowOrgs map[string]EnergyFlowOrg
-	// archiveBounds maps an org id to its importable archive date range
-	// (operation-start lower bound + live-data-start upper bound) that
-	// guards the FusionSolar importer. An org missing from the map (or
-	// with a zero Cutoff) has archive import disabled so live telemetry
-	// can never be overwritten.
-	archiveBounds map[string]fusionsolar.ArchiveBounds
 	// damFetcher backs POST /api/v1/dam-prices/refresh. nil when the
 	// API process was started without an `oree:` config block — the
 	// handler responds 503 in that case so operators get a clear
@@ -284,24 +278,6 @@ func (h *Handlers) SetOrganizations(orgs []OrganizationInfo) {
 	out := make([]OrganizationInfo, len(orgs))
 	copy(out, orgs)
 	h.organizations = out
-}
-
-// SetArchiveBounds sets the per-organization importable archive date
-// ranges that guard the FusionSolar importer: an import window may not
-// reach on/after its org's cutoff (live-data start) nor begin before its
-// start (operation start), and an org with no entry has archive import
-// disabled entirely. The map is shallow-copied so the caller can mutate
-// the source without affecting in-flight requests.
-func (h *Handlers) SetArchiveBounds(m map[string]fusionsolar.ArchiveBounds) {
-	if len(m) == 0 {
-		h.archiveBounds = nil
-		return
-	}
-	out := make(map[string]fusionsolar.ArchiveBounds, len(m))
-	for k, v := range m {
-		out[k] = v
-	}
-	h.archiveBounds = out
 }
 
 func (h *Handlers) Router() http.Handler {
@@ -1149,24 +1125,9 @@ func (h *Handlers) fusionSolarImport(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("range too wide: max %s per import", maxFusionImportRange), http.StatusBadRequest)
 		return
 	}
-	// Safety guard: archive imports must stay within the org's importable
-	// range. The boundary is per-organization (operation_start ..
-	// live_data_start); an org with no configured cutoff has archive
-	// import disabled so live data can never be overwritten. The window
-	// is half-open [from, to), so to == cutoff is allowed.
-	bounds, ok := h.archiveBounds[orgID]
-	if !ok || bounds.Cutoff.IsZero() {
-		http.Error(w, fmt.Sprintf("archive import disabled for organization %q: live-data start date not configured", orgID), http.StatusBadRequest)
-		return
-	}
-	if to.After(bounds.Cutoff) {
-		http.Error(w, fmt.Sprintf("archive import forbidden on/after %s (live data) — set `to` no later than the cutoff", bounds.Cutoff.Format(time.RFC3339)), http.StatusBadRequest)
-		return
-	}
-	if !bounds.Start.IsZero() && from.Before(bounds.Start) {
-		http.Error(w, fmt.Sprintf("archive import forbidden before %s (operation start) — set `from` no earlier than that date", bounds.Start.Format(time.RFC3339)), http.StatusBadRequest)
-		return
-	}
+	// No date guard: the importer protects live data per 24h window by
+	// skipping any day that already has real (non-archive) telemetry, so
+	// a backfill can never overwrite it.
 
 	var body struct {
 		AccessToken  string `json:"access_token"`

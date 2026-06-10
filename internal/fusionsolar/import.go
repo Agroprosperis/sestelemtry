@@ -3,7 +3,6 @@ package fusionsolar
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -18,38 +17,6 @@ import (
 // buffering an entire year of rows before the first write.
 const insertBatchSize = 5000
 
-// ErrAfterCutoff is returned (and wrapped) when an import would reach
-// into the live-data region: `to` is after the organization's live-data
-// start instant. The import range is half-open [from, to), so a `to`
-// equal to the cutoff is allowed (it covers up to but excluding the
-// cutoff); anything past it is rejected. The HTTP handler maps it to
-// 400 so the operator sees a clear validation error rather than an
-// upstream 502.
-var ErrAfterCutoff = errors.New("fusionsolar: import window reaches live data on/after the organization's live-data start")
-
-// ErrNoCutoff is returned when the organization has no live-data start
-// date configured. Per policy the importer refuses to run rather than
-// risk overwriting live telemetry, so the site's go-live date must be
-// configured (live_data_start in the org YAML) before any archive
-// import is allowed.
-var ErrNoCutoff = errors.New("fusionsolar: no live-data start date configured for organization")
-
-// ErrBeforeStart is returned (and wrapped) when an import window starts
-// before the organization's operation-start date (the earliest date
-// with any data). The HTTP handler maps it to 400.
-var ErrBeforeStart = errors.New("fusionsolar: import window starts before the organization's operation-start date")
-
-// ArchiveBounds is the per-organization importable date range for the
-// FusionSolar archive backfill. Cutoff is the live-data start (the
-// exclusive upper bound: a window may reach up to but not past it);
-// a zero Cutoff means archive import is disabled for the org. Start is
-// the operation-start (the inclusive lower bound: a window may not
-// begin before it); a zero Start means no lower bound is enforced.
-type ArchiveBounds struct {
-	Start  time.Time
-	Cutoff time.Time
-}
-
 // ImportResult is the structured summary returned to the operator after
 // a backfill run. It is JSON-tagged so the HTTP handler can hand it
 // straight to the response.
@@ -61,9 +28,13 @@ type ImportResult struct {
 	Windows        int            `json:"windows"`
 	RowsWritten    int            `json:"rows_written"`
 	DeletedRows    int64          `json:"deleted_rows"`
-	PerMetric      map[string]int `json:"per_metric"`
-	KpiDaysWritten int            `json:"kpi_days_written"`
-	Warnings       []string       `json:"warnings,omitempty"`
+	// SkippedLiveWindows counts 24h windows the importer skipped because
+	// real (live) data already exists for them — those days are left
+	// untouched so live telemetry is never overwritten.
+	SkippedLiveWindows int            `json:"skipped_live_windows"`
+	PerMetric          map[string]int `json:"per_metric"`
+	KpiDaysWritten     int            `json:"kpi_days_written"`
+	Warnings           []string       `json:"warnings,omitempty"`
 }
 
 // kpiKyiv is the timezone used to bucket getKpiStationDay rows into
@@ -87,26 +58,21 @@ type Importer struct {
 	pool      *pgxpool.Pool
 	log       *slog.Logger
 	hostByOrg map[string]string
-	// boundsByOrg maps an org id to its importable archive date range
-	// (operation-start lower bound + live-data-start upper bound). An
-	// org with no entry (or a zero Cutoff) has archive import disabled
-	// (ErrNoCutoff).
-	boundsByOrg map[string]ArchiveBounds
 }
 
 // NewImporter wires a ready-to-use importer. `hostByOrg` maps an org id
 // to the Modbus host label the live collector stamps on its samples;
 // the importer copies it onto `labels.device_host` so the energy-flow
 // allocator classifies archive rows exactly as it would live data.
-// `boundsByOrg` maps an org id to its importable archive date range
-// (operation-start .. live-data-start); orgs missing from the map (or
-// with a zero Cutoff) are refused (ErrNoCutoff) so live data is never
-// overwritten.
-func NewImporter(pool *pgxpool.Pool, log *slog.Logger, hostByOrg map[string]string, boundsByOrg map[string]ArchiveBounds) *Importer {
+//
+// There is no date guard: instead of a configured cutoff, the importer
+// checks per 24h window whether real (live) telemetry already exists and
+// skips those windows, so a backfill can never overwrite live data.
+func NewImporter(pool *pgxpool.Pool, log *slog.Logger, hostByOrg map[string]string) *Importer {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Importer{pool: pool, log: log, hostByOrg: hostByOrg, boundsByOrg: boundsByOrg}
+	return &Importer{pool: pool, log: log, hostByOrg: hostByOrg}
 }
 
 // Import backfills [from, to) for one organization using the supplied
@@ -126,21 +92,6 @@ func (im *Importer) Import(ctx context.Context, client *Client, orgID string, fr
 	}
 	from = from.UTC()
 	to = to.UTC()
-	// Safety guard: never write or delete in the live-data region. The
-	// boundary is per-organization (its live_data_start); an org with no
-	// configured date is refused outright. Half-open [from, to) means
-	// to == cutoff is fine. The optional operation_start lower bound
-	// rejects windows that begin before the site had any data.
-	bounds, ok := im.boundsByOrg[orgID]
-	if !ok || bounds.Cutoff.IsZero() {
-		return nil, fmt.Errorf("%w: %q", ErrNoCutoff, orgID)
-	}
-	if to.After(bounds.Cutoff) {
-		return nil, fmt.Errorf("%w: to=%s cutoff=%s", ErrAfterCutoff, to.Format(time.RFC3339), bounds.Cutoff.Format(time.RFC3339))
-	}
-	if !bounds.Start.IsZero() && from.Before(bounds.Start) {
-		return nil, fmt.Errorf("%w: from=%s start=%s", ErrBeforeStart, from.Format(time.RFC3339), bounds.Start.Format(time.RFC3339))
-	}
 	topo, ok := Topology[orgID]
 	if !ok {
 		return nil, fmt.Errorf("fusionsolar: no plant topology for organization %q", orgID)
@@ -155,7 +106,7 @@ func (im *Importer) Import(ctx context.Context, client *Client, orgID string, fr
 		PerMetric:      map[string]int{},
 	}
 
-	acc := newSampleAccumulator(orgID, host, topo)
+	metricKeys := ImportableMetricKeys()
 
 	// Total 24h windows the loop will cover, for the progress feed.
 	totalWindows := int(to.Sub(from) / maxHistoryWindow)
@@ -175,6 +126,31 @@ func (im *Importer) Import(ctx context.Context, client *Client, orgID string, fr
 			windowEnd = to
 		}
 		result.Windows++
+
+		// Live-data protection (replaces the old date cutoff): if this
+		// day already has ANY real (non-archive) telemetry, leave it
+		// completely untouched — don't fetch, don't delete, don't write.
+		// Archive only ever fills days that have no live data; a day
+		// that already has real data is skipped wholesale. This makes
+		// the importer safe to run over any range without a boundary and
+		// guarantees live data is never overwritten or interleaved.
+		hasLive, err := storage.HasLiveSamplesInRange(ctx, im.pool, orgID, SourceValue, windowStart, windowEnd)
+		if err != nil {
+			return nil, fmt.Errorf("fusionsolar: check live data [%s..%s]: %w", windowStart.Format(time.RFC3339), windowEnd.Format(time.RFC3339), err)
+		}
+		if hasLive {
+			result.SkippedLiveWindows++
+			if onProgress != nil {
+				onProgress(result.Windows, totalWindows)
+			}
+			continue
+		}
+
+		// A fresh accumulator per window keeps each day's archive rows
+		// independent. The samples are absolute cumulative readings (not
+		// cross-window deltas), so there is no continuity to preserve
+		// between windows.
+		acc := newSampleAccumulator(orgID, host, topo)
 
 		// 1. Primary SmartLogger: PV / load / grid (+ ESS counters on
 		//    single-logger sites).
@@ -208,6 +184,35 @@ func (im *Importer) Import(ctx context.Context, client *Client, orgID string, fr
 			acc.addEssDevice(essSamples, windowStart, windowEnd)
 		}
 
+		windowSamples := acc.samples()
+		for _, s := range windowSamples {
+			result.PerMetric[s.MetricKey]++
+		}
+
+		if len(windowSamples) > 0 {
+			// Idempotency: drop only previously-imported ARCHIVE rows in
+			// this window (labels.source = "fusionsolar") before writing
+			// the fresh batch. Live Modbus samples carry no source label,
+			// so they are never deleted — and we only get here for days
+			// without live data anyway.
+			deleted, err := storage.DeleteArchiveSamplesInRange(ctx, im.pool, orgID, metricKeys, SourceValue, windowStart, windowEnd)
+			if err != nil {
+				return nil, fmt.Errorf("fusionsolar: clear existing archive range: %w", err)
+			}
+			result.DeletedRows += deleted
+
+			for start := 0; start < len(windowSamples); start += insertBatchSize {
+				end := start + insertBatchSize
+				if end > len(windowSamples) {
+					end = len(windowSamples)
+				}
+				if err := storage.InsertSamples(ctx, im.pool, windowSamples[start:end]); err != nil {
+					return nil, fmt.Errorf("fusionsolar: insert samples: %w", err)
+				}
+			}
+			result.RowsWritten += len(windowSamples)
+		}
+
 		if onProgress != nil {
 			onProgress(result.Windows, totalWindows)
 		}
@@ -223,36 +228,13 @@ func (im *Importer) Import(ctx context.Context, client *Client, orgID string, fr
 		result.KpiDaysWritten = kpiDays
 	}
 
-	samples := acc.samples()
-	for _, s := range samples {
-		result.PerMetric[s.MetricKey]++
-	}
-
-	if len(samples) == 0 {
-		result.Warnings = append(result.Warnings, "no samples returned for the requested window")
-		return result, nil
-	}
-
-	// Idempotency: drop only previously-imported ARCHIVE rows in the
-	// window (labels.source = "fusionsolar") before writing the fresh
-	// batch. Live Modbus samples carry no source label, so they are
-	// never deleted — a re-import rewrites strictly its own rows.
-	deleted, err := storage.DeleteArchiveSamplesInRange(ctx, im.pool, orgID, ImportableMetricKeys(), SourceValue, from, to)
-	if err != nil {
-		return nil, fmt.Errorf("fusionsolar: clear existing archive range: %w", err)
-	}
-	result.DeletedRows = deleted
-
-	for start := 0; start < len(samples); start += insertBatchSize {
-		end := start + insertBatchSize
-		if end > len(samples) {
-			end = len(samples)
-		}
-		if err := storage.InsertSamples(ctx, im.pool, samples[start:end]); err != nil {
-			return nil, fmt.Errorf("fusionsolar: insert samples: %w", err)
+	if result.RowsWritten == 0 {
+		if result.SkippedLiveWindows == result.Windows && result.Windows > 0 {
+			result.Warnings = append(result.Warnings, "all days in the requested window already have live data — nothing imported")
+		} else {
+			result.Warnings = append(result.Warnings, "no samples returned for the requested window")
 		}
 	}
-	result.RowsWritten = len(samples)
 
 	im.log.Info("fusionsolar_import_ok",
 		"organization_id", orgID,
@@ -260,6 +242,7 @@ func (im *Importer) Import(ctx context.Context, client *Client, orgID string, fr
 		"from", from.Format(time.RFC3339),
 		"to", to.Format(time.RFC3339),
 		"windows", result.Windows,
+		"skipped_live_windows", result.SkippedLiveWindows,
 		"rows_written", result.RowsWritten,
 		"deleted_rows", result.DeletedRows,
 		"kpi_days_written", result.KpiDaysWritten,

@@ -59,22 +59,6 @@ type Organization struct {
 	Modbus        Modbus         `yaml:"modbus"`
 	ModbusDevices []ModbusDevice `yaml:"modbus_devices"`
 
-	// LiveDataStart marks the day this site went live on the Modbus
-	// collector (YYYY-MM-DD, civil date in UTC). It is the per-org upper
-	// bound for FusionSolar archive imports: the backfill may only
-	// write/delete strictly before this date, so it can never overwrite
-	// real telemetry. Empty means "not configured" — archive import is
-	// disabled for the org until a go-live date is set.
-	LiveDataStart string `yaml:"live_data_start"`
-
-	// OperationStart marks the day this site began operating (YYYY-MM-DD,
-	// civil date in UTC) — the earliest date with any archive data. It
-	// is the per-org lower bound for FusionSolar archive imports: a
-	// window starting before it is rejected (there is nothing to import,
-	// and it guards against fat-finger ranges). Empty means no lower
-	// bound is enforced.
-	OperationStart string `yaml:"operation_start"`
-
 	// EssDischargeSign overrides the convention that
 	// `active_ess_power_kw > 0` means "ESS discharging". Set to -1
 	// for inverters that report charge as positive ESS power.
@@ -391,24 +375,6 @@ func (c *Root) validate() error {
 		case 0, 1, -1:
 		default:
 			return fmt.Errorf("config: org %q ess_discharge_sign must be 1 or -1, got %d", id, o.EssDischargeSign)
-		}
-		var liveStart, opStart time.Time
-		if s := strings.TrimSpace(o.LiveDataStart); s != "" {
-			t, err := time.Parse("2006-01-02", s)
-			if err != nil {
-				return fmt.Errorf("config: org %q live_data_start must be YYYY-MM-DD: %w", id, err)
-			}
-			liveStart = t
-		}
-		if s := strings.TrimSpace(o.OperationStart); s != "" {
-			t, err := time.Parse("2006-01-02", s)
-			if err != nil {
-				return fmt.Errorf("config: org %q operation_start must be YYYY-MM-DD: %w", id, err)
-			}
-			opStart = t
-		}
-		if !liveStart.IsZero() && !opStart.IsZero() && !opStart.Before(liveStart) {
-			return fmt.Errorf("config: org %q operation_start (%s) must be before live_data_start (%s)", id, opStart.Format("2006-01-02"), liveStart.Format("2006-01-02"))
 		}
 	}
 	return nil

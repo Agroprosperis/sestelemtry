@@ -9,8 +9,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/nesh/sestelemetry/internal/fusionsolar"
 )
 
 func TestFusionImportRejectsNonPost(t *testing.T) {
@@ -79,22 +77,12 @@ func TestFusionImportRejectsBackwardsRange(t *testing.T) {
 	}
 }
 
-// testBounds is the per-org archive range used by the import handler
-// tests: live data starts 2026-05-01 (the archive window may reach up to
-// but not past it) and operation started 2026-01-01 (no window may begin
-// earlier).
-var testBounds = map[string]fusionsolar.ArchiveBounds{
-	"ab": {Start: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), Cutoff: time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)},
-	"sm": {Start: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), Cutoff: time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)},
-}
-
 func TestFusionImportRequiresToken(t *testing.T) {
 	h := NewHandlers(&mockStore{}, "*")
 	h.SetFusionSolarImporter(func(context.Context, string, string, string, time.Time, time.Time, FusionProgressFunc) (any, error) {
 		t.Fatal("importer should not run without a token")
 		return nil, nil
 	})
-	h.SetArchiveBounds(testBounds)
 	// Valid query params but empty body — token missing.
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/fusionsolar/import?organization_id=ab&from=2026-04-29T00:00:00Z&to=2026-04-30T00:00:00Z", strings.NewReader(`{}`))
 	rec := httptest.NewRecorder()
@@ -107,57 +95,11 @@ func TestFusionImportRequiresToken(t *testing.T) {
 	}
 }
 
-// TestFusionImportRejectsAfterCutoff guards the live-data boundary: a
-// window whose `to` crosses the archive cutoff (2026-05-01) must be
-// rejected with 400 before the importer runs, so real data can never
-// be overwritten.
-func TestFusionImportRejectsAfterCutoff(t *testing.T) {
-	h := NewHandlers(&mockStore{}, "*")
-	h.SetFusionSolarImporter(func(context.Context, string, string, string, time.Time, time.Time, FusionProgressFunc) (any, error) {
-		t.Fatal("importer must not run for a post-cutoff window")
-		return nil, nil
-	})
-	h.SetArchiveBounds(testBounds)
-	// to = 2026-05-02 is past the cutoff -> forbidden.
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/fusionsolar/import?organization_id=ab&from=2026-04-30T00:00:00Z&to=2026-05-02T00:00:00Z", strings.NewReader(`{"access_token":"t"}`))
-	rec := httptest.NewRecorder()
-	h.Router().ServeHTTP(rec, req)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("want 400 got %d body=%s", rec.Code, rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), "archive import forbidden") {
-		t.Fatalf("expected cutoff hint, got %q", rec.Body.String())
-	}
-}
-
-// TestFusionImportAllowsToEqualCutoff verifies the half-open boundary:
-// to == cutoff covers up to but excluding the live region and is
-// allowed.
-func TestFusionImportAllowsToEqualCutoff(t *testing.T) {
-	ran := false
-	h := NewHandlers(&mockStore{}, "*")
-	h.SetFusionSolarImporter(func(context.Context, string, string, string, time.Time, time.Time, FusionProgressFunc) (any, error) {
-		ran = true
-		return map[string]any{"rows_written": 0}, nil
-	})
-	h.SetArchiveBounds(testBounds)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/fusionsolar/import?organization_id=ab&from=2026-04-30T00:00:00Z&to=2026-05-01T00:00:00Z", strings.NewReader(`{"access_token":"t"}`))
-	rec := httptest.NewRecorder()
-	h.Router().ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("want 200 got %d body=%s", rec.Code, rec.Body.String())
-	}
-	if !ran {
-		t.Fatal("importer should have run for to == cutoff")
-	}
-}
-
 func TestFusionImportUpstreamFailure(t *testing.T) {
 	h := NewHandlers(&mockStore{}, "*")
 	h.SetFusionSolarImporter(func(context.Context, string, string, string, time.Time, time.Time, FusionProgressFunc) (any, error) {
 		return nil, errors.New("fusionsolar: device/history failCode=305 token expired")
 	})
-	h.SetArchiveBounds(testBounds)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/fusionsolar/import?organization_id=ab&from=2026-04-29T00:00:00Z&to=2026-04-30T00:00:00Z", strings.NewReader(`{"access_token":"t"}`))
 	rec := httptest.NewRecorder()
 	h.Router().ServeHTTP(rec, req)
@@ -181,7 +123,6 @@ func TestFusionImportSuccessPassesParams(t *testing.T) {
 		gotOrg, gotToken, gotBase, gotFrom, gotTo = org, token, base, from, to
 		return map[string]any{"organization_id": org, "rows_written": 42}, nil
 	})
-	h.SetArchiveBounds(testBounds)
 	body := `{"access_token":"secret-token","api_base":"https://eu5.fusionsolar.huawei.com"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/fusionsolar/import?organization_id=sm&from=2026-04-29T00:00:00Z&to=2026-04-30T00:00:00Z", strings.NewReader(body))
 	rec := httptest.NewRecorder()
@@ -244,54 +185,10 @@ func TestFusionImportTokenNotInQuery(t *testing.T) {
 		t.Fatal("importer should not run when token only in query")
 		return nil, nil
 	})
-	h.SetArchiveBounds(testBounds)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/fusionsolar/import?organization_id=ab&from=2026-04-29T00:00:00Z&to=2026-04-30T00:00:00Z&access_token=leaked", strings.NewReader(`{}`))
 	rec := httptest.NewRecorder()
 	h.Router().ServeHTTP(rec, req)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("want 400 got %d body=%s", rec.Code, rec.Body.String())
-	}
-}
-
-// TestFusionImportDisabledWhenNoCutoff verifies that an org with no
-// configured live-data start date has archive import disabled: the
-// handler rejects with 400 before the importer (or any auth) runs, so a
-// station whose go-live date hasn't been set can never be backfilled.
-func TestFusionImportDisabledWhenNoCutoff(t *testing.T) {
-	h := NewHandlers(&mockStore{}, "*")
-	h.SetFusionSolarImporter(func(context.Context, string, string, string, time.Time, time.Time, FusionProgressFunc) (any, error) {
-		t.Fatal("importer must not run for an org without a configured cutoff")
-		return nil, nil
-	})
-	h.SetArchiveBounds(testBounds) // "ke" intentionally absent
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/fusionsolar/import?organization_id=ke&from=2026-04-29T00:00:00Z&to=2026-04-30T00:00:00Z", strings.NewReader(`{"access_token":"t"}`))
-	rec := httptest.NewRecorder()
-	h.Router().ServeHTTP(rec, req)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("want 400 got %d body=%s", rec.Code, rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), "archive import disabled") {
-		t.Fatalf("expected disabled hint, got %q", rec.Body.String())
-	}
-}
-
-// TestFusionImportRejectsBeforeStart guards the lower bound: a window
-// starting before the org's operation-start date is rejected with 400
-// before the importer runs.
-func TestFusionImportRejectsBeforeStart(t *testing.T) {
-	h := NewHandlers(&mockStore{}, "*")
-	h.SetFusionSolarImporter(func(context.Context, string, string, string, time.Time, time.Time, FusionProgressFunc) (any, error) {
-		t.Fatal("importer must not run for a pre-operation-start window")
-		return nil, nil
-	})
-	h.SetArchiveBounds(testBounds) // ab operation start = 2026-01-01
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/fusionsolar/import?organization_id=ab&from=2025-12-30T00:00:00Z&to=2025-12-31T00:00:00Z", strings.NewReader(`{"access_token":"t"}`))
-	rec := httptest.NewRecorder()
-	h.Router().ServeHTTP(rec, req)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("want 400 got %d body=%s", rec.Code, rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), "operation start") {
-		t.Fatalf("expected operation-start hint, got %q", rec.Body.String())
 	}
 }

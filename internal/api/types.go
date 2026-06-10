@@ -229,17 +229,6 @@ type OrganizationInfo struct {
 	ID       string        `json:"id"`
 	Name     string        `json:"name,omitempty"`
 	Location *LocationInfo `json:"location,omitempty"`
-	// ArchiveLastDay is the last day (inclusive, YYYY-MM-DD) the
-	// FusionSolar archive importer may cover for this org — the day
-	// before its configured live-data start. Empty when no go-live date
-	// is configured, in which case archive import is disabled for the
-	// org. The import page uses it to cap the date pickers per station.
-	ArchiveLastDay string `json:"archive_last_day,omitempty"`
-	// ArchiveFirstDay is the earliest day (inclusive, YYYY-MM-DD) the
-	// archive importer may cover — the org's configured operation start.
-	// Empty when no lower bound is configured. The import page uses it to
-	// cap the lower end of the date pickers per station.
-	ArchiveFirstDay string `json:"archive_first_day,omitempty"`
 }
 
 // OrganizationsResponse is the body of GET /api/v1/organizations.

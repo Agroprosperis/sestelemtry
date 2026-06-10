@@ -616,6 +616,9 @@ export type FusionSolarImportResult = {
   windows: number
   rows_written: number
   deleted_rows: number
+  // skipped_live_windows counts 24h windows skipped because real (live)
+  // data already exists for them — those days are left untouched.
+  skipped_live_windows?: number
   per_metric: Record<string, number>
   warnings?: string[]
 }
