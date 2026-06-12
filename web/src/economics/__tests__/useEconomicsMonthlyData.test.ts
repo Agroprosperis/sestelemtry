@@ -59,6 +59,9 @@ function emptyTotals(): EconomicsMonthlyResponse['totals'] {
     days_with_data: 0,
     hours_with_data: 0,
     hours_missing_price: 0,
+    ess_optimum_uah: 0,
+    ess_reserve_uah: 0,
+    ess_captured_share: 0,
     best_day: { date: '', effect_uah: 0 },
     min_effect_day: { date: '', effect_uah: 0 },
   }

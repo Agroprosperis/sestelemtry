@@ -60,7 +60,7 @@ export function EconomicsMonthlyView({ data, organizationID }: Props) {
       </div>
       <div className="economics-month-grid2">
         <MonthlyTrend days={data.days} totals={t} />
-        <MonthlyOptimumStub />
+        <MonthlyOptimum totals={t} days={data.days} />
       </div>
       <div className="economics-month-grid2">
         <MonthlyBalance totals={t} />
@@ -358,39 +358,91 @@ function MonthlyTrend({ days, totals }: { days: EconomicsMonthlyDay[]; totals: E
   )
 }
 
-// --- ESS fact vs optimum (stub) ---
+// --- ESS fact vs optimum ---
 //
-// Deferred in the MVP: the "captured vs reserve" comparison needs an
-// optimiser that models the theoretical ESS maximum from realised RDN
-// prices, PV, load, SOC, capacity, power and degradation. Until that
-// model exists we render an explicit placeholder rather than fake
-// numbers, so the panel still occupies its mockup slot.
-function MonthlyOptimumStub() {
-  const kpis = [
-    { label: 'Оптимум', value: '—' },
-    { label: 'Факт', value: '—' },
-    { label: 'Захоплено', value: '—' },
-    { label: 'Резерв', value: '—' },
-  ]
+// "Optimum" is the best dispatch the battery could have achieved within
+// its demonstrated operating envelope (power, SOC range and round-trip
+// efficiency derived from the month's own telemetry), valued with the
+// same essNet objective as the realised figure. Reserve = optimum − fact
+// is the under-used opportunity (not a loss).
+const TOP_RESERVE_ROWS = 8
+
+function MonthlyOptimum({ totals, days }: { totals: EconomicsMonthlyTotals; days: EconomicsMonthlyDay[] }) {
+  const captured = totals.ess_captured_share
+  const hasOptimum = totals.ess_optimum_uah > 0
+
+  const rows = useMemo(
+    () =>
+      days
+        .filter((d) => d.ess_optimum_uah > 0)
+        .sort((a, b) => b.ess_reserve_uah - a.ess_reserve_uah)
+        .slice(0, TOP_RESERVE_ROWS),
+    [days],
+  )
+
   return (
-    <section className="economics-card economics-month-section economics-optimum-stub" aria-label="УЗЕ: факт vs оптимум">
+    <section className="economics-card economics-month-section" aria-label="УЗЕ: факт vs оптимум">
       <div className="economics-month-section-head">
         <h3 className="economics-month-section-title">УЗЕ: факт vs оптимум</h3>
         <div className="economics-month-muted">ефект, грн</div>
       </div>
       <div className="economics-optimum-kpis">
-        {kpis.map((k) => (
-          <div key={k.label} className="economics-optimum-kpi">
-            <span className="economics-optimum-kpi-label">{k.label}</span>
-            <span className="economics-optimum-kpi-value">{k.value}</span>
-          </div>
-        ))}
+        <div className="economics-optimum-kpi">
+          <span className="economics-optimum-kpi-label">Оптимум</span>
+          <span className="economics-optimum-kpi-value">{formatUah(totals.ess_optimum_uah)}</span>
+        </div>
+        <div className="economics-optimum-kpi">
+          <span className="economics-optimum-kpi-label">Факт</span>
+          <span className="economics-optimum-kpi-value good">{formatUah(totals.ess_net_uah)}</span>
+        </div>
+        <div className="economics-optimum-kpi">
+          <span className="economics-optimum-kpi-label">Захоплено</span>
+          <span className="economics-optimum-kpi-value">{hasOptimum ? formatPercent(captured) : '—'}</span>
+        </div>
+        <div className="economics-optimum-kpi">
+          <span className="economics-optimum-kpi-label">Резерв</span>
+          <span className="economics-optimum-kpi-value amber">{formatUah(totals.ess_reserve_uah)}</span>
+        </div>
       </div>
-      <p className="economics-month-empty-note">
-        Панель потребує моделі оптимуму УЗЕ — максимального ефекту за фактичних
-        цін РДН, генерації СЕС, споживання, ємності, SOC, потужності, ККД та
-        зносу. У поточній версії (MVP) ще не реалізовано.
-      </p>
+
+      {rows.length > 0 ? (
+        <>
+          <div className="economics-optimum-legend">
+            <span><i style={{ background: '#7c3aed' }} />фактичний ефект</span>
+            <span><i style={{ background: '#f59e0b' }} />недовикористано</span>
+          </div>
+          <div className="economics-optimum-list">
+            <div className="economics-optimum-row head">
+              <span>Дата</span>
+              <span>захоплення</span>
+              <span>опт.</span>
+              <span>факт</span>
+              <span>резерв</span>
+            </div>
+            {rows.map((d) => {
+              const factShare = d.ess_optimum_uah > 0 ? Math.max(0, Math.min(1, d.ess_net_uah / d.ess_optimum_uah)) : 0
+              return (
+                <div key={d.date} className="economics-optimum-row">
+                  <strong>{formatDayLabel(d.date)}</strong>
+                  <div className="economics-capture-bar">
+                    <span className="fact" style={{ width: `${factShare * 100}%` }} />
+                    <span className="missed" style={{ width: `${(1 - factShare) * 100}%` }} />
+                  </div>
+                  <span>{formatUah(d.ess_optimum_uah)}</span>
+                  <span className="good">{formatUah(d.ess_net_uah)}</span>
+                  <span className="amber">{formatUah(d.ess_reserve_uah)}</span>
+                </div>
+              )
+            })}
+          </div>
+          <p className="economics-month-muted economics-optimum-note">
+            Оптимум — найкращий диспетчинг у межах фактично продемонстрованих
+            можливостей УЗЕ (потужність, діапазон SOC, ККД виведені з даних місяця).
+          </p>
+        </>
+      ) : (
+        <p className="economics-month-empty-note">Недостатньо активності УЗЕ в місяці для оцінки оптимуму.</p>
+      )}
     </section>
   )
 }

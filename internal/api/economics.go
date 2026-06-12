@@ -180,11 +180,20 @@ func (b *economicsBackend) LoadHourlyRange(ctx context.Context, orgID string, fr
 	out := make([]economics.HourlyRecord, 0, len(rows))
 	for _, row := range rows {
 		out = append(out, economics.HourlyRecord{
-			HourStart:     row.HourStart,
-			Rdn:           row.Rdn,
-			GridImport:    row.ImportTotal,
-			EssNet:        row.EssNet,
-			EssDischarged: row.EssDischarged,
+			HourStart:            row.HourStart,
+			Rdn:                  row.Rdn,
+			ImportPrice:          row.ImportPrice,
+			ExportPrice:          row.ExportPrice,
+			GridImport:           row.ImportTotal,
+			PVToLoad:             row.PVToLoad,
+			PVToGrid:             row.PVToGrid,
+			PVToEss:              row.PVToEss,
+			GridToLoad:           row.GridToLoad,
+			EssToLoad:            row.EssToLoad,
+			EssCharged:           row.EssCharged,
+			EssDischarged:        row.EssDischarged,
+			EssNet:               row.EssNet,
+			EssRemainingKwhStart: row.EssRemainingKwhStart,
 		})
 	}
 	return out, nil

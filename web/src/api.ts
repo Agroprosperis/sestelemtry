@@ -444,6 +444,10 @@ export type EconomicsMonthlyTotals = {
   hours_with_data: number
   hours_missing_price: number
 
+  ess_optimum_uah: number
+  ess_reserve_uah: number
+  ess_captured_share: number
+
   best_day: { date: string; effect_uah: number }
   min_effect_day: { date: string; effect_uah: number }
 }
@@ -460,6 +464,9 @@ export type EconomicsMonthlyDay = {
   effect_uah: number
   ess_net_uah: number
   ebitda_uah: number
+
+  ess_optimum_uah: number
+  ess_reserve_uah: number
 
   load_kwh: number
   pv_kwh: number

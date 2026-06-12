@@ -27,16 +27,16 @@ type EconomicsHour struct {
 	EssToLoadKwh     float64 `json:"ess_to_load_kwh"`
 	EssToGridKwh     float64 `json:"ess_to_grid_kwh"`
 
-	LoadKwh               float64 `json:"load_kwh"`
-	PvToLoadKwh           float64 `json:"pv_to_load_kwh"`
-	PvToGridKwh           float64 `json:"pv_to_grid_kwh"`
-	GridToLoadKwh         float64 `json:"grid_to_load_kwh"`
-	ImportPriceUahPerKwh  float64 `json:"import_price_uah_per_kwh"`
-	ExportPriceUahPerKwh  float64 `json:"export_price_uah_per_kwh"`
-	BaselineCostUah       float64 `json:"baseline_cost_uah"`
-	ActualCostUah         float64 `json:"actual_cost_uah"`
-	EffectUah             float64 `json:"effect_uah"`
-	EssNetUah             float64 `json:"ess_net_uah"`
+	LoadKwh              float64 `json:"load_kwh"`
+	PvToLoadKwh          float64 `json:"pv_to_load_kwh"`
+	PvToGridKwh          float64 `json:"pv_to_grid_kwh"`
+	GridToLoadKwh        float64 `json:"grid_to_load_kwh"`
+	ImportPriceUahPerKwh float64 `json:"import_price_uah_per_kwh"`
+	ExportPriceUahPerKwh float64 `json:"export_price_uah_per_kwh"`
+	BaselineCostUah      float64 `json:"baseline_cost_uah"`
+	ActualCostUah        float64 `json:"actual_cost_uah"`
+	EffectUah            float64 `json:"effect_uah"`
+	EssNetUah            float64 `json:"ess_net_uah"`
 
 	EssRemainingKwhStart     *float64 `json:"ess_remaining_kwh_start"`
 	EssCostBasisUahStart     *float64 `json:"ess_cost_basis_uah_start"`
@@ -62,9 +62,9 @@ type EconomicsDailyResponse struct {
 	// canonical FusionSolar daily KPIs. QualityFlags carries diagnostics
 	// (e.g. "load_mismatch:0.07"); Reconciliation maps each measured
 	// quantity to its computed/canonical/factor detail.
-	Reconciled     bool                                  `json:"reconciled"`
-	QualityFlags   []string                              `json:"quality_flags,omitempty"`
-	Reconciliation map[string]economics.ReconcileField   `json:"reconciliation,omitempty"`
+	Reconciled     bool                                `json:"reconciled"`
+	QualityFlags   []string                            `json:"quality_flags,omitempty"`
+	Reconciliation map[string]economics.ReconcileField `json:"reconciliation,omitempty"`
 }
 
 func economicsHourToJSON(r *economics.HourRow) *EconomicsHour {
@@ -72,28 +72,28 @@ func economicsHourToJSON(r *economics.HourRow) *EconomicsHour {
 		return nil
 	}
 	return &EconomicsHour{
-		Hour:             r.Hour,
-		HourStart:        r.HourStart,
-		RdnUahPerKwh:     r.Rdn,
-		PvKwh:            r.Flow.PV,
-		GridImportKwh:    r.Flow.GridImport,
-		GridExportKwh:    r.Flow.GridExport,
-		EssChargedKwh:    r.Flow.EssCharged,
-		EssDischargedKwh: r.Flow.EssDischarged,
-		PvToEssKwh:       r.Flow.PVToEss,
-		GridToEssKwh:     r.Flow.GridToEss,
-		EssToLoadKwh:     r.Flow.EssToLoad,
-		EssToGridKwh:     r.Flow.EssToGrid,
-		LoadKwh:              r.Econ.Load,
-		PvToLoadKwh:          r.Econ.PVToLoad,
-		PvToGridKwh:          r.Econ.PVToGrid,
-		GridToLoadKwh:        r.Econ.GridToLoad,
-		ImportPriceUahPerKwh: r.Econ.ImportPrice,
-		ExportPriceUahPerKwh: r.Econ.ExportPrice,
-		BaselineCostUah:      r.Econ.BaselineCost,
-		ActualCostUah:        r.Econ.ActualCost,
-		EffectUah:            r.Econ.Effect,
-		EssNetUah:            r.Econ.EssNet,
+		Hour:                     r.Hour,
+		HourStart:                r.HourStart,
+		RdnUahPerKwh:             r.Rdn,
+		PvKwh:                    r.Flow.PV,
+		GridImportKwh:            r.Flow.GridImport,
+		GridExportKwh:            r.Flow.GridExport,
+		EssChargedKwh:            r.Flow.EssCharged,
+		EssDischargedKwh:         r.Flow.EssDischarged,
+		PvToEssKwh:               r.Flow.PVToEss,
+		GridToEssKwh:             r.Flow.GridToEss,
+		EssToLoadKwh:             r.Flow.EssToLoad,
+		EssToGridKwh:             r.Flow.EssToGrid,
+		LoadKwh:                  r.Econ.Load,
+		PvToLoadKwh:              r.Econ.PVToLoad,
+		PvToGridKwh:              r.Econ.PVToGrid,
+		GridToLoadKwh:            r.Econ.GridToLoad,
+		ImportPriceUahPerKwh:     r.Econ.ImportPrice,
+		ExportPriceUahPerKwh:     r.Econ.ExportPrice,
+		BaselineCostUah:          r.Econ.BaselineCost,
+		ActualCostUah:            r.Econ.ActualCost,
+		EffectUah:                r.Econ.Effect,
+		EssNetUah:                r.Econ.EssNet,
 		EssRemainingKwhStart:     r.EssRemainingKwhStart,
 		EssCostBasisUahStart:     r.EssCostBasisUahStart,
 		EssAvgCostUahPerKwhStart: r.EssAvgCostUahPerKwhStart,
@@ -197,26 +197,30 @@ type EconomicsMonthlyTotals struct {
 	RdnAvgUahPerKwh         float64 `json:"rdn_avg_uah_per_kwh"`
 	RdnMaxUahPerKwh         float64 `json:"rdn_max_uah_per_kwh"`
 
-	RevenuePvExportUah  float64 `json:"revenue_pv_export_uah"`
-	RevenuePvSelfUah    float64 `json:"revenue_pv_self_uah"`
-	RevenueEssExportUah float64 `json:"revenue_ess_export_uah"`
-	RevenueEssSelfUah   float64 `json:"revenue_ess_self_uah"`
-	RevenueTotalUah     float64 `json:"revenue_total_uah"`
+	RevenuePvExportUah   float64 `json:"revenue_pv_export_uah"`
+	RevenuePvSelfUah     float64 `json:"revenue_pv_self_uah"`
+	RevenueEssExportUah  float64 `json:"revenue_ess_export_uah"`
+	RevenueEssSelfUah    float64 `json:"revenue_ess_self_uah"`
+	RevenueTotalUah      float64 `json:"revenue_total_uah"`
 	ExpenseGridChargeUah float64 `json:"expense_grid_charge_uah"`
-	ExpenseTotalUah     float64 `json:"expense_total_uah"`
-	EbitdaUah           float64 `json:"ebitda_uah"`
+	ExpenseTotalUah      float64 `json:"expense_total_uah"`
+	EbitdaUah            float64 `json:"ebitda_uah"`
 
-	EssWithdrawnCostUah        float64 `json:"ess_withdrawn_cost_uah"`
-	EssRealizedProfitUah       float64 `json:"ess_realized_profit_uah"`
-	EssDegradationCostUah      float64 `json:"ess_degradation_cost_uah"`
+	EssWithdrawnCostUah         float64 `json:"ess_withdrawn_cost_uah"`
+	EssRealizedProfitUah        float64 `json:"ess_realized_profit_uah"`
+	EssDegradationCostUah       float64 `json:"ess_degradation_cost_uah"`
 	EssAvgCostBasisUahPerKwhEod float64 `json:"ess_avg_cost_basis_uah_per_kwh_eod"`
-	EssResidualKwhEod          float64 `json:"ess_residual_kwh_eod"`
-	EssCostBasisUahEod         float64 `json:"ess_cost_basis_uah_eod"`
+	EssResidualKwhEod           float64 `json:"ess_residual_kwh_eod"`
+	EssCostBasisUahEod          float64 `json:"ess_cost_basis_uah_eod"`
 
 	EquivalentCycles  float64 `json:"equivalent_cycles"`
 	DaysWithData      int     `json:"days_with_data"`
 	HoursWithData     int     `json:"hours_with_data"`
 	HoursMissingPrice int     `json:"hours_missing_price"`
+
+	EssOptimumUah    float64 `json:"ess_optimum_uah"`
+	EssReserveUah    float64 `json:"ess_reserve_uah"`
+	EssCapturedShare float64 `json:"ess_captured_share"`
 
 	BestDay      EconomicsMonthExtreme `json:"best_day"`
 	MinEffectDay EconomicsMonthExtreme `json:"min_effect_day"`
@@ -235,6 +239,9 @@ type EconomicsMonthlyDay struct {
 	EffectUah       float64 `json:"effect_uah"`
 	EssNetUah       float64 `json:"ess_net_uah"`
 	EbitdaUah       float64 `json:"ebitda_uah"`
+
+	EssOptimumUah float64 `json:"ess_optimum_uah"`
+	EssReserveUah float64 `json:"ess_reserve_uah"`
 
 	LoadKwh          float64 `json:"load_kwh"`
 	PvKwh            float64 `json:"pv_kwh"`
@@ -274,23 +281,23 @@ type EconomicsMonthlyResponse struct {
 
 func monthlyTotalsToJSON(t economics.MonthlyTotals) EconomicsMonthlyTotals {
 	return EconomicsMonthlyTotals{
-		BaselineCostUah:  t.BaselineCost,
-		ActualCostUah:    t.ActualCost,
-		EffectUah:        t.Effect,
-		EssNetUah:        t.EssNet,
-		LoadKwh:          t.Load,
-		PvKwh:            t.PV,
-		GridImportKwh:    t.GridImport,
-		GridExportKwh:    t.GridExport,
-		EssChargedKwh:    t.EssCharged,
-		EssDischargedKwh: t.EssDischarged,
-		PvToLoadKwh:      t.PVToLoad,
-		PvToEssKwh:       t.PVToEss,
-		PvToGridKwh:      t.PVToGrid,
-		GridToLoadKwh:    t.GridToLoad,
-		GridToEssKwh:     t.GridToEss,
-		EssToLoadKwh:     t.EssToLoad,
-		EssToGridKwh:     t.EssToGrid,
+		BaselineCostUah:             t.BaselineCost,
+		ActualCostUah:               t.ActualCost,
+		EffectUah:                   t.Effect,
+		EssNetUah:                   t.EssNet,
+		LoadKwh:                     t.Load,
+		PvKwh:                       t.PV,
+		GridImportKwh:               t.GridImport,
+		GridExportKwh:               t.GridExport,
+		EssChargedKwh:               t.EssCharged,
+		EssDischargedKwh:            t.EssDischarged,
+		PvToLoadKwh:                 t.PVToLoad,
+		PvToEssKwh:                  t.PVToEss,
+		PvToGridKwh:                 t.PVToGrid,
+		GridToLoadKwh:               t.GridToLoad,
+		GridToEssKwh:                t.GridToEss,
+		EssToLoadKwh:                t.EssToLoad,
+		EssToGridKwh:                t.EssToGrid,
 		AvgImportPriceUahPerKwh:     t.AvgImportPrice,
 		AvgExportPriceUahPerKwh:     t.AvgExportPrice,
 		RdnAvgUahPerKwh:             t.RdnAvgUahPerKwh,
@@ -313,6 +320,9 @@ func monthlyTotalsToJSON(t economics.MonthlyTotals) EconomicsMonthlyTotals {
 		DaysWithData:                t.DaysWithData,
 		HoursWithData:               t.HoursWithData,
 		HoursMissingPrice:           t.HoursMissingPrice,
+		EssOptimumUah:               t.EssOptimum,
+		EssReserveUah:               t.EssReserve,
+		EssCapturedShare:            t.EssCapturedShare,
 		BestDay:                     EconomicsMonthExtreme{Date: t.BestDay.Date, EffectUah: t.BestDay.EffectUah},
 		MinEffectDay:                EconomicsMonthExtreme{Date: t.MinEffectDay.Date, EffectUah: t.MinEffectDay.EffectUah},
 	}
@@ -321,28 +331,30 @@ func monthlyTotalsToJSON(t economics.MonthlyTotals) EconomicsMonthlyTotals {
 func monthlyDayToJSON(d economics.MonthDay) EconomicsMonthlyDay {
 	t := d.Totals
 	return EconomicsMonthlyDay{
-		Date:             d.Date,
-		IsFinal:          d.IsFinal,
-		RdnAvgUahPerKwh:  d.RdnAvgUahPerKwh,
-		EquivalentCycles: d.EquivalentCycles,
-		BaselineCostUah:  t.BaselineCost,
-		ActualCostUah:    t.ActualCost,
-		EffectUah:        t.Effect,
-		EssNetUah:        t.EssNet,
-		EbitdaUah:        t.Ebitda,
-		LoadKwh:          t.Load,
-		PvKwh:            t.PV,
-		GridImportKwh:    t.GridImport,
-		GridExportKwh:    t.GridExport,
-		EssChargedKwh:    t.EssCharged,
-		EssDischargedKwh: t.EssDischarged,
-		PvToLoadKwh:      t.PVToLoad,
-		PvToEssKwh:       t.PVToEss,
-		PvToGridKwh:      t.PVToGrid,
-		GridToLoadKwh:    t.GridToLoad,
-		GridToEssKwh:     t.GridToEss,
-		EssToLoadKwh:     t.EssToLoad,
-		EssToGridKwh:     t.EssToGrid,
+		Date:              d.Date,
+		IsFinal:           d.IsFinal,
+		RdnAvgUahPerKwh:   d.RdnAvgUahPerKwh,
+		EquivalentCycles:  d.EquivalentCycles,
+		BaselineCostUah:   t.BaselineCost,
+		ActualCostUah:     t.ActualCost,
+		EffectUah:         t.Effect,
+		EssNetUah:         t.EssNet,
+		EbitdaUah:         t.Ebitda,
+		EssOptimumUah:     d.EssOptimum,
+		EssReserveUah:     d.EssReserve,
+		LoadKwh:           t.Load,
+		PvKwh:             t.PV,
+		GridImportKwh:     t.GridImport,
+		GridExportKwh:     t.GridExport,
+		EssChargedKwh:     t.EssCharged,
+		EssDischargedKwh:  t.EssDischarged,
+		PvToLoadKwh:       t.PVToLoad,
+		PvToEssKwh:        t.PVToEss,
+		PvToGridKwh:       t.PVToGrid,
+		GridToLoadKwh:     t.GridToLoad,
+		GridToEssKwh:      t.GridToEss,
+		EssToLoadKwh:      t.EssToLoad,
+		EssToGridKwh:      t.EssToGrid,
 		HoursWithData:     t.HoursWithData,
 		HoursMissingPrice: t.HoursMissingPrice,
 	}

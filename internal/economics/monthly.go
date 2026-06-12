@@ -17,14 +17,27 @@ type DailyRecord struct {
 	ComputedAt time.Time
 }
 
-// HourlyRecord is the slim per-hour slice the monthly aggregator needs
-// for the RDN price stats and the ESS marginality heatmap.
+// HourlyRecord is the per-hour slice the monthly aggregator needs for the
+// RDN price stats, the ESS marginality heatmap, and the fact-vs-optimum
+// optimizer (prices, PV surplus, displaceable load, SOC residual).
 type HourlyRecord struct {
-	HourStart     time.Time
-	Rdn           *float64
-	GridImport    float64
-	EssNet        float64
+	HourStart   time.Time
+	Rdn         *float64
+	ImportPrice float64
+	ExportPrice float64
+	GridImport  float64
+
+	PVToLoad   float64
+	PVToGrid   float64
+	PVToEss    float64
+	GridToLoad float64
+	EssToLoad  float64
+
+	EssCharged    float64
 	EssDischarged float64
+	EssNet        float64
+
+	EssRemainingKwhStart *float64
 }
 
 // MonthDay is one day's contribution to the month — the full daily
@@ -36,6 +49,11 @@ type MonthDay struct {
 	RdnAvgUahPerKwh  float64
 	EquivalentCycles float64
 	IsFinal          bool
+
+	// EssOptimum is the modelled maximum ESS effect for the day (perfect
+	// foresight, same essNet objective); EssReserve = EssOptimum − EssNet.
+	EssOptimum float64
+	EssReserve float64
 }
 
 // DayMargin is one row of the ESS marginality heatmap: 24 hourly margins
@@ -102,6 +120,13 @@ type MonthlyTotals struct {
 	HoursWithData     int
 	HoursMissingPrice int
 
+	// ESS fact-vs-optimum rollup. EssOptimum is the sum of per-day
+	// modelled maxima (each clamped ≥ that day's realised EssNet, so
+	// EssReserve is always ≥ 0). EssCapturedShare = EssNet / EssOptimum.
+	EssOptimum       float64
+	EssReserve       float64
+	EssCapturedShare float64
+
 	BestDay      MonthExtreme
 	MinEffectDay MonthExtreme
 }
@@ -121,14 +146,23 @@ type StoredMonth struct {
 // AggregateMonth folds the persisted daily + hourly records of one month
 // into a MonthlyTotals + per-day breakdown + ESS marginality heatmap.
 // capacityKwh is the ESS capacity used for the equivalent-cycle metric.
-func AggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly []HourlyRecord, capacityKwh float64) StoredMonth {
+func AggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly []HourlyRecord, capacityKwh, degradationUahPerKwh float64) StoredMonth {
 	// Per-day RDN stats keyed by civil date, derived from the hourly
 	// slice (the daily table stores only the all-in import price).
 	type rdnAcc struct {
 		num float64 // sum(rdn * import)
 		den float64 // sum(import)
 	}
+	// Per-day optimizer context: the 24 hourly slots plus the residual at
+	// the earliest priced hour (the day's starting SOC).
+	type dayOpt struct {
+		hours     [24]optimumHour
+		startKwh  float64
+		startHour int
+		haveStart bool
+	}
 	dayRdn := make(map[string]*rdnAcc)
+	dayOpts := make(map[string]*dayOpt)
 	margins := make(map[string][]*float64)
 	var monthRdnNum, monthRdnDen, monthRdnMax float64
 	haveRdnMax := false
@@ -149,6 +183,31 @@ func AggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly
 				grid[hour] = &v
 			}
 		}
+		if hour >= 0 && hour < 24 {
+			do := dayOpts[key]
+			if do == nil {
+				do = &dayOpt{}
+				dayOpts[key] = do
+			}
+			oh := optimumHour{
+				// PV not consumed by load is available to charge (or
+				// export); load not served by PV is the import the
+				// battery can displace at import price.
+				pvSurplusKwh:    h.PVToGrid + h.PVToEss,
+				displaceableKwh: h.GridToLoad + h.EssToLoad,
+			}
+			if h.Rdn != nil {
+				oh.tradable = true
+				oh.importPrice = h.ImportPrice
+				oh.exportPrice = h.ExportPrice
+			}
+			do.hours[hour] = oh
+			if h.EssRemainingKwhStart != nil && (!do.haveStart || hour < do.startHour) {
+				do.startKwh = *h.EssRemainingKwhStart
+				do.startHour = hour
+				do.haveStart = true
+			}
+		}
 		if h.Rdn != nil {
 			acc := dayRdn[key]
 			if acc == nil {
@@ -164,6 +223,18 @@ func AggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly
 				haveRdnMax = true
 			}
 		}
+	}
+
+	// Fact-vs-optimum: derive the battery envelope from this month's
+	// hourly history, then solve each day's optimal dispatch.
+	optParams := deriveOptimumParams(hourly, capacityKwh, degradationUahPerKwh)
+	perDayOptimum := make(map[string]float64, len(dayOpts))
+	for key, do := range dayOpts {
+		start := optParams.socMinKwh
+		if do.haveStart {
+			start = do.startKwh
+		}
+		perDayOptimum[key] = optimizeDay(do.hours[:], start, optParams)
 	}
 
 	var totals MonthlyTotals
@@ -232,12 +303,25 @@ func AggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly
 		if capacityKwh > 0 {
 			cycles = t.EssDischarged / capacityKwh
 		}
+
+		// Optimum is clamped to the realised effect so the reserve is
+		// never negative (the actual schedule is, by definition, a
+		// feasible — if suboptimal — dispatch).
+		dayOptimum := perDayOptimum[key]
+		if dayOptimum < t.EssNet {
+			dayOptimum = t.EssNet
+		}
+		dayReserve := dayOptimum - t.EssNet
+		totals.EssOptimum += dayOptimum
+
 		outDays = append(outDays, MonthDay{
 			Date:             key,
 			Totals:           t,
 			RdnAvgUahPerKwh:  rdnAvg,
 			EquivalentCycles: cycles,
 			IsFinal:          d.IsFinal,
+			EssOptimum:       dayOptimum,
+			EssReserve:       dayReserve,
 		})
 	}
 
@@ -256,6 +340,10 @@ func AggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly
 	totals.Ebitda = totals.RevenueTotal - totals.ExpenseTotal
 	if capacityKwh > 0 {
 		totals.EquivalentCycles = totals.EssDischarged / capacityKwh
+	}
+	totals.EssReserve = totals.EssOptimum - totals.EssNet
+	if totals.EssOptimum > 0 {
+		totals.EssCapturedShare = totals.EssNet / totals.EssOptimum
 	}
 
 	// ESS EOD snapshot: last day with data wins (point-in-time state).
@@ -355,7 +443,7 @@ func (s *Service) GetMonth(ctx context.Context, orgID, month, tz string) (Stored
 		tariffs = DefaultTariffs
 	}
 
-	result := AggregateMonth(month, loc, daily, hourly, tariffs.EssCapacityKwh)
+	result := AggregateMonth(month, loc, daily, hourly, tariffs.EssCapacityKwh, tariffs.DegradationUahPerKwh)
 	result.OrganizationID = orgID
 	return result, nil
 }
