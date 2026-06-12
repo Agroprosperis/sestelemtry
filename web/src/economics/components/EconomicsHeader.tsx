@@ -268,7 +268,7 @@ export function EconomicsHeader({
         </div>
       </div>
 
-      <details className="economics-tariffs" open>
+      <details className="economics-tariffs">
         <summary>
           <span>Параметри тарифів</span>
           {statusText && (

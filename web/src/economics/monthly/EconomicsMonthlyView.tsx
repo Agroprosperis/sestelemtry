@@ -53,11 +53,18 @@ export function EconomicsMonthlyView({ data, organizationID }: Props) {
   return (
     <>
       <MonthlyKpis totals={t} />
-      <MonthlyFinance totals={t} />
-      <MonthlyWaterfall totals={t} />
-      <MonthlyTrend days={data.days} />
-      <MonthlyBalance totals={t} />
-      <MonthlyHeatmap margins={data.hourly_margin} />
+      <div className="economics-month-grid2">
+        <MonthlyFinance totals={t} />
+        <MonthlyWaterfall totals={t} />
+      </div>
+      <div className="economics-month-grid2">
+        <MonthlyTrend days={data.days} />
+        <MonthlyOptimumStub />
+      </div>
+      <div className="economics-month-grid2">
+        <MonthlyBalance totals={t} />
+        <MonthlyHeatmap margins={data.hourly_margin} />
+      </div>
       <MonthlyDailyTable days={data.days} totals={t} organizationID={organizationID} month={data.month} />
     </>
   )
@@ -142,23 +149,20 @@ function MonthlyFinance({ totals }: { totals: EconomicsMonthlyTotals }) {
     { label: 'Знос / ресурс УЗЕ', amount: Math.max(totals.ess_degradation_cost_uah, 0) },
   ]
   const expenseTotal = expenseLines.reduce((acc, l) => acc + l.amount, 0)
-  const ebitdaClass =
-    totals.ebitda_uah >= 0
-      ? 'economics-revenue-ebitda-card positive'
-      : 'economics-revenue-ebitda-card negative'
   const savingShare = totals.baseline_cost_uah > 0 ? totals.ebitda_uah / totals.baseline_cost_uah : 0
 
   return (
-    <section className="economics-revenue-panel" aria-label="Фінансова розкладка за місяць">
-      <h3 className="economics-month-section-title">Фінансова розкладка за місяць</h3>
-      <div className="economics-revenue-grid">
-        <div className={ebitdaClass}>
-          <span className="economics-revenue-ebitda-label">EBITDA за місяць</span>
-          <span className="economics-revenue-ebitda-value">{formatUah(totals.ebitda_uah)}</span>
-          <span className="economics-revenue-ebitda-sub">{formatPercent(savingShare)} від бази</span>
+    <section className="economics-card economics-month-section" aria-label="Фінансова розкладка за місяць">
+      <div className="economics-month-section-head">
+        <h3 className="economics-month-section-title">Фінансова розкладка за місяць</h3>
+        <div className="economics-month-legend">
+          <span><i style={{ background: '#16a34a' }} />дохід / економія</span>
+          <span><i style={{ background: '#dc2626' }} />витрати</span>
         </div>
-        <FinanceColumn title="Дохід / економія" total={totals.revenue_total_uah} lines={revenueLines} showPercent />
-        <FinanceColumn title="Витрати" total={expenseTotal} lines={expenseLines} showPercent />
+      </div>
+      <div className="economics-finance">
+        <FinanceBox title="Дохід / економія" total={totals.revenue_total_uah} lines={revenueLines} />
+        <FinanceBox title="Витрати" total={expenseTotal} lines={expenseLines} />
       </div>
       <div className="economics-month-mini-grid">
         <MiniCard label="EBITDA" value={formatUah(totals.ebitda_uah)} note={`${formatPercent(savingShare)} від бази`} good />
@@ -179,37 +183,29 @@ function MonthlyFinance({ totals }: { totals: EconomicsMonthlyTotals }) {
   )
 }
 
-function FinanceColumn({
+function FinanceBox({
   title,
   total,
   lines,
-  showPercent,
 }: {
   title: string
   total: number
   lines: { label: string; amount: number }[]
-  showPercent: boolean
 }) {
   return (
-    <div className="economics-revenue-column">
-      <div className="economics-revenue-column-header">
-        <span className="economics-revenue-column-title">{title}</span>
-        <span className="economics-revenue-column-total">{formatUah(total)}</span>
-        <span className="economics-revenue-column-share-spacer" aria-hidden="true" />
+    <div className="economics-finance-box">
+      <div className="economics-finance-title">
+        <span>{title}</span>
+        <span>{formatUah(total)}</span>
+        <span>100%</span>
       </div>
-      <ul className="economics-revenue-list">
-        {lines.map((line) => (
-          <li key={line.label} className="economics-revenue-line">
-            <span className="economics-revenue-line-label">{line.label}</span>
-            <span className="economics-revenue-line-amount">{formatUah(line.amount)}</span>
-            {showPercent ? (
-              <span className="economics-revenue-line-share">{formatShare(line.amount, total)}</span>
-            ) : (
-              <span className="economics-revenue-line-share" aria-hidden="true" />
-            )}
-          </li>
-        ))}
-      </ul>
+      {lines.map((line) => (
+        <div key={line.label} className="economics-metric-row">
+          <span>{line.label}</span>
+          <span className="economics-money">{formatUah(line.amount)}</span>
+          <span className="economics-month-muted">{formatShare(line.amount, total)}</span>
+        </div>
+      ))}
     </div>
   )
 }
@@ -316,6 +312,43 @@ function MonthlyTrend({ days }: { days: EconomicsMonthlyDay[] }) {
           </BarChart>
         </ResponsiveContainer>
       </div>
+    </section>
+  )
+}
+
+// --- ESS fact vs optimum (stub) ---
+//
+// Deferred in the MVP: the "captured vs reserve" comparison needs an
+// optimiser that models the theoretical ESS maximum from realised RDN
+// prices, PV, load, SOC, capacity, power and degradation. Until that
+// model exists we render an explicit placeholder rather than fake
+// numbers, so the panel still occupies its mockup slot.
+function MonthlyOptimumStub() {
+  const kpis = [
+    { label: 'Оптимум', value: '—' },
+    { label: 'Факт', value: '—' },
+    { label: 'Захоплено', value: '—' },
+    { label: 'Резерв', value: '—' },
+  ]
+  return (
+    <section className="economics-card economics-month-section economics-optimum-stub" aria-label="УЗЕ: факт vs оптимум">
+      <div className="economics-month-section-head">
+        <h3 className="economics-month-section-title">УЗЕ: факт vs оптимум</h3>
+        <div className="economics-month-muted">ефект, грн</div>
+      </div>
+      <div className="economics-optimum-kpis">
+        {kpis.map((k) => (
+          <div key={k.label} className="economics-optimum-kpi">
+            <span className="economics-optimum-kpi-label">{k.label}</span>
+            <span className="economics-optimum-kpi-value">{k.value}</span>
+          </div>
+        ))}
+      </div>
+      <p className="economics-month-empty-note">
+        Панель потребує моделі оптимуму УЗЕ — максимального ефекту за фактичних
+        цін РДН, генерації СЕС, споживання, ємності, SOC, потужності, ККД та
+        зносу. У поточній версії (MVP) ще не реалізовано.
+      </p>
     </section>
   )
 }
