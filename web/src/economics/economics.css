@@ -1275,6 +1275,54 @@
 
 .economics-seg.green { background: #86efac; }
 .economics-seg.blue { background: #93c5fd; }
+.economics-seg.amber { background: #fdba74; }
+.economics-seg.violet { background: #c4b5fd; }
+.economics-seg.red { background: #fca5a5; }
+
+/* Flow legend above the balance bars (colour key for the segments). */
+.economics-flow-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  margin-bottom: 12px;
+  color: #667085;
+  font-size: 12px;
+}
+
+.economics-flow-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.economics-seg-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  display: inline-block;
+}
+
+.economics-seg-dot.green { background: #86efac; }
+.economics-seg-dot.blue { background: #93c5fd; }
+.economics-seg-dot.amber { background: #fdba74; }
+.economics-seg-dot.violet { background: #c4b5fd; }
+.economics-seg-dot.red { background: #fca5a5; }
+
+/* Coloured marker before each flow name in the balance table. */
+.economics-flow-dot {
+  width: 9px;
+  height: 9px;
+  display: inline-block;
+  border-radius: 2px;
+  margin-right: 7px;
+  vertical-align: 1px;
+}
+
+.economics-flow-dot.grid { background: #93c5fd; }
+.economics-flow-dot.consume { background: #fdba74; }
+.economics-flow-dot.ess { background: #c4b5fd; }
+.economics-flow-dot.export { background: #fca5a5; }
 
 .economics-balance-value {
   text-align: right;

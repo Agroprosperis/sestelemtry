@@ -360,14 +360,21 @@ function MonthlyBalance({ totals }: { totals: EconomicsMonthlyTotals }) {
   const pct = (v: number) => (sourcesTotal > 0 ? (v / sourcesTotal) * 100 : 0)
   const gridToLoadCost = totals.grid_to_load_kwh * totals.avg_import_price_uah_per_kwh
 
+  // Where the sourced energy is allocated. These three sinks sum to the
+  // sources total (PV = load+ess+grid, grid import = load+ess), so the
+  // "directions" bar is a clean split with no double counting.
+  const toConsumption = totals.pv_to_load_kwh + totals.grid_to_load_kwh
+  const toEss = totals.pv_to_ess_kwh + totals.grid_to_ess_kwh
+  const toExport = totals.pv_to_grid_kwh
+
   const flows = [
-    { label: 'СЕС → споживання', kwh: totals.pv_to_load_kwh, effect: totals.revenue_pv_self_uah, cls: 'good' },
-    { label: 'СЕС → мережа', kwh: totals.pv_to_grid_kwh, effect: totals.revenue_pv_export_uah, cls: 'good' },
-    { label: 'СЕС → УЗЕ', kwh: totals.pv_to_ess_kwh, effect: 0, cls: 'neutral' },
-    { label: 'УЗЕ → споживання', kwh: totals.ess_to_load_kwh, effect: totals.revenue_ess_self_uah, cls: 'good' },
-    { label: 'УЗЕ → мережа', kwh: totals.ess_to_grid_kwh, effect: totals.revenue_ess_export_uah, cls: 'good' },
-    { label: 'Мережа → споживання', kwh: totals.grid_to_load_kwh, effect: -gridToLoadCost, cls: 'bad' },
-    { label: 'Мережа → УЗЕ', kwh: totals.grid_to_ess_kwh, effect: -totals.expense_grid_charge_uah, cls: 'bad' },
+    { label: 'СЕС → споживання', kwh: totals.pv_to_load_kwh, effect: totals.revenue_pv_self_uah, cls: 'good', dot: 'consume' },
+    { label: 'СЕС → мережа', kwh: totals.pv_to_grid_kwh, effect: totals.revenue_pv_export_uah, cls: 'good', dot: 'export' },
+    { label: 'СЕС → УЗЕ', kwh: totals.pv_to_ess_kwh, effect: 0, cls: 'neutral', dot: 'ess' },
+    { label: 'УЗЕ → споживання', kwh: totals.ess_to_load_kwh, effect: totals.revenue_ess_self_uah, cls: 'good', dot: 'consume' },
+    { label: 'УЗЕ → мережа', kwh: totals.ess_to_grid_kwh, effect: totals.revenue_ess_export_uah, cls: 'good', dot: 'export' },
+    { label: 'Мережа → споживання', kwh: totals.grid_to_load_kwh, effect: -gridToLoadCost, cls: 'bad', dot: 'grid' },
+    { label: 'Мережа → УЗЕ', kwh: totals.grid_to_ess_kwh, effect: -totals.expense_grid_charge_uah, cls: 'bad', dot: 'ess' },
   ]
   const flowTotalKwh = flows.reduce((acc, f) => acc + f.kwh, 0)
 
@@ -377,9 +384,16 @@ function MonthlyBalance({ totals }: { totals: EconomicsMonthlyTotals }) {
         <h3 className="economics-month-section-title">Енергетичний баланс за місяць</h3>
         <span className="economics-month-muted">МВт·год за місяць</span>
       </div>
+      <div className="economics-flow-legend">
+        <span><i className="economics-seg-dot green" />СЕС</span>
+        <span><i className="economics-seg-dot blue" />мережа</span>
+        <span><i className="economics-seg-dot amber" />споживання</span>
+        <span><i className="economics-seg-dot violet" />УЗЕ</span>
+        <span><i className="economics-seg-dot red" />експорт</span>
+      </div>
       <div className="economics-month-balance">
         <div className="economics-balance-row">
-          <span className="economics-balance-name">Джерела</span>
+          <strong className="economics-balance-name">Джерела</strong>
           <div className="economics-balance-bar">
             <span className="economics-seg green" style={{ width: `${pct(totals.pv_kwh)}%` }} />
             <span className="economics-seg blue" style={{ width: `${pct(totals.grid_import_kwh)}%` }} />
@@ -400,6 +414,15 @@ function MonthlyBalance({ totals }: { totals: EconomicsMonthlyTotals }) {
           </div>
           <span className="economics-balance-value">{formatMwh(totals.grid_import_kwh)}</span>
         </div>
+        <div className="economics-balance-row">
+          <strong className="economics-balance-name">Напрямки</strong>
+          <div className="economics-balance-bar">
+            <span className="economics-seg amber" style={{ width: `${pct(toConsumption)}%` }} />
+            <span className="economics-seg red" style={{ width: `${pct(toExport)}%` }} />
+            <span className="economics-seg violet" style={{ width: `${pct(toEss)}%` }} />
+          </div>
+          <span className="economics-balance-value">{formatMwh(sourcesTotal)}</span>
+        </div>
       </div>
       <div className="economics-table-scroll" style={{ marginTop: 14 }}>
         <table className="economics-table economics-month-table">
@@ -414,7 +437,10 @@ function MonthlyBalance({ totals }: { totals: EconomicsMonthlyTotals }) {
           <tbody>
             {flows.map((f) => (
               <tr key={f.label}>
-                <td className="economics-month-table-left">{f.label}</td>
+                <td className="economics-month-table-left">
+                  <span className={`economics-flow-dot ${f.dot}`} aria-hidden="true" />
+                  {f.label}
+                </td>
                 <td>{formatKwh(f.kwh)}</td>
                 <td>{formatShare(f.kwh, flowTotalKwh)}</td>
                 <td className={`cell-${f.cls === 'good' ? 'positive' : f.cls === 'bad' ? 'negative' : 'neutral'}`}>
