@@ -23,6 +23,7 @@ import {
   formatDayOfMonth,
   formatKwh,
   formatMwh,
+  formatMwhNumber,
   formatPercent,
   formatPrice,
   formatShare,
@@ -58,7 +59,7 @@ export function EconomicsMonthlyView({ data, organizationID }: Props) {
         <MonthlyWaterfall totals={t} />
       </div>
       <div className="economics-month-grid2">
-        <MonthlyTrend days={data.days} />
+        <MonthlyTrend days={data.days} totals={t} />
         <MonthlyOptimumStub />
       </div>
       <div className="economics-month-grid2">
@@ -273,7 +274,7 @@ type TrendRow = {
 
 const trendNumberFmt = new Intl.NumberFormat('uk-UA', { minimumFractionDigits: 1, maximumFractionDigits: 1 })
 
-function MonthlyTrend({ days }: { days: EconomicsMonthlyDay[] }) {
+function MonthlyTrend({ days, totals }: { days: EconomicsMonthlyDay[]; totals: EconomicsMonthlyTotals }) {
   const rows = useMemo<TrendRow[]>(
     () =>
       days.map((d) => ({
@@ -288,11 +289,52 @@ function MonthlyTrend({ days }: { days: EconomicsMonthlyDay[] }) {
     [days],
   )
 
+  // PV fate: directly self-consumed vs exported + stored.
+  const pvSelf = totals.pv_to_load_kwh
+  const pvOther = totals.pv_to_grid_kwh + totals.pv_to_ess_kwh
+  const pvSelfShare = totals.pv_kwh > 0 ? pvSelf / totals.pv_kwh : 0
+  // Load coverage: served by PV+ESS vs taken from the grid.
+  const loadFromRenewable = totals.pv_to_load_kwh + totals.ess_to_load_kwh
+  const loadFromGrid = totals.grid_to_load_kwh
+  const loadRenewableShare = totals.load_kwh > 0 ? loadFromRenewable / totals.load_kwh : 0
+
   return (
     <section className="economics-card economics-month-section" aria-label="Енергетичний тренд по днях">
       <div className="economics-month-section-head">
         <h3 className="economics-month-section-title">Енергетичний тренд по днях</h3>
         <span className="economics-month-muted">МВт·год/день</span>
+      </div>
+      <div className="economics-trend-summary">
+        <div className="economics-trend-metric">
+          <div>
+            <strong>Вироблено СЕС: {formatMwhNumber(totals.pv_kwh)}</strong>
+            <span className="economics-trend-mwh">МВт·год</span>
+          </div>
+          <div className="economics-ratio-line">
+            <span>{formatPercent(pvSelfShare)}</span>
+            <div className="economics-ratio-bar">
+              <span style={{ width: `${pvSelfShare * 100}%`, background: '#12b76a' }} />
+              <span style={{ width: `${(1 - pvSelfShare) * 100}%`, background: '#91d9aa' }} />
+            </div>
+            <span>{formatPercent(1 - pvSelfShare)}</span>
+          </div>
+          <div className="economics-month-muted">спожито {formatMwh(pvSelf)} / експорт + заряд УЗЕ {formatMwh(pvOther)}</div>
+        </div>
+        <div className="economics-trend-metric">
+          <div>
+            <strong>Споживання об'єкта: {formatMwhNumber(totals.load_kwh)}</strong>
+            <span className="economics-trend-mwh">МВт·год</span>
+          </div>
+          <div className="economics-ratio-line">
+            <span>{formatPercent(loadRenewableShare)}</span>
+            <div className="economics-ratio-bar">
+              <span style={{ width: `${loadRenewableShare * 100}%`, background: '#f97316' }} />
+              <span style={{ width: `${(1 - loadRenewableShare) * 100}%`, background: '#fdba74' }} />
+            </div>
+            <span>{formatPercent(1 - loadRenewableShare)}</span>
+          </div>
+          <div className="economics-month-muted">від СЕС+УЗЕ {formatMwh(loadFromRenewable)} / з мережі {formatMwh(loadFromGrid)}</div>
+        </div>
       </div>
       <div className="economics-month-chart">
         <ResponsiveContainer width="100%" height={340}>

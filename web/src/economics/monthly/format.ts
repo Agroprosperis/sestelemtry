@@ -44,6 +44,13 @@ export function formatMwh(kwh: number): string {
   return `${mwhFmt.format(kwh / 1000)} МВт·год`
 }
 
+// formatMwhNumber returns just the numeric part ("60,3") so callers can
+// render the unit separately (e.g. a muted "МВт·год" suffix).
+export function formatMwhNumber(kwh: number): string {
+  if (!Number.isFinite(kwh)) return '—'
+  return mwhFmt.format(kwh / 1000)
+}
+
 export function formatKwh(kwh: number): string {
   if (!Number.isFinite(kwh)) return '—'
   return `${kwhFmt.format(Math.round(kwh))} кВт·год`

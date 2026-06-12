@@ -1242,6 +1242,58 @@
   width: 100%;
 }
 
+/* Summary metrics above the daily trend chart (PV fate + load
+   coverage), each with a thin two-segment ratio bar. */
+.economics-trend-summary {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 28px;
+  margin-bottom: 10px;
+}
+
+.economics-trend-metric strong {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.economics-trend-mwh {
+  margin-left: 5px;
+  font-size: 13px;
+  color: #667085;
+  font-weight: 600;
+}
+
+.economics-ratio-line {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 10px;
+  align-items: center;
+  margin-top: 8px;
+  color: #98a2b3;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.economics-ratio-bar {
+  height: 8px;
+  display: flex;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #edf2f7;
+}
+
+.economics-ratio-bar span {
+  display: block;
+  height: 100%;
+}
+
+@media (max-width: 600px) {
+  .economics-trend-summary {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+}
+
 /* Energy balance stacked bars. */
 .economics-month-balance {
   display: grid;
