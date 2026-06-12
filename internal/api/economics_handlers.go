@@ -218,9 +218,14 @@ type EconomicsMonthlyTotals struct {
 	HoursWithData     int     `json:"hours_with_data"`
 	HoursMissingPrice int     `json:"hours_missing_price"`
 
-	EssOptimumUah    float64 `json:"ess_optimum_uah"`
-	EssReserveUah    float64 `json:"ess_reserve_uah"`
-	EssCapturedShare float64 `json:"ess_captured_share"`
+	EssFactUah          float64 `json:"ess_fact_uah"`
+	EssOptimumUah       float64 `json:"ess_optimum_uah"`
+	EssReserveUah       float64 `json:"ess_reserve_uah"`
+	EssCapturedShare    float64 `json:"ess_captured_share"`
+	EssReserveTimingUah float64 `json:"ess_reserve_timing_uah"`
+	EssReserveSocUah    float64 `json:"ess_reserve_soc_uah"`
+	EssReservePvUah     float64 `json:"ess_reserve_pv_uah"`
+	EssPvMissedKwh      float64 `json:"ess_pv_missed_kwh"`
 
 	BestDay      EconomicsMonthExtreme `json:"best_day"`
 	MinEffectDay EconomicsMonthExtreme `json:"min_effect_day"`
@@ -240,8 +245,13 @@ type EconomicsMonthlyDay struct {
 	EssNetUah       float64 `json:"ess_net_uah"`
 	EbitdaUah       float64 `json:"ebitda_uah"`
 
-	EssOptimumUah float64 `json:"ess_optimum_uah"`
-	EssReserveUah float64 `json:"ess_reserve_uah"`
+	EssFactUah          float64 `json:"ess_fact_uah"`
+	EssOptimumUah       float64 `json:"ess_optimum_uah"`
+	EssReserveUah       float64 `json:"ess_reserve_uah"`
+	EssReserveTimingUah float64 `json:"ess_reserve_timing_uah"`
+	EssReserveSocUah    float64 `json:"ess_reserve_soc_uah"`
+	EssReservePvUah     float64 `json:"ess_reserve_pv_uah"`
+	EssPvMissedKwh      float64 `json:"ess_pv_missed_kwh"`
 
 	LoadKwh          float64 `json:"load_kwh"`
 	PvKwh            float64 `json:"pv_kwh"`
@@ -320,9 +330,14 @@ func monthlyTotalsToJSON(t economics.MonthlyTotals) EconomicsMonthlyTotals {
 		DaysWithData:                t.DaysWithData,
 		HoursWithData:               t.HoursWithData,
 		HoursMissingPrice:           t.HoursMissingPrice,
+		EssFactUah:                  t.EssFact,
 		EssOptimumUah:               t.EssOptimum,
 		EssReserveUah:               t.EssReserve,
 		EssCapturedShare:            t.EssCapturedShare,
+		EssReserveTimingUah:         t.EssReserveTiming,
+		EssReserveSocUah:            t.EssReserveSoc,
+		EssReservePvUah:             t.EssReservePv,
+		EssPvMissedKwh:              t.EssPvMissedKwh,
 		BestDay:                     EconomicsMonthExtreme{Date: t.BestDay.Date, EffectUah: t.BestDay.EffectUah},
 		MinEffectDay:                EconomicsMonthExtreme{Date: t.MinEffectDay.Date, EffectUah: t.MinEffectDay.EffectUah},
 	}
@@ -331,32 +346,37 @@ func monthlyTotalsToJSON(t economics.MonthlyTotals) EconomicsMonthlyTotals {
 func monthlyDayToJSON(d economics.MonthDay) EconomicsMonthlyDay {
 	t := d.Totals
 	return EconomicsMonthlyDay{
-		Date:              d.Date,
-		IsFinal:           d.IsFinal,
-		RdnAvgUahPerKwh:   d.RdnAvgUahPerKwh,
-		EquivalentCycles:  d.EquivalentCycles,
-		BaselineCostUah:   t.BaselineCost,
-		ActualCostUah:     t.ActualCost,
-		EffectUah:         t.Effect,
-		EssNetUah:         t.EssNet,
-		EbitdaUah:         t.Ebitda,
-		EssOptimumUah:     d.EssOptimum,
-		EssReserveUah:     d.EssReserve,
-		LoadKwh:           t.Load,
-		PvKwh:             t.PV,
-		GridImportKwh:     t.GridImport,
-		GridExportKwh:     t.GridExport,
-		EssChargedKwh:     t.EssCharged,
-		EssDischargedKwh:  t.EssDischarged,
-		PvToLoadKwh:       t.PVToLoad,
-		PvToEssKwh:        t.PVToEss,
-		PvToGridKwh:       t.PVToGrid,
-		GridToLoadKwh:     t.GridToLoad,
-		GridToEssKwh:      t.GridToEss,
-		EssToLoadKwh:      t.EssToLoad,
-		EssToGridKwh:      t.EssToGrid,
-		HoursWithData:     t.HoursWithData,
-		HoursMissingPrice: t.HoursMissingPrice,
+		Date:                d.Date,
+		IsFinal:             d.IsFinal,
+		RdnAvgUahPerKwh:     d.RdnAvgUahPerKwh,
+		EquivalentCycles:    d.EquivalentCycles,
+		BaselineCostUah:     t.BaselineCost,
+		ActualCostUah:       t.ActualCost,
+		EffectUah:           t.Effect,
+		EssNetUah:           t.EssNet,
+		EbitdaUah:           t.Ebitda,
+		EssFactUah:          d.EssFact,
+		EssOptimumUah:       d.EssOptimum,
+		EssReserveUah:       d.EssReserve,
+		EssReserveTimingUah: d.EssReserveTiming,
+		EssReserveSocUah:    d.EssReserveSoc,
+		EssReservePvUah:     d.EssReservePv,
+		EssPvMissedKwh:      d.EssPvMissedKwh,
+		LoadKwh:             t.Load,
+		PvKwh:               t.PV,
+		GridImportKwh:       t.GridImport,
+		GridExportKwh:       t.GridExport,
+		EssChargedKwh:       t.EssCharged,
+		EssDischargedKwh:    t.EssDischarged,
+		PvToLoadKwh:         t.PVToLoad,
+		PvToEssKwh:          t.PVToEss,
+		PvToGridKwh:         t.PVToGrid,
+		GridToLoadKwh:       t.GridToLoad,
+		GridToEssKwh:        t.GridToEss,
+		EssToLoadKwh:        t.EssToLoad,
+		EssToGridKwh:        t.EssToGrid,
+		HoursWithData:       t.HoursWithData,
+		HoursMissingPrice:   t.HoursMissingPrice,
 	}
 }
 

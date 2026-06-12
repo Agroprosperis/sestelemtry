@@ -1643,7 +1643,7 @@
 
 .economics-optimum-row {
   display: grid;
-  grid-template-columns: 52px 1fr 76px 76px 76px;
+  grid-template-columns: 66px 1fr 76px 76px 76px;
   align-items: center;
   gap: 10px;
   padding: 9px 10px;
@@ -1693,6 +1693,123 @@
 
 .economics-capture-bar .missed {
   background: #f59e0b;
+}
+
+.economics-optimum-rowgroup {
+  display: grid;
+  gap: 6px;
+}
+
+button.economics-optimum-row {
+  width: 100%;
+  font-family: inherit;
+  color: inherit;
+  cursor: pointer;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+
+button.economics-optimum-row:hover {
+  border-color: #cbd5e1;
+  background: #f8fafc;
+}
+
+button.economics-optimum-row.open {
+  border-color: #c4b5fd;
+  background: #faf8ff;
+}
+
+.economics-optimum-caret {
+  display: inline-block;
+  width: 12px;
+  margin-right: 4px;
+  color: #94a3b8;
+  font-size: 10px;
+}
+
+.economics-optimum-detail {
+  padding: 10px;
+  border: 1px solid #f5dfbd;
+  border-radius: 8px;
+  background: #fffaf2;
+}
+
+.economics-reason-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.economics-reason {
+  padding: 9px;
+  border: 1px solid #f5dfbd;
+  border-radius: 7px;
+  background: #fff;
+}
+
+.economics-reason strong {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 12px;
+  color: #b45309;
+}
+
+.economics-reason span {
+  color: #667085;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+@media (max-width: 640px) {
+  .economics-reason-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.economics-info {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  margin-left: 5px;
+  border-radius: 50%;
+  background: #e2e8f0;
+  color: #475569;
+  font-size: 9px;
+  font-weight: 700;
+  font-style: normal;
+  cursor: help;
+  position: relative;
+  vertical-align: middle;
+}
+
+.economics-info::after {
+  content: attr(data-tip);
+  position: absolute;
+  z-index: 20;
+  bottom: calc(100% + 7px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: 240px;
+  padding: 7px 9px;
+  border-radius: 7px;
+  background: #1e293b;
+  color: #f8fafc;
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.4;
+  text-align: left;
+  white-space: normal;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.12s ease;
+  pointer-events: none;
+}
+
+.economics-info:hover::after {
+  opacity: 1;
+  visibility: visible;
 }
 
 .economics-optimum-note {

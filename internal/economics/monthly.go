@@ -30,6 +30,7 @@ type HourlyRecord struct {
 	PVToLoad   float64
 	PVToGrid   float64
 	PVToEss    float64
+	GridToEss  float64
 	GridToLoad float64
 	EssToLoad  float64
 
@@ -50,10 +51,17 @@ type MonthDay struct {
 	EquivalentCycles float64
 	IsFinal          bool
 
-	// EssOptimum is the modelled maximum ESS effect for the day (perfect
-	// foresight, same essNet objective); EssReserve = EssOptimum − EssNet.
-	EssOptimum float64
-	EssReserve float64
+	// Fact-vs-optimum (all on the PV-free basis, per the example: stored
+	// PV has cost 0). EssFact is the realised effect on that basis;
+	// EssOptimum the modelled maximum; EssReserve = EssOptimum − EssFact,
+	// decomposed into the timing / pre-peak-SOC / missed-PV causes.
+	EssFact          float64
+	EssOptimum       float64
+	EssReserve       float64
+	EssReserveTiming float64
+	EssReserveSoc    float64
+	EssReservePv     float64
+	EssPvMissedKwh   float64
 }
 
 // DayMargin is one row of the ESS marginality heatmap: 24 hourly margins
@@ -120,12 +128,19 @@ type MonthlyTotals struct {
 	HoursWithData     int
 	HoursMissingPrice int
 
-	// ESS fact-vs-optimum rollup. EssOptimum is the sum of per-day
-	// modelled maxima (each clamped ≥ that day's realised EssNet, so
-	// EssReserve is always ≥ 0). EssCapturedShare = EssNet / EssOptimum.
+	// ESS fact-vs-optimum rollup (PV-free basis). EssFact is the realised
+	// effect, EssOptimum the sum of per-day modelled maxima (each clamped
+	// ≥ that day's fact, so EssReserve ≥ 0). EssCapturedShare =
+	// EssFact / EssOptimum. The reserve is split into three causes that
+	// sum back to EssReserve.
+	EssFact          float64
 	EssOptimum       float64
 	EssReserve       float64
 	EssCapturedShare float64
+	EssReserveTiming float64
+	EssReserveSoc    float64
+	EssReservePv     float64
+	EssPvMissedKwh   float64
 
 	BestDay      MonthExtreme
 	MinEffectDay MonthExtreme
@@ -153,13 +168,17 @@ func AggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly
 		num float64 // sum(rdn * import)
 		den float64 // sum(import)
 	}
-	// Per-day optimizer context: the 24 hourly slots plus the residual at
-	// the earliest priced hour (the day's starting SOC).
+	// Per-day optimizer context: the 24 hourly slots, the residual at the
+	// earliest hour (the day's starting SOC), and the accumulators the
+	// fact-vs-optimum decomposition needs.
 	type dayOpt struct {
-		hours     [24]optimumHour
-		startKwh  float64
-		startHour int
-		haveStart bool
+		hours       [24]optimumHour
+		startKwh    float64
+		startHour   int
+		haveStart   bool
+		pvChargeOpp float64 // Σ pv_to_ess × export (PV→free basis adjustment)
+		pvSurplus   float64 // Σ available PV surplus
+		actualPv    float64 // Σ actual pv_to_ess
 	}
 	dayRdn := make(map[string]*rdnAcc)
 	dayOpts := make(map[string]*dayOpt)
@@ -189,19 +208,25 @@ func AggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly
 				do = &dayOpt{}
 				dayOpts[key] = do
 			}
+			pvSurplus := h.PVToGrid + h.PVToEss
 			oh := optimumHour{
 				// PV not consumed by load is available to charge (or
 				// export); load not served by PV is the import the
 				// battery can displace at import price.
-				pvSurplusKwh:    h.PVToGrid + h.PVToEss,
-				displaceableKwh: h.GridToLoad + h.EssToLoad,
+				pvSurplusKwh:        pvSurplus,
+				displaceableKwh:     h.GridToLoad + h.EssToLoad,
+				actualPvChargeKwh:   h.PVToEss,
+				actualGridChargeKwh: h.GridToEss,
 			}
 			if h.Rdn != nil {
 				oh.tradable = true
 				oh.importPrice = h.ImportPrice
 				oh.exportPrice = h.ExportPrice
+				do.pvChargeOpp += h.PVToEss * h.ExportPrice
 			}
 			do.hours[hour] = oh
+			do.pvSurplus += pvSurplus
+			do.actualPv += h.PVToEss
 			if h.EssRemainingKwhStart != nil && (!do.haveStart || hour < do.startHour) {
 				do.startKwh = *h.EssRemainingKwhStart
 				do.startHour = hour
@@ -226,15 +251,52 @@ func AggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly
 	}
 
 	// Fact-vs-optimum: derive the battery envelope from this month's
-	// hourly history, then solve each day's optimal dispatch.
+	// hourly history, then solve each day's optimal dispatch on the
+	// PV-free basis and attribute the reserve to its causes.
+	type optimumResult struct {
+		fact     float64 // realised effect on the PV-free basis
+		optimum  float64
+		reserve  float64
+		timing   float64 // discharge not at peak
+		soc      float64 // pre-peak SOC / grid charge timing
+		pv       float64 // missed PV charging
+		pvMissed float64 // available PV surplus that was not stored (kWh)
+	}
 	optParams := deriveOptimumParams(hourly, capacityKwh, degradationUahPerKwh)
-	perDayOptimum := make(map[string]float64, len(dayOpts))
-	for key, do := range dayOpts {
+
+	// computeOptimum solves the 3-run ladder for one day: each relaxation
+	// only adds freedom, so the values are monotonic and the three
+	// reasons are non-negative and sum to the reserve.
+	computeOptimum := func(do *dayOpt, factPv0 float64) optimumResult {
+		if do == nil {
+			return optimumResult{fact: factPv0, optimum: factPv0}
+		}
 		start := optParams.socMinKwh
 		if do.haveStart {
 			start = do.startKwh
 		}
-		perDayOptimum[key] = optimizeDay(do.hours[:], start, optParams)
+		fixed := optimizeDay(do.hours[:], start, optParams, modeFixedCharge)
+		noPv := optimizeDay(do.hours[:], start, optParams, modeNoPV)
+		full := optimizeDay(do.hours[:], start, optParams, modeFull)
+		// Clamp into a monotonic ladder bottomed at the fact.
+		if fixed < factPv0 {
+			fixed = factPv0
+		}
+		if noPv < fixed {
+			noPv = fixed
+		}
+		if full < noPv {
+			full = noPv
+		}
+		return optimumResult{
+			fact:     factPv0,
+			optimum:  full,
+			reserve:  full - factPv0,
+			timing:   fixed - factPv0,
+			soc:      noPv - fixed,
+			pv:       full - noPv,
+			pvMissed: math.Max(0, do.pvSurplus-do.actualPv),
+		}
 	}
 
 	var totals MonthlyTotals
@@ -304,15 +366,21 @@ func AggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly
 			cycles = t.EssDischarged / capacityKwh
 		}
 
-		// Optimum is clamped to the realised effect so the reserve is
-		// never negative (the actual schedule is, by definition, a
-		// feasible — if suboptimal — dispatch).
-		dayOptimum := perDayOptimum[key]
-		if dayOptimum < t.EssNet {
-			dayOptimum = t.EssNet
+		// Fact-vs-optimum on the PV-free basis: realised effect adds back
+		// the export-opportunity of PV that was stored (so charging from
+		// PV counts as free, like the optimum and the example).
+		do := dayOpts[key]
+		factPv0 := t.EssNet
+		if do != nil {
+			factPv0 += do.pvChargeOpp
 		}
-		dayReserve := dayOptimum - t.EssNet
-		totals.EssOptimum += dayOptimum
+		opt := computeOptimum(do, factPv0)
+		totals.EssFact += opt.fact
+		totals.EssOptimum += opt.optimum
+		totals.EssReserveTiming += opt.timing
+		totals.EssReserveSoc += opt.soc
+		totals.EssReservePv += opt.pv
+		totals.EssPvMissedKwh += opt.pvMissed
 
 		outDays = append(outDays, MonthDay{
 			Date:             key,
@@ -320,8 +388,13 @@ func AggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly
 			RdnAvgUahPerKwh:  rdnAvg,
 			EquivalentCycles: cycles,
 			IsFinal:          d.IsFinal,
-			EssOptimum:       dayOptimum,
-			EssReserve:       dayReserve,
+			EssFact:          opt.fact,
+			EssOptimum:       opt.optimum,
+			EssReserve:       opt.reserve,
+			EssReserveTiming: opt.timing,
+			EssReserveSoc:    opt.soc,
+			EssReservePv:     opt.pv,
+			EssPvMissedKwh:   opt.pvMissed,
 		})
 	}
 
@@ -341,9 +414,9 @@ func AggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly
 	if capacityKwh > 0 {
 		totals.EquivalentCycles = totals.EssDischarged / capacityKwh
 	}
-	totals.EssReserve = totals.EssOptimum - totals.EssNet
+	totals.EssReserve = totals.EssOptimum - totals.EssFact
 	if totals.EssOptimum > 0 {
-		totals.EssCapturedShare = totals.EssNet / totals.EssOptimum
+		totals.EssCapturedShare = totals.EssFact / totals.EssOptimum
 	}
 
 	// ESS EOD snapshot: last day with data wins (point-in-time state).

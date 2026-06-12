@@ -24,7 +24,7 @@ func TestOptimizeDayArbitrage(t *testing.T) {
 	hours[0] = optimumHour{tradable: true, importPrice: 1, exportPrice: 1, displaceableKwh: 100}
 	hours[1] = optimumHour{tradable: true, importPrice: 10, exportPrice: 10, displaceableKwh: 100}
 
-	got := optimizeDay(hours, 0, p)
+	got := optimizeDay(hours, 0, p, modeFull)
 	// Charge 50 @1 (cost 50), discharge 50 to load @10 (revenue 500) → 450.
 	if math.Abs(got-450) > 5 {
 		t.Fatalf("optimizeDay = %v, want ~450", got)
@@ -43,7 +43,7 @@ func TestOptimizeDayNoSpread(t *testing.T) {
 	for i := range hours {
 		hours[i] = optimumHour{tradable: true, importPrice: 5, exportPrice: 5, displaceableKwh: 100}
 	}
-	if got := optimizeDay(hours, 0, p); got > 1e-6 {
+	if got := optimizeDay(hours, 0, p, modeFull); got > 1e-6 {
 		t.Fatalf("optimizeDay flat = %v, want ~0", got)
 	}
 }
@@ -65,10 +65,10 @@ func TestAggregateMonthOptimum(t *testing.T) {
 	for h := 0; h < 24; h++ {
 		hourly = append(hourly, HourlyRecord{HourStart: day.Add(time.Duration(h) * time.Hour)})
 	}
-	// Night: cheap, battery demonstrates a 40 kWh charge from empty.
+	// Night: cheap, battery demonstrates a 40 kWh grid charge from empty.
 	hourly[3] = HourlyRecord{
 		HourStart: day.Add(3 * time.Hour), Rdn: floatPtr(1), ImportPrice: 1, ExportPrice: 1,
-		EssCharged: 40, EssRemainingKwhStart: floatPtr(0),
+		GridToEss: 40, EssCharged: 40, EssRemainingKwhStart: floatPtr(0),
 	}
 	// Evening peak: expensive, demonstrates a 40 kWh discharge into load.
 	hourly[19] = HourlyRecord{
@@ -85,8 +85,14 @@ func TestAggregateMonthOptimum(t *testing.T) {
 	if got.Totals.EssReserve <= 0 {
 		t.Fatalf("EssReserve = %v, want > 0", got.Totals.EssReserve)
 	}
-	if got.Totals.EssReserve != got.Totals.EssOptimum-got.Totals.EssNet {
-		t.Fatalf("EssReserve %v != optimum %v − fact %v", got.Totals.EssReserve, got.Totals.EssOptimum, got.Totals.EssNet)
+	if math.Abs(got.Totals.EssReserve-(got.Totals.EssOptimum-got.Totals.EssFact)) > 1e-6 {
+		t.Fatalf("EssReserve %v != optimum %v − fact %v", got.Totals.EssReserve, got.Totals.EssOptimum, got.Totals.EssFact)
+	}
+	// The three reasons must add up to the reserve.
+	reasonsSum := got.Totals.EssReserveTiming + got.Totals.EssReserveSoc + got.Totals.EssReservePv
+	if math.Abs(reasonsSum-got.Totals.EssReserve) > 1e-6 {
+		t.Fatalf("reasons %v (t=%v s=%v p=%v) != reserve %v", reasonsSum,
+			got.Totals.EssReserveTiming, got.Totals.EssReserveSoc, got.Totals.EssReservePv, got.Totals.EssReserve)
 	}
 	if got.Totals.EssCapturedShare <= 0 || got.Totals.EssCapturedShare > 1 {
 		t.Fatalf("EssCapturedShare = %v, want (0,1]", got.Totals.EssCapturedShare)

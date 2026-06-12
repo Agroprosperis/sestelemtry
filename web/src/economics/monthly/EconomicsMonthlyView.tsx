@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import {
   Bar,
   BarChart,
@@ -367,9 +367,18 @@ function MonthlyTrend({ days, totals }: { days: EconomicsMonthlyDay[]; totals: E
 // is the under-used opportunity (not a loss).
 const TOP_RESERVE_ROWS = 8
 
+function OptimumInfo({ tip }: { tip: string }) {
+  return (
+    <span className="economics-info" data-tip={tip} role="img" aria-label={tip}>
+      i
+    </span>
+  )
+}
+
 function MonthlyOptimum({ totals, days }: { totals: EconomicsMonthlyTotals; days: EconomicsMonthlyDay[] }) {
   const captured = totals.ess_captured_share
   const hasOptimum = totals.ess_optimum_uah > 0
+  const [openDate, setOpenDate] = useState<string | null>(null)
 
   const rows = useMemo(
     () =>
@@ -388,19 +397,31 @@ function MonthlyOptimum({ totals, days }: { totals: EconomicsMonthlyTotals; days
       </div>
       <div className="economics-optimum-kpis">
         <div className="economics-optimum-kpi">
-          <span className="economics-optimum-kpi-label">Оптимум</span>
+          <span className="economics-optimum-kpi-label">
+            Оптимум
+            <OptimumInfo tip="Модельний максимум ефекту УЗЕ за фактичних цін РДН, генерації СЕС, споживання, ємності, SOC, потужності, ККД та зносу. Заряд від СЕС має собівартість 0." />
+          </span>
           <span className="economics-optimum-kpi-value">{formatUah(totals.ess_optimum_uah)}</span>
         </div>
         <div className="economics-optimum-kpi">
-          <span className="economics-optimum-kpi-label">Факт</span>
-          <span className="economics-optimum-kpi-value good">{formatUah(totals.ess_net_uah)}</span>
+          <span className="economics-optimum-kpi-label">
+            Факт
+            <OptimumInfo tip="Фактичний ефект УЗЕ = УЗЕ → споживання + УЗЕ → мережа − заряд УЗЕ з мережі − втрати та знос (заряд від СЕС безкоштовний)." />
+          </span>
+          <span className="economics-optimum-kpi-value good">{formatUah(totals.ess_fact_uah)}</span>
         </div>
         <div className="economics-optimum-kpi">
-          <span className="economics-optimum-kpi-label">Захоплено</span>
+          <span className="economics-optimum-kpi-label">
+            Захоплено
+            <OptimumInfo tip="Факт / Оптимум. Показує, яку частку доступної можливості УЗЕ реально використала." />
+          </span>
           <span className="economics-optimum-kpi-value">{hasOptimum ? formatPercent(captured) : '—'}</span>
         </div>
         <div className="economics-optimum-kpi">
-          <span className="economics-optimum-kpi-label">Резерв</span>
+          <span className="economics-optimum-kpi-label">
+            Резерв
+            <OptimumInfo tip="Оптимум − Факт. Це не збиток, а оцінка недовикористаної можливості за місяць." />
+          </span>
           <span className="economics-optimum-kpi-value amber">{formatUah(totals.ess_reserve_uah)}</span>
         </div>
       </div>
@@ -410,6 +431,7 @@ function MonthlyOptimum({ totals, days }: { totals: EconomicsMonthlyTotals; days
           <div className="economics-optimum-legend">
             <span><i style={{ background: '#7c3aed' }} />фактичний ефект</span>
             <span><i style={{ background: '#f59e0b' }} />недовикористано</span>
+            <span><i style={{ background: '#e5e7eb' }} />оптимум</span>
           </div>
           <div className="economics-optimum-list">
             <div className="economics-optimum-row head">
@@ -420,17 +442,29 @@ function MonthlyOptimum({ totals, days }: { totals: EconomicsMonthlyTotals; days
               <span>резерв</span>
             </div>
             {rows.map((d) => {
-              const factShare = d.ess_optimum_uah > 0 ? Math.max(0, Math.min(1, d.ess_net_uah / d.ess_optimum_uah)) : 0
+              const factShare = d.ess_optimum_uah > 0 ? Math.max(0, Math.min(1, d.ess_fact_uah / d.ess_optimum_uah)) : 0
+              const open = openDate === d.date
               return (
-                <div key={d.date} className="economics-optimum-row">
-                  <strong>{formatDayLabel(d.date)}</strong>
-                  <div className="economics-capture-bar">
-                    <span className="fact" style={{ width: `${factShare * 100}%` }} />
-                    <span className="missed" style={{ width: `${(1 - factShare) * 100}%` }} />
-                  </div>
-                  <span>{formatUah(d.ess_optimum_uah)}</span>
-                  <span className="good">{formatUah(d.ess_net_uah)}</span>
-                  <span className="amber">{formatUah(d.ess_reserve_uah)}</span>
+                <div key={d.date} className="economics-optimum-rowgroup">
+                  <button
+                    type="button"
+                    className={`economics-optimum-row clickable${open ? ' open' : ''}`}
+                    aria-expanded={open}
+                    onClick={() => setOpenDate(open ? null : d.date)}
+                  >
+                    <strong>
+                      <span className="economics-optimum-caret">{open ? '▾' : '▸'}</span>
+                      {formatDayLabel(d.date)}
+                    </strong>
+                    <div className="economics-capture-bar">
+                      <span className="fact" style={{ width: `${factShare * 100}%` }} />
+                      <span className="missed" style={{ width: `${(1 - factShare) * 100}%` }} />
+                    </div>
+                    <span>{formatUah(d.ess_optimum_uah)}</span>
+                    <span className="good">{formatUah(d.ess_fact_uah)}</span>
+                    <span className="amber">{formatUah(d.ess_reserve_uah)}</span>
+                  </button>
+                  {open ? <OptimumReasons day={d} /> : null}
                 </div>
               )
             })}
@@ -444,6 +478,38 @@ function MonthlyOptimum({ totals, days }: { totals: EconomicsMonthlyTotals; days
         <p className="economics-month-empty-note">Недостатньо активності УЗЕ в місяці для оцінки оптимуму.</p>
       )}
     </section>
+  )
+}
+
+// OptimumReasons breaks a day's reserve into the three causes the backend
+// attributes it to (timing of discharge, pre-peak SOC / charge timing, and
+// missed PV charging). The three values sum to that day's reserve.
+function OptimumReasons({ day }: { day: EconomicsMonthlyDay }) {
+  return (
+    <div className="economics-optimum-detail">
+      <div className="economics-reason-grid">
+        <div className="economics-reason">
+          <strong>Розряд не в пік</strong>
+          <span>
+            {formatKwh(day.ess_discharged_kwh)} розряду пройшли повз найдорожчі години: резерв{' '}
+            {formatUah(day.ess_reserve_timing_uah)}.
+          </span>
+        </div>
+        <div className="economics-reason">
+          <strong>Заряд від СЕС</strong>
+          <span>
+            {formatKwh(day.ess_pv_missed_kwh)} доступного надлишку СЕС не потрапили в УЗЕ: резерв{' '}
+            {formatUah(day.ess_reserve_pv_uah)}.
+          </span>
+        </div>
+        <div className="economics-reason">
+          <strong>SOC перед піком</strong>
+          <span>
+            Бракувало заряду батареї перед вечірнім піком: резерв {formatUah(day.ess_reserve_soc_uah)}.
+          </span>
+        </div>
+      </div>
+    </div>
   )
 }
 

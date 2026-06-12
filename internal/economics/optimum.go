@@ -108,23 +108,52 @@ type optimumHour struct {
 	tradable        bool    // prices known → the battery may act this hour
 	importPrice     float64 // all-in import price (UAH/kWh)
 	exportPrice     float64 // export price (UAH/kWh)
-	pvSurplusKwh    float64 // PV not used by load → chargeable at export opp. cost
+	pvSurplusKwh    float64 // PV not used by load → chargeable for free
 	displaceableKwh float64 // grid import to load → dischargeable at import price
+
+	actualPvChargeKwh   float64 // realised pv_to_ess (cap for the no-extra-PV runs)
+	actualGridChargeKwh float64 // realised grid_to_ess (cap for the fixed-charge run)
+}
+
+// chargeMode selects which charging the optimizer may use. The ladder of
+// progressively-relaxed modes lets us attribute the fact↔optimum gap to
+// distinct causes (see AggregateMonth).
+type chargeMode int
+
+const (
+	// modeFull: store any available PV surplus, charge freely from grid.
+	modeFull chargeMode = iota
+	// modeNoPV: no more PV than was actually stored; grid charge free.
+	modeNoPV
+	// modeFixedCharge: charge no more than actually charged each hour
+	// (PV and grid) — only discharge timing is re-optimized.
+	modeFixedCharge
+)
+
+// chargeCaps returns the per-hour PV and grid charge ceilings for a mode.
+func (h optimumHour) chargeCaps(mode chargeMode) (pvCap, gridCap float64) {
+	switch mode {
+	case modeFixedCharge:
+		return h.actualPvChargeKwh, h.actualGridChargeKwh
+	case modeNoPV:
+		return h.actualPvChargeKwh, math.Inf(1)
+	default: // modeFull
+		return h.pvSurplusKwh, math.Inf(1)
+	}
 }
 
 // optimizeDay returns the maximum achievable ESS effect for one civil day
-// under perfect foresight, maximizing the same essNet objective used for
-// the realised figure:
+// under perfect foresight. Following the example's convention, charging
+// from PV surplus is FREE (cost basis 0); only grid charging costs the
+// import price. The objective is:
 //
 //	Σ [ dischargeToLoad·import + dischargeToGrid·export
-//	    − chargeFromGrid·import − chargeFromPV·export
-//	    − discharged·degradation ]
+//	    − chargeFromGrid·import − discharged·degradation ]
 //
-// It is solved by forward DP over a discretized SOC grid. Charging from PV
-// surplus is preferred over the grid, and discharging to load (import
-// price) over the grid (export price), so each SOC transition reduces to a
-// single greedy source/sink split.
-func optimizeDay(hours []optimumHour, startResidualKwh float64, p optimumParams) float64 {
+// It is solved by forward DP over a discretized SOC grid. PV is filled
+// first (free), then the grid, so each SOC transition reduces to a single
+// greedy source/sink split; mode bounds how much PV / grid may be used.
+func optimizeDay(hours []optimumHour, startResidualKwh float64, p optimumParams, mode chargeMode) float64 {
 	span := p.socMaxKwh - p.socMinKwh
 	if span <= 0 || len(hours) == 0 {
 		return 0
@@ -176,6 +205,7 @@ func optimizeDay(hours []optimumHour, startResidualKwh float64, p optimumParams)
 			if !h.tradable {
 				continue
 			}
+			pvCap, gridCap := h.chargeCaps(mode)
 			// Charge: climb to a higher SOC level.
 			for d := 1; d <= upLevels; d++ {
 				ns := s + d
@@ -186,9 +216,12 @@ func optimizeDay(hours []optimumHour, startResidualKwh float64, p optimumParams)
 				if chargeAC > p.maxChargeKwh+1e-9 {
 					break
 				}
-				cp := math.Min(h.pvSurplusKwh, chargeAC)
+				cp := math.Min(pvCap, chargeAC) // PV first, free
 				cg := chargeAC - cp
-				v := f[s] - (cp*h.exportPrice + cg*h.importPrice)
+				if cg > gridCap+1e-9 {
+					break // beyond this the grid cap is exceeded
+				}
+				v := f[s] - cg*h.importPrice
 				if v > nf[ns] {
 					nf[ns] = v
 				}
