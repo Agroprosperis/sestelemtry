@@ -993,6 +993,12 @@ func (s *Store) GetEconomicsDaily(ctx context.Context, organizationID string, da
 	return storage.GetEconomicsDaily(ctx, s.pool, organizationID, day)
 }
 
+// GetEconomicsDailyRange returns persisted per-day summaries for the
+// inclusive civil-date span [from, to], ordered by day ascending.
+func (s *Store) GetEconomicsDailyRange(ctx context.Context, organizationID string, from, to time.Time) ([]storage.EconomicsDailyRow, error) {
+	return storage.GetEconomicsDailyRange(ctx, s.pool, organizationID, from, to)
+}
+
 // GetFusionDailyKpi returns the canonical FusionSolar daily KPI for
 // (org, day), used to reconcile computed economics.
 func (s *Store) GetFusionDailyKpi(ctx context.Context, organizationID string, day time.Time) (storage.FusionDailyKpiRow, bool, error) {

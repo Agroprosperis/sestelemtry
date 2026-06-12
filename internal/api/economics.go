@@ -155,6 +155,41 @@ func (b *economicsBackend) LoadDay(ctx context.Context, orgID string, dayStart t
 	}, true, nil
 }
 
+func (b *economicsBackend) LoadDailyRange(ctx context.Context, orgID string, from, to time.Time) ([]economics.DailyRecord, error) {
+	rows, err := b.store.GetEconomicsDailyRange(ctx, orgID, from, to)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]economics.DailyRecord, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, economics.DailyRecord{
+			Day:        row.Day,
+			Totals:     storageToDailyTotals(row),
+			IsFinal:    row.IsFinal,
+			ComputedAt: row.ComputedAt,
+		})
+	}
+	return out, nil
+}
+
+func (b *economicsBackend) LoadHourlyRange(ctx context.Context, orgID string, from, to time.Time) ([]economics.HourlyRecord, error) {
+	rows, err := b.store.GetEconomicsHourly(ctx, orgID, from, to)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]economics.HourlyRecord, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, economics.HourlyRecord{
+			HourStart:     row.HourStart,
+			Rdn:           row.Rdn,
+			GridImport:    row.ImportTotal,
+			EssNet:        row.EssNet,
+			EssDischarged: row.EssDischarged,
+		})
+	}
+	return out, nil
+}
+
 // --- conversions ---
 
 func orgTariffsToEconomics(t OrgTariffs) economics.Tariffs {

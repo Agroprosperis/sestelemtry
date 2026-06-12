@@ -32,10 +32,17 @@ function formatDateString(d: Date): string {
 // pulling the page in as a dependency cycle.
 export type DamRefreshState = 'idle' | 'loading' | 'error'
 
+// EconomicsRange is the period granularity toggle: a single day or a
+// whole calendar month. Year is intentionally excluded — the economics
+// rollup is day/month only.
+export type EconomicsRange = 'day' | 'month'
+
 type Props = {
   organizationID: string
   organizationOptions: string[]
   onOrganizationChange: (next: string) => void
+  range: EconomicsRange
+  onRangeChange: (next: EconomicsRange) => void
   date: string
   onDateChange: (next: string) => void
   tariffs: Tariffs
@@ -148,6 +155,8 @@ export function EconomicsHeader({
   organizationID,
   organizationOptions,
   onOrganizationChange,
+  range,
+  onRangeChange,
   date,
   onDateChange,
   tariffs,
@@ -178,9 +187,12 @@ export function EconomicsHeader({
             className="economics-header-logo"
           />
           <div className="economics-header-titles">
-            <h1>Добова економіка (СЕС + УЗЕ)</h1>
+            <h1>{range === 'month' ? 'Місячна економіка (СЕС + УЗЕ)' : 'Добова економіка (СЕС + УЗЕ)'}</h1>
             <p>
-              {formatOrganizationLabel(organizationID)} · розрахунок ефекту за обраний день на базі цін РДН і тарифів.
+              {formatOrganizationLabel(organizationID)} ·{' '}
+              {range === 'month'
+                ? 'управлінський звіт за місяць на базі цін РДН і тарифів.'
+                : 'розрахунок ефекту за обраний день на базі цін РДН і тарифів.'}
             </p>
           </div>
         </div>
@@ -190,8 +202,26 @@ export function EconomicsHeader({
             options={organizationOptions}
             onChange={onOrganizationChange}
           />
+          <div className="economics-range-switch" role="group" aria-label="Гранулярність періоду">
+            <button
+              type="button"
+              className={range === 'day' ? 'active' : ''}
+              aria-pressed={range === 'day'}
+              onClick={() => onRangeChange('day')}
+            >
+              День
+            </button>
+            <button
+              type="button"
+              className={range === 'month' ? 'active' : ''}
+              aria-pressed={range === 'month'}
+              onClick={() => onRangeChange('month')}
+            >
+              Місяць
+            </button>
+          </div>
           <PeriodPicker
-            preset="day"
+            preset={range}
             anchor={parseDateString(date)}
             onChange={(next) => onDateChange(formatDateString(next))}
           />

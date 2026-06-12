@@ -584,3 +584,60 @@ func GetEconomicsDaily(ctx context.Context, pool *pgxpool.Pool, organizationID s
 	}
 	return r, true, nil
 }
+
+// GetEconomicsDailyRange returns every persisted per-day summary for the
+// inclusive civil-date span [from, to], ordered by day ascending. An
+// empty slice (no error) means the org has no stored days in the range.
+func GetEconomicsDailyRange(ctx context.Context, pool *pgxpool.Pool, organizationID string, from, to time.Time) ([]EconomicsDailyRow, error) {
+	if pool == nil {
+		return nil, fmt.Errorf("storage: nil pool")
+	}
+	if organizationID == "" {
+		return nil, fmt.Errorf("storage: empty organization_id")
+	}
+	rows, err := pool.Query(ctx, `
+		SELECT
+			organization_id, day, tz,
+			baseline_cost_uah, actual_cost_uah, effect_uah, ess_net_uah,
+			load_kwh, pv_kwh, grid_import_kwh, grid_export_kwh, ess_charged_kwh, ess_discharged_kwh,
+			pv_to_load_kwh, pv_to_ess_kwh, pv_to_grid_kwh, grid_to_load_kwh, grid_to_ess_kwh, ess_to_load_kwh, ess_to_grid_kwh,
+			avg_import_price_uah_per_kwh, avg_export_price_uah_per_kwh,
+			revenue_pv_export_uah, revenue_pv_self_uah, revenue_ess_export_uah, revenue_ess_self_uah, revenue_total_uah,
+			expense_grid_charge_uah, expense_total_uah, ebitda_uah,
+			ess_withdrawn_cost_uah, ess_realized_profit_uah, ess_degradation_cost_uah,
+			ess_avg_cost_basis_uah_per_kwh_eod, ess_residual_kwh_eod, ess_cost_basis_uah_eod,
+			hours_with_data, hours_missing_price, skip_diagnostics, is_final,
+			reconciled, quality_flags, reconciliation, computed_at
+		FROM economics_daily
+		WHERE organization_id = $1 AND day >= $2::date AND day <= $3::date
+		ORDER BY day ASC
+	`, organizationID, from, to)
+	if err != nil {
+		return nil, fmt.Errorf("storage: query economics daily range: %w", err)
+	}
+	defer rows.Close()
+	var out []EconomicsDailyRow
+	for rows.Next() {
+		var r EconomicsDailyRow
+		if err := rows.Scan(
+			&r.OrganizationID, &r.Day, &r.Tz,
+			&r.BaselineCost, &r.ActualCost, &r.Effect, &r.EssNet,
+			&r.Load, &r.PV, &r.GridImport, &r.GridExport, &r.EssCharged, &r.EssDischarged,
+			&r.PVToLoad, &r.PVToEss, &r.PVToGrid, &r.GridToLoad, &r.GridToEss, &r.EssToLoad, &r.EssToGrid,
+			&r.AvgImportPrice, &r.AvgExportPrice,
+			&r.RevenuePvExport, &r.RevenuePvSelf, &r.RevenueEssExport, &r.RevenueEssSelf, &r.RevenueTotal,
+			&r.ExpenseGridCharge, &r.ExpenseTotal, &r.Ebitda,
+			&r.EssWithdrawnCost, &r.EssRealizedProfit, &r.EssDegradationCost,
+			&r.EssAvgCostBasisEod, &r.EssResidualKwhEod, &r.EssCostBasisUahEod,
+			&r.HoursWithData, &r.HoursMissingPrice, &r.SkipDiagnostics, &r.IsFinal,
+			&r.Reconciled, &r.QualityFlags, &r.Reconciliation, &r.ComputedAt,
+		); err != nil {
+			return nil, fmt.Errorf("storage: scan economics daily range: %w", err)
+		}
+		out = append(out, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("storage: iterate economics daily range: %w", err)
+	}
+	return out, nil
+}

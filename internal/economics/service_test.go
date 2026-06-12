@@ -76,6 +76,45 @@ func (b *fakeBackend) LoadDay(_ context.Context, _ string, dayStart time.Time, _
 	return d, ok, nil
 }
 
+func (b *fakeBackend) LoadDailyRange(_ context.Context, _ string, from, to time.Time) ([]DailyRecord, error) {
+	var out []DailyRecord
+	for day := from; !day.After(to); day = day.AddDate(0, 0, 1) {
+		d, ok := b.saved[day.Format("2006-01-02")]
+		if !ok {
+			continue
+		}
+		out = append(out, DailyRecord{
+			Day:        d.Day,
+			Totals:     d.Totals,
+			IsFinal:    d.IsFinal,
+			ComputedAt: d.ComputedAt,
+		})
+	}
+	return out, nil
+}
+
+func (b *fakeBackend) LoadHourlyRange(_ context.Context, _ string, from, to time.Time) ([]HourlyRecord, error) {
+	var out []HourlyRecord
+	for _, d := range b.saved {
+		for _, r := range d.Rows {
+			if r == nil {
+				continue
+			}
+			if r.HourStart.Before(from) || !r.HourStart.Before(to) {
+				continue
+			}
+			out = append(out, HourlyRecord{
+				HourStart:     r.HourStart,
+				Rdn:           r.Rdn,
+				GridImport:    r.Flow.GridImport,
+				EssNet:        r.Econ.EssNet,
+				EssDischarged: r.Flow.EssDischarged,
+			})
+		}
+	}
+	return out, nil
+}
+
 func newKyivBackend(t *testing.T) (*fakeBackend, *time.Location) {
 	t.Helper()
 	loc, err := time.LoadLocation("Europe/Kyiv")

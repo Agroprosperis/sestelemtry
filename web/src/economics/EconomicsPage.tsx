@@ -4,13 +4,15 @@ import { useOrganizationParam } from '../dashboard/hooks/useOrganizationParam'
 import { dailyTotals } from './compute'
 import { EconomicsCharts } from './components/EconomicsCharts'
 import { EconomicsDamPricesModal } from './components/EconomicsDamPricesModal'
-import { EconomicsHeader } from './components/EconomicsHeader'
+import { EconomicsHeader, type EconomicsRange } from './components/EconomicsHeader'
 import { EconomicsKpis } from './components/EconomicsKpis'
 import { EconomicsRecomputeModal } from './components/EconomicsRecomputeModal'
 import { EconomicsRevenuePanel } from './components/EconomicsRevenuePanel'
 import { EconomicsTable } from './components/EconomicsTable'
+import { EconomicsMonthlyView } from './monthly/EconomicsMonthlyView'
 import './economics.css'
 import { useEconomicsData } from './useEconomicsData'
+import { useEconomicsMonthlyData } from './useEconomicsMonthlyData'
 import { useOrgTariffs } from './useOrgTariffs'
 
 // DamRefreshState is the small UI state machine that drives the
@@ -82,11 +84,24 @@ const LEGACY_QUERY_KEYS = [
   'ess_capacity',
 ]
 
-function updateUrl(date: string) {
+// readRangeFromUrl picks the period granularity (day / month). Defaults
+// to 'day' so existing links and the common case stay unchanged.
+function readRangeFromUrl(): EconomicsRange {
+  if (typeof window === 'undefined') return 'day'
+  const params = new URLSearchParams(window.location.search)
+  return params.get('range') === 'month' ? 'month' : 'day'
+}
+
+function updateUrl(date: string, range: EconomicsRange) {
   if (typeof window === 'undefined') return
   const url = new URL(window.location.href)
   url.searchParams.set('view', 'economics')
   url.searchParams.set('anchor', date)
+  if (range === 'month') {
+    url.searchParams.set('range', 'month')
+  } else {
+    url.searchParams.delete('range')
+  }
   for (const key of LEGACY_QUERY_KEYS) url.searchParams.delete(key)
   window.history.replaceState({}, '', url.toString())
 }
@@ -94,6 +109,7 @@ function updateUrl(date: string) {
 export function EconomicsPage() {
   const { organizationID, options, change: onOrganizationChange } = useOrganizationParam()
   const [date, setDate] = useState<string>(readDateFromUrl)
+  const [range, setRange] = useState<EconomicsRange>(readRangeFromUrl)
   const {
     tariffs,
     status: tariffsStatus,
@@ -101,13 +117,14 @@ export function EconomicsPage() {
     setTariffs,
   } = useOrgTariffs(organizationID)
 
-  // Keep the URL in sync with the date so the analyst can copy/paste
-  // a "this view" link into Slack. Org id changes are already URL-
-  // synced inside `useOrganizationParam`; tariffs are persisted per-
-  // org on the backend and intentionally don't show up in the URL.
+  // Keep the URL in sync with the date + range so the analyst can
+  // copy/paste a "this view" link into Slack. Org id changes are
+  // already URL-synced inside `useOrganizationParam`; tariffs are
+  // persisted per-org on the backend and intentionally don't show up
+  // in the URL.
   useEffect(() => {
-    updateUrl(date)
-  }, [date])
+    updateUrl(date, range)
+  }, [date, range])
 
   // refreshKey bumps every time a successful POST to
   // /api/v1/dam-prices/refresh comes back, forcing useEconomicsData
@@ -133,9 +150,25 @@ export function EconomicsPage() {
     }
   }, [date])
 
-  const data = useEconomicsData({ organizationID, date, tariffs, refreshKey })
+  // Only the active view fetches: passing an empty org id makes the
+  // hook stay idle (its effect short-circuits), so toggling Day/Month
+  // never hits both the daily and the monthly endpoint at once.
+  const data = useEconomicsData({
+    organizationID: range === 'day' ? organizationID : '',
+    date: range === 'day' ? date : '',
+    tariffs,
+    refreshKey,
+  })
 
   const totals = useMemo(() => dailyTotals(data.rows), [data.rows])
+
+  // month is the YYYY-MM derived from the day anchor.
+  const month = date.slice(0, 7)
+  const monthly = useEconomicsMonthlyData({
+    organizationID: range === 'month' ? organizationID : '',
+    month: range === 'month' ? month : '',
+    refreshKey,
+  })
 
   const onBackToDashboard = useCallback(() => {
     if (typeof window === 'undefined') return
@@ -154,6 +187,8 @@ export function EconomicsPage() {
         organizationID={organizationID}
         organizationOptions={options}
         onOrganizationChange={onOrganizationChange}
+        range={range}
+        onRangeChange={setRange}
         date={date}
         onDateChange={setDate}
         tariffs={tariffs}
@@ -184,43 +219,62 @@ export function EconomicsPage() {
         />
       )}
 
-      {data.error && (
-        <section className="economics-banner economics-banner-error" role="alert">
-          Не вдалося завантажити дані: {data.error}
-        </section>
-      )}
-
-      {!data.error && data.hoursMissingPrice > 0 && (
-        <section className="economics-banner" role="status">
-          Ціни РДН частково відсутні: {data.hoursMissingPrice} год без ціни.
-          Розрахунок ефекту виконано лише для годин з відомою ціною.
-        </section>
-      )}
-
-      {!data.error && data.skipDiagnostics && (
-        <section className="economics-banner" role="status">
-          Алокатор повідомив про неповні дані: {data.skipDiagnostics}
-        </section>
-      )}
-
-      {!data.error && !data.loading && data.reconciled && (
-        <section className="economics-banner economics-banner-ok" role="status">
-          <span className="economics-reconciled-badge">Звірено з FusionSolar</span>
-          Денні підсумки масштабовано під канонічні KPI станції.
-          {data.qualityFlags.length > 0 && (
-            <> Розбіжності: {data.qualityFlags.join(', ')}.</>
+      {range === 'month' ? (
+        <>
+          {monthly.error && (
+            <section className="economics-banner economics-banner-error" role="alert">
+              Не вдалося завантажити дані: {monthly.error}
+            </section>
           )}
-        </section>
-      )}
-
-      {data.loading ? (
-        <p className="economics-loading">Завантаження…</p>
+          {monthly.loading ? (
+            <p className="economics-loading">Завантаження…</p>
+          ) : monthly.month ? (
+            <EconomicsMonthlyView data={monthly.month} organizationID={organizationID} />
+          ) : (
+            <p className="economics-loading">Немає даних за місяць.</p>
+          )}
+        </>
       ) : (
         <>
-          <EconomicsKpis totals={totals} tariffs={tariffs} />
-          <EconomicsRevenuePanel totals={totals} />
-          <EconomicsCharts rows={data.rows} />
-          <EconomicsTable rows={data.rows} organizationID={organizationID} date={date} />
+          {data.error && (
+            <section className="economics-banner economics-banner-error" role="alert">
+              Не вдалося завантажити дані: {data.error}
+            </section>
+          )}
+
+          {!data.error && data.hoursMissingPrice > 0 && (
+            <section className="economics-banner" role="status">
+              Ціни РДН частково відсутні: {data.hoursMissingPrice} год без ціни.
+              Розрахунок ефекту виконано лише для годин з відомою ціною.
+            </section>
+          )}
+
+          {!data.error && data.skipDiagnostics && (
+            <section className="economics-banner" role="status">
+              Алокатор повідомив про неповні дані: {data.skipDiagnostics}
+            </section>
+          )}
+
+          {!data.error && !data.loading && data.reconciled && (
+            <section className="economics-banner economics-banner-ok" role="status">
+              <span className="economics-reconciled-badge">Звірено з FusionSolar</span>
+              Денні підсумки масштабовано під канонічні KPI станції.
+              {data.qualityFlags.length > 0 && (
+                <> Розбіжності: {data.qualityFlags.join(', ')}.</>
+              )}
+            </section>
+          )}
+
+          {data.loading ? (
+            <p className="economics-loading">Завантаження…</p>
+          ) : (
+            <>
+              <EconomicsKpis totals={totals} tariffs={tariffs} />
+              <EconomicsRevenuePanel totals={totals} />
+              <EconomicsCharts rows={data.rows} />
+              <EconomicsTable rows={data.rows} organizationID={organizationID} date={date} />
+            </>
+          )}
         </>
       )}
     </main>

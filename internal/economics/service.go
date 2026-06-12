@@ -71,6 +71,12 @@ type Backend interface {
 	// LoadDay returns a previously-persisted day. The bool is false
 	// when nothing is stored yet.
 	LoadDay(ctx context.Context, orgID string, day time.Time, tz string) (StoredDay, bool, error)
+	// LoadDailyRange returns the persisted per-day summaries for the
+	// inclusive civil-date span [from, to]. Used by the monthly rollup.
+	LoadDailyRange(ctx context.Context, orgID string, from, to time.Time) ([]DailyRecord, error)
+	// LoadHourlyRange returns the slim per-hour records for the half-open
+	// window [from, to) — the RDN stats and ESS marginality heatmap.
+	LoadHourlyRange(ctx context.Context, orgID string, from, to time.Time) ([]HourlyRecord, error)
 }
 
 // Service computes and persists economics, and serves them read-through

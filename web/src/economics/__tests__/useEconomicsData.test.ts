@@ -20,7 +20,6 @@ afterEach(() => {
 
 function hour(partial: Partial<EconomicsHourApi> & { hour: number }): EconomicsHourApi {
   return {
-    hour: partial.hour,
     hour_start: `2026-04-01T${String(partial.hour).padStart(2, '0')}:00:00+03:00`,
     rdn_uah_per_kwh: null,
     pv_kwh: 0,

@@ -396,6 +396,127 @@ export async function fetchEconomicsDaily(
   return res.json()
 }
 
+// EconomicsMonthlyTotals mirrors internal/api.EconomicsMonthlyTotals —
+// the month rollup of the per-day economics.
+export type EconomicsMonthlyTotals = {
+  baseline_cost_uah: number
+  actual_cost_uah: number
+  effect_uah: number
+  ess_net_uah: number
+
+  load_kwh: number
+  pv_kwh: number
+  grid_import_kwh: number
+  grid_export_kwh: number
+  ess_charged_kwh: number
+  ess_discharged_kwh: number
+  pv_to_load_kwh: number
+  pv_to_ess_kwh: number
+  pv_to_grid_kwh: number
+  grid_to_load_kwh: number
+  grid_to_ess_kwh: number
+  ess_to_load_kwh: number
+  ess_to_grid_kwh: number
+
+  avg_import_price_uah_per_kwh: number
+  avg_export_price_uah_per_kwh: number
+  rdn_avg_uah_per_kwh: number
+  rdn_max_uah_per_kwh: number
+
+  revenue_pv_export_uah: number
+  revenue_pv_self_uah: number
+  revenue_ess_export_uah: number
+  revenue_ess_self_uah: number
+  revenue_total_uah: number
+  expense_grid_charge_uah: number
+  expense_total_uah: number
+  ebitda_uah: number
+
+  ess_withdrawn_cost_uah: number
+  ess_realized_profit_uah: number
+  ess_degradation_cost_uah: number
+  ess_avg_cost_basis_uah_per_kwh_eod: number
+  ess_residual_kwh_eod: number
+  ess_cost_basis_uah_eod: number
+
+  equivalent_cycles: number
+  days_with_data: number
+  hours_with_data: number
+  hours_missing_price: number
+
+  best_day: { date: string; effect_uah: number }
+  min_effect_day: { date: string; effect_uah: number }
+}
+
+// EconomicsMonthlyDay is one day of the month breakdown.
+export type EconomicsMonthlyDay = {
+  date: string
+  is_final: boolean
+  rdn_avg_uah_per_kwh: number
+  equivalent_cycles: number
+
+  baseline_cost_uah: number
+  actual_cost_uah: number
+  effect_uah: number
+  ess_net_uah: number
+  ebitda_uah: number
+
+  load_kwh: number
+  pv_kwh: number
+  grid_import_kwh: number
+  grid_export_kwh: number
+  ess_charged_kwh: number
+  ess_discharged_kwh: number
+  pv_to_load_kwh: number
+  pv_to_ess_kwh: number
+  pv_to_grid_kwh: number
+  grid_to_load_kwh: number
+  grid_to_ess_kwh: number
+  ess_to_load_kwh: number
+  ess_to_grid_kwh: number
+
+  hours_with_data: number
+  hours_missing_price: number
+}
+
+// EconomicsMonthlyDayMargin is one heatmap row: 24 hourly ESS margins
+// (UAH per kWh discharged; null when the hour had no discharge/price).
+export type EconomicsMonthlyDayMargin = {
+  date: string
+  hours: Array<number | null>
+}
+
+export type EconomicsMonthlyResponse = {
+  organization_id: string
+  month: string
+  tz: string
+  days_in_month: number
+  totals: EconomicsMonthlyTotals
+  days: EconomicsMonthlyDay[]
+  hourly_margin: EconomicsMonthlyDayMargin[]
+}
+
+// fetchEconomicsMonthly reads the server-computed month rollup. The
+// backend serves final days from cache and recomputes the open tail
+// (today) on read, so a request always returns a consistent month.
+export async function fetchEconomicsMonthly(
+  input: { organizationID: string; month: string; tz?: string },
+  signal?: AbortSignal,
+): Promise<EconomicsMonthlyResponse> {
+  const url = buildURL('/api/v1/economics/monthly', {
+    organization_id: input.organizationID,
+    month: input.month,
+    tz: input.tz || undefined,
+  })
+  const res = await fetch(url, { signal })
+  if (!res.ok) {
+    const body = await res.text().catch(() => '')
+    const suffix = body ? ` — ${body.trim()}` : ''
+    throw new Error(`economics/monthly request failed: ${res.status}${suffix}`)
+  }
+  return res.json()
+}
+
 // EconomicsRecomputeResult mirrors internal/economics.RangeResult.
 export type EconomicsRecomputeResult = {
   from: string

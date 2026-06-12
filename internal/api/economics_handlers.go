@@ -165,6 +165,248 @@ func (h *Handlers) economicsDaily(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// EconomicsMonthExtreme is the best / worst day of the month.
+type EconomicsMonthExtreme struct {
+	Date      string  `json:"date"`
+	EffectUah float64 `json:"effect_uah"`
+}
+
+// EconomicsMonthlyTotals is the month rollup in the served response.
+type EconomicsMonthlyTotals struct {
+	BaselineCostUah float64 `json:"baseline_cost_uah"`
+	ActualCostUah   float64 `json:"actual_cost_uah"`
+	EffectUah       float64 `json:"effect_uah"`
+	EssNetUah       float64 `json:"ess_net_uah"`
+
+	LoadKwh          float64 `json:"load_kwh"`
+	PvKwh            float64 `json:"pv_kwh"`
+	GridImportKwh    float64 `json:"grid_import_kwh"`
+	GridExportKwh    float64 `json:"grid_export_kwh"`
+	EssChargedKwh    float64 `json:"ess_charged_kwh"`
+	EssDischargedKwh float64 `json:"ess_discharged_kwh"`
+	PvToLoadKwh      float64 `json:"pv_to_load_kwh"`
+	PvToEssKwh       float64 `json:"pv_to_ess_kwh"`
+	PvToGridKwh      float64 `json:"pv_to_grid_kwh"`
+	GridToLoadKwh    float64 `json:"grid_to_load_kwh"`
+	GridToEssKwh     float64 `json:"grid_to_ess_kwh"`
+	EssToLoadKwh     float64 `json:"ess_to_load_kwh"`
+	EssToGridKwh     float64 `json:"ess_to_grid_kwh"`
+
+	AvgImportPriceUahPerKwh float64 `json:"avg_import_price_uah_per_kwh"`
+	AvgExportPriceUahPerKwh float64 `json:"avg_export_price_uah_per_kwh"`
+	RdnAvgUahPerKwh         float64 `json:"rdn_avg_uah_per_kwh"`
+	RdnMaxUahPerKwh         float64 `json:"rdn_max_uah_per_kwh"`
+
+	RevenuePvExportUah  float64 `json:"revenue_pv_export_uah"`
+	RevenuePvSelfUah    float64 `json:"revenue_pv_self_uah"`
+	RevenueEssExportUah float64 `json:"revenue_ess_export_uah"`
+	RevenueEssSelfUah   float64 `json:"revenue_ess_self_uah"`
+	RevenueTotalUah     float64 `json:"revenue_total_uah"`
+	ExpenseGridChargeUah float64 `json:"expense_grid_charge_uah"`
+	ExpenseTotalUah     float64 `json:"expense_total_uah"`
+	EbitdaUah           float64 `json:"ebitda_uah"`
+
+	EssWithdrawnCostUah        float64 `json:"ess_withdrawn_cost_uah"`
+	EssRealizedProfitUah       float64 `json:"ess_realized_profit_uah"`
+	EssDegradationCostUah      float64 `json:"ess_degradation_cost_uah"`
+	EssAvgCostBasisUahPerKwhEod float64 `json:"ess_avg_cost_basis_uah_per_kwh_eod"`
+	EssResidualKwhEod          float64 `json:"ess_residual_kwh_eod"`
+	EssCostBasisUahEod         float64 `json:"ess_cost_basis_uah_eod"`
+
+	EquivalentCycles  float64 `json:"equivalent_cycles"`
+	DaysWithData      int     `json:"days_with_data"`
+	HoursWithData     int     `json:"hours_with_data"`
+	HoursMissingPrice int     `json:"hours_missing_price"`
+
+	BestDay      EconomicsMonthExtreme `json:"best_day"`
+	MinEffectDay EconomicsMonthExtreme `json:"min_effect_day"`
+}
+
+// EconomicsMonthlyDay is one day of the month breakdown (daily totals
+// the trend chart / detail table render, plus per-day RDN + cycles).
+type EconomicsMonthlyDay struct {
+	Date             string  `json:"date"`
+	IsFinal          bool    `json:"is_final"`
+	RdnAvgUahPerKwh  float64 `json:"rdn_avg_uah_per_kwh"`
+	EquivalentCycles float64 `json:"equivalent_cycles"`
+
+	BaselineCostUah float64 `json:"baseline_cost_uah"`
+	ActualCostUah   float64 `json:"actual_cost_uah"`
+	EffectUah       float64 `json:"effect_uah"`
+	EssNetUah       float64 `json:"ess_net_uah"`
+	EbitdaUah       float64 `json:"ebitda_uah"`
+
+	LoadKwh          float64 `json:"load_kwh"`
+	PvKwh            float64 `json:"pv_kwh"`
+	GridImportKwh    float64 `json:"grid_import_kwh"`
+	GridExportKwh    float64 `json:"grid_export_kwh"`
+	EssChargedKwh    float64 `json:"ess_charged_kwh"`
+	EssDischargedKwh float64 `json:"ess_discharged_kwh"`
+	PvToLoadKwh      float64 `json:"pv_to_load_kwh"`
+	PvToEssKwh       float64 `json:"pv_to_ess_kwh"`
+	PvToGridKwh      float64 `json:"pv_to_grid_kwh"`
+	GridToLoadKwh    float64 `json:"grid_to_load_kwh"`
+	GridToEssKwh     float64 `json:"grid_to_ess_kwh"`
+	EssToLoadKwh     float64 `json:"ess_to_load_kwh"`
+	EssToGridKwh     float64 `json:"ess_to_grid_kwh"`
+
+	HoursWithData     int `json:"hours_with_data"`
+	HoursMissingPrice int `json:"hours_missing_price"`
+}
+
+// EconomicsMonthlyDayMargin is one heatmap row: 24 hourly ESS margins
+// (UAH per kWh discharged; null when the hour had no discharge/price).
+type EconomicsMonthlyDayMargin struct {
+	Date  string     `json:"date"`
+	Hours []*float64 `json:"hours"`
+}
+
+// EconomicsMonthlyResponse is the body of GET /api/v1/economics/monthly.
+type EconomicsMonthlyResponse struct {
+	OrganizationID string                      `json:"organization_id"`
+	Month          string                      `json:"month"`
+	Tz             string                      `json:"tz"`
+	DaysInMonth    int                         `json:"days_in_month"`
+	Totals         EconomicsMonthlyTotals      `json:"totals"`
+	Days           []EconomicsMonthlyDay       `json:"days"`
+	HourlyMargin   []EconomicsMonthlyDayMargin `json:"hourly_margin"`
+}
+
+func monthlyTotalsToJSON(t economics.MonthlyTotals) EconomicsMonthlyTotals {
+	return EconomicsMonthlyTotals{
+		BaselineCostUah:  t.BaselineCost,
+		ActualCostUah:    t.ActualCost,
+		EffectUah:        t.Effect,
+		EssNetUah:        t.EssNet,
+		LoadKwh:          t.Load,
+		PvKwh:            t.PV,
+		GridImportKwh:    t.GridImport,
+		GridExportKwh:    t.GridExport,
+		EssChargedKwh:    t.EssCharged,
+		EssDischargedKwh: t.EssDischarged,
+		PvToLoadKwh:      t.PVToLoad,
+		PvToEssKwh:       t.PVToEss,
+		PvToGridKwh:      t.PVToGrid,
+		GridToLoadKwh:    t.GridToLoad,
+		GridToEssKwh:     t.GridToEss,
+		EssToLoadKwh:     t.EssToLoad,
+		EssToGridKwh:     t.EssToGrid,
+		AvgImportPriceUahPerKwh:     t.AvgImportPrice,
+		AvgExportPriceUahPerKwh:     t.AvgExportPrice,
+		RdnAvgUahPerKwh:             t.RdnAvgUahPerKwh,
+		RdnMaxUahPerKwh:             t.RdnMaxUahPerKwh,
+		RevenuePvExportUah:          t.RevenuePvExport,
+		RevenuePvSelfUah:            t.RevenuePvSelf,
+		RevenueEssExportUah:         t.RevenueEssExport,
+		RevenueEssSelfUah:           t.RevenueEssSelf,
+		RevenueTotalUah:             t.RevenueTotal,
+		ExpenseGridChargeUah:        t.ExpenseGridCharge,
+		ExpenseTotalUah:             t.ExpenseTotal,
+		EbitdaUah:                   t.Ebitda,
+		EssWithdrawnCostUah:         t.EssWithdrawnCost,
+		EssRealizedProfitUah:        t.EssRealizedProfit,
+		EssDegradationCostUah:       t.EssDegradationCost,
+		EssAvgCostBasisUahPerKwhEod: t.EssAvgCostBasisEod,
+		EssResidualKwhEod:           t.EssResidualKwhEod,
+		EssCostBasisUahEod:          t.EssCostBasisUahEod,
+		EquivalentCycles:            t.EquivalentCycles,
+		DaysWithData:                t.DaysWithData,
+		HoursWithData:               t.HoursWithData,
+		HoursMissingPrice:           t.HoursMissingPrice,
+		BestDay:                     EconomicsMonthExtreme{Date: t.BestDay.Date, EffectUah: t.BestDay.EffectUah},
+		MinEffectDay:                EconomicsMonthExtreme{Date: t.MinEffectDay.Date, EffectUah: t.MinEffectDay.EffectUah},
+	}
+}
+
+func monthlyDayToJSON(d economics.MonthDay) EconomicsMonthlyDay {
+	t := d.Totals
+	return EconomicsMonthlyDay{
+		Date:             d.Date,
+		IsFinal:          d.IsFinal,
+		RdnAvgUahPerKwh:  d.RdnAvgUahPerKwh,
+		EquivalentCycles: d.EquivalentCycles,
+		BaselineCostUah:  t.BaselineCost,
+		ActualCostUah:    t.ActualCost,
+		EffectUah:        t.Effect,
+		EssNetUah:        t.EssNet,
+		EbitdaUah:        t.Ebitda,
+		LoadKwh:          t.Load,
+		PvKwh:            t.PV,
+		GridImportKwh:    t.GridImport,
+		GridExportKwh:    t.GridExport,
+		EssChargedKwh:    t.EssCharged,
+		EssDischargedKwh: t.EssDischarged,
+		PvToLoadKwh:      t.PVToLoad,
+		PvToEssKwh:       t.PVToEss,
+		PvToGridKwh:      t.PVToGrid,
+		GridToLoadKwh:    t.GridToLoad,
+		GridToEssKwh:     t.GridToEss,
+		EssToLoadKwh:     t.EssToLoad,
+		EssToGridKwh:     t.EssToGrid,
+		HoursWithData:     t.HoursWithData,
+		HoursMissingPrice: t.HoursMissingPrice,
+	}
+}
+
+// economicsMonthly serves a month rollup of the per-day economics,
+// read-through (final days from cache, the open tail recomputed on read).
+//
+//	GET /api/v1/economics/monthly?organization_id=&month=YYYY-MM&tz=
+func (h *Handlers) economicsMonthly(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if h.economics == nil {
+		http.Error(w, "economics service not configured", http.StatusServiceUnavailable)
+		return
+	}
+	orgID := strings.TrimSpace(r.URL.Query().Get("organization_id"))
+	if orgID == "" {
+		http.Error(w, "organization_id is required", http.StatusBadRequest)
+		return
+	}
+	monthStr := strings.TrimSpace(r.URL.Query().Get("month"))
+	if monthStr == "" {
+		http.Error(w, "month is required (YYYY-MM)", http.StatusBadRequest)
+		return
+	}
+	tzStr := strings.TrimSpace(r.URL.Query().Get("tz"))
+	loc, err := loadLocation(tzStr)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if _, err := time.ParseInLocation("2006-01", monthStr, loc); err != nil {
+		http.Error(w, "month must be YYYY-MM", http.StatusBadRequest)
+		return
+	}
+
+	month, err := h.economics.GetMonth(r.Context(), orgID, monthStr, loc.String())
+	if err != nil {
+		h.log.Error("api_economics_monthly", "organization_id", orgID, "month", monthStr, "tz", loc.String(), "err", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	resp := EconomicsMonthlyResponse{
+		OrganizationID: orgID,
+		Month:          monthStr,
+		Tz:             loc.String(),
+		DaysInMonth:    month.DaysInMonth,
+		Totals:         monthlyTotalsToJSON(month.Totals),
+		Days:           make([]EconomicsMonthlyDay, 0, len(month.Days)),
+		HourlyMargin:   make([]EconomicsMonthlyDayMargin, 0, len(month.HourlyMargin)),
+	}
+	for _, d := range month.Days {
+		resp.Days = append(resp.Days, monthlyDayToJSON(d))
+	}
+	for _, m := range month.HourlyMargin {
+		resp.HourlyMargin = append(resp.HourlyMargin, EconomicsMonthlyDayMargin{Date: m.Date, Hours: m.Hours})
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
 // economicsRecompute recomputes (and persists) economics over a date
 // range, streaming NDJSON progress (one line per day, then "done").
 //

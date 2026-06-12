@@ -301,6 +301,7 @@ func (h *Handlers) Router() http.Handler {
 	mux.HandleFunc("/api/v1/organization-tariffs", h.organizationTariffs)
 	mux.HandleFunc("/api/v1/organization-tariff-schedule", h.organizationTariffSchedule)
 	mux.HandleFunc("/api/v1/economics/daily", h.economicsDaily)
+	mux.HandleFunc("/api/v1/economics/monthly", h.economicsMonthly)
 	mux.HandleFunc("/api/v1/economics/recompute", h.economicsRecompute)
 	mux.HandleFunc("/swagger", h.swaggerUI)
 	mux.HandleFunc("/swagger/", h.swaggerUI)

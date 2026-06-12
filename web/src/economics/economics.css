@@ -1084,3 +1084,328 @@
   background: #fca5a5;
 }
 
+/* ------------------------------------------------------------------ */
+/* Monthly economics view                                             */
+/* ------------------------------------------------------------------ */
+
+/* Day / Month period granularity toggle in the header. Mirrors the
+   chrome of the surrounding toolbar buttons; the active segment uses
+   the indigo wash the rest of the dashboard uses for "selected". */
+.economics-range-switch {
+  display: inline-flex;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #ffffff;
+}
+
+.economics-range-switch button {
+  border: 0;
+  background: transparent;
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #334155;
+  cursor: pointer;
+}
+
+.economics-range-switch button + button {
+  border-left: 1px solid #e2e8f0;
+}
+
+.economics-range-switch button.active {
+  background: #eef2ff;
+  color: #4338ca;
+}
+
+.economics-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(16, 24, 40, 0.05);
+}
+
+.economics-month-section {
+  padding: 18px;
+}
+
+.economics-month-section-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+
+.economics-month-section-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.economics-month-muted {
+  color: #667085;
+  font-size: 12px;
+}
+
+/* Mini metric grid under the finance breakdown. */
+.economics-month-mini-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.economics-month-mini {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid #edf1f5;
+  border-radius: 10px;
+  background: #fbfcfe;
+}
+
+.economics-month-mini-label {
+  font-size: 12px;
+  color: #7a8494;
+}
+
+.economics-month-mini-value {
+  font-size: 18px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.economics-month-mini-value.good {
+  color: #16a34a;
+}
+
+.economics-month-mini-note {
+  font-size: 12px;
+  color: #667085;
+}
+
+.economics-revenue-ebitda-sub {
+  font-size: 12px;
+  opacity: 0.85;
+}
+
+/* Waterfall: a row of bottom-anchored bars. */
+.economics-waterfall {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 14px;
+  height: 280px;
+  align-items: end;
+  padding: 8px 4px 0;
+  border-bottom: 1px solid #dde3ea;
+}
+
+.economics-wf-item {
+  height: 100%;
+  display: grid;
+  grid-template-rows: 1fr auto auto;
+  text-align: center;
+  min-width: 0;
+}
+
+.economics-wf-bar {
+  align-self: end;
+  min-height: 26px;
+  border-radius: 6px 6px 0 0;
+}
+
+.economics-wf-gray { background: #64748b; }
+.economics-wf-green { background: #16a34a; }
+.economics-wf-blue { background: #2563eb; }
+.economics-wf-violet { background: #7c3aed; }
+.economics-wf-red { background: #dc2626; }
+
+.economics-wf-num {
+  margin-top: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.economics-wf-name {
+  margin-top: 4px;
+  color: #667085;
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.economics-month-chart {
+  width: 100%;
+}
+
+/* Energy balance stacked bars. */
+.economics-month-balance {
+  display: grid;
+  gap: 12px;
+}
+
+.economics-balance-row {
+  display: grid;
+  grid-template-columns: 90px 1fr 110px;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+}
+
+.economics-balance-name {
+  color: #475569;
+  font-weight: 600;
+}
+
+.economics-balance-bar {
+  height: 22px;
+  display: flex;
+  overflow: hidden;
+  border-radius: 6px;
+  background: #eef2f7;
+}
+
+.economics-seg {
+  height: 100%;
+}
+
+.economics-seg.green { background: #86efac; }
+.economics-seg.blue { background: #93c5fd; }
+
+.economics-balance-value {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: #0f172a;
+  font-weight: 600;
+}
+
+/* Monthly tables (energy balance + daily detail). Right-aligned
+   numeric columns, left-aligned first column. */
+.economics-month-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.economics-month-table th,
+.economics-month-table td {
+  padding: 9px;
+  border-bottom: 1px solid #edf1f5;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.economics-month-table th {
+  background: #f8fafc;
+  color: #667085;
+  font-weight: 700;
+  position: sticky;
+  top: 0;
+}
+
+.economics-month-table-left {
+  text-align: left !important;
+}
+
+.economics-month-table th:first-child {
+  text-align: left;
+}
+
+.cell-neutral {
+  color: #2563eb;
+  font-weight: 600;
+}
+
+/* Export button reused from the daily detail table chrome. */
+.economics-export-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 12px;
+  border: 1px solid #bbf7d0;
+  border-radius: 8px;
+  background: #ecfdf3;
+  color: #166534;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.economics-export-btn:hover {
+  background: #dcfce7;
+  border-color: #86efac;
+}
+
+/* ESS marginality heatmap. */
+.economics-heatmap-scroll {
+  max-height: 420px;
+  overflow: auto;
+  border: 1px solid #edf1f5;
+  border-radius: 10px;
+}
+
+.economics-heatmap {
+  border-collapse: collapse;
+  font-size: 10px;
+  width: 100%;
+}
+
+.economics-heatmap th,
+.economics-heatmap td {
+  min-width: 26px;
+  height: 20px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  border: 1px solid #f1f5f9;
+}
+
+.economics-heatmap thead th {
+  position: sticky;
+  top: 0;
+  background: #f8fafc;
+  color: #667085;
+  font-weight: 700;
+  z-index: 1;
+}
+
+.economics-heatmap tbody th {
+  position: sticky;
+  left: 0;
+  background: #f8fafc;
+  color: #667085;
+  font-weight: 700;
+}
+
+.economics-heatmap-corner {
+  left: 0;
+  z-index: 2;
+}
+
+.economics-hm-empty { background: #ffffff; color: #cbd5e1; }
+.economics-hm0 { background: #f1f5f9; color: #64748b; }
+.economics-hm1 { background: #dcfce7; color: #166534; }
+.economics-hm2 { background: #86efac; color: #14532d; }
+.economics-hm3 { background: #22c55e; color: #ffffff; }
+.economics-hm4 { background: #15803d; color: #ffffff; }
+
+.economics-month-explain {
+  margin-top: 10px;
+  color: #667085;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+@media (max-width: 1100px) {
+  .economics-month-mini-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .economics-waterfall {
+    height: 220px;
+  }
+}
+
