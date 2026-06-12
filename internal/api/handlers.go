@@ -748,6 +748,13 @@ func (h *Handlers) energySummary(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "from and to are required", http.StatusBadRequest)
 		return
 	}
+	// A degenerate or inverted range is a client error, not a server
+	// fault: return 400 rather than letting the store's "to must be
+	// after from" surface as a confusing 500.
+	if !to.After(from) {
+		http.Error(w, "to must be after from", http.StatusBadRequest)
+		return
+	}
 	start := time.Now()
 	resp, err := h.store.EnergySummary(r.Context(), orgID, metricKeys, from, to)
 	if err != nil {

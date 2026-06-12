@@ -65,6 +65,22 @@ const FLOW_METRIC_KEYS = [
   'ess_to_grid_kwh',
 ]
 
+// clampEnergyFromIso raises the `from` edge to MIN_RELIABLE_DATA_AT so the
+// energy-summary seed sample isn't taken from pre-deployment garbage —
+// EXCEPT when the whole requested period sits before that floor (e.g. the
+// user is viewing an imported archive day/month). In that case clamping
+// would push `from` past `to` and invert the range, which the backend
+// rejects (the dashboard then showed "energy-summary request failed").
+// For wholly-historical periods the archive data IS the reliable source,
+// so we keep the real range unclamped.
+function clampEnergyFromIso(fromIso: string, toIso: string): string {
+  const fromMs = new Date(fromIso).getTime()
+  const toMs = new Date(toIso).getTime()
+  const clamped = Math.max(fromMs, MIN_RELIABLE_DATA_AT.getTime())
+  if (clamped >= toMs) return fromIso
+  return new Date(clamped).toISOString()
+}
+
 function energySummaryMetricKeys(preset: RangePreset): string[] {
   if (preset === 'day') {
     return [...BASE_ENERGY_SUMMARY_METRIC_KEYS, ...FLOW_METRIC_KEYS]
@@ -324,12 +340,11 @@ export function useDashboardData(input: {
         // pulling in lifetime-counter readings from before the deployment
         // was healthy; periods that sit entirely before the floor return
         // empty bars and a zero summary.
-        const minReliable = MIN_RELIABLE_DATA_AT.getTime()
         const rawRange = rangeParams(preset, anchorDate, now)
-        const energyFrom = new Date(
-          Math.max(new Date(rawRange.from).getTime(), minReliable),
-        )
-        const baseRange = { ...rawRange, from: energyFrom.toISOString() }
+        const baseRange = {
+          ...rawRange,
+          from: clampEnergyFromIso(rawRange.from, rawRange.to),
+        }
         const damFromDate = startOfPeriod(preset, anchorDate)
         const damToExclusive = endOfPeriod(preset, anchorDate)
         const damToDate = new Date(damToExclusive)
@@ -521,12 +536,11 @@ export function useDashboardData(input: {
     try {
       const anchorDate = new Date(anchorTime)
       const now = new Date()
-      const minReliable = MIN_RELIABLE_DATA_AT.getTime()
       const rawRange = rangeParams(preset, anchorDate, now)
-      const energyFrom = new Date(
-        Math.max(new Date(rawRange.from).getTime(), minReliable),
-      )
-      const baseRange = { ...rawRange, from: energyFrom.toISOString() }
+      const baseRange = {
+        ...rawRange,
+        from: clampEnergyFromIso(rawRange.from, rawRange.to),
+      }
 
       const summaryResp = await fetchEnergySummary(
         {
