@@ -3,7 +3,6 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
-  Legend,
   ReferenceLine,
   ResponsiveContainer,
   Tooltip,
@@ -274,6 +273,40 @@ type TrendRow = {
 
 const trendNumberFmt = new Intl.NumberFormat('uk-UA', { minimumFractionDigits: 1, maximumFractionDigits: 1 })
 
+// Trend palette: generation/sources are shades of green (above the axis),
+// sinks/exports are shades of orange (below). Order matches the legend.
+const TREND_SERIES = [
+  { key: 'gridImport', name: 'з мережі', color: '#12b76a' },
+  { key: 'essDischarge', name: 'розряд УЗЕ', color: '#5fc993' },
+  { key: 'pv', name: 'виробіток СЕС', color: '#91d9aa' },
+  { key: 'gridExport', name: 'експорт у мережу', color: '#f97316' },
+  { key: 'essCharge', name: 'заряд УЗЕ', color: '#fb923c' },
+  { key: 'load', name: 'споживання', color: '#fdba74' },
+] as const
+
+type TrendTooltipProps = {
+  active?: boolean
+  label?: string | number
+  payload?: { payload: TrendRow }[]
+}
+
+function TrendTooltip({ active, payload, label }: TrendTooltipProps) {
+  if (!active || !payload?.length) return null
+  const row = payload[0].payload
+  return (
+    <div className="economics-trend-tip">
+      <div className="economics-trend-tip-day">{label}</div>
+      {TREND_SERIES.map((s) => (
+        <div className="economics-trend-tip-row" key={s.key}>
+          <i style={{ background: s.color }} />
+          <span>{s.name}</span>
+          <b>{trendNumberFmt.format(Math.abs(row[s.key]))}</b>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function MonthlyTrend({ days, totals }: { days: EconomicsMonthlyDay[]; totals: EconomicsMonthlyTotals }) {
   const rows = useMemo<TrendRow[]>(
     () =>
@@ -337,22 +370,29 @@ function MonthlyTrend({ days, totals }: { days: EconomicsMonthlyDay[]; totals: E
         </div>
       </div>
       <div className="economics-month-chart">
-        <ResponsiveContainer width="100%" height={340}>
-          <BarChart data={rows} margin={{ top: 8, right: 12, bottom: 4, left: 0 }} stackOffset="sign">
-            <CartesianGrid strokeDasharray="3 4" stroke="#e7ecf2" vertical={false} />
-            <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#7a8494' }} interval={0} />
-            <YAxis tick={{ fontSize: 11, fill: '#7a8494' }} width={44} />
-            <Tooltip formatter={(value) => `${trendNumberFmt.format(Math.abs(Number(value)))} МВт·год`} />
-            <Legend wrapperStyle={{ fontSize: 12 }} />
+        <ResponsiveContainer width="100%" height={300}>
+          <BarChart data={rows} margin={{ top: 8, right: 8, bottom: 0, left: 0 }} stackOffset="sign" barCategoryGap="22%">
+            <CartesianGrid strokeDasharray="2 5" stroke="#e7ecf2" vertical={false} />
+            <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#8a94a6' }} interval={0} tickLine={false} axisLine={false} />
+            <YAxis tick={{ fontSize: 11, fill: '#98a2b3' }} width={40} tickLine={false} axisLine={false} />
+            <Tooltip content={<TrendTooltip />} cursor={{ fill: 'rgba(148, 163, 184, 0.12)' }} />
             <ReferenceLine y={0} stroke="#98a2b3" />
-            <Bar dataKey="pv" name="виробіток СЕС" stackId="pos" fill="#91d9aa" />
-            <Bar dataKey="essDischarge" name="розряд УЗЕ" stackId="pos" fill="#5fc993" />
-            <Bar dataKey="gridImport" name="з мережі" stackId="pos" fill="#12b76a" />
-            <Bar dataKey="load" name="споживання" stackId="neg" fill="#fdba74" />
-            <Bar dataKey="essCharge" name="заряд УЗЕ" stackId="neg" fill="#fb923c" />
-            <Bar dataKey="gridExport" name="експорт у мережу" stackId="neg" fill="#f97316" />
+            <Bar dataKey="pv" name="виробіток СЕС" stackId="pos" fill="#91d9aa" maxBarSize={15} />
+            <Bar dataKey="essDischarge" name="розряд УЗЕ" stackId="pos" fill="#5fc993" maxBarSize={15} />
+            <Bar dataKey="gridImport" name="з мережі" stackId="pos" fill="#12b76a" maxBarSize={15} radius={[3, 3, 0, 0]} />
+            <Bar dataKey="load" name="споживання" stackId="neg" fill="#fdba74" maxBarSize={15} />
+            <Bar dataKey="essCharge" name="заряд УЗЕ" stackId="neg" fill="#fb923c" maxBarSize={15} />
+            <Bar dataKey="gridExport" name="експорт у мережу" stackId="neg" fill="#f97316" maxBarSize={15} radius={[0, 0, 3, 3]} />
           </BarChart>
         </ResponsiveContainer>
+      </div>
+      <div className="economics-trend-legend">
+        {TREND_SERIES.map((s) => (
+          <span key={s.key}>
+            <i style={{ background: s.color }} />
+            {s.name}
+          </span>
+        ))}
       </div>
     </section>
   )
