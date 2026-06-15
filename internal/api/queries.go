@@ -13,6 +13,17 @@ import (
 	"github.com/nesh/sestelemetry/internal/storage"
 )
 
+// maxCounterDeltaPowerKw bounds the per-bucket growth of a cumulative
+// energy counter to a physically plausible average power. A single
+// corrupted Modbus reading (e.g. one sample of 28846 kWh between
+// neighbours of ~50) or a counter re-base can otherwise inject a
+// multi-MWh spike into one bucket. Any cross-bucket delta implying an
+// average power above this ceiling — measured against the real elapsed
+// time between the two consecutive buckets, so genuine multi-hour gap
+// recovery is preserved — is treated as spurious and dropped. 10 MW
+// sits far above any real site (elevator BESS/PV are well under 2 MW).
+const maxCounterDeltaPowerKw = 10000
+
 type Store struct {
 	pool        *pgxpool.Pool
 	useDailyCAG bool
@@ -249,23 +260,35 @@ func (s *Store) timeseriesDelta(ctx context.Context, organizationID string, metr
 				AND time >= $4::timestamptz - $1::interval
 				AND time <= $5
 			GROUP BY bucket_time, metric_key
+		),
+		deltas AS (
+			SELECT
+				bucket_time,
+				metric_key,
+				first_value,
+				last_value,
+				lag(last_value)  OVER w AS prev_last,
+				lag(bucket_time) OVER w AS prev_bucket
+			FROM bucketed
+			WINDOW w AS (PARTITION BY metric_key ORDER BY bucket_time)
 		)
 		SELECT
 			bucket_time,
 			metric_key,
-			GREATEST(
-				COALESCE(
-					last_value - lag(last_value) OVER (
-						PARTITION BY metric_key ORDER BY bucket_time
-					),
-					last_value - first_value
-				),
-				0
-			) AS value
-		FROM bucketed
+			CASE
+				WHEN prev_last IS NOT NULL
+					AND (last_value - prev_last) > $7::float8
+						* EXTRACT(epoch FROM (bucket_time - prev_bucket)) / 3600.0
+				THEN 0
+				ELSE GREATEST(
+					COALESCE(last_value - prev_last, last_value - first_value),
+					0
+				)
+			END AS value
+		FROM deltas
 		WHERE bucket_time >= $4
 		ORDER BY bucket_time ASC, metric_key ASC
-	`, bucket, organizationID, metricKeys, from.UTC(), to.UTC(), tz)
+	`, bucket, organizationID, metricKeys, from.UTC(), to.UTC(), tz, float64(maxCounterDeltaPowerKw))
 	if err != nil {
 		return TimeseriesResponse{}, err
 	}
@@ -325,23 +348,35 @@ func (s *Store) timeseriesDeltaFromDaily(ctx context.Context, organizationID str
 				AND day >= $4::timestamptz - $1::interval
 				AND day <= $5
 			GROUP BY bucket_time, metric_key
+		),
+		deltas AS (
+			SELECT
+				bucket_time,
+				metric_key,
+				first_value,
+				last_value,
+				lag(last_value)  OVER w AS prev_last,
+				lag(bucket_time) OVER w AS prev_bucket
+			FROM bucketed
+			WINDOW w AS (PARTITION BY metric_key ORDER BY bucket_time)
 		)
 		SELECT
 			bucket_time,
 			metric_key,
-			GREATEST(
-				COALESCE(
-					last_value - lag(last_value) OVER (
-						PARTITION BY metric_key ORDER BY bucket_time
-					),
-					last_value - first_value
-				),
-				0
-			) AS value
-		FROM bucketed
+			CASE
+				WHEN prev_last IS NOT NULL
+					AND (last_value - prev_last) > $7::float8
+						* EXTRACT(epoch FROM (bucket_time - prev_bucket)) / 3600.0
+				THEN 0
+				ELSE GREATEST(
+					COALESCE(last_value - prev_last, last_value - first_value),
+					0
+				)
+			END AS value
+		FROM deltas
 		WHERE bucket_time >= $4
 		ORDER BY bucket_time ASC, metric_key ASC
-	`, bucket, organizationID, metricKeys, from.UTC(), to.UTC(), tz)
+	`, bucket, organizationID, metricKeys, from.UTC(), to.UTC(), tz, float64(maxCounterDeltaPowerKw))
 	if err != nil {
 		return TimeseriesResponse{}, err
 	}
