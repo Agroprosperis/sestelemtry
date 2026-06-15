@@ -130,9 +130,10 @@ func TestAggregateMonthSumsAndWeightedPrices(t *testing.T) {
 	}
 }
 
-// TestGetMonthReadThrough verifies the service recomputes missing/non-
-// final days and serves final days from the cache, then aggregates.
-func TestGetMonthReadThrough(t *testing.T) {
+// TestGetMonthReadOnly verifies GetMonth is a pure read: it serves
+// whatever the daemon persisted and never recomputes days live, then
+// aggregates the stored records.
+func TestGetMonthReadOnly(t *testing.T) {
 	loc, err := time.LoadLocation("Europe/Kyiv")
 	if err != nil {
 		t.Skip("tzdata unavailable")
@@ -163,10 +164,9 @@ func TestGetMonthReadThrough(t *testing.T) {
 	if month.Month != "2020-01" {
 		t.Fatalf("Month = %q, want 2020-01", month.Month)
 	}
-	// 31 days in Jan 2020; the seeded final day must not be recomputed,
-	// the other 30 are missing → recomputed once each.
-	if b.saveCount != 30 {
-		t.Fatalf("saveCount = %d, want 30 (seeded final day skipped)", b.saveCount)
+	// Pure read: missing days are NOT recomputed, so nothing is saved.
+	if b.saveCount != 0 {
+		t.Fatalf("saveCount = %d, want 0 (read path must not recompute)", b.saveCount)
 	}
 	// The seeded day's effect must survive into the rollup.
 	if month.Totals.Effect < 999 {

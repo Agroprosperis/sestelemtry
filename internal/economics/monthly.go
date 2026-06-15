@@ -450,9 +450,10 @@ func AggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly
 	}
 }
 
-// GetMonth returns economics for one calendar month, read-through: final
-// days are served from cache, missing / non-final days are recomputed
-// (and persisted) on read. month is YYYY-MM in tz.
+// GetMonth returns economics for one calendar month as a pure read of
+// the persisted daily/hourly records — the economics-recompute daemon is
+// responsible for keeping the month (including today) up to date, so the
+// read path never recomputes live. month is YYYY-MM in tz.
 func (s *Service) GetMonth(ctx context.Context, orgID, month, tz string) (StoredMonth, error) {
 	loc, err := loadLocation(tz)
 	if err != nil {
@@ -465,48 +466,16 @@ func (s *Service) GetMonth(ctx context.Context, orgID, month, tz string) (Stored
 	firstDay := time.Date(parsed.Year(), parsed.Month(), 1, 0, 0, 0, 0, loc)
 	nextMonth := firstDay.AddDate(0, 1, 0)
 	lastDay := nextMonth.AddDate(0, 0, -1)
-	now := time.Now().In(loc)
 
-	// Which stored days are already final (and thus trustworthy)?
-	existing, _ := s.backend.LoadDailyRange(ctx, orgID, firstDay, lastDay)
-	finalSet := make(map[string]bool, len(existing))
-	for _, d := range existing {
-		if d.IsFinal {
-			finalSet[d.Day.In(loc).Format("2006-01-02")] = true
-		}
-	}
-
-	// Recompute every day that is missing or not yet final, but never a
-	// day in the future. For a past month every day is final → no work;
-	// for the current month only the open tail (today) recomputes.
-	recomputed := false
-	for day := firstDay; !day.After(lastDay); day = day.AddDate(0, 0, 1) {
-		if day.After(now) {
-			break
-		}
-		key := day.Format("2006-01-02")
-		if finalSet[key] {
-			continue
-		}
-		if _, err := s.ComputeDay(ctx, orgID, key, tz); err != nil {
-			if ctx.Err() != nil {
-				return StoredMonth{}, ctx.Err()
-			}
-			// Best-effort: a single broken day shouldn't fail the month.
-			continue
-		}
-		recomputed = true
-	}
-
-	// Reuse the pre-recompute snapshot for a fully-final month (no work
-	// happened); only re-read when a day was actually recomputed.
-	daily := existing
-	if recomputed {
-		reloaded, err := s.backend.LoadDailyRange(ctx, orgID, firstDay, lastDay)
-		if err != nil {
-			return StoredMonth{}, fmt.Errorf("load daily range: %w", err)
-		}
-		daily = reloaded
+	// Pure read: the month rollup serves whatever the
+	// economics-recompute daemon has already persisted. We never
+	// recompute days live here — a user-facing month read must not scan
+	// the uncompressed "hot" telemetry chunks (a single such day can
+	// take 10+ s and blow past the client timeout). The daemon keeps the
+	// current month's days, including today, warm in the background.
+	daily, err := s.backend.LoadDailyRange(ctx, orgID, firstDay, lastDay)
+	if err != nil {
+		return StoredMonth{}, fmt.Errorf("load daily range: %w", err)
 	}
 	hourly, _ := s.backend.LoadHourlyRange(ctx, orgID, firstDay, nextMonth)
 
