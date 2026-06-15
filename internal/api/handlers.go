@@ -306,7 +306,7 @@ func (h *Handlers) Router() http.Handler {
 	mux.HandleFunc("/swagger", h.swaggerUI)
 	mux.HandleFunc("/swagger/", h.swaggerUI)
 	mux.HandleFunc("/swagger/openapi.yaml", h.swaggerSpec)
-	return h.withSecurityHeaders(h.withCORS(mux))
+	return h.withSecurityHeaders(h.withCORS(h.withGzip(mux)))
 }
 
 func (h *Handlers) healthz(w http.ResponseWriter, _ *http.Request) {
