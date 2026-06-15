@@ -187,6 +187,13 @@ export function ExportDialog({ organizationID, initialAnchor, onClose }: Props) 
     : columns
   const anyColumn = Object.values(rawAllowedColumns).some(Boolean)
   const validRange = !!fromDate && !!toExclusive && fromDate.getTime() < toExclusive.getTime()
+  // rangeInvalid drives a post-hoc inline notice rather than clamping the
+  // date inputs against each other. Users start from «Від», so capping
+  // its `max` by «До» (and vice versa) fought the natural order — now both
+  // pickers are bounded only by "not in the future" and the from<=to
+  // relationship is validated after both values exist.
+  const rangeInvalid =
+    !!fromDate && !!toExclusive && fromDate.getTime() >= toExclusive.getTime()
   const todayMax = useMemo(() => toDateInputValue(new Date()), [])
   // Forecast only makes sense for a single-day, 5-minute export of an
   // organization that has an elevator code mapping (pe / ze).
@@ -389,7 +396,7 @@ export function ExportDialog({ organizationID, initialAnchor, onClose }: Props) 
               <input
                 type="date"
                 value={fromStr}
-                max={toStr || todayMax}
+                max={todayMax}
                 onChange={(e) => setFromStr(e.target.value)}
               />
             </label>
@@ -398,7 +405,6 @@ export function ExportDialog({ organizationID, initialAnchor, onClose }: Props) 
               <input
                 type="date"
                 value={toStr}
-                min={fromStr}
                 max={todayMax}
                 onChange={(e) => setToStr(e.target.value)}
               />
@@ -453,6 +459,12 @@ export function ExportDialog({ organizationID, initialAnchor, onClose }: Props) 
               Експорт обмежений {RAW_SAMPLES_MAX_DAYS} добами та{' '}
               {RAW_SAMPLES_LIMIT.toLocaleString('uk-UA')} рядками. Колонки «Ціна РДН» та «Прогноз
               СЕС» вимкнені — у цих джерел немає сирих рядків.
+            </p>
+          )}
+
+          {!error && rangeInvalid && (
+            <p role="alert" className="export-dialog-error">
+              Дата «Від» має бути не пізніше за «До».
             </p>
           )}
 
