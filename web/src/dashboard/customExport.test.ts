@@ -6,7 +6,6 @@ import {
   customExportFilename,
   fetchCustomExportData,
   rawExportMetricKeys,
-  RAW_SAMPLES_LIMIT,
   RAW_SAMPLES_MAX_DAYS,
 } from './customExport'
 
@@ -398,8 +397,7 @@ describe('rawExportMetricKeys', () => {
 })
 
 describe('raw export limits', () => {
-  it('exposes server-aligned constants so the dialog hint stays truthful', () => {
-    expect(RAW_SAMPLES_LIMIT).toBe(5_000_000)
+  it('exposes the server-aligned range cap so the dialog hint stays truthful', () => {
     expect(RAW_SAMPLES_MAX_DAYS).toBe(31)
   })
 })

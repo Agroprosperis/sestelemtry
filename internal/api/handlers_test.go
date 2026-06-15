@@ -96,7 +96,7 @@ func (m *mockStore) Samples(_ context.Context, orgID string, keys []string, from
 	}
 	emitted := 0
 	for _, r := range m.samplesRows {
-		if emitted >= limit {
+		if limit > 0 && emitted >= limit {
 			return emitted, true, nil
 		}
 		if err := emit(r); err != nil {
@@ -770,8 +770,8 @@ func TestSamplesStreamsCsv(t *testing.T) {
 	if len(store.samplesKeys) != 2 || store.samplesKeys[0] != "active_pv_power_kw" {
 		t.Fatalf("keys mismatch: %#v", store.samplesKeys)
 	}
-	if store.samplesLimit != defaultSamplesLimit {
-		t.Fatalf("default limit mismatch: %d", store.samplesLimit)
+	if store.samplesLimit != 0 {
+		t.Fatalf("omitted limit should stream unlimited (0), got %d", store.samplesLimit)
 	}
 }
 
@@ -1010,8 +1010,8 @@ func TestSamplesValidatesInputs(t *testing.T) {
 			url:  "/api/v1/samples?organization_id=org-a&metric_keys=soc_percent&from=2026-05-09T00:00:00Z&to=2026-05-10T00:00:00Z&limit=many",
 		},
 		{
-			name: "limit above hard cap",
-			url:  "/api/v1/samples?organization_id=org-a&metric_keys=soc_percent&from=2026-05-09T00:00:00Z&to=2026-05-10T00:00:00Z&limit=6000000",
+			name: "limit not positive",
+			url:  "/api/v1/samples?organization_id=org-a&metric_keys=soc_percent&from=2026-05-09T00:00:00Z&to=2026-05-10T00:00:00Z&limit=0",
 		},
 	}
 	for _, tc := range cases {

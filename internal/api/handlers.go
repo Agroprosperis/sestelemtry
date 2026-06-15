@@ -127,22 +127,14 @@ type storeReader interface {
 	Ready(ctx context.Context) error
 }
 
-// Limits for the raw-samples export. These are deliberately on the
-// generous side — most analyst use cases sit well under them — but
-// they exist to keep a misclick on a multi-month range from streaming
-// gigabytes through the API server. The handler returns 400 when a
-// request would exceed them so the user fixes their query rather than
-// silently receiving truncated data.
+// Guards for the raw-samples export. The row count is intentionally
+// unbounded: the 1-month range cap and the metric-key count are the
+// only safety valves against a misclick streaming gigabytes through the
+// API server. Within those bounds the handler streams every matching
+// row so the analyst gets full-fidelity data instead of a silently
+// truncated CSV. An explicit positive `limit` query param can still cap
+// a request (e.g. ad-hoc curl probes); the dashboard sends none.
 const (
-	defaultSamplesLimit = 100_000
-	// maxSamplesLimit caps the rows we'll stream for a single export
-	// to keep memory + bandwidth bounded. The 5M cap pairs with the
-	// matching RAW_SAMPLES_LIMIT in web/src/dashboard/customExport.ts
-	// and survives a typical "all columns × 2 devices × 7-day window
-	// at 1 s polling" pull (~13M rows worst case still truncates,
-	// but the cap now buys ~2.5 days of full-fidelity data instead
-	// of the previous ~12-15 hours).
-	maxSamplesLimit      = 5_000_000
 	maxSamplesRange      = 31 * 24 * time.Hour
 	maxSamplesMetricKeys = 20
 	// maxTimeseriesRange caps the explicit window for the bucketed
@@ -558,7 +550,7 @@ func (h *Handlers) samples(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	limit, err := parseLimit(r, defaultSamplesLimit, maxSamplesLimit)
+	limit, err := parseSamplesLimit(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -694,6 +686,23 @@ func parseLimit(r *http.Request, def, max int) (int, error) {
 	}
 	if n > max {
 		return 0, fmt.Errorf("limit must be <= %d", max)
+	}
+	return n, nil
+}
+
+// parseSamplesLimit reads the optional `limit` query param for the raw
+// export. An omitted param means "unlimited" (return 0): the 1-month
+// range cap bounds the work, so the export streams every matching row.
+// An explicit value must be a positive integer and is honored as-is —
+// there is no upper cap — letting an ad-hoc caller still bound a probe.
+func parseSamplesLimit(r *http.Request) (int, error) {
+	raw := strings.TrimSpace(r.URL.Query().Get("limit"))
+	if raw == "" {
+		return 0, nil
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 1 {
+		return 0, fmt.Errorf("limit must be a positive integer")
 	}
 	return n, nil
 }

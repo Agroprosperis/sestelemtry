@@ -6,7 +6,6 @@ import {
   customExportFilename,
   fetchCustomExportData,
   rawExportMetricKeys,
-  RAW_SAMPLES_LIMIT,
   RAW_SAMPLES_MAX_DAYS,
   type CustomExportBucket,
   type CustomExportColumns,
@@ -248,13 +247,15 @@ export function ExportDialog({ organizationID, initialAnchor, onClose }: Props) 
         // instead of UTC. Without this the day picker says "9 May"
         // but the CSV shows "8 May 21:00 .. 9 May 20:59".
         const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || undefined
+        // No row limit — the server streams every sample in range and
+        // the 31-day cap is the only bound (validated above via
+        // rawRangeOk). The result is never truncated.
         const result = await fetchRawSamplesCsv(
           {
             organizationID,
             metricKeys,
             from: fromDate.toISOString(),
             to: toExclusive.toISOString(),
-            limit: RAW_SAMPLES_LIMIT,
             tz,
           },
           signal,
@@ -288,12 +289,6 @@ export function ExportDialog({ organizationID, initialAnchor, onClose }: Props) 
           registerAddresses,
         })
         downloadCsv(result.filename, pivot.csv)
-        if (result.truncated) {
-          setError(
-            `Експорт обмежено ${RAW_SAMPLES_LIMIT.toLocaleString('uk-UA')} рядками — звузьте діапазон або зменште кількість метрик.`,
-          )
-          return
-        }
         onClose()
         return
       }
@@ -456,9 +451,9 @@ export function ExportDialog({ organizationID, initialAnchor, onClose }: Props) 
           {isRaw && (
             <p className="export-dialog-note">
               Сирі дані — кожен зразок із <code>telemetry_samples</code> (крок ~1с/15с/30с).
-              Експорт обмежений {RAW_SAMPLES_MAX_DAYS} добами та{' '}
-              {RAW_SAMPLES_LIMIT.toLocaleString('uk-UA')} рядками. Колонки «Ціна РДН» та «Прогноз
-              СЕС» вимкнені — у цих джерел немає сирих рядків.
+              Експорт обмежений лише діапазоном до {RAW_SAMPLES_MAX_DAYS} діб (без обмеження на
+              кількість рядків). Колонки «Ціна РДН» та «Прогноз СЕС» вимкнені — у цих джерел немає
+              сирих рядків.
             </p>
           )}
 

@@ -848,13 +848,14 @@ func (s *Store) DAMPrices(ctx context.Context, zone int, from, to time.Time) (DA
 // an error from `emit` aborts iteration cleanly without consuming the
 // rest of the cursor.
 //
-// `limit` caps the number of emitted rows. The query reads
-// `limit + 1` rows so we can detect truncation: when the underlying
-// data has more rows than the cap, we stop after `limit` and report
-// `truncated = true` so the caller can flag the export as partial. We
-// don't run a separate `COUNT(*)` because per-poll exports can hit
-// hundreds of thousands of rows on production data and an extra
-// scan would double the latency for the common (non-truncated) case.
+// `limit <= 0` streams every row in range (the caller's time window is
+// the only bound) and never reports truncation. A positive `limit`
+// caps the emitted rows: the query reads `limit + 1` rows so we can
+// detect truncation — when the underlying data has more rows than the
+// cap, we stop after `limit` and report `truncated = true` so the
+// caller can flag the export as partial. We don't run a separate
+// `COUNT(*)` because per-poll exports can hit millions of rows on
+// production data and an extra scan would double the latency.
 //
 // Rows are ordered by `time ASC, metric_key ASC` so a multi-metric
 // export interleaves the samples in real time, which is what an
@@ -878,27 +879,43 @@ func (s *Store) Samples(
 	if !to.After(from) {
 		return 0, false, fmt.Errorf("to must be after from")
 	}
-	if limit <= 0 {
-		return 0, false, fmt.Errorf("limit must be > 0")
-	}
 
-	rows, err := s.pool.Query(ctx, `
-		SELECT time, metric_key, value, labels
-		FROM telemetry_samples
-		WHERE organization_id = $1
-			AND metric_key = ANY($2)
-			AND time >= $3
-			AND time <  $4
-		ORDER BY time ASC, metric_key ASC
-		LIMIT $5
-	`, organizationID, metricKeys, from.UTC(), to.UTC(), int64(limit)+1)
+	// limit <= 0 means "stream everything in range": the caller's
+	// time window is the only bound. We drop the LIMIT clause entirely
+	// rather than passing a huge sentinel so the planner doesn't reserve
+	// a top-N sort, and truncation can never be reported. A positive
+	// limit reads limit+1 rows to detect (and flag) truncation.
+	unlimited := limit <= 0
+	var rows pgx.Rows
+	if unlimited {
+		rows, err = s.pool.Query(ctx, `
+			SELECT time, metric_key, value, labels
+			FROM telemetry_samples
+			WHERE organization_id = $1
+				AND metric_key = ANY($2)
+				AND time >= $3
+				AND time <  $4
+			ORDER BY time ASC, metric_key ASC
+		`, organizationID, metricKeys, from.UTC(), to.UTC())
+	} else {
+		rows, err = s.pool.Query(ctx, `
+			SELECT time, metric_key, value, labels
+			FROM telemetry_samples
+			WHERE organization_id = $1
+				AND metric_key = ANY($2)
+				AND time >= $3
+				AND time <  $4
+			ORDER BY time ASC, metric_key ASC
+			LIMIT $5
+		`, organizationID, metricKeys, from.UTC(), to.UTC(), int64(limit)+1)
+	}
 	if err != nil {
 		return 0, false, err
 	}
 	defer rows.Close()
 
 	for rows.Next() {
-		if rowsEmitted >= limit {
+		if !unlimited && rowsEmitted >= limit {
 			truncated = true
 			break
 		}
