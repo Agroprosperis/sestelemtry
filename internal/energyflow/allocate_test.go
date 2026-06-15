@@ -333,3 +333,52 @@ func TestAllocate_ChargeClampToGridImport(t *testing.T) {
 		EssChargedKwh: 2,
 	})
 }
+
+// ESS counter-step guard: when MaxEssPowerKw is set, an interval whose
+// implied average ESS power exceeds the ceiling is rejected (a device
+// counter re-base / corrupted reading), while a plausible interval at
+// the same dt passes through unchanged.
+func TestAllocate_EssMaxPowerKwGuard(t *testing.T) {
+	// 1 s interval, 2000 kW ceiling ⇒ max plausible delta = 2000 *
+	// (1/3600) ≈ 0.5556 kWh per second.
+	opts := Options{MaxEssPowerKw: 2000}
+
+	// A counter step of 14467 kWh charge in 1 s is ~52 GW — rejected.
+	prev := mkSample(t0, 0, 20000, 0, 0, 0)
+	curr := mkSample(t1, 0, 20000+14467, 0, 14467, 0)
+	got := Allocate(prev, curr, opts)
+	if !got.Skipped {
+		t.Fatalf("expected charge counter step to be skipped, got %+v", got)
+	}
+	if !containsAny(got.Warnings, "exceeds") {
+		t.Errorf("expected counter-step warning, got %v", got.Warnings)
+	}
+
+	// Same magnitude on the discharge counter is rejected too.
+	prev = mkSample(t0, 0, 0, 0, 0, 0)
+	curr = mkSample(t1, 0, 0, 0, 0, 12513)
+	if got := Allocate(prev, curr, opts); !got.Skipped {
+		t.Fatalf("expected discharge counter step to be skipped, got %+v", got)
+	}
+
+	// A plausible 0.4 kWh charge in 1 s (~1440 kW) stays under the
+	// 2000 kW ceiling and is processed normally.
+	prev = mkSample(t0, 0, 1, 0, 0, 0)
+	curr = mkSample(t1, 0, 1.4, 0, 0.4, 0)
+	got = Allocate(prev, curr, opts)
+	if got.Skipped {
+		t.Fatalf("plausible interval should not be skipped, got %v", got.Warnings)
+	}
+	assertResult(t, got, Result{
+		GridToESSKwh:  0.4,
+		EssChargedKwh: 0.4,
+	})
+
+	// With the guard disabled (default), the absurd step passes through
+	// and pollutes the flows — proving the guard is what blocks it.
+	prev = mkSample(t0, 0, 20000, 0, 0, 0)
+	curr = mkSample(t1, 0, 20000+14467, 0, 14467, 0)
+	if got := Allocate(prev, curr, Options{}); got.Skipped {
+		t.Fatalf("guard disabled: interval should pass through, got %v", got.Warnings)
+	}
+}

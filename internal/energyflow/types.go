@@ -82,6 +82,17 @@ const (
 	TopologyDual   Topology = "dual_smartlogger"
 )
 
+// DefaultMaxEssPowerKw is the fleet-wide ESS charge/discharge power
+// ceiling (kW) the on-the-fly compute applies when an organization has
+// no explicit ess_max_power_kw override. It sits far above any real
+// site's rated ESS power (elevator BESS are well under 2 MW) yet far
+// below the implausible counter-step spikes the guard exists to catch
+// (a single re-based counter implies hundreds of MW over one bucket).
+// Allocate stays opt-in: the library never applies this on its own —
+// only the API call sites inject it so unit tests keep their explicit
+// Options.
+const DefaultMaxEssPowerKw = 10000
+
 // Role identifies which logical role a Modbus device plays in the
 // energy-flow calculation. Roles are auto-detected from the device's
 // resolved metric_keys.
@@ -105,6 +116,16 @@ type Options struct {
 	WarnDeviceTimeSkewSeconds int     // default 5
 	BalanceToleranceKwh       float64 // default 0.1
 	ActivePvPowerAddress      int     // default 440388
+
+	// MaxEssPowerKw is the physical charge/discharge power ceiling of
+	// the site's ESS in kW. When > 0, Allocate rejects any interval
+	// whose implied average ESS power (delta_ess_charged or
+	// delta_ess_discharged over dt) exceeds this bound — that signals a
+	// cumulative-counter step (device re-base / firmware resync /
+	// corrupted high reading) rather than real energy. 0 disables the
+	// guard. No spec default: a wrong value would clip real data, so it
+	// is opt-in per organization.
+	MaxEssPowerKw float64
 }
 
 // DefaultOptions returns the spec-recommended defaults.
@@ -150,6 +171,9 @@ func (o Options) WithDefaults() Options {
 	}
 	if o.ActivePvPowerAddress > 0 {
 		d.ActivePvPowerAddress = o.ActivePvPowerAddress
+	}
+	if o.MaxEssPowerKw > 0 {
+		d.MaxEssPowerKw = o.MaxEssPowerKw
 	}
 	return d
 }

@@ -261,7 +261,11 @@ type EnergyFlowDevice struct {
 type EnergyFlowOrg struct {
 	ID               string
 	EssDischargeSign int
-	Devices          []EnergyFlowDevice
+	// EssMaxPowerKw mirrors config.Organization.EssMaxPowerKw: the ESS
+	// power ceiling (kW) used to reject implausible counter-step
+	// intervals. 0 disables the guard.
+	EssMaxPowerKw float64
+	Devices       []EnergyFlowDevice
 }
 
 // EnergyFlowRecomputeSourceMetrics is the set of source counter keys

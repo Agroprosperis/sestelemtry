@@ -136,6 +136,7 @@ func (h *Handlers) computeEnergyFlowTotals(
 		EssDischargeSign:        cfg.EssDischargeSign,
 		AllocationWindowSeconds: 60,
 		MaxGapSeconds:           0, // disabled — historical windows can span collector outages
+		MaxEssPowerKw:           essPowerCeiling(cfg),
 	})
 	return &EnergyFlowTotals{
 		PVToESSKwh:   rec.Totals[energyflow.MetricPVToESSKwh],
@@ -143,6 +144,18 @@ func (h *Handlers) computeEnergyFlowTotals(
 		ESSToLoadKwh: rec.Totals[energyflow.MetricESSToLoadKwh],
 		ESSToGridKwh: rec.Totals[energyflow.MetricESSToGridKwh],
 	}, nil
+}
+
+// essPowerCeiling returns the ESS charge/discharge power ceiling (kW)
+// the allocator's counter-step guard uses for this org. An explicit
+// per-org ess_max_power_kw wins; otherwise the fleet-wide default
+// applies so the guard is always active on the dashboard / economics
+// paths without any per-org configuration.
+func essPowerCeiling(cfg EnergyFlowOrg) float64 {
+	if cfg.EssMaxPowerKw > 0 {
+		return cfg.EssMaxPowerKw
+	}
+	return energyflow.DefaultMaxEssPowerKw
 }
 
 // buildRawSamples groups telemetry rows into energyflow.RawSample by

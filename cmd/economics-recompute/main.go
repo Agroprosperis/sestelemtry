@@ -301,6 +301,7 @@ func toEnergyFlowOrgs(orgs []config.Organization) []api.EnergyFlowOrg {
 		out = append(out, api.EnergyFlowOrg{
 			ID:               o.ID,
 			EssDischargeSign: o.EssDischargeSign,
+			EssMaxPowerKw:    o.EssMaxPowerKw,
 			Devices:          mapped,
 		})
 	}

@@ -68,6 +68,15 @@ type Organization struct {
 	// energy_charged / energy_discharged accumulators are sign-
 	// invariant.
 	EssDischargeSign int `yaml:"ess_discharge_sign"`
+
+	// EssMaxPowerKw is the physical charge/discharge power ceiling of
+	// the ESS in kW. When > 0, the energy-flow allocator rejects any
+	// interval whose implied average ESS power exceeds this bound — a
+	// guard against cumulative-counter steps (device re-base, firmware
+	// resync, corrupted high reading) that would otherwise dump a huge
+	// fake charge/discharge into a single hour. 0 (default) disables the
+	// guard. Set a value slightly above the ESS rated power.
+	EssMaxPowerKw float64 `yaml:"ess_max_power_kw"`
 }
 
 // Devices returns the effective list of Modbus endpoints for this
@@ -447,6 +456,9 @@ func (c *Root) validate() error {
 		case 0, 1, -1:
 		default:
 			return fmt.Errorf("config: org %q ess_discharge_sign must be 1 or -1, got %d", id, o.EssDischargeSign)
+		}
+		if o.EssMaxPowerKw < 0 {
+			return fmt.Errorf("config: org %q ess_max_power_kw must be >= 0, got %g", id, o.EssMaxPowerKw)
 		}
 	}
 	return nil

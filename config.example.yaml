@@ -14,6 +14,21 @@ organizations:
     site_id: site-a
     device_id: smartlogger-1
     poll_interval: 15s
+    # ess_discharge_sign: flips the instantaneous-power sign convention
+    # for inverters that report charge as positive ESS power. Allowed: 1
+    # (default) or -1. Cumulative charge/discharge counters are sign-
+    # invariant, so this only affects the energy-flow sanity check.
+    # ess_discharge_sign: 1
+    #
+    # ess_max_power_kw: OPTIONAL override of the ESS charge/discharge
+    # power ceiling (kW) used by the energy-flow counter-step guard. The
+    # allocator drops any interval whose implied average ESS power
+    # exceeds it — a guard against cumulative-counter steps (device
+    # re-base / firmware resync / corrupted reading) that would otherwise
+    # dump a huge fake charge/discharge into one hour. Leave it unset:
+    # a fleet-wide default (DefaultMaxEssPowerKw, 10 MW) already applies.
+    # Only set this for an unusually large site that the default would
+    # clip. ess_max_power_kw: 20000
     # `location` is optional and is exposed to the dashboard via
     # /api/v1/organizations. The weather widget uses it to query
     # Open-Meteo for the right coordinates; orgs without a location

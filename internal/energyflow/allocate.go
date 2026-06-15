@@ -78,6 +78,28 @@ func Allocate(prev, curr Sample, opts Options) Result {
 		}
 	}
 
+	// ESS counter-step guard. An upward jump in total_ess_charged /
+	// total_ess_discharged (device counter re-base, firmware resync,
+	// corrupted high reading) is indistinguishable from real energy in
+	// a pure delta calc, and with the gap guard disabled it dumps the
+	// whole jump into a single interval. When a physical ESS power
+	// ceiling is configured, reject any interval whose implied average
+	// ESS power exceeds it; advancing prev past the discontinuity lets
+	// the next interval resume from the new counter base.
+	if opts.MaxEssPowerKw > 0 && dt > 0 {
+		maxKwh := opts.MaxEssPowerKw * (dt / 3600.0)
+		if deltaEssCharged > maxKwh {
+			res.Skipped = true
+			res.Warnings = append(res.Warnings, fmt.Sprintf("delta_ess_charged_kwh=%g exceeds %g kWh max over %.0fs (counter step)", deltaEssCharged, maxKwh, dt))
+			return res
+		}
+		if deltaEssDischarged > maxKwh {
+			res.Skipped = true
+			res.Warnings = append(res.Warnings, fmt.Sprintf("delta_ess_discharged_kwh=%g exceeds %g kWh max over %.0fs (counter step)", deltaEssDischarged, maxKwh, dt))
+			return res
+		}
+	}
+
 	// Algebraic appliance consumption (spec §Основні формули):
 	//   delta_appliances = delta_pv + delta_grid_import + delta_ess_dis
 	//                      - delta_grid_export - delta_ess_charged

@@ -144,6 +144,7 @@ func (h *Handlers) computeEnergyFlowHourly(
 			EssDischargeSign:        cfg.EssDischargeSign,
 			AllocationWindowSeconds: 60,
 			MaxGapSeconds:           0,
+			MaxEssPowerKw:           essPowerCeiling(cfg),
 		},
 		func(curr time.Time, r energyflow.Result) {
 			h := curr.In(loc).Hour()
