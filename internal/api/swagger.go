@@ -342,8 +342,11 @@ paths:
         gain replicate the vendor metadata for the metric_key (empty
         when the metric isn't backed by a Modbus register). labels is
         a JSON object when the sample carries label dimensions and
-        empty otherwise. Rows are ordered by time ASC, metric_key
-        ASC.
+        empty otherwise. Rows are ordered by metric_key ASC, time ASC
+        (metric-major): this streams straight off the
+        (organization_id, metric_key, time) index without a global
+        sort, so large multi-week pulls don't time out. Consumers that
+        need a time-major view should sort client-side.
 
         Hard limits keep a misclick from streaming gigabytes:
           * range must be <= 31 days,

@@ -161,6 +161,27 @@ describe('pivotRawCsvToWide', () => {
     expect(out.csv).not.toMatch(/__TRUNCATED__/)
   })
 
+  it('groups metric-major input (non-contiguous polls) and re-sorts the wide rows by time', () => {
+    // The server streams all of metric A (time-ordered), then all of
+    // metric B — so samples from one poll are scattered. The pivot must
+    // still merge them per timestamp and emit chronological rows.
+    const long =
+      HEADER +
+      '2026-05-09T13:00:01+03:00,active_pv_power_kw,40388,UINT32,0.001,11,"{""device_host"":""10.0.0.1""}"\r\n' +
+      '2026-05-09T13:00:00+03:00,active_pv_power_kw,40388,UINT32,0.001,10,"{""device_host"":""10.0.0.1""}"\r\n' +
+      '2026-05-09T13:00:01+03:00,load_power_kw,40503,UINT32,0.001,21,"{""device_host"":""10.0.0.1""}"\r\n' +
+      '2026-05-09T13:00:00+03:00,load_power_kw,40503,UINT32,0.001,20,"{""device_host"":""10.0.0.1""}"\r\n'
+    const out = pivotRawCsvToWide({
+      longCsv: long,
+      metricKeys: ['active_pv_power_kw', 'load_power_kw'],
+    })
+    expect(out.rows).toBe(2)
+    const lines = out.csv.split('\r\n')
+    // Two distinct polls merged into one wide row each, in time order.
+    expect(lines[1]).toBe('2026-05-09T13:00:00+03:00,smartlogger,10.0.0.1,10,20')
+    expect(lines[2]).toBe('2026-05-09T13:00:01+03:00,smartlogger,10.0.0.1,11,21')
+  })
+
   it('handles header-only response (no samples) without crashing', () => {
     const out = pivotRawCsvToWide({
       longCsv: HEADER,

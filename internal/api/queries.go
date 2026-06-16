@@ -857,11 +857,19 @@ func (s *Store) DAMPrices(ctx context.Context, zone int, from, to time.Time) (DA
 // `COUNT(*)` because per-poll exports can hit millions of rows on
 // production data and an extra scan would double the latency.
 //
-// Rows are ordered by `time ASC, metric_key ASC` so a multi-metric
-// export interleaves the samples in real time, which is what an
-// analyst exploring an outage cares about. The (organization_id,
-// metric_key, time DESC) index covers the WHERE clause; the planner
-// rewrites the ORDER BY to walk the index in reverse.
+// Rows are ordered by `metric_key ASC, time ASC` — metric-major, not
+// time-major. This matches the (organization_id, metric_key, time DESC)
+// index and the compression segment layout (segmentby org+metric_key,
+// orderby time), so a multi-metric export streams straight off the
+// index with no global Sort. A time-major order (`time, metric_key`)
+// instead forces Postgres to materialize and sort the entire range
+// before emitting the first row, which on a multi-week × multi-metric
+// pull (tens of millions of rows) blows past the statement timeout. The
+// dashboard pivots the long stream into a wide, time-sorted CSV
+// client-side, so the metric-major transport order is invisible to the
+// analyst. Note: with a positive `limit`, truncation now drops the
+// tail metrics rather than the tail time range — the dashboard sends no
+// limit, so its full-range export is unaffected.
 func (s *Store) Samples(
 	ctx context.Context,
 	organizationID string,
@@ -895,7 +903,7 @@ func (s *Store) Samples(
 				AND metric_key = ANY($2)
 				AND time >= $3
 				AND time <  $4
-			ORDER BY time ASC, metric_key ASC
+			ORDER BY metric_key ASC, time ASC
 		`, organizationID, metricKeys, from.UTC(), to.UTC())
 	} else {
 		rows, err = s.pool.Query(ctx, `
@@ -905,7 +913,7 @@ func (s *Store) Samples(
 				AND metric_key = ANY($2)
 				AND time >= $3
 				AND time <  $4
-			ORDER BY time ASC, metric_key ASC
+			ORDER BY metric_key ASC, time ASC
 			LIMIT $5
 		`, organizationID, metricKeys, from.UTC(), to.UTC(), int64(limit)+1)
 	}

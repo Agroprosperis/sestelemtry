@@ -180,10 +180,17 @@ export function pivotRawCsvToWide(input: PivotInput): PivotResult {
     deviceType: string
     values: Record<string, string>
   }
-  const wideRows: WideRow[] = []
-  let current: WideRow | null = null
+  // The server now streams metric-major (all of metric A ordered by
+  // time, then metric B, …) so it can read straight off the
+  // (organization_id, metric_key, time) index without a global sort —
+  // the previous time-major order forced Postgres to sort the whole
+  // range before the first row and timed out on multi-week pulls.
+  // Because a single poll's samples are no longer contiguous, we group
+  // into wide rows via a Map keyed by (time, device_type, device_host)
+  // and sort by time at the end, restoring the chronological "one row
+  // per poll" layout the analyst expects.
+  const byKey = new Map<string, WideRow>()
   let truncationLine = ''
-  let dataRows = 0
 
   for (; i < lines.length; i++) {
     const line = lines[i]
@@ -215,18 +222,34 @@ export function pivotRawCsvToWide(input: PivotInput): PivotResult {
     // value without requiring a schema change to telemetry_samples.
     const deviceType =
       labelStringFromLabels(labelsCell, 'device_type') || DEFAULT_DEVICE_TYPE
-    if (
-      !current ||
-      current.time !== time ||
-      current.deviceHost !== deviceHost ||
-      current.deviceType !== deviceType
-    ) {
-      current = { time, deviceHost, deviceType, values: {} }
-      wideRows.push(current)
+    // NUL separator can't appear inside a timestamp or label value, so
+    // it keeps the composite key unambiguous.
+    const key = `${time}\u0000${deviceType}\u0000${deviceHost}`
+    let row = byKey.get(key)
+    if (!row) {
+      row = { time, deviceHost, deviceType, values: {} }
+      byKey.set(key, row)
     }
-    current.values[metricKey] = value
-    dataRows++
+    row.values[metricKey] = value
   }
+
+  const wideRows = Array.from(byKey.values())
+  // Restore chronological order. Date.parse handles the offset the
+  // server rendered (and any DST change inside the range); unparseable
+  // timestamps sink to the end. Ties (same instant, different device)
+  // break by device_type then device_host for deterministic output.
+  wideRows.sort((a, b) => {
+    const ta = Date.parse(a.time)
+    const tb = Date.parse(b.time)
+    if (ta !== tb) {
+      if (Number.isNaN(ta)) return 1
+      if (Number.isNaN(tb)) return -1
+      return ta - tb
+    }
+    if (a.deviceType !== b.deviceType) return a.deviceType < b.deviceType ? -1 : 1
+    if (a.deviceHost !== b.deviceHost) return a.deviceHost < b.deviceHost ? -1 : 1
+    return 0
+  })
 
   const annotatedHeaders = metricKeys.map((k) => annotateMetricHeader(k, registerAddresses))
   // local_time is a synthetic column derived from local_time_epoch_s
@@ -274,6 +297,6 @@ export function pivotRawCsvToWide(input: PivotInput): PivotResult {
   return {
     csv,
     rows: wideRows.length,
-    truncated: truncationLine !== '' || dataRows === 0 ? truncationLine !== '' : false,
+    truncated: truncationLine !== '',
   }
 }
