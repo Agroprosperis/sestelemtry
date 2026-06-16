@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { fetchRegisters, rawSamplesZipURL } from '../../api'
+import { fetchRawSamplesZip, fetchRegisters } from '../../api'
 import { downloadCsv, rowsToCsv } from '../csv'
 import {
   autoBucket,
@@ -12,20 +12,28 @@ import {
 } from '../customExport'
 import { elevatorCodeFor } from '../transforms/pvForecast'
 
-// triggerBrowserDownload navigates an off-DOM anchor to a download URL
-// so the browser saves the response (Content-Disposition: attachment)
-// straight to disk without unloading the dashboard. Used for the raw
-// zip export, where the body is too large to route through fetch.
-function triggerBrowserDownload(url: string): void {
+// saveBlob writes an in-memory Blob to disk under `filename` via an
+// off-DOM anchor. Used for the raw zip once it has fully downloaded
+// (the blob is the compressed archive, so this is the zip size, not the
+// decompressed CSV). Object URL revocation is deferred a tick so Safari
+// /Firefox don't 404 the still-initiating download.
+function saveBlob(filename: string, blob: Blob): void {
+  const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
+  a.download = filename
   a.rel = 'noopener'
-  // download hint is ignored cross-origin (the server's
-  // Content-Disposition filename wins) but helps same-origin setups.
-  a.download = ''
   document.body.appendChild(a)
   a.click()
   a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 0)
+}
+
+// formatBytes renders a byte count as a human MB/GB string for the
+// live download status.
+function formatBytes(bytes: number): string {
+  if (bytes >= 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} ГБ`
+  return `${(bytes / 1024 / 1024).toFixed(1)} МБ`
 }
 
 type Props = {
@@ -131,6 +139,9 @@ export function ExportDialog({ organizationID, initialAnchor, onClose }: Props) 
   })
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // downloadedBytes tracks the raw zip stream so the dialog can show a
+  // live "downloaded X MB" status; null when no download is in flight.
+  const [downloadedBytes, setDownloadedBytes] = useState<number | null>(null)
   // abortRef carries the controller for the in-flight export so the
   // dialog can cancel its fetches when the user closes the modal,
   // hits ESC, or unmounts the component (e.g. navigating away). The
@@ -257,23 +268,31 @@ export function ExportDialog({ organizationID, initialAnchor, onClose }: Props) 
           setError('Виберіть принаймні одну метрику з telemetry_samples.')
           return
         }
-        // Raw exports can be gigabytes (a month at 1 s polling), far
-        // beyond what fetch + in-memory pivot can hold. Instead we let
-        // the browser stream a server-built `.zip` straight to disk:
-        // the server zips the long-format CSV and streams it through
-        // (X-Accel-Buffering: no), so memory stays bounded and the
-        // transfer is compressed. tz keeps the `time` column in the
-        // analyst's local zone (e.g. Europe/Kyiv → "+03:00").
+        // Raw exports can be gigabytes uncompressed (a month at 1 s
+        // polling). The server zips the long-format CSV and streams it
+        // through (X-Accel-Buffering: no); we read that stream with a
+        // live byte counter so the user sees progress instead of a
+        // dead button, then save the (compressed) archive to disk. tz
+        // keeps the `time` column in the analyst's local zone.
         const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || undefined
-        triggerBrowserDownload(
-          rawSamplesZipURL({
+        setDownloadedBytes(0)
+        const { blob, filename } = await fetchRawSamplesZip(
+          {
             organizationID,
             metricKeys,
             from: fromDate.toISOString(),
             to: toExclusive.toISOString(),
             tz,
-          }),
+          },
+          {
+            signal,
+            onProgress: (b) => {
+              if (mountedRef.current) setDownloadedBytes(b)
+            },
+          },
         )
+        if (!mountedRef.current) return
+        saveBlob(filename, blob)
         onClose()
         return
       }
@@ -334,7 +353,10 @@ export function ExportDialog({ organizationID, initialAnchor, onClose }: Props) 
       if (!mountedRef.current) return
       setError(e instanceof Error ? e.message : 'Не вдалось підготувати експорт')
     } finally {
-      if (mountedRef.current) setBusy(false)
+      if (mountedRef.current) {
+        setBusy(false)
+        setDownloadedBytes(null)
+      }
     }
   }
 
@@ -449,6 +471,13 @@ export function ExportDialog({ organizationID, initialAnchor, onClose }: Props) 
             </p>
           )}
 
+          {busy && downloadedBytes !== null && (
+            <p className="export-dialog-note" aria-live="polite">
+              Завантаження архіву… {formatBytes(downloadedBytes)}. Не закривайте вкладку до
+              завершення.
+            </p>
+          )}
+
           {error && (
             <p role="alert" className="export-dialog-error">
               {error}
@@ -465,7 +494,13 @@ export function ExportDialog({ organizationID, initialAnchor, onClose }: Props) 
             className="export-dialog-primary"
             disabled={!validRange || !anyColumn || !rawRangeOk || busy}
           >
-            {busy ? 'Готуємо…' : 'Завантажити CSV'}
+            {busy
+              ? downloadedBytes !== null
+                ? `Завантаження… ${formatBytes(downloadedBytes)}`
+                : 'Готуємо…'
+              : isRaw
+                ? 'Завантажити ZIP'
+                : 'Завантажити CSV'}
           </button>
         </footer>
       </form>

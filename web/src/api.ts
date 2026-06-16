@@ -226,6 +226,66 @@ export function rawSamplesZipURL(input: {
   })
 }
 
+// fetchRawSamplesZip downloads the server-built `.zip` (format=zip)
+// while reporting progress. We read the response as a stream and sum
+// the received bytes so the dialog can show a live "downloaded X MB"
+// status — a plain <a download> gives no progress and looked like
+// "nothing happened" on a slow multi-minute pull. The body is the
+// already-compressed archive (no client-side decompression), so memory
+// stays at the zip size, an order of magnitude below the raw CSV.
+export async function fetchRawSamplesZip(
+  input: {
+    organizationID: string
+    metricKeys: string[]
+    from: string
+    to: string
+    tz?: string
+  },
+  opts?: { signal?: AbortSignal; onProgress?: (bytes: number) => void },
+): Promise<{ blob: Blob; filename: string }> {
+  const res = await fetch(rawSamplesZipURL(input), { signal: opts?.signal })
+  if (!res.ok) {
+    const body = await res.text().catch(() => '')
+    const trimmed = body.trim()
+    throw new Error(
+      `samples zip request failed: ${res.status}${trimmed ? ` ${trimmed}` : ''}`,
+    )
+  }
+  const cd = res.headers.get('content-disposition') || ''
+  const m = /filename="?([^";]+)"?/i.exec(cd)
+  const filename = m ? m[1] : 'samples.csv.zip'
+
+  // Fall back to a buffered read when the stream reader is unavailable
+  // (older browsers / no res.body) — no progress, but the download
+  // still works.
+  if (!res.body) {
+    const blob = await res.blob()
+    opts?.onProgress?.(blob.size)
+    return { blob, filename }
+  }
+
+  const reader = res.body.getReader()
+  const chunks: Uint8Array[] = []
+  let received = 0
+  let lastTick = 0
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    if (!value) continue
+    chunks.push(value)
+    received += value.byteLength
+    // Throttle progress callbacks so a 1 s-cadence stream of small
+    // chunks doesn't thrash React state on every packet.
+    const now = Date.now()
+    if (now - lastTick > 200) {
+      lastTick = now
+      opts?.onProgress?.(received)
+    }
+  }
+  opts?.onProgress?.(received)
+  return { blob: new Blob(chunks as BlobPart[], { type: 'application/zip' }), filename }
+}
+
 export type RawSamplesResult = {
   // Pre-formatted CSV body, including the UTF-8 BOM and trailing
   // truncation sentinel (when present). The caller is expected to
