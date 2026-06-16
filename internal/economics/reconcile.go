@@ -12,6 +12,19 @@ import (
 // use_power, which is not force-scaled (see reconcileFlows).
 const reconcileTolerance = 0.02
 
+// maxReconcileFactor / minReconcileFactor bound the scaling applied to a
+// counter when matching its canonical KPI. A healthy FusionSolar daily
+// value and the allocator agree to within a small correction, so a
+// factor far outside this range means the canonical KPI is corrupted
+// (e.g. a single bad getKpiStationDay value of 24958 kWh against a
+// computed 67 kWh — factor ~369). Rather than let that scale the day's
+// flows into a multi-MWh artifact, the metric is left at its computed
+// value and surfaced via a reconcile_rejected flag.
+const (
+	maxReconcileFactor = 10.0
+	minReconcileFactor = 0.1
+)
+
 // CanonicalDaily holds the authoritative FusionSolar daily KPIs
 // (getKpiStationDay) used to reconcile a day's computed flows. Load maps
 // to use_power; the rest map 1:1 to the measured counters.
@@ -69,10 +82,18 @@ func reconcileFlows(flows []*HourFlows, canonical *CanonicalDaily) ReconcileResu
 	res := ReconcileResult{Applied: true, Detail: map[string]ReconcileField{}}
 	factor := func(name string, computed, target float64) float64 {
 		fac := 1.0
-		if computed > 0 {
-			fac = target / computed
-		} else {
+		switch {
+		case computed <= 0:
 			res.Flags = append(res.Flags, "no_scale:"+name)
+		default:
+			fac = target / computed
+			if fac > maxReconcileFactor || fac < minReconcileFactor {
+				// Canonical KPI implausibly diverges from the computed
+				// total — treat it as corrupted and keep the computed
+				// flows rather than scaling the day into garbage.
+				res.Flags = append(res.Flags, fmt.Sprintf("reconcile_rejected:%s:%.2f", name, fac))
+				fac = 1.0
+			}
 		}
 		res.Detail[name] = ReconcileField{Computed: computed, Canonical: target, Factor: fac}
 		return fac
