@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { fetchRawSamplesCsv, fetchRegisters } from '../../api'
+import { fetchRegisters, rawSamplesZipURL } from '../../api'
 import { downloadCsv, rowsToCsv } from '../csv'
 import {
   autoBucket,
@@ -10,8 +10,23 @@ import {
   type CustomExportBucket,
   type CustomExportColumns,
 } from '../customExport'
-import { pivotRawCsvToWide } from '../pivotRaw'
 import { elevatorCodeFor } from '../transforms/pvForecast'
+
+// triggerBrowserDownload navigates an off-DOM anchor to a download URL
+// so the browser saves the response (Content-Disposition: attachment)
+// straight to disk without unloading the dashboard. Used for the raw
+// zip export, where the body is too large to route through fetch.
+function triggerBrowserDownload(url: string): void {
+  const a = document.createElement('a')
+  a.href = url
+  a.rel = 'noopener'
+  // download hint is ignored cross-origin (the server's
+  // Content-Disposition filename wins) but helps same-origin setups.
+  a.download = ''
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+}
 
 type Props = {
   organizationID: string
@@ -242,53 +257,23 @@ export function ExportDialog({ organizationID, initialAnchor, onClose }: Props) 
           setError('Виберіть принаймні одну метрику з telemetry_samples.')
           return
         }
-        // Send the browser's IANA tz so the CSV `time` column renders
-        // in the analyst's local zone (e.g. Europe/Kyiv → "+03:00")
-        // instead of UTC. Without this the day picker says "9 May"
-        // but the CSV shows "8 May 21:00 .. 9 May 20:59".
+        // Raw exports can be gigabytes (a month at 1 s polling), far
+        // beyond what fetch + in-memory pivot can hold. Instead we let
+        // the browser stream a server-built `.zip` straight to disk:
+        // the server zips the long-format CSV and streams it through
+        // (X-Accel-Buffering: no), so memory stays bounded and the
+        // transfer is compressed. tz keeps the `time` column in the
+        // analyst's local zone (e.g. Europe/Kyiv → "+03:00").
         const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || undefined
-        // No row limit — the server streams every sample in range and
-        // the 31-day cap is the only bound (validated above via
-        // rawRangeOk). The result is never truncated.
-        const result = await fetchRawSamplesCsv(
-          {
+        triggerBrowserDownload(
+          rawSamplesZipURL({
             organizationID,
             metricKeys,
             from: fromDate.toISOString(),
             to: toExclusive.toISOString(),
             tz,
-          },
-          signal,
+          }),
         )
-        if (!mountedRef.current) return
-        if (result.rows === 0 && !result.truncated) {
-          setError('У вибраному діапазоні немає сирих даних — спробуйте інший період або метрики.')
-          return
-        }
-        // Pull the metric_key → register address map for header
-        // annotation parity with the bucketed wide export. Failures
-        // are non-fatal: we just fall back to plain headers.
-        let registerAddresses: Record<string, number> | undefined
-        try {
-          const reg = await fetchRegisters(signal)
-          registerAddresses = Object.fromEntries(
-            Object.entries(reg.metadata).map(([k, v]) => [k, v.address]),
-          )
-        } catch (e) {
-          if (isAbortError(e)) throw e
-          registerAddresses = undefined
-        }
-        if (!mountedRef.current) return
-        // Pivot long → wide on the client. The user explicitly
-        // asked for the "one row per moment, metrics as columns"
-        // layout (matches the spreadsheet they ship into) instead
-        // of the long-format the API streams.
-        const pivot = pivotRawCsvToWide({
-          longCsv: result.text,
-          metricKeys,
-          registerAddresses,
-        })
-        downloadCsv(result.filename, pivot.csv)
         onClose()
         return
       }
@@ -451,9 +436,10 @@ export function ExportDialog({ organizationID, initialAnchor, onClose }: Props) 
           {isRaw && (
             <p className="export-dialog-note">
               Сирі дані — кожен зразок із <code>telemetry_samples</code> (крок ~1с/15с/30с).
-              Експорт обмежений лише діапазоном до {RAW_SAMPLES_MAX_DAYS} діб (без обмеження на
-              кількість рядків). Колонки «Ціна РДН» та «Прогноз СЕС» вимкнені — у цих джерел немає
-              сирих рядків.
+              Завантажується як <code>.zip</code> (стрім на диск), діапазон до{' '}
+              {RAW_SAMPLES_MAX_DAYS} діб, без обмеження на кількість рядків. Усередині — «довгий»
+              CSV (рядок на зразок). Колонки «Ціна РДН» та «Прогноз СЕС» вимкнені — у цих джерел
+              немає сирих рядків.
             </p>
           )}
 

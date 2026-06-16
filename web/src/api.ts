@@ -204,6 +204,28 @@ export async function fetchEnergySummary(
 // deployment renders flows immediately without an operator restart
 // or backfill. See `internal/api/handlers.go:computeEnergyFlowTotals`.
 
+// rawSamplesZipURL builds the /api/v1/samples download URL with
+// `format=zip`, so the browser saves a compact streamed `.zip` straight
+// to disk. Used for the raw export instead of fetch+pivot: a multi-week
+// pull is gigabytes uncompressed and can't be held in browser memory,
+// but a native download streams to disk with the gzip-class size win.
+export function rawSamplesZipURL(input: {
+  organizationID: string
+  metricKeys: string[]
+  from: string
+  to: string
+  tz?: string
+}): string {
+  return buildURL('/api/v1/samples', {
+    organization_id: input.organizationID,
+    metric_keys: input.metricKeys.join(','),
+    from: input.from,
+    to: input.to,
+    tz: input.tz,
+    format: 'zip',
+  })
+}
+
 export type RawSamplesResult = {
   // Pre-formatted CSV body, including the UTF-8 BOM and trailing
   // truncation sentinel (when present). The caller is expected to

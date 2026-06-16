@@ -1,6 +1,7 @@
 package api
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"encoding/csv"
@@ -556,22 +557,58 @@ func (h *Handlers) samples(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	filename := fmt.Sprintf("samples_%s_%s_%s.csv",
+	// format=zip streams the CSV inside a single-entry zip archive so
+	// the browser saves a compact `.zip` straight to disk. This is the
+	// only way a multi-week raw pull (gigabytes uncompressed) is
+	// downloadable at all: the dashboard navigates to this URL and the
+	// browser streams the archive to disk, instead of the fetch+pivot
+	// path that has to hold the whole body in memory. Note we do NOT
+	// set Content-Encoding here — the body itself is the compressed
+	// file the user keeps, not a transport encoding the browser
+	// transparently unwraps.
+	asZip := strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("format")), "zip")
+	csvName := fmt.Sprintf("samples_%s_%s_%s.csv",
 		sanitizeFilenameSegment(orgID),
 		from.UTC().Format("20060102T150405Z"),
 		to.UTC().Format("20060102T150405Z"),
 	)
-	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
-	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Sample-Limit", strconv.Itoa(limit))
-	// Chunked encoding kicks in implicitly because we don't set
-	// Content-Length; that lets us stream the rows out of the cursor
-	// without buffering the entire result set in memory.
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte{0xEF, 0xBB, 0xBF})
+	// Tell an upstream nginx not to buffer this response (same as the
+	// NDJSON progress streams). A multi-day raw pull can run to
+	// hundreds of MB / gigabytes; with the default proxy_buffering the
+	// proxy tries to spool the whole body, blows past its temp-file
+	// limit, and hands the browser a truncated / empty response (which
+	// the dashboard then misreads as "no data"). Streaming straight
+	// through keeps memory bounded and the bytes flowing.
+	w.Header().Set("X-Accel-Buffering", "no")
 
-	cw := csv.NewWriter(w)
+	// csvSink is where the CSV bytes land: the response directly for a
+	// plain CSV, or a streaming zip entry for format=zip.
+	var csvSink io.Writer = w
+	var zw *zip.Writer
+	if asZip {
+		w.Header().Set("Content-Type", "application/zip")
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", csvName+".zip"))
+		w.WriteHeader(http.StatusOK)
+		zw = zip.NewWriter(w)
+		entry, zerr := zw.Create(csvName)
+		if zerr != nil {
+			h.log.Error("api_samples_zip", "organization_id", orgID, "err", zerr)
+			return
+		}
+		csvSink = entry
+	} else {
+		w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", csvName))
+		// Chunked encoding kicks in implicitly because we don't set
+		// Content-Length; that lets us stream the rows out of the cursor
+		// without buffering the entire result set in memory.
+		w.WriteHeader(http.StatusOK)
+	}
+	_, _ = csvSink.Write([]byte{0xEF, 0xBB, 0xBF})
+
+	cw := csv.NewWriter(csvSink)
 	cw.UseCRLF = true
 	// Column layout exposes the vendor metadata (modbus_register,
 	// data_type, gain) right next to metric_key so analysts can spot
@@ -647,6 +684,9 @@ func (h *Handlers) samples(w http.ResponseWriter, r *http.Request) {
 			"err", err,
 		)
 		cw.Flush()
+		if zw != nil {
+			_ = zw.Close()
+		}
 		return
 	}
 	if truncated {
@@ -661,6 +701,13 @@ func (h *Handlers) samples(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	cw.Flush()
+	if zw != nil {
+		// Closing writes the zip central directory — required for a
+		// valid archive. Do it before logging success.
+		if cerr := zw.Close(); cerr != nil {
+			h.log.Error("api_samples_zip_close", "organization_id", orgID, "err", cerr)
+		}
+	}
 
 	dur := time.Since(start)
 	h.log.Info("api_samples_ok",
