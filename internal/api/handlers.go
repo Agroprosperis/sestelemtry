@@ -447,6 +447,15 @@ func (h *Handlers) timeseries(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	// A fine-grained export over a long range (e.g. 5-minute buckets for
+	// a month of 1-second samples) can aggregate tens of millions of raw
+	// rows and run well past the 30s server WriteTimeout, which severs
+	// the connection mid-query and surfaces to the client as a 502. Drop
+	// the write deadline so the response completes; the request context
+	// still bounds the work and is cancelled when the client aborts.
+	if rc := http.NewResponseController(w); rc != nil {
+		_ = rc.SetWriteDeadline(time.Time{})
+	}
 	start := time.Now()
 	resp, err := h.store.Timeseries(r.Context(), orgID, metricKeys, from, to, bucket, tz, aggregation)
 	dur := time.Since(start)
