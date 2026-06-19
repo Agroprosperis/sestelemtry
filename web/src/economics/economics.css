@@ -1388,19 +1388,19 @@
   height: 100%;
 }
 
-/* Hoverable balance segment: subtle highlight + pointer so users
-   discover the breakdown tooltip. */
+/* Hoverable balance bar: subtle highlight + pointer so users discover
+   the per-row breakdown tooltip. */
 .economics-balance-wrap {
   position: relative;
 }
 
-.economics-seg-hover {
+.economics-balance-bar-hover {
   cursor: pointer;
-  transition: filter 0.12s ease, opacity 0.12s ease;
+  transition: filter 0.12s ease;
 }
 
-.economics-seg-hover:hover {
-  filter: brightness(0.92) saturate(1.15);
+.economics-balance-bar-hover:hover {
+  filter: brightness(0.96) saturate(1.1);
 }
 
 /* Floating breakdown tip over the balance bars. Reuses .economics-trend-tip
@@ -1408,14 +1408,14 @@
 .economics-balance-tip {
   position: absolute;
   z-index: 30;
-  min-width: 0;
   transform: translate(-50%, calc(-100% - 12px));
   pointer-events: none;
   white-space: nowrap;
 }
 
 .economics-balance-tip-share {
-  margin-top: 4px;
+  margin-left: 6px;
+  font-weight: 500;
   font-size: 11px;
   color: #667085;
 }
