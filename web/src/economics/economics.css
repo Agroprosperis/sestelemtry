@@ -1388,6 +1388,38 @@
   height: 100%;
 }
 
+/* Hoverable balance segment: subtle highlight + pointer so users
+   discover the breakdown tooltip. */
+.economics-balance-wrap {
+  position: relative;
+}
+
+.economics-seg-hover {
+  cursor: pointer;
+  transition: filter 0.12s ease, opacity 0.12s ease;
+}
+
+.economics-seg-hover:hover {
+  filter: brightness(0.92) saturate(1.15);
+}
+
+/* Floating breakdown tip over the balance bars. Reuses .economics-trend-tip
+   for the card chrome; positioned at the pointer within the wrap. */
+.economics-balance-tip {
+  position: absolute;
+  z-index: 30;
+  min-width: 0;
+  transform: translate(-50%, calc(-100% - 12px));
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.economics-balance-tip-share {
+  margin-top: 4px;
+  font-size: 11px;
+  color: #667085;
+}
+
 .economics-seg.green { background: #86efac; }
 .economics-seg.blue { background: #93c5fd; }
 .economics-seg.amber { background: #fdba74; }

@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import type { MouseEvent as ReactMouseEvent } from 'react'
 import {
   Bar,
   BarChart,
@@ -58,11 +59,11 @@ export function EconomicsMonthlyView({ data, organizationID }: Props) {
         <MonthlyWaterfall totals={t} />
       </div>
       <div className="economics-month-grid2">
-        <MonthlyTrend days={data.days} totals={t} />
+        <MonthlyBalance totals={t} />
         <MonthlyOptimum totals={t} days={data.days} />
       </div>
       <div className="economics-month-grid2">
-        <MonthlyBalance totals={t} />
+        <MonthlyTrend days={data.days} totals={t} />
         <MonthlyHeatmap margins={data.hourly_margin} />
       </div>
       <MonthlyDailyTable days={data.days} totals={t} organizationID={organizationID} month={data.month} />
@@ -555,6 +556,10 @@ function OptimumReasons({ day }: { day: EconomicsMonthlyDay }) {
 
 // --- Energy balance ---
 
+type BalanceSeg = { name: string; cls: BalanceSegClass; kwh: number }
+type BalanceSegClass = 'green' | 'blue' | 'amber' | 'violet' | 'red'
+type BalanceTip = { seg: BalanceSeg; share: number; x: number; y: number }
+
 function MonthlyBalance({ totals }: { totals: EconomicsMonthlyTotals }) {
   const sourcesTotal = totals.pv_kwh + totals.grid_import_kwh
   const pct = (v: number) => (sourcesTotal > 0 ? (v / sourcesTotal) * 100 : 0)
@@ -566,6 +571,19 @@ function MonthlyBalance({ totals }: { totals: EconomicsMonthlyTotals }) {
   const toConsumption = totals.pv_to_load_kwh + totals.grid_to_load_kwh
   const toEss = totals.pv_to_ess_kwh + totals.grid_to_ess_kwh
   const toExport = totals.pv_to_grid_kwh
+
+  // Hover breakdown shown over the stacked bars. We track the cursor
+  // position relative to the bars wrapper so the floating tip follows
+  // the pointer without being clipped by the bar's overflow:hidden.
+  const [tip, setTip] = useState<BalanceTip | null>(null)
+  const showTip = (seg: BalanceSeg) => (e: ReactMouseEvent<HTMLSpanElement>) => {
+    const wrap = e.currentTarget.closest('.economics-balance-wrap') as HTMLElement | null
+    if (!wrap) return
+    const box = wrap.getBoundingClientRect()
+    setTip({ seg, share: sourcesTotal > 0 ? seg.kwh / sourcesTotal : 0, x: e.clientX - box.left, y: e.clientY - box.top })
+  }
+  const hideTip = () => setTip(null)
+  const seg = (name: string, cls: BalanceSegClass, kwh: number): BalanceSeg => ({ name, cls, kwh })
 
   const flows = [
     { label: 'СЕС → споживання', kwh: totals.pv_to_load_kwh, effect: totals.revenue_pv_self_uah, cls: 'good', dot: 'consume' },
@@ -591,38 +609,50 @@ function MonthlyBalance({ totals }: { totals: EconomicsMonthlyTotals }) {
         <span><i className="economics-seg-dot violet" />УЗЕ</span>
         <span><i className="economics-seg-dot red" />експорт</span>
       </div>
-      <div className="economics-month-balance">
-        <div className="economics-balance-row">
-          <strong className="economics-balance-name">Джерела</strong>
-          <div className="economics-balance-bar">
-            <span className="economics-seg green" style={{ width: `${pct(totals.pv_kwh)}%` }} />
-            <span className="economics-seg blue" style={{ width: `${pct(totals.grid_import_kwh)}%` }} />
+      <div className="economics-balance-wrap" onMouseLeave={hideTip}>
+        <div className="economics-month-balance">
+          <div className="economics-balance-row">
+            <strong className="economics-balance-name">Джерела</strong>
+            <div className="economics-balance-bar">
+              <BalanceSegment seg={seg('СЕС', 'green', totals.pv_kwh)} width={pct(totals.pv_kwh)} onMove={showTip} onLeave={hideTip} />
+              <BalanceSegment seg={seg('Мережа', 'blue', totals.grid_import_kwh)} width={pct(totals.grid_import_kwh)} onMove={showTip} onLeave={hideTip} />
+            </div>
+            <span className="economics-balance-value">{formatMwh(sourcesTotal)}</span>
           </div>
-          <span className="economics-balance-value">{formatMwh(sourcesTotal)}</span>
-        </div>
-        <div className="economics-balance-row">
-          <span className="economics-balance-name">СЕС</span>
-          <div className="economics-balance-bar">
-            <span className="economics-seg green" style={{ width: `${pct(totals.pv_kwh)}%` }} />
+          <div className="economics-balance-row">
+            <span className="economics-balance-name">СЕС</span>
+            <div className="economics-balance-bar">
+              <BalanceSegment seg={seg('СЕС', 'green', totals.pv_kwh)} width={pct(totals.pv_kwh)} onMove={showTip} onLeave={hideTip} />
+            </div>
+            <span className="economics-balance-value">{formatMwh(totals.pv_kwh)}</span>
           </div>
-          <span className="economics-balance-value">{formatMwh(totals.pv_kwh)}</span>
-        </div>
-        <div className="economics-balance-row">
-          <span className="economics-balance-name">Мережа</span>
-          <div className="economics-balance-bar">
-            <span className="economics-seg blue" style={{ width: `${pct(totals.grid_import_kwh)}%` }} />
+          <div className="economics-balance-row">
+            <span className="economics-balance-name">Мережа</span>
+            <div className="economics-balance-bar">
+              <BalanceSegment seg={seg('Мережа', 'blue', totals.grid_import_kwh)} width={pct(totals.grid_import_kwh)} onMove={showTip} onLeave={hideTip} />
+            </div>
+            <span className="economics-balance-value">{formatMwh(totals.grid_import_kwh)}</span>
           </div>
-          <span className="economics-balance-value">{formatMwh(totals.grid_import_kwh)}</span>
-        </div>
-        <div className="economics-balance-row">
-          <strong className="economics-balance-name">Напрямки</strong>
-          <div className="economics-balance-bar">
-            <span className="economics-seg amber" style={{ width: `${pct(toConsumption)}%` }} />
-            <span className="economics-seg red" style={{ width: `${pct(toExport)}%` }} />
-            <span className="economics-seg violet" style={{ width: `${pct(toEss)}%` }} />
+          <div className="economics-balance-row">
+            <strong className="economics-balance-name">Напрямки</strong>
+            <div className="economics-balance-bar">
+              <BalanceSegment seg={seg('Споживання', 'amber', toConsumption)} width={pct(toConsumption)} onMove={showTip} onLeave={hideTip} />
+              <BalanceSegment seg={seg('Експорт', 'red', toExport)} width={pct(toExport)} onMove={showTip} onLeave={hideTip} />
+              <BalanceSegment seg={seg('УЗЕ', 'violet', toEss)} width={pct(toEss)} onMove={showTip} onLeave={hideTip} />
+            </div>
+            <span className="economics-balance-value">{formatMwh(sourcesTotal)}</span>
           </div>
-          <span className="economics-balance-value">{formatMwh(sourcesTotal)}</span>
         </div>
+        {tip ? (
+          <div className="economics-trend-tip economics-balance-tip" style={{ left: tip.x, top: tip.y }}>
+            <div className="economics-trend-tip-row">
+              <i className={`economics-seg-dot ${tip.seg.cls}`} />
+              <span>{tip.seg.name}</span>
+              <b>{formatMwh(tip.seg.kwh)}</b>
+            </div>
+            <div className="economics-balance-tip-share">{formatPercent(tip.share)} від джерел</div>
+          </div>
+        ) : null}
       </div>
       <div className="economics-table-scroll" style={{ marginTop: 14 }}>
         <table className="economics-table economics-month-table">
@@ -652,6 +682,34 @@ function MonthlyBalance({ totals }: { totals: EconomicsMonthlyTotals }) {
         </table>
       </div>
     </section>
+  )
+}
+
+// BalanceSegment is one coloured slice of a balance bar. It reports the
+// pointer position on hover so MonthlyBalance can float a breakdown tip.
+// Zero-width slices are skipped so an empty flow leaves no dead hover
+// zone. Width is clamped to a hairline minimum so a tiny-but-nonzero
+// flow still has something to hover.
+function BalanceSegment({
+  seg,
+  width,
+  onMove,
+  onLeave,
+}: {
+  seg: BalanceSeg
+  width: number
+  onMove: (seg: BalanceSeg) => (e: ReactMouseEvent<HTMLSpanElement>) => void
+  onLeave: () => void
+}) {
+  if (seg.kwh <= 0 || width <= 0) return null
+  return (
+    <span
+      className={`economics-seg ${seg.cls} economics-seg-hover`}
+      style={{ width: `${width}%` }}
+      onMouseEnter={onMove(seg)}
+      onMouseMove={onMove(seg)}
+      onMouseLeave={onLeave}
+    />
   )
 }
 
