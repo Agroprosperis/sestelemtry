@@ -137,18 +137,41 @@ func main() {
 	// request body. The per-org device_host label mirrors what the
 	// live collector stamps, so backfilled rows classify identically in
 	// the energy-flow allocator.
-	hostByOrg := map[string]string{}
+	// Build the per-metric device_host map the importer stamps on
+	// archive rows. Dual-SmartLogger sites (e.g. ze) scope PV/grid/load
+	// and ESS counters to different hosts via per-device metric_keys; we
+	// mirror that exactly so archived rows classify in the energy-flow
+	// allocator like live ones. Metrics not scoped to a device fall back
+	// to the org's first host (the single-logger common case).
+	hostsByOrg := map[string]fusionsolar.OrgHosts{}
 	if loadedCfg != nil {
 		for _, o := range loadedCfg.Organizations {
 			devices := o.Devices()
-			if len(devices) > 0 {
-				hostByOrg[o.ID] = strings.TrimSpace(devices[0].Host)
+			if len(devices) == 0 {
+				continue
 			}
+			oh := fusionsolar.OrgHosts{
+				Default:     strings.TrimSpace(devices[0].Host),
+				ByMetricKey: map[string]string{},
+			}
+			for _, d := range devices {
+				host := strings.TrimSpace(d.Host)
+				for _, mk := range d.MetricKeys {
+					mk = strings.TrimSpace(mk)
+					if mk == "" {
+						continue
+					}
+					if _, exists := oh.ByMetricKey[mk]; !exists {
+						oh.ByMetricKey[mk] = host
+					}
+				}
+			}
+			hostsByOrg[o.ID] = oh
 		}
 	}
 	// The importer has no date guard: it protects live data per 24h
 	// window by skipping any day that already has real telemetry.
-	importer := fusionsolar.NewImporter(pool, log, hostByOrg)
+	importer := fusionsolar.NewImporter(pool, log, hostsByOrg)
 	svc.SetFusionSolarImporter(func(ctx context.Context, orgID, accessToken, apiBase string, from, to time.Time, onProgress api.FusionProgressFunc) (any, error) {
 		client := fusionsolar.NewClient(apiBase, accessToken, 60*time.Second)
 		return importer.Import(ctx, client, orgID, from, to, onProgress)

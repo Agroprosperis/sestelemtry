@@ -55,24 +55,26 @@ func mustLoadKyiv() *time.Location {
 // the operator can enter connection details on the import page rather
 // than baking secrets into the environment.
 type Importer struct {
-	pool      *pgxpool.Pool
-	log       *slog.Logger
-	hostByOrg map[string]string
+	pool       *pgxpool.Pool
+	log        *slog.Logger
+	hostsByOrg map[string]OrgHosts
 }
 
-// NewImporter wires a ready-to-use importer. `hostByOrg` maps an org id
-// to the Modbus host label the live collector stamps on its samples;
-// the importer copies it onto `labels.device_host` so the energy-flow
-// allocator classifies archive rows exactly as it would live data.
+// NewImporter wires a ready-to-use importer. `hostsByOrg` maps an org id
+// to the per-metric Modbus host labels the live collector stamps on its
+// samples; the importer copies them onto `labels.device_host` so the
+// energy-flow allocator classifies archive rows exactly as it would live
+// data — including dual-SmartLogger sites where PV/grid/load and ESS
+// counters live on different hosts.
 //
 // There is no date guard: instead of a configured cutoff, the importer
 // checks per 24h window whether real (live) telemetry already exists and
 // skips those windows, so a backfill can never overwrite live data.
-func NewImporter(pool *pgxpool.Pool, log *slog.Logger, hostByOrg map[string]string) *Importer {
+func NewImporter(pool *pgxpool.Pool, log *slog.Logger, hostsByOrg map[string]OrgHosts) *Importer {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Importer{pool: pool, log: log, hostByOrg: hostByOrg}
+	return &Importer{pool: pool, log: log, hostsByOrg: hostsByOrg}
 }
 
 // Import backfills [from, to) for one organization using the supplied
@@ -97,7 +99,7 @@ func (im *Importer) Import(ctx context.Context, client *Client, orgID string, fr
 		return nil, fmt.Errorf("fusionsolar: no plant topology for organization %q", orgID)
 	}
 
-	host := im.hostByOrg[orgID]
+	hosts := im.hostsByOrg[orgID]
 	result := &ImportResult{
 		OrganizationID: orgID,
 		PlantCode:      topo.PlantCode,
@@ -150,7 +152,7 @@ func (im *Importer) Import(ctx context.Context, client *Client, orgID string, fr
 		// independent. The samples are absolute cumulative readings (not
 		// cross-window deltas), so there is no continuity to preserve
 		// between windows.
-		acc := newSampleAccumulator(orgID, host, topo)
+		acc := newSampleAccumulator(orgID, hosts, topo)
 
 		// 1. Primary SmartLogger: PV / load / grid (+ ESS counters on
 		//    single-logger sites).

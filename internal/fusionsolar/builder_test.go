@@ -29,7 +29,7 @@ func valueAt(samples []storage.Sample, metric string, t time.Time) (float64, boo
 // to the dashboard metric_keys verbatim, with the device_host label.
 func TestSingleLoggerMapping(t *testing.T) {
 	topo := Topology["sm"]
-	acc := newSampleAccumulator("sm", "10.36.40.102", topo)
+	acc := newSampleAccumulator("sm", OrgHosts{Default: "10.36.40.102"}, topo)
 
 	start := ts("2026-06-02T14:50:00Z")
 	end := start.Add(maxHistoryWindow)
@@ -78,7 +78,7 @@ func TestSingleLoggerMapping(t *testing.T) {
 // TestEssSocAveraging verifies SOC is averaged across battery packs at
 // each timestamp and emitted as soc_percent.
 func TestEssSocAveraging(t *testing.T) {
-	acc := newSampleAccumulator("sm", "", Topology["sm"])
+	acc := newSampleAccumulator("sm", OrgHosts{}, Topology["sm"])
 
 	start := ts("2026-06-02T14:50:00Z")
 	end := start.Add(maxHistoryWindow)
@@ -106,7 +106,7 @@ func TestDualLoggerEssCounters(t *testing.T) {
 	if topo.EssLogger == nil {
 		t.Fatal("expected ze to be a dual-logger topology")
 	}
-	acc := newSampleAccumulator("ze", "", topo)
+	acc := newSampleAccumulator("ze", OrgHosts{}, topo)
 
 	start := ts("2026-06-02T14:50:00Z")
 	end := start.Add(maxHistoryWindow)
@@ -134,10 +134,76 @@ func TestDualLoggerEssCounters(t *testing.T) {
 	}
 }
 
+// TestDualLoggerHostSplit verifies that on a dual-SmartLogger site the
+// PV/grid/load counters are stamped with the PV-logger host and the ESS
+// counters + SOC with the ESS-logger host — matching the live collector
+// so the energy-flow allocator can form a RolePV+RoleESS pair per bucket
+// instead of dropping every archived interval (which zeroed the flows
+// and corrupted economics on archive days).
+func TestDualLoggerHostSplit(t *testing.T) {
+	const pvHost = "10.28.40.101"
+	const essHost = "10.28.40.102"
+	hosts := OrgHosts{
+		Default: essHost,
+		ByMetricKey: map[string]string{
+			"accumulated_pv_energy_yield_kwh":       pvHost,
+			"accumulated_electricity_purchased_kwh": pvHost,
+			"accumulated_electricity_sold_kwh":      pvHost,
+			"accumulated_power_consumption_kwh":     pvHost,
+			"total_energy_charged_kwh":              essHost,
+			"total_energy_discharged_kwh":           essHost,
+			"soc_percent":                           essHost,
+		},
+	}
+	acc := newSampleAccumulator("ze", hosts, Topology["ze"])
+
+	start := ts("2026-06-02T14:50:00Z")
+	end := start.Add(maxHistoryWindow)
+	t0 := ts("2026-06-02T15:00:00Z")
+
+	acc.addLogger([]HistorySample{{Time: t0, Fields: map[string]float64{
+		"total_yield":             1192659.1,
+		"total_supply_from_grid":  789091.19,
+		"total_feed_in_to_grid":   87199.31,
+		"total_power_consumption": 500000.0,
+	}}}, start, end)
+	acc.addEssLogger([]HistorySample{{Time: t0, Fields: map[string]float64{
+		"total_charge":    143348.99,
+		"total_discharge": 128383.2,
+	}}}, start, end)
+	acc.addEssDevice([]HistorySample{{Time: t0, Fields: map[string]float64{"battery_soc": 90}}}, start, end)
+
+	wantHost := map[string]string{
+		"accumulated_pv_energy_yield_kwh":       pvHost,
+		"accumulated_electricity_purchased_kwh": pvHost,
+		"accumulated_electricity_sold_kwh":      pvHost,
+		"accumulated_power_consumption_kwh":     pvHost,
+		"total_energy_charged_kwh":              essHost,
+		"total_energy_discharged_kwh":           essHost,
+		"soc_percent":                           essHost,
+	}
+	seen := map[string]bool{}
+	for _, s := range acc.samples() {
+		want, tracked := wantHost[s.MetricKey]
+		if !tracked {
+			continue
+		}
+		seen[s.MetricKey] = true
+		if got := s.Labels["device_host"]; got != want {
+			t.Errorf("metric %s device_host = %q, want %q", s.MetricKey, got, want)
+		}
+	}
+	for metric := range wantHost {
+		if !seen[metric] {
+			t.Errorf("metric %s missing from samples", metric)
+		}
+	}
+}
+
 // TestAcChargeFallback verifies ac_total_charge_energy is used when the
 // plain total_charge field is absent on the ESS logger.
 func TestAcChargeFallback(t *testing.T) {
-	acc := newSampleAccumulator("ze", "", Topology["ze"])
+	acc := newSampleAccumulator("ze", OrgHosts{}, Topology["ze"])
 	start := ts("2026-06-02T14:50:00Z")
 	end := start.Add(maxHistoryWindow)
 	t0 := ts("2026-06-02T15:00:00Z")
@@ -155,7 +221,7 @@ func TestAcChargeFallback(t *testing.T) {
 // TestWindowDedup verifies a sample on the boundary of two successive
 // windows is written once (the half-open window rule).
 func TestWindowDedup(t *testing.T) {
-	acc := newSampleAccumulator("sm", "", Topology["sm"])
+	acc := newSampleAccumulator("sm", OrgHosts{}, Topology["sm"])
 
 	w1Start := ts("2026-06-02T14:50:00Z")
 	w1End := w1Start.Add(maxHistoryWindow)

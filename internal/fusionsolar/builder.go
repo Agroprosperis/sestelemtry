@@ -7,6 +7,35 @@ import (
 	"github.com/nesh/sestelemetry/internal/storage"
 )
 
+// OrgHosts maps an organization's metric_keys to the live device_host
+// the Modbus collector stamps for each one, so archive rows classify in
+// the energy-flow allocator exactly as live rows do.
+//
+// On dual-SmartLogger sites (e.g. Zhmerynskyi) PV/grid/load counters and
+// ESS charge/discharge counters live on *different* hosts; the allocator
+// derives RolePV / RoleESS from device_host, so stamping every archive
+// row with one host collapses both onto a single role and the allocator
+// drops every bucket (no RolePV+RoleESS pair) — zeroing the directional
+// flows for archived days. ByMetricKey carries the per-metric host;
+// Default covers any metric not scoped to a specific device (the common
+// single-logger case, where every metric shares one host).
+type OrgHosts struct {
+	Default     string
+	ByMetricKey map[string]string
+}
+
+// hostFor returns the device_host to stamp on `metric`: the per-metric
+// host when the org's config scopes the metric to a specific device,
+// otherwise the org default.
+func (h OrgHosts) hostFor(metric string) string {
+	if h.ByMetricKey != nil {
+		if v, ok := h.ByMetricKey[metric]; ok && v != "" {
+			return v
+		}
+	}
+	return h.Default
+}
+
 // sampleAccumulator folds FusionSolar device history into the
 // deduplicated set of telemetry_samples the importer writes. It is the
 // pure transform half of Import (no network, no DB) so the cumulative
@@ -16,7 +45,7 @@ import (
 // a window boundary in two successive 24h fetches collapses to one row.
 type sampleAccumulator struct {
 	orgID string
-	host  string
+	hosts OrgHosts
 	topo  PlantTopology
 
 	values   map[cellKey]float64
@@ -29,10 +58,10 @@ type cellKey struct {
 	ms     int64
 }
 
-func newSampleAccumulator(orgID, host string, topo PlantTopology) *sampleAccumulator {
+func newSampleAccumulator(orgID string, hosts OrgHosts, topo PlantTopology) *sampleAccumulator {
 	return &sampleAccumulator{
 		orgID:    orgID,
-		host:     host,
+		hosts:    hosts,
 		topo:     topo,
 		values:   map[cellKey]float64{},
 		socSum:   map[int64]float64{},
@@ -112,11 +141,13 @@ func (a *sampleAccumulator) samples() []storage.Sample {
 		// Each sample carries its own labels map (CopyFrom marshals
 		// per-row). The `source` tag marks the row as archive so the
 		// idempotency delete is scoped to it and live data is never
-		// touched; `device_host` mirrors the live collector so the
+		// touched; `device_host` mirrors the live collector — resolved
+		// per metric_key so dual-SmartLogger sites split PV/grid/load
+		// and ESS counters onto the same hosts live data uses, and the
 		// energy-flow allocator classifies archive rows identically.
 		l := map[string]string{SourceLabel: SourceValue}
-		if a.host != "" {
-			l["device_host"] = a.host
+		if host := a.hosts.hostFor(c.metric); host != "" {
+			l["device_host"] = host
 		}
 		out = append(out, storage.Sample{
 			Time:           time.UnixMilli(c.ms).UTC(),
