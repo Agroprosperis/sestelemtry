@@ -459,8 +459,21 @@ export function useDashboardData(input: {
           setEnergyFlows(EMPTY_FLOWS)
         }
         setSocSeries(soc ? socChartRows(soc.points, 'day', anchorDate) : [])
+        // On the day preset, reconstruct the power lines from the cumulative
+        // energy deltas (already fetched as `energy`) for any bucket lacking
+        // an instantaneous sample — that is how archive-only days, which have
+        // no `*_power_kw` snapshots, still render PV/Grid/ESS/Load. Live
+        // buckets keep their instantaneous values (fallback is per-bucket).
         setPowerSeries(
-          power ? powerChartRows(power.points, DAY_POWER_METRIC_KEYS, anchorDate, now) : [],
+          power
+            ? powerChartRows(
+                power.points,
+                DAY_POWER_METRIC_KEYS,
+                anchorDate,
+                now,
+                energy.points,
+              )
+            : [],
         )
         setDamSeries(dam ? damChartRows(dam.prices, preset, anchorDate) : [])
         setError(null)

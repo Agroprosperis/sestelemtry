@@ -169,4 +169,73 @@ describe('powerChartRows', () => {
       expect(rows[futureIdx].load_power_kw).toBeNull()
     })
   })
+
+  // Archive-day fallback: reconstruct instantaneous power from the 5-minute
+  // cumulative-counter deltas (kWh) the FusionSolar importer writes, since
+  // archive rows have no `*_power_kw` snapshots. delta(kWh) over a 5-min
+  // bucket == delta * 12 average kW.
+  describe('fallback derivation from cumulative deltas', () => {
+    // A past day so futureDayCutoff returns null and every bucket renders.
+    const pastAnchor = new Date(2025, 6, 1)
+    const pastNow = new Date(2026, 0, 1)
+    const NOON_INDEX = (12 * 60) / DAY_BUCKET_MINUTES
+
+    function delta(idx: number, metric: string, value: number): TimeseriesPoint {
+      return { time: bucketTime(pastAnchor, idx), metric_key: metric, value }
+    }
+
+    it('reconstructs PV/Grid/ESS/Load when no instantaneous data exists', () => {
+      const fallback: TimeseriesPoint[] = [
+        delta(NOON_INDEX, 'accumulated_pv_energy_yield_kwh', 10), // 10 kWh -> 120 kW
+        delta(NOON_INDEX, 'accumulated_electricity_purchased_kwh', 2),
+        delta(NOON_INDEX, 'accumulated_electricity_sold_kwh', 0.5), // grid (2-0.5)*12 = 18
+        delta(NOON_INDEX, 'total_energy_discharged_kwh', 1),
+        delta(NOON_INDEX, 'total_energy_charged_kwh', 3), // ess (1-3)*12 = -24
+      ]
+      const rows = powerChartRows([], keys, pastAnchor, pastNow, fallback)
+      const noon = rows[NOON_INDEX]
+      expect(noon.active_pv_power_kw).toBeCloseTo(120)
+      expect(noon.grid_connected_active_power_kw).toBeCloseTo(18)
+      expect(noon.active_ess_power_kw).toBeCloseTo(-24)
+      expect(noon.load_power_kw).toBeCloseTo(-114) // -(120 + 18 - 24)
+    })
+
+    it('prefers instantaneous samples over the derived fallback', () => {
+      const instantaneous: TimeseriesPoint[] = [
+        delta(NOON_INDEX, 'active_pv_power_kw', 200),
+      ]
+      const fallback: TimeseriesPoint[] = [
+        delta(NOON_INDEX, 'accumulated_pv_energy_yield_kwh', 10), // would derive 120
+      ]
+      const rows = powerChartRows(instantaneous, keys, pastAnchor, pastNow, fallback)
+      expect(rows[NOON_INDEX].active_pv_power_kw).toBe(200)
+    })
+
+    it('mixes per bucket: instantaneous in one slot, derived in the next', () => {
+      const instantaneous: TimeseriesPoint[] = [
+        delta(NOON_INDEX, 'grid_connected_active_power_kw', 50),
+      ]
+      const fallback: TimeseriesPoint[] = [
+        delta(NOON_INDEX + 1, 'accumulated_pv_energy_yield_kwh', 5), // 5*12 = 60
+      ]
+      const rows = powerChartRows(instantaneous, keys, pastAnchor, pastNow, fallback)
+      expect(rows[NOON_INDEX].grid_connected_active_power_kw).toBe(50)
+      expect(rows[NOON_INDEX].active_pv_power_kw).toBeNull()
+      expect(rows[NOON_INDEX + 1].active_pv_power_kw).toBeCloseTo(60)
+    })
+
+    it('clamps absurd derived magnitudes to 0', () => {
+      const fallback: TimeseriesPoint[] = [
+        delta(NOON_INDEX, 'accumulated_pv_energy_yield_kwh', 1000), // 12000 kW -> 0
+      ]
+      const rows = powerChartRows([], keys, pastAnchor, pastNow, fallback)
+      expect(rows[NOON_INDEX].active_pv_power_kw).toBe(0)
+    })
+
+    it('leaves buckets with neither source as null gaps', () => {
+      const rows = powerChartRows([], keys, pastAnchor, pastNow, [])
+      expect(rows[NOON_INDEX].active_pv_power_kw).toBeNull()
+      expect(rows[NOON_INDEX].load_power_kw).toBeNull()
+    })
+  })
 })

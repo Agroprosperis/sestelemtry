@@ -16,6 +16,86 @@ const PV_KEY = 'active_pv_power_kw'
 const GRID_KEY = 'grid_connected_active_power_kw'
 const ESS_KEY = 'active_ess_power_kw'
 
+// Cumulative-counter metric_keys used to RECONSTRUCT instantaneous power for
+// days that only have archive data (the FusionSolar importer writes these
+// kWh counters but no `*_power_kw` snapshots). Each 5-minute bucket carries
+// the server's MAX-MIN delta (already clamped >= 0); average power over the
+// interval is delta(kWh) / (5/60 h) = delta * 12.
+const FALLBACK_PV_YIELD_KEY = 'accumulated_pv_energy_yield_kwh'
+const FALLBACK_GRID_IMPORT_KEY = 'accumulated_electricity_purchased_kwh'
+const FALLBACK_GRID_EXPORT_KEY = 'accumulated_electricity_sold_kwh'
+const FALLBACK_ESS_CHARGE_KEY = 'total_energy_charged_kwh'
+const FALLBACK_ESS_DISCHARGE_KEY = 'total_energy_discharged_kwh'
+
+// kWh accumulated over one DAY_BUCKET_MINUTES interval, expressed as average
+// power: 1 kWh in 5 min == 12 kW.
+const KW_PER_KWH_5MIN = 60 / DAY_BUCKET_MINUTES
+
+type DerivedPower = { pv: number; grid: number; ess: number }
+
+// derivedPowerByBucket folds per-bucket cumulative-counter deltas into the
+// three directional power values, keyed by the same 5-minute slot the
+// instantaneous samples use. Grid is net import (import - export, + = import)
+// and ESS is net discharge (discharge - charge, + = discharge), matching the
+// live-metric sign convention the load derivation and tooltip already assume.
+function derivedPowerByBucket(
+  fallbackPoints: TimeseriesPoint[],
+): Map<string, DerivedPower> {
+  type Deltas = {
+    pvYield: number
+    gridImport: number
+    gridExport: number
+    essCharge: number
+    essDischarge: number
+  }
+  const deltas = new Map<string, Deltas>()
+  for (const p of fallbackPoints) {
+    const t = new Date(p.time)
+    const ts = t.getTime()
+    if (!Number.isFinite(ts) || !Number.isFinite(p.value)) continue
+    const slot = bucketKey(t)
+    const cur =
+      deltas.get(slot) ??
+      { pvYield: 0, gridImport: 0, gridExport: 0, essCharge: 0, essDischarge: 0 }
+    switch (p.metric_key) {
+      case FALLBACK_PV_YIELD_KEY:
+        cur.pvYield += p.value
+        break
+      case FALLBACK_GRID_IMPORT_KEY:
+        cur.gridImport += p.value
+        break
+      case FALLBACK_GRID_EXPORT_KEY:
+        cur.gridExport += p.value
+        break
+      case FALLBACK_ESS_CHARGE_KEY:
+        cur.essCharge += p.value
+        break
+      case FALLBACK_ESS_DISCHARGE_KEY:
+        cur.essDischarge += p.value
+        break
+      default:
+        continue
+    }
+    deltas.set(slot, cur)
+  }
+  const out = new Map<string, DerivedPower>()
+  for (const [slot, d] of deltas) {
+    out.set(slot, {
+      pv: d.pvYield * KW_PER_KWH_5MIN,
+      grid: (d.gridImport - d.gridExport) * KW_PER_KWH_5MIN,
+      ess: (d.essDischarge - d.essCharge) * KW_PER_KWH_5MIN,
+    })
+  }
+  return out
+}
+
+// clampAnomaly drops absurd power magnitudes (sensor glitches / counter
+// resets that produce a huge single-bucket delta) to 0 so one bad sample
+// can't blow up the y-axis scale.
+function clampAnomaly(value: number): number {
+  return Math.abs(value) > DAY_POWER_ANOMALY_THRESHOLD_KW ? 0 : value
+}
+
 // powerChartRows aligns instantaneous power samples (kW) to the day-preset
 // 5-minute timeline. For each (bucket, metric) it keeps the sample with the
 // latest `time` (semantics matches the server `aggregation=last`). Empty
@@ -45,11 +125,20 @@ const ESS_KEY = 'active_ess_power_kw'
 //
 // If any of the three inputs is null in a bucket the load stays null
 // (gap) — partial sums would be misleading.
+//
+// `fallbackPoints` are per-bucket cumulative-counter deltas (kWh). When a
+// bucket has no instantaneous power sample (typical for archive-only days,
+// where the FusionSolar importer wrote only kWh counters), the PV/Grid/ESS
+// value is reconstructed from these deltas (delta * 12 == avg kW). The
+// fallback is applied per bucket and per metric, so a day that mixes live
+// and archive segments renders one continuous line. Instantaneous samples
+// always take precedence when present.
 export function powerChartRows(
   points: TimeseriesPoint[],
   keys: string[],
   anchor: Date,
   now: Date = new Date(),
+  fallbackPoints: TimeseriesPoint[] = [],
 ): PowerChartRow[] {
   const lastByKey = new Map<string, { value: number; time: number }>()
   for (const p of points) {
@@ -65,6 +154,12 @@ export function powerChartRows(
       lastByKey.set(composite, { value: p.value, time: ts })
     }
   }
+  const derived = derivedPowerByBucket(fallbackPoints)
+  const derivedKeyOf: Record<string, keyof DerivedPower> = {
+    [PV_KEY]: 'pv',
+    [GRID_KEY]: 'grid',
+    [ESS_KEY]: 'ess',
+  }
   const cutoff = futureDayCutoff(anchor, now)
   const timeline = timelineBuckets('day', anchor)
   const wantsLoad = keys.includes(LOAD_KEY)
@@ -79,11 +174,16 @@ export function powerChartRows(
         continue
       }
       const hit = lastByKey.get(`${key}@${slot}`)
-      if (!hit) {
-        row[key] = null
+      if (hit) {
+        row[key] = clampAnomaly(hit.value)
+        continue
+      }
+      const fallbackKey = derivedKeyOf[key]
+      const slotDerived = fallbackKey ? derived.get(slot) : undefined
+      if (slotDerived && fallbackKey) {
+        row[key] = clampAnomaly(slotDerived[fallbackKey])
       } else {
-        row[key] =
-          Math.abs(hit.value) > DAY_POWER_ANOMALY_THRESHOLD_KW ? 0 : hit.value
+        row[key] = null
       }
     }
     if (wantsLoad) {
