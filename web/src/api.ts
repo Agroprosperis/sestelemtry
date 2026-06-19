@@ -836,9 +836,12 @@ export type FusionSolarImportResult = {
   windows: number
   rows_written: number
   deleted_rows: number
-  // skipped_live_windows counts 24h windows skipped because real (live)
-  // data already exists for them — those days are left untouched.
+  // skipped_live_windows counts 24h windows skipped wholesale because every
+  // 5-minute slot already has live data — those days are left untouched.
   skipped_live_windows?: number
+  // skipped_live_samples counts archive samples dropped because their own
+  // 5-minute slot already had live data (transition days filled partially).
+  skipped_live_samples?: number
   per_metric: Record<string, number>
   warnings?: string[]
 }

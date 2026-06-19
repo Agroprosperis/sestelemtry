@@ -233,6 +233,70 @@ func HasLiveSamplesInRange(
 	return exists, nil
 }
 
+// LiveSampleBucketsInRange returns the set of fixed-width time slots in the
+// half-open window [from, to) that already hold *live* (non-archive)
+// telemetry — i.e. any row whose `source` label is not the archive value.
+// Slots are keyed by their start instant as a UTC unix-milli, bucketed at
+// `bucketSeconds` (the archive granularity, 5 minutes).
+//
+// The FusionSolar importer uses this for slot-level live-data protection:
+// it writes archive rows only into slots absent from this set, so it fills
+// the empty part of a transition day (when live collection started mid-day)
+// without ever overwriting or interleaving with a slot that already has
+// live data. Returning the set (rather than a bool over the whole day) is
+// what lets a partially-live day still receive archive for its empty slots.
+func LiveSampleBucketsInRange(
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	organizationID string,
+	source string,
+	from, to time.Time,
+	bucketSeconds int,
+) (map[int64]struct{}, error) {
+	if pool == nil {
+		return nil, fmt.Errorf("storage: nil pool")
+	}
+	if organizationID == "" {
+		return nil, fmt.Errorf("storage: organization_id is required")
+	}
+	if strings.TrimSpace(source) == "" {
+		return nil, fmt.Errorf("storage: source is required")
+	}
+	if from.IsZero() || to.IsZero() {
+		return nil, fmt.Errorf("storage: from and to are required")
+	}
+	if !to.After(from) {
+		return nil, fmt.Errorf("storage: to must be after from")
+	}
+	if bucketSeconds <= 0 {
+		return nil, fmt.Errorf("storage: bucketSeconds must be positive")
+	}
+	rows, err := pool.Query(ctx, `
+		SELECT DISTINCT time_bucket(make_interval(secs => $5), time) AS slot
+		FROM telemetry_samples
+		WHERE organization_id = $1
+			AND labels->>'source' IS DISTINCT FROM $2
+			AND time >= $3
+			AND time < $4
+	`, organizationID, source, from.UTC(), to.UTC(), bucketSeconds)
+	if err != nil {
+		return nil, fmt.Errorf("storage: scan live buckets in range: %w", err)
+	}
+	defer rows.Close()
+	out := map[int64]struct{}{}
+	for rows.Next() {
+		var slot time.Time
+		if err := rows.Scan(&slot); err != nil {
+			return nil, fmt.Errorf("storage: scan live bucket: %w", err)
+		}
+		out[slot.UTC().UnixMilli()] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("storage: iterate live buckets: %w", err)
+	}
+	return out, nil
+}
+
 func toCopyRows(samples []Sample) ([][]any, error) {
 	rows := make([][]any, len(samples))
 	for i, s := range samples {

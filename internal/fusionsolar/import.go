@@ -28,14 +28,25 @@ type ImportResult struct {
 	Windows        int            `json:"windows"`
 	RowsWritten    int            `json:"rows_written"`
 	DeletedRows    int64          `json:"deleted_rows"`
-	// SkippedLiveWindows counts 24h windows the importer skipped because
-	// real (live) data already exists for them — those days are left
-	// untouched so live telemetry is never overwritten.
-	SkippedLiveWindows int            `json:"skipped_live_windows"`
+	// SkippedLiveWindows counts 24h windows the importer skipped wholesale
+	// because every 5-minute slot already held real (live) data — those
+	// days are left untouched so live telemetry is never overwritten.
+	SkippedLiveWindows int `json:"skipped_live_windows"`
+	// SkippedLiveSamples counts individual archive samples dropped because
+	// their own 5-minute slot already held live data. This is non-zero on
+	// transition days where live collection started mid-day: the empty
+	// slots are filled from archive while the live slots are left intact.
+	SkippedLiveSamples int            `json:"skipped_live_samples"`
 	PerMetric          map[string]int `json:"per_metric"`
 	KpiDaysWritten     int            `json:"kpi_days_written"`
 	Warnings           []string       `json:"warnings,omitempty"`
 }
+
+// liveSlotSeconds is the granularity at which live-data protection resolves
+// collisions. Archive is 5-minute data and the dashboard buckets at 5
+// minutes, so an archive sample is dropped only when its own 5-minute slot
+// already holds live data — every empty slot stays fillable.
+const liveSlotSeconds = 300
 
 // kpiKyiv is the timezone used to bucket getKpiStationDay rows into
 // civil days, matching the economics dashboard's Europe/Kyiv day grid.
@@ -129,18 +140,23 @@ func (im *Importer) Import(ctx context.Context, client *Client, orgID string, fr
 		}
 		result.Windows++
 
-		// Live-data protection (replaces the old date cutoff): if this
-		// day already has ANY real (non-archive) telemetry, leave it
-		// completely untouched — don't fetch, don't delete, don't write.
-		// Archive only ever fills days that have no live data; a day
-		// that already has real data is skipped wholesale. This makes
-		// the importer safe to run over any range without a boundary and
-		// guarantees live data is never overwritten or interleaved.
-		hasLive, err := storage.HasLiveSamplesInRange(ctx, im.pool, orgID, SourceValue, windowStart, windowEnd)
+		// Live-data protection at 5-minute granularity (replaces the old
+		// whole-window skip): collect the slots in this window that already
+		// hold real (non-archive) telemetry. Archive is written only into
+		// the slots NOT in this set, so live data is never overwritten or
+		// interleaved within a slot — but the empty slots of a partially
+		// live day (e.g. the transition day when live collection started
+		// mid-day) are still filled from archive, instead of discarding the
+		// whole day's archive as before.
+		liveSlots, err := storage.LiveSampleBucketsInRange(ctx, im.pool, orgID, SourceValue, windowStart, windowEnd, liveSlotSeconds)
 		if err != nil {
-			return nil, fmt.Errorf("fusionsolar: check live data [%s..%s]: %w", windowStart.Format(time.RFC3339), windowEnd.Format(time.RFC3339), err)
+			return nil, fmt.Errorf("fusionsolar: scan live slots [%s..%s]: %w", windowStart.Format(time.RFC3339), windowEnd.Format(time.RFC3339), err)
 		}
-		if hasLive {
+		// Fast path: when every 5-minute slot in the window already has
+		// live data there is nothing to fill, so skip the upstream fetch
+		// entirely (keeps a backfill that overlaps the live period cheap).
+		windowSlots := int(windowEnd.Sub(windowStart) / (time.Duration(liveSlotSeconds) * time.Second))
+		if windowSlots > 0 && len(liveSlots) >= windowSlots {
 			result.SkippedLiveWindows++
 			if onProgress != nil {
 				onProgress(result.Windows, totalWindows)
@@ -187,6 +203,26 @@ func (im *Importer) Import(ctx context.Context, client *Client, orgID string, fr
 		}
 
 		windowSamples := acc.samples()
+
+		// Slot-level live-data protection: drop any archive sample whose
+		// 5-minute slot already holds live data, so a transition day keeps
+		// its live slots and gets archive only for the empty ones. Truncate
+		// matches the UTC, epoch-aligned 5-minute boundaries time_bucket
+		// uses in LiveSampleBucketsInRange.
+		if len(liveSlots) > 0 {
+			slot := time.Duration(liveSlotSeconds) * time.Second
+			kept := windowSamples[:0]
+			for _, s := range windowSamples {
+				key := s.Time.UTC().Truncate(slot).UnixMilli()
+				if _, live := liveSlots[key]; live {
+					result.SkippedLiveSamples++
+					continue
+				}
+				kept = append(kept, s)
+			}
+			windowSamples = kept
+		}
+
 		for _, s := range windowSamples {
 			result.PerMetric[s.MetricKey]++
 		}
@@ -231,9 +267,12 @@ func (im *Importer) Import(ctx context.Context, client *Client, orgID string, fr
 	}
 
 	if result.RowsWritten == 0 {
-		if result.SkippedLiveWindows == result.Windows && result.Windows > 0 {
+		switch {
+		case result.SkippedLiveWindows == result.Windows && result.Windows > 0:
 			result.Warnings = append(result.Warnings, "all days in the requested window already have live data — nothing imported")
-		} else {
+		case result.SkippedLiveSamples > 0:
+			result.Warnings = append(result.Warnings, "every returned sample fell on a 5-minute slot that already has live data — nothing imported")
+		default:
 			result.Warnings = append(result.Warnings, "no samples returned for the requested window")
 		}
 	}
@@ -245,6 +284,7 @@ func (im *Importer) Import(ctx context.Context, client *Client, orgID string, fr
 		"to", to.Format(time.RFC3339),
 		"windows", result.Windows,
 		"skipped_live_windows", result.SkippedLiveWindows,
+		"skipped_live_samples", result.SkippedLiveSamples,
 		"rows_written", result.RowsWritten,
 		"deleted_rows", result.DeletedRows,
 		"kpi_days_written", result.KpiDaysWritten,

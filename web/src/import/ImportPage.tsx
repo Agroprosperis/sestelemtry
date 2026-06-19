@@ -227,8 +227,12 @@ function FusionSolarImportCard() {
               <dd>{result.windows}</dd>
             </div>
             <div>
-              <dt>Пропущено (є live-дані)</dt>
+              <dt>Пропущено днів (повністю live)</dt>
               <dd>{(result.skipped_live_windows ?? 0).toLocaleString('uk-UA')}</dd>
+            </div>
+            <div>
+              <dt>Пропущено семплів (слот зайнятий live)</dt>
+              <dd>{(result.skipped_live_samples ?? 0).toLocaleString('uk-UA')}</dd>
             </div>
             <div>
               <dt>Записано рядків</dt>
