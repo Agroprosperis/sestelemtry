@@ -48,18 +48,9 @@ export function EconomicsRevenuePanel({ totals }: Props): ReactElement {
     { label: 'Заряд УЗЕ із мережі', amount: totals.expenseGridCharge },
   ]
 
-  const ebitdaClass =
-    totals.ebitda >= 0
-      ? 'economics-revenue-ebitda-card positive'
-      : 'economics-revenue-ebitda-card negative'
-
   return (
-    <section className="economics-revenue-panel" aria-label="EBITDA та розкладка ефекту">
+    <section className="economics-revenue-panel" aria-label="Розкладка доходу та витрат">
       <div className="economics-revenue-grid">
-        <div className={ebitdaClass}>
-          <span className="economics-revenue-ebitda-label">EBITDA за добу</span>
-          <span className="economics-revenue-ebitda-value">{formatUah(totals.ebitda)}</span>
-        </div>
         <RevenueColumn
           title="Дохід"
           total={totals.revenueTotal}

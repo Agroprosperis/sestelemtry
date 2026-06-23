@@ -78,7 +78,7 @@ export function EconomicsKpis({ totals, tariffs }: Props) {
   const pvSelfConsumptionShare = totals.pv > 0 ? pvSelfConsumed / totals.pv : 0
   const equivalentCycles = tariffs.essCapacityKwh > 0 ? totals.essDischarged / tariffs.essCapacityKwh : 0
   const avoidedImportKwh = totals.pvToLoad + totals.essToLoad
-  const effectClass = totals.effect >= 0 ? 'kpi-card kpi-card-success' : 'kpi-card kpi-card-danger'
+  const ebitdaClass = totals.ebitda >= 0 ? 'kpi-card kpi-card-success' : 'kpi-card kpi-card-danger'
   // Realized ESS profit replaces the legacy spot `essNet` here:
   // it's the cash the battery actually earned today after each
   // discharge was matched to the WAC cost basis it consumed
@@ -101,10 +101,10 @@ export function EconomicsKpis({ totals, tariffs }: Props) {
           <span className="kpi-value">{formatUah(totals.actualCost)}</span>
           <span className="kpi-sub">імпорт − експорт + знос УЗЕ</span>
         </div>
-        <div className={effectClass}>
-          <span className="kpi-label">Ефект проєкту</span>
-          <span className="kpi-value">{formatUah(totals.effect)}</span>
-          <span className="kpi-sub">{totals.effect >= 0 ? 'економія' : 'переплата'} за день</span>
+        <div className={ebitdaClass}>
+          <span className="kpi-label">EBITDA за добу</span>
+          <span className="kpi-value">{formatUah(totals.ebitda)}</span>
+          <span className="kpi-sub">дохід − витрати за день</span>
         </div>
         <div
           className={essRealizedClass}

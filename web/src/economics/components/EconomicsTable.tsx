@@ -1,3 +1,4 @@
+import { useLayoutEffect, useRef, useState } from 'react'
 import type { ReactElement } from 'react'
 import { formatOrganizationLabel } from '../../dashboard/config'
 import type { HourEconomicsRow } from '../compute'
@@ -617,9 +618,120 @@ function renderCell(
 
 const HOUR_COUNT = 24
 
+const stripUahFmt = new Intl.NumberFormat('uk-UA', {
+  style: 'decimal',
+  useGrouping: true,
+  minimumFractionDigits: 0,
+  maximumFractionDigits: 0,
+})
+
+function formatStripUah(v: number): string {
+  if (!Number.isFinite(v)) return '—'
+  return `${stripUahFmt.format(Math.round(v))} грн`
+}
+
+// hourEssNet extracts the per-hour spot ESS effect, mirroring the
+// "Чистий ефект УЗЕ" chart (null when the hour had no price so the
+// strip and the chart agree on which hours are blank).
+function hourEssNet(row: HourEconomicsRow | null): number | null {
+  return row && row.rdnUahPerKwh !== null ? row.economics.essNet : null
+}
+
+// EssEffectStrip is a thin bar row of per-hour ESS net effect rendered
+// directly above the pivot, using the table's measured column widths
+// so each bar sits over its hour column. Bars grow up (positive
+// effect) or down (negative) from a centred zero baseline.
+function EssEffectStrip({
+  rows,
+  cols,
+}: {
+  rows: Array<HourEconomicsRow | null>
+  cols: HourColumns | null
+}): ReactElement | null {
+  if (!cols) {
+    // First render has no measurements yet; reserve nothing and let the
+    // post-layout measure pass mount the strip on the next frame.
+    return null
+  }
+  const values = rows.map(hourEssNet)
+  const total = values.reduce<number>((acc, v) => acc + (v ?? 0), 0)
+  let maxAbs = 0
+  for (const v of values) {
+    if (v === null || !Number.isFinite(v)) continue
+    const a = Math.abs(v)
+    if (a > maxAbs) maxAbs = a
+  }
+  const template = `${cols.metric}px ${cols.sigma}px ${cols.hours.map((w) => `${w}px`).join(' ')}`
+  return (
+    <div className="economics-ess-strip" style={{ gridTemplateColumns: template }}>
+      <div className="economics-ess-strip-label">Чистий ефект УЗЕ, грн/год</div>
+      <div className="economics-ess-strip-total" style={{ left: `${cols.metric}px` }}>
+        {formatStripUah(total)}
+      </div>
+      {values.map((v, i) => {
+        const pct = v === null || maxAbs <= 0 ? 0 : (Math.abs(v) / maxAbs) * 50
+        const sign = v === null ? '' : v >= 0 ? 'pos' : 'neg'
+        const label = `${String(i).padStart(2, '0')}:00 — ${v === null ? '—' : formatStripUah(v)}`
+        return (
+          <div className="economics-ess-strip-cell" key={i} title={label}>
+            {sign && pct > 0 ? (
+              <span className={`economics-ess-strip-bar ${sign}`} style={{ height: `${pct}%` }} />
+            ) : null}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+// HourColumns is the geometry the ESS-effect strip needs to line up
+// with the pivot: the sticky metric + Σ column widths and the 24 hour
+// column widths, all measured from the rendered table so the strip
+// tracks the table exactly (the table keeps its content-driven,
+// non-fixed layout — we never constrain it).
+type HourColumns = {
+  metric: number
+  sigma: number
+  hours: number[]
+}
+
 export function EconomicsTable({ rows, organizationID, date }: Props) {
   const orgLabel = formatOrganizationLabel(organizationID)
   const dateLabel = formatLocalDate(date)
+  const tableRef = useRef<HTMLTableElement>(null)
+  const [cols, setCols] = useState<HourColumns | null>(null)
+
+  useLayoutEffect(() => {
+    const table = tableRef.current
+    if (!table) return
+    const measure = () => {
+      const metricHead = table.querySelector<HTMLElement>('thead th.economics-table-metric-head')
+      const sigmaHead = table.querySelector<HTMLElement>('thead th.economics-table-total-head')
+      const hourHeads = Array.from(
+        table.querySelectorAll<HTMLElement>('thead th.economics-table-hour-cell'),
+      )
+      if (!metricHead || !sigmaHead || hourHeads.length !== HOUR_COUNT) return
+      const next: HourColumns = {
+        metric: metricHead.getBoundingClientRect().width,
+        sigma: sigmaHead.getBoundingClientRect().width,
+        hours: hourHeads.map((h) => h.getBoundingClientRect().width),
+      }
+      setCols((prev) =>
+        prev &&
+        prev.metric === next.metric &&
+        prev.sigma === next.sigma &&
+        prev.hours.length === next.hours.length &&
+        prev.hours.every((w, i) => w === next.hours[i])
+          ? prev
+          : next,
+      )
+    }
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(table)
+    return () => ro.disconnect()
+  }, [rows])
+
   return (
     <section className="economics-table-wrap" aria-label="Погодинна деталізація">
       <h3>
@@ -627,7 +739,8 @@ export function EconomicsTable({ rows, organizationID, date }: Props) {
         <span className="economics-table-context"> · {orgLabel} · {dateLabel}</span>
       </h3>
       <div className="economics-table-scroll">
-        <table className="economics-table economics-table-pivot">
+        <EssEffectStrip rows={rows} cols={cols} />
+        <table ref={tableRef} className="economics-table economics-table-pivot">
           <thead>
             <tr>
               <th className="economics-table-metric-head" rowSpan={2} scope="col">

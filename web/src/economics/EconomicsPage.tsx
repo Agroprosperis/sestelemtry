@@ -270,8 +270,10 @@ export function EconomicsPage() {
           ) : (
             <>
               <EconomicsKpis totals={totals} tariffs={tariffs} />
-              <EconomicsRevenuePanel totals={totals} />
-              <EconomicsCharts rows={data.rows} />
+              <div className="economics-daily-split">
+                <EconomicsRevenuePanel totals={totals} />
+                <EconomicsCharts rows={data.rows} />
+              </div>
               <EconomicsTable rows={data.rows} organizationID={organizationID} date={date} />
             </>
           )}

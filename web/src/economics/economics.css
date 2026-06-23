@@ -639,46 +639,40 @@
   padding: 16px 20px;
 }
 
-.economics-revenue-grid {
+/* Revenue panel + hourly ESS-effect chart share one row: the
+ * breakdown is the narrower left column, the chart the wider right
+ * one. Collapses to a single column on tablets/phones. */
+.economics-daily-split {
   display: grid;
-  grid-template-columns: minmax(180px, max-content) 2fr 1fr;
-  gap: 28px;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.6fr);
+  gap: 20px;
   align-items: start;
 }
 
-@media (max-width: 720px) {
+@media (max-width: 900px) {
+  .economics-daily-split {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* The chart section is itself a grid; inside the split it must fill
+ * its column rather than impose its own two-column layout. */
+.economics-daily-split .economics-charts {
+  grid-template-columns: 1fr;
+}
+
+.economics-revenue-grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 24px;
+  align-items: start;
+}
+
+@media (max-width: 520px) {
   .economics-revenue-grid {
     grid-template-columns: 1fr;
     gap: 16px;
   }
-}
-
-.economics-revenue-ebitda-card {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 12px 16px;
-  border-left: 4px solid #16a34a;
-  background: #f8fafc;
-  border-radius: 8px;
-}
-
-.economics-revenue-ebitda-card.negative {
-  border-left-color: #dc2626;
-}
-
-.economics-revenue-ebitda-label {
-  font-size: 11px;
-  color: #64748b;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-.economics-revenue-ebitda-value {
-  font-size: 24px;
-  font-weight: 700;
-  color: #0f172a;
-  font-variant-numeric: tabular-nums;
 }
 
 /* Column header uses the same 3-track grid as the line rows
@@ -806,6 +800,77 @@
      paints over the last row (УЗЕ нетто). On platforms that draw
      overlay scrollbars the gap reads as a normal bottom margin. */
   padding-bottom: 12px;
+}
+
+/* Per-hour ESS-effect strip pinned above the pivot. Its grid track
+ * widths are set inline from the table's measured columns so each bar
+ * lines up with its hour column; width:max-content makes it exactly as
+ * wide as the table so the two scroll in lockstep. */
+.economics-ess-strip {
+  display: grid;
+  width: max-content;
+  height: 60px;
+  align-items: stretch;
+  margin-bottom: 8px;
+  border-bottom: 1px solid #eef2f6;
+}
+
+.economics-ess-strip-label,
+.economics-ess-strip-total {
+  position: sticky;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.economics-ess-strip-label {
+  left: 0;
+  padding-left: 8px;
+  color: #64748b;
+  background: #f8fafc;
+  border-right: 1px solid #e2e8f0;
+}
+
+.economics-ess-strip-total {
+  justify-content: flex-end;
+  padding-right: 6px;
+  font-weight: 700;
+  color: #0f172a;
+  font-variant-numeric: tabular-nums;
+  background: #f1f5f9;
+  border-right: 1px solid #e2e8f0;
+}
+
+.economics-ess-strip-cell {
+  position: relative;
+  background: linear-gradient(
+    to bottom,
+    transparent calc(50% - 0.5px),
+    #e5e9f0 50%,
+    transparent calc(50% + 0.5px)
+  );
+}
+
+.economics-ess-strip-bar {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 7px;
+  max-width: 72%;
+  border-radius: 2px;
+}
+
+.economics-ess-strip-bar.pos {
+  bottom: 50%;
+  background: #7c3aed;
+}
+
+.economics-ess-strip-bar.neg {
+  top: 50%;
+  background: #f87171;
 }
 
 .economics-table {
