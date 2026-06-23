@@ -2,12 +2,10 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { refreshDAMPrices } from '../api'
 import { useOrganizationParam } from '../dashboard/hooks/useOrganizationParam'
 import { dailyTotals } from './compute'
-import { EconomicsCharts } from './components/EconomicsCharts'
 import { EconomicsDamPricesModal } from './components/EconomicsDamPricesModal'
 import { EconomicsHeader, type EconomicsRange } from './components/EconomicsHeader'
 import { EconomicsKpis } from './components/EconomicsKpis'
 import { EconomicsRecomputeModal } from './components/EconomicsRecomputeModal'
-import { EconomicsRevenuePanel } from './components/EconomicsRevenuePanel'
 import { EconomicsTable } from './components/EconomicsTable'
 import { EconomicsMonthlyView } from './monthly/EconomicsMonthlyView'
 import './economics.css'
@@ -270,10 +268,6 @@ export function EconomicsPage() {
           ) : (
             <>
               <EconomicsKpis totals={totals} tariffs={tariffs} />
-              <div className="economics-daily-split">
-                <EconomicsRevenuePanel totals={totals} />
-                <EconomicsCharts rows={data.rows} />
-              </div>
               <EconomicsTable rows={data.rows} organizationID={organizationID} date={date} />
             </>
           )}

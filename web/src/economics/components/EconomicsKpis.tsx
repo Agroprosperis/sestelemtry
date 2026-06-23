@@ -101,10 +101,11 @@ export function EconomicsKpis({ totals, tariffs }: Props) {
           <span className="kpi-value">{formatUah(totals.actualCost)}</span>
           <span className="kpi-sub">імпорт − експорт + знос УЗЕ</span>
         </div>
-        <div className={ebitdaClass}>
+        <div className={`${ebitdaClass} kpi-card-ebitda`} tabIndex={0}>
           <span className="kpi-label">EBITDA за добу</span>
           <span className="kpi-value">{formatUah(totals.ebitda)}</span>
-          <span className="kpi-sub">дохід − витрати за день</span>
+          <span className="kpi-sub">дохід − витрати за день · наведіть для розкладки</span>
+          <EbitdaBreakdown totals={totals} />
         </div>
         <div
           className={essRealizedClass}
@@ -155,5 +156,47 @@ export function EconomicsKpis({ totals, tariffs }: Props) {
         </div>
       </div>
     </section>
+  )
+}
+
+// EbitdaBreakdown is the revenue/expense detail that used to live in a
+// standalone panel; it now appears as a hover/focus popover under the
+// EBITDA KPI card so the strip can stay full-width above the table.
+function EbitdaBreakdown({ totals }: { totals: DailyTotals }) {
+  const revenueLines = [
+    { label: 'СЕС → мережа', amount: totals.revenuePvExport },
+    { label: 'СЕС → споживання', amount: totals.revenuePvSelf },
+    { label: 'УЗЕ → мережа', amount: totals.revenueEssExport },
+    { label: 'УЗЕ → споживання', amount: totals.revenueEssSelf },
+  ]
+  const expenseLines = [{ label: 'Заряд УЗЕ із мережі', amount: totals.expenseGridCharge }]
+
+  return (
+    <div className="economics-ebitda-breakdown" role="tooltip">
+      <div className="economics-ebitda-col">
+        <div className="economics-ebitda-col-head">
+          <span>Дохід</span>
+          <span>{formatUah(totals.revenueTotal)}</span>
+        </div>
+        {revenueLines.map((line) => (
+          <div className="economics-ebitda-line" key={line.label}>
+            <span>{line.label}</span>
+            <b>{formatUah(line.amount)}</b>
+          </div>
+        ))}
+      </div>
+      <div className="economics-ebitda-col">
+        <div className="economics-ebitda-col-head">
+          <span>Витрати</span>
+          <span>{formatUah(totals.expenseTotal)}</span>
+        </div>
+        {expenseLines.map((line) => (
+          <div className="economics-ebitda-line" key={line.label}>
+            <span>{line.label}</span>
+            <b>{formatUah(line.amount)}</b>
+          </div>
+        ))}
+      </div>
+    </div>
   )
 }
