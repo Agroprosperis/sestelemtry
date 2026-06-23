@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import type { MouseEvent as ReactMouseEvent } from 'react'
+import type { MouseEvent as ReactMouseEvent, ReactNode } from 'react'
 import {
   Bar,
   BarChart,
@@ -327,10 +327,13 @@ function MonthlyTrend({ days, totals }: { days: EconomicsMonthlyDay[]; totals: E
   const pvSelf = totals.pv_to_load_kwh
   const pvOther = totals.pv_to_grid_kwh + totals.pv_to_ess_kwh
   const pvSelfShare = totals.pv_kwh > 0 ? pvSelf / totals.pv_kwh : 0
-  // Load coverage: served by PV+ESS vs taken from the grid.
+  // Load coverage: served by PV+ESS vs taken from the grid. Consumption
+  // is the sum of the three load-serving flows (matching the boundary
+  // balance widget), not the raw load meter, so both blocks agree.
   const loadFromRenewable = totals.pv_to_load_kwh + totals.ess_to_load_kwh
   const loadFromGrid = totals.grid_to_load_kwh
-  const loadRenewableShare = totals.load_kwh > 0 ? loadFromRenewable / totals.load_kwh : 0
+  const consumption = loadFromRenewable + loadFromGrid
+  const loadRenewableShare = consumption > 0 ? loadFromRenewable / consumption : 0
 
   return (
     <section className="economics-card economics-month-section" aria-label="Енергетичний тренд по днях">
@@ -356,7 +359,7 @@ function MonthlyTrend({ days, totals }: { days: EconomicsMonthlyDay[]; totals: E
         </div>
         <div className="economics-trend-metric">
           <div>
-            <strong>Споживання об'єкта: {formatMwhNumber(totals.load_kwh)}</strong>
+            <strong>Споживання об'єкта: {formatMwhNumber(consumption)}</strong>
             <span className="economics-trend-mwh">МВт·год</span>
           </div>
           <div className="economics-ratio-line">
@@ -555,61 +558,131 @@ function OptimumReasons({ day }: { day: EconomicsMonthlyDay }) {
 }
 
 // --- Energy balance ---
+//
+// Boundary balance of the month: what entered the object (Джерела =
+// PV + grid import) must equal where it went (Напрямки = consumption +
+// export + net ESS storage). Both bars and the flow table read straight
+// off the monthly totals; no figure is derived as a residual.
 
-type BalanceSeg = { name: string; cls: BalanceSegClass; kwh: number }
 type BalanceSegClass = 'green' | 'blue' | 'amber' | 'violet' | 'red'
-type BalanceRow = { name: string; bold: boolean; total: number; segs: BalanceSeg[] }
-type BalanceTip = { row: BalanceRow; x: number; y: number }
+type TipLine = { k: string; v: string }
+type BalanceSeg = { cls: BalanceSegClass; kwh: number; title: string; lines: TipLine[] }
+type BalanceBar = { name: string; total: number; segs: BalanceSeg[] }
+type SegTip = { title: string; lines: TipLine[]; x: number; y: number }
+type FlowMode = 'detail' | 'source' | 'destination'
 
 function MonthlyBalance({ totals }: { totals: EconomicsMonthlyTotals }) {
+  const [flowMode, setFlowMode] = useState<FlowMode>('detail')
+  const [tip, setTip] = useState<SegTip | null>(null)
+
+  // Sources entering the object boundary.
   const sourcesTotal = totals.pv_kwh + totals.grid_import_kwh
-  const pct = (v: number) => (sourcesTotal > 0 ? (v / sourcesTotal) * 100 : 0)
+  // Directions leaving the boundary. Consumption and export are sums of
+  // their measured/modelled flows (never a residual), ESS is the net
+  // amount that stayed in storage over the month.
+  const consumption = totals.pv_to_load_kwh + totals.ess_to_load_kwh + totals.grid_to_load_kwh
+  const exportTotal = totals.pv_to_grid_kwh + totals.ess_to_grid_kwh
+  const essNet = totals.ess_charged_kwh - totals.ess_discharged_kwh
+  const checkTotal = consumption + exportTotal + essNet
+
   const gridToLoadCost = totals.grid_to_load_kwh * totals.avg_import_price_uah_per_kwh
 
-  // Where the sourced energy is allocated. These three sinks sum to the
-  // sources total (PV = load+ess+grid, grid import = load+ess), so the
-  // "directions" bar is a clean split with no double counting.
-  const toConsumption = totals.pv_to_load_kwh + totals.grid_to_load_kwh
-  const toEss = totals.pv_to_ess_kwh + totals.grid_to_ess_kwh
-  const toExport = totals.pv_to_grid_kwh
-
-  const seg = (name: string, cls: BalanceSegClass, kwh: number): BalanceSeg => ({ name, cls, kwh })
-  const balanceRows: BalanceRow[] = [
-    { name: 'Джерела', bold: true, total: sourcesTotal, segs: [seg('СЕС', 'green', totals.pv_kwh), seg('Мережа', 'blue', totals.grid_import_kwh)] },
-    { name: 'СЕС', bold: false, total: totals.pv_kwh, segs: [seg('СЕС', 'green', totals.pv_kwh)] },
-    { name: 'Мережа', bold: false, total: totals.grid_import_kwh, segs: [seg('Мережа', 'blue', totals.grid_import_kwh)] },
+  const bars: BalanceBar[] = [
+    {
+      name: 'Джерела',
+      total: sourcesTotal,
+      segs: [
+        {
+          cls: 'green',
+          kwh: totals.pv_kwh,
+          title: 'СЕС',
+          lines: [
+            { k: 'Обсяг', v: formatMwh(totals.pv_kwh) },
+            { k: 'Частка', v: formatShare(totals.pv_kwh, sourcesTotal) },
+          ],
+        },
+        {
+          cls: 'blue',
+          kwh: totals.grid_import_kwh,
+          title: 'Імпорт з мережі',
+          lines: [
+            { k: 'Обсяг', v: formatMwh(totals.grid_import_kwh) },
+            { k: 'Частка', v: formatShare(totals.grid_import_kwh, sourcesTotal) },
+            { k: 'На споживання', v: formatMwh(totals.grid_to_load_kwh) },
+            { k: 'На заряд УЗЕ', v: formatMwh(totals.grid_to_ess_kwh) },
+          ],
+        },
+      ],
+    },
     {
       name: 'Напрямки',
-      bold: true,
-      total: sourcesTotal,
-      segs: [seg('Споживання', 'amber', toConsumption), seg('Експорт', 'red', toExport), seg('УЗЕ', 'violet', toEss)],
+      total: checkTotal,
+      segs: [
+        {
+          cls: 'amber',
+          kwh: consumption,
+          title: "Споживання об'єкта",
+          lines: [
+            { k: 'Разом', v: formatMwh(consumption) },
+            { k: 'від СЕС', v: formatMwh(totals.pv_to_load_kwh) },
+            { k: 'від УЗЕ', v: formatMwh(totals.ess_to_load_kwh) },
+            { k: 'від мережі', v: formatMwh(totals.grid_to_load_kwh) },
+          ],
+        },
+        {
+          cls: 'red',
+          kwh: exportTotal,
+          title: 'Експорт у мережу',
+          lines: [
+            { k: 'Разом', v: formatMwh(exportTotal) },
+            { k: 'від СЕС', v: formatMwh(totals.pv_to_grid_kwh) },
+            { k: 'від УЗЕ', v: formatMwh(totals.ess_to_grid_kwh) },
+          ],
+        },
+        {
+          cls: 'violet',
+          kwh: Math.max(essNet, 0),
+          title: 'Накопичено в УЗЕ (нетто)',
+          lines: [
+            { k: 'Заряд', v: formatMwh(totals.ess_charged_kwh) },
+            { k: 'Розряд', v: formatMwh(totals.ess_discharged_kwh) },
+            { k: 'Нетто', v: formatMwh(essNet) },
+          ],
+        },
+      ],
     },
   ]
 
-  // Hover breakdown shown over the stacked bars. Hovering anywhere on a
-  // row's bar reveals the full per-row split (every segment, in MWh and
-  // its share of the row). The cursor position is tracked relative to the
-  // wrapper so the floating tip follows the pointer without being clipped
-  // by the bar's overflow:hidden.
-  const [tip, setTip] = useState<BalanceTip | null>(null)
-  const showTip = (row: BalanceRow) => (e: ReactMouseEvent<HTMLDivElement>) => {
-    const wrap = e.currentTarget.closest('.economics-balance-wrap') as HTMLElement | null
-    if (!wrap) return
-    const box = wrap.getBoundingClientRect()
-    setTip({ row, x: e.clientX - box.left, y: e.clientY - box.top })
-  }
-  const hideTip = () => setTip(null)
-
+  // The seven detailed flows. Energy through the battery is counted twice
+  // (charge + discharge), so their sum exceeds the sources total — the
+  // table share is therefore relative to this sum, not to the boundary.
   const flows = [
-    { label: 'СЕС → споживання', kwh: totals.pv_to_load_kwh, effect: totals.revenue_pv_self_uah, cls: 'good', dot: 'consume' },
-    { label: 'СЕС → мережа', kwh: totals.pv_to_grid_kwh, effect: totals.revenue_pv_export_uah, cls: 'good', dot: 'export' },
-    { label: 'СЕС → УЗЕ', kwh: totals.pv_to_ess_kwh, effect: 0, cls: 'neutral', dot: 'ess' },
-    { label: 'УЗЕ → споживання', kwh: totals.ess_to_load_kwh, effect: totals.revenue_ess_self_uah, cls: 'good', dot: 'consume' },
-    { label: 'УЗЕ → мережа', kwh: totals.ess_to_grid_kwh, effect: totals.revenue_ess_export_uah, cls: 'good', dot: 'export' },
-    { label: 'Мережа → споживання', kwh: totals.grid_to_load_kwh, effect: -gridToLoadCost, cls: 'bad', dot: 'grid' },
-    { label: 'Мережа → УЗЕ', kwh: totals.grid_to_ess_kwh, effect: -totals.expense_grid_charge_uah, cls: 'bad', dot: 'ess' },
+    { id: 'pv_to_load', label: 'СЕС → споживання', source: 'СЕС', destination: 'споживання', dot: 'consume', kwh: totals.pv_to_load_kwh, effect: totals.revenue_pv_self_uah, cls: 'good' },
+    { id: 'pv_to_grid', label: 'СЕС → мережа', source: 'СЕС', destination: 'мережа', dot: 'export', kwh: totals.pv_to_grid_kwh, effect: totals.revenue_pv_export_uah, cls: 'good' },
+    { id: 'pv_to_ess', label: 'СЕС → УЗЕ', source: 'СЕС', destination: 'УЗЕ', dot: 'ess', kwh: totals.pv_to_ess_kwh, effect: 0, cls: 'neutral' },
+    { id: 'ess_to_load', label: 'УЗЕ → споживання', source: 'УЗЕ', destination: 'споживання', dot: 'consume', kwh: totals.ess_to_load_kwh, effect: totals.revenue_ess_self_uah, cls: 'good' },
+    { id: 'ess_to_grid', label: 'УЗЕ → мережа', source: 'УЗЕ', destination: 'мережа', dot: 'export', kwh: totals.ess_to_grid_kwh, effect: totals.revenue_ess_export_uah, cls: 'good' },
+    { id: 'grid_to_load', label: 'Мережа → споживання', source: 'Мережа', destination: 'споживання', dot: 'grid', kwh: totals.grid_to_load_kwh, effect: -gridToLoadCost, cls: 'bad' },
+    { id: 'grid_to_ess', label: 'Мережа → УЗЕ', source: 'Мережа', destination: 'УЗЕ', dot: 'ess', kwh: totals.grid_to_ess_kwh, effect: -totals.expense_grid_charge_uah, cls: 'bad' },
   ]
   const flowTotalKwh = flows.reduce((acc, f) => acc + f.kwh, 0)
+
+  const groupBy = (field: 'source' | 'destination') => {
+    const order: string[] = []
+    const sums = new Map<string, number>()
+    for (const f of flows) {
+      const key = f[field]
+      if (!sums.has(key)) order.push(key)
+      sums.set(key, (sums.get(key) ?? 0) + f.kwh)
+    }
+    return order.map((name) => ({ name, kwh: sums.get(name) ?? 0 }))
+  }
+
+  const showTip = (s: BalanceSeg) => (e: ReactMouseEvent<HTMLSpanElement>) =>
+    setTip({ title: s.title, lines: s.lines, x: e.clientX + 14, y: e.clientY + 14 })
+  const moveTip = (e: ReactMouseEvent<HTMLSpanElement>) =>
+    setTip((t) => (t ? { ...t, x: e.clientX + 14, y: e.clientY + 14 } : t))
+  const hideTip = () => setTip(null)
 
   return (
     <section className="economics-card economics-month-section" aria-label="Енергетичний баланс за місяць">
@@ -619,89 +692,162 @@ function MonthlyBalance({ totals }: { totals: EconomicsMonthlyTotals }) {
       </div>
       <div className="economics-flow-legend">
         <span><i className="economics-seg-dot green" />СЕС</span>
-        <span><i className="economics-seg-dot blue" />мережа</span>
+        <span><i className="economics-seg-dot blue" />імпорт</span>
         <span><i className="economics-seg-dot amber" />споживання</span>
-        <span><i className="economics-seg-dot violet" />УЗЕ</span>
         <span><i className="economics-seg-dot red" />експорт</span>
+        <span><i className="economics-seg-dot violet" />УЗЕ нетто</span>
       </div>
-      <div className="economics-balance-wrap" onMouseLeave={hideTip}>
-        <div className="economics-month-balance">
-          {balanceRows.map((row) => (
-            <div className="economics-balance-row" key={row.name}>
-              {row.bold ? (
-                <strong className="economics-balance-name">{row.name}</strong>
-              ) : (
-                <span className="economics-balance-name">{row.name}</span>
-              )}
-              <div
-                className="economics-balance-bar economics-balance-bar-hover"
-                onMouseEnter={showTip(row)}
-                onMouseMove={showTip(row)}
-                onMouseLeave={hideTip}
-              >
-                {row.segs.map((s) => (
-                  <BalanceSegment key={s.name} seg={s} width={pct(s.kwh)} />
-                ))}
-              </div>
-              <span className="economics-balance-value">{formatMwh(row.total)}</span>
+      <div className="economics-month-balance">
+        {bars.map((bar) => (
+          <div className="economics-balance-row" key={bar.name}>
+            <strong className="economics-balance-name">{bar.name}</strong>
+            <div className="economics-balance-bar">
+              {bar.segs.map((s) => (
+                <BalanceSegment
+                  key={s.title}
+                  seg={s}
+                  width={segWidth(s.kwh, bar.total)}
+                  onEnter={showTip(s)}
+                  onMove={moveTip}
+                  onLeave={hideTip}
+                />
+              ))}
+            </div>
+            <span className="economics-balance-value">{formatMwh(bar.total)}</span>
+          </div>
+        ))}
+      </div>
+      <p className="economics-balance-note">
+        Джерела {formatMwh(sourcesTotal)} = напрямки {formatMwh(checkTotal)} (споживання + експорт + нетто-заряд УЗЕ).
+        Наведіть на сегмент для деталей.
+      </p>
+
+      <div className="economics-balance-subtabs" role="tablist">
+        <SubTab mode="detail" active={flowMode} onSelect={setFlowMode}>Детальні потоки</SubTab>
+        <SubTab mode="source" active={flowMode} onSelect={setFlowMode}>За джерелом</SubTab>
+        <SubTab mode="destination" active={flowMode} onSelect={setFlowMode}>За призначенням</SubTab>
+      </div>
+      <div className="economics-table-scroll" style={{ marginTop: 10 }}>
+        {flowMode === 'detail' ? (
+          <table className="economics-table economics-month-table">
+            <thead>
+              <tr>
+                <th>Потік</th>
+                <th>МВт·год</th>
+                <th>Частка</th>
+                <th>Фін. ефект</th>
+              </tr>
+            </thead>
+            <tbody>
+              {flows.map((f) => (
+                <tr key={f.id}>
+                  <td className="economics-month-table-left">
+                    <span className={`economics-flow-dot ${f.dot}`} aria-hidden="true" />
+                    {f.label}
+                  </td>
+                  <td>{formatMwhNumber(f.kwh)}</td>
+                  <td>{formatShare(f.kwh, flowTotalKwh)}</td>
+                  <td className={`cell-${f.cls === 'good' ? 'positive' : f.cls === 'bad' ? 'negative' : 'neutral'}`}>
+                    {f.effect === 0 ? '0 грн' : formatUah(f.effect)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : (
+          <table className="economics-table economics-month-table">
+            <thead>
+              <tr>
+                <th>{flowMode === 'source' ? 'Джерело' : 'Призначення'}</th>
+                <th>МВт·год</th>
+                <th>Частка</th>
+              </tr>
+            </thead>
+            <tbody>
+              {groupBy(flowMode).map((g) => (
+                <tr key={g.name}>
+                  <td className="economics-month-table-left">{g.name}</td>
+                  <td>{formatMwhNumber(g.kwh)}</td>
+                  <td>{formatShare(g.kwh, flowTotalKwh)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {tip ? (
+        <div className="economics-seg-tip" style={{ left: tip.x, top: tip.y }} role="tooltip">
+          <strong>{tip.title}</strong>
+          {tip.lines.map((l) => (
+            <div className="economics-seg-tip-line" key={l.k}>
+              <span>{l.k}</span>
+              <b>{l.v}</b>
             </div>
           ))}
         </div>
-        {tip ? (
-          <div className="economics-trend-tip economics-balance-tip" style={{ left: tip.x, top: tip.y }}>
-            <div className="economics-trend-tip-day">{tip.row.name}</div>
-            {tip.row.segs.map((s) => (
-              <div className="economics-trend-tip-row" key={s.name}>
-                <i className={`economics-seg-dot ${s.cls}`} />
-                <span>{s.name}</span>
-                <b>
-                  {formatMwh(s.kwh)}
-                  {tip.row.segs.length > 1 ? (
-                    <span className="economics-balance-tip-share">{formatShare(s.kwh, tip.row.total)}</span>
-                  ) : null}
-                </b>
-              </div>
-            ))}
-          </div>
-        ) : null}
-      </div>
-      <div className="economics-table-scroll" style={{ marginTop: 14 }}>
-        <table className="economics-table economics-month-table">
-          <thead>
-            <tr>
-              <th>Потік</th>
-              <th>кВт·год</th>
-              <th>Частка</th>
-              <th>Фін. ефект</th>
-            </tr>
-          </thead>
-          <tbody>
-            {flows.map((f) => (
-              <tr key={f.label}>
-                <td className="economics-month-table-left">
-                  <span className={`economics-flow-dot ${f.dot}`} aria-hidden="true" />
-                  {f.label}
-                </td>
-                <td>{formatKwh(f.kwh)}</td>
-                <td>{formatShare(f.kwh, flowTotalKwh)}</td>
-                <td className={`cell-${f.cls === 'good' ? 'positive' : f.cls === 'bad' ? 'negative' : 'neutral'}`}>
-                  {f.effect === 0 ? '0 грн' : formatUah(f.effect)}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      ) : null}
     </section>
   )
 }
 
+// segWidth keeps a hairline-visible slice for any non-zero flow while
+// scaling the rest proportionally to the row total.
+function segWidth(kwh: number, total: number): number {
+  if (kwh <= 0 || total <= 0) return 0
+  return Math.max((kwh / total) * 100, 0.4)
+}
+
+function SubTab({
+  mode,
+  active,
+  onSelect,
+  children,
+}: {
+  mode: FlowMode
+  active: FlowMode
+  onSelect: (m: FlowMode) => void
+  children: ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active === mode}
+      className={`economics-balance-subtab${active === mode ? ' active' : ''}`}
+      onClick={() => onSelect(mode)}
+    >
+      {children}
+    </button>
+  )
+}
+
 // BalanceSegment is one coloured slice of a balance bar. Zero-width
-// slices are skipped so an empty flow leaves no stray sliver. Hover is
-// handled by the parent bar so the whole row reveals its breakdown.
-function BalanceSegment({ seg, width }: { seg: BalanceSeg; width: number }) {
-  if (seg.kwh <= 0 || width <= 0) return null
-  return <span className={`economics-seg ${seg.cls}`} style={{ width: `${width}%` }} />
+// slices are skipped so an empty flow leaves no stray sliver. Hovering a
+// slice raises a cursor-following breakdown tooltip.
+function BalanceSegment({
+  seg,
+  width,
+  onEnter,
+  onMove,
+  onLeave,
+}: {
+  seg: BalanceSeg
+  width: number
+  onEnter: (e: ReactMouseEvent<HTMLSpanElement>) => void
+  onMove: (e: ReactMouseEvent<HTMLSpanElement>) => void
+  onLeave: () => void
+}) {
+  if (width <= 0) return null
+  return (
+    <span
+      className={`economics-seg ${seg.cls} economics-seg-hover`}
+      style={{ width: `${width}%` }}
+      onMouseEnter={onEnter}
+      onMouseMove={onMove}
+      onMouseLeave={onLeave}
+    />
+  )
 }
 
 // --- ESS marginality heatmap ---
