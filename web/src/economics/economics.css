@@ -852,15 +852,23 @@
     #e5e9f0 50%,
     transparent calc(50% + 0.5px)
   );
+  cursor: pointer;
+}
+
+.economics-ess-strip-cell.active {
+  background:
+    linear-gradient(to bottom, transparent calc(50% - 0.5px), #cbd5e1 50%, transparent calc(50% + 0.5px)),
+    rgba(124, 58, 237, 0.08);
 }
 
 .economics-ess-strip-bar {
   position: absolute;
   left: 50%;
   transform: translateX(-50%);
-  width: 7px;
-  max-width: 72%;
-  border-radius: 2px;
+  width: 70%;
+  max-width: 26px;
+  min-width: 8px;
+  border-radius: 2px 2px 0 0;
 }
 
 .economics-ess-strip-bar.pos {
@@ -870,7 +878,43 @@
 
 .economics-ess-strip-bar.neg {
   top: 50%;
+  border-radius: 0 0 2px 2px;
   background: #f87171;
+}
+
+/* Hover tooltip for the ESS-effect strip — portaled to <body> and
+ * fixed-positioned so the scroll container's overflow never clips it. */
+.economics-ess-strip-tip {
+  position: fixed;
+  z-index: 50;
+  pointer-events: none;
+  background: #fff;
+  border: 1px solid #e4e9f0;
+  border-radius: 9px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.14);
+  padding: 8px 11px;
+  font-size: 12px;
+  min-width: 180px;
+}
+
+.economics-ess-strip-tip-hour {
+  font-weight: 700;
+  color: #0f172a;
+  margin-bottom: 4px;
+}
+
+.economics-ess-strip-tip-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+  color: #475569;
+}
+
+.economics-ess-strip-tip-row b {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: #0f172a;
 }
 
 .economics-table {

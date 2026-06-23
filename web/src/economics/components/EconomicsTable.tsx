@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import type { ReactElement } from 'react'
 import { formatOrganizationLabel } from '../../dashboard/config'
 import type { HourEconomicsRow } from '../compute'
@@ -648,6 +649,7 @@ function EssEffectStrip({
   rows: Array<HourEconomicsRow | null>
   cols: HourColumns | null
 }): ReactElement | null {
+  const [hover, setHover] = useState<{ index: number; x: number; y: number } | null>(null)
   if (!cols) {
     // First render has no measurements yet; reserve nothing and let the
     // post-layout measure pass mount the strip on the next frame.
@@ -662,6 +664,7 @@ function EssEffectStrip({
     if (a > maxAbs) maxAbs = a
   }
   const template = `${cols.metric}px ${cols.sigma}px ${cols.hours.map((w) => `${w}px`).join(' ')}`
+  const hoverValue = hover ? values[hover.index] : null
   return (
     <div className="economics-ess-strip" style={{ gridTemplateColumns: template }}>
       <div className="economics-ess-strip-label">Чистий ефект УЗЕ, грн/год</div>
@@ -671,15 +674,49 @@ function EssEffectStrip({
       {values.map((v, i) => {
         const pct = v === null || maxAbs <= 0 ? 0 : (Math.abs(v) / maxAbs) * 50
         const sign = v === null ? '' : v >= 0 ? 'pos' : 'neg'
-        const label = `${String(i).padStart(2, '0')}:00 — ${v === null ? '—' : formatStripUah(v)}`
+        const active = hover?.index === i
         return (
-          <div className="economics-ess-strip-cell" key={i} title={label}>
+          <div
+            className={`economics-ess-strip-cell${active ? ' active' : ''}`}
+            key={i}
+            onMouseEnter={(e) => setHover({ index: i, x: e.clientX, y: e.clientY })}
+            onMouseMove={(e) => setHover((h) => (h ? { ...h, x: e.clientX, y: e.clientY } : h))}
+            onMouseLeave={() => setHover(null)}
+          >
             {sign && pct > 0 ? (
               <span className={`economics-ess-strip-bar ${sign}`} style={{ height: `${pct}%` }} />
             ) : null}
           </div>
         )
       })}
+      {hover
+        ? createPortal(
+            <div
+              className="economics-ess-strip-tip"
+              style={{ left: hover.x + 14, top: hover.y + 18 }}
+              role="tooltip"
+            >
+              <div className="economics-ess-strip-tip-hour">
+                {String(hover.index).padStart(2, '0')}:00
+              </div>
+              <div className="economics-ess-strip-tip-row">
+                <span>Чистий ефект УЗЕ</span>
+                <b
+                  className={
+                    hoverValue === null
+                      ? undefined
+                      : hoverValue >= 0
+                        ? 'cell-positive'
+                        : 'cell-negative'
+                  }
+                >
+                  {hoverValue === null ? 'немає даних' : formatStripUah(hoverValue)}
+                </b>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   )
 }
