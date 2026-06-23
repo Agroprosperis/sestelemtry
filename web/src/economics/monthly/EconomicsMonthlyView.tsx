@@ -22,6 +22,7 @@ import {
   formatDayLabel,
   formatDayOfMonth,
   formatKwh,
+  formatMonthTitle,
   formatMwh,
   formatMwhNumber,
   formatPercent,
@@ -60,7 +61,7 @@ export function EconomicsMonthlyView({ data, organizationID }: Props) {
       </div>
       <div className="economics-month-grid2">
         <MonthlyBalance totals={t} />
-        <MonthlyOptimum totals={t} days={data.days} />
+        <MonthlyAiAnalysis totals={t} days={data.days} organizationID={organizationID} month={data.month} />
       </div>
       <div className="economics-month-grid2">
         <MonthlyTrend days={data.days} totals={t} />
@@ -419,10 +420,104 @@ function OptimumInfo({ tip }: { tip: string }) {
   )
 }
 
-function MonthlyOptimum({ totals, days }: { totals: EconomicsMonthlyTotals; days: EconomicsMonthlyDay[] }) {
-  const captured = totals.ess_captured_share
-  const hasOptimum = totals.ess_optimum_uah > 0
+// --- Monthly AI analysis ---
+//
+// A management-facing narrative card that replaces the legacy "УЗЕ: факт
+// vs оптимум" widget. The text is fully deterministic (template), built
+// only from already-computed monthly figures — no external LLM and no
+// number that is not present in the data. The ESS fact-vs-optimum reserve
+// detail is preserved as a sub-section so nothing is lost in the swap.
+
+type Narrative = {
+  title: string
+  howItWent: string
+  mainReserve: string
+  toImprove: string
+}
+
+type ReserveCause = 'timing' | 'soc' | 'pv'
+
+const RESERVE_CAUSE_TEXT: Record<ReserveCause, string> = {
+  timing: 'розряд не завжди потрапляв у найдорожчі години',
+  soc: 'бракувало заряду батареї перед вечірнім піком',
+  pv: 'частина надлишку СЕС не потрапила в УЗЕ',
+}
+
+const RESERVE_IMPROVE_TEXT: Record<ReserveCause, string> = {
+  timing: 'зміщувати розряд УЗЕ ближче до вечірнього піку цін',
+  soc: 'тримати вищий SOC перед вечірнім піком',
+  pv: 'більше заряджати УЗЕ надлишком СЕС вдень',
+}
+
+function dominantReserveCause(totals: EconomicsMonthlyTotals): ReserveCause {
+  const causes: { key: ReserveCause; uah: number }[] = [
+    { key: 'timing', uah: totals.ess_reserve_timing_uah },
+    { key: 'soc', uah: totals.ess_reserve_soc_uah },
+    { key: 'pv', uah: totals.ess_reserve_pv_uah },
+  ]
+  return causes.reduce((best, c) => (c.uah > best.uah ? c : best), causes[0]).key
+}
+
+// buildNarrative turns the month totals into four deterministic sentences.
+// Branching keys off profitability and whether the site is export-heavy
+// (more energy exported than consumed) plus the dominant ESS reserve cause.
+function buildNarrative(totals: EconomicsMonthlyTotals, heading: string): Narrative {
+  const profitable = totals.effect_uah >= 0
+  const exportHeavy = totals.grid_export_kwh > totals.load_kwh
+  const cause = dominantReserveCause(totals)
+  const priceGap = totals.avg_import_price_uah_per_kwh - totals.avg_export_price_uah_per_kwh
+
+  let title: string
+  if (!profitable) {
+    title = `${heading}: місяць збитковий — ефект ${formatUah(totals.effect_uah)}.`
+  } else if (exportHeavy) {
+    title = `${heading}: місяць прибутковий, але більшість СЕС пішла в експорт, а не в економію об'єкта.`
+  } else {
+    title = `${heading}: місяць прибутковий, основний ефект — від власного споживання СЕС та УЗЕ.`
+  }
+
+  const howItWent =
+    `СЕС виробила ${formatMwh(totals.pv_kwh)}, об'єкт спожив ${formatMwh(totals.load_kwh)}. ` +
+    `Імпорт ${formatMwh(totals.grid_import_kwh)}, експорт ${formatMwh(totals.grid_export_kwh)}. ` +
+    `Ефект проєкту: ${formatUah(totals.effect_uah)}.`
+
+  const captureTxt =
+    totals.ess_optimum_uah > 0 ? `захоплено ${formatPercent(totals.ess_captured_share)}` : 'оцінка за фактом'
+  let mainReserve = `Підтверджений резерв УЗЕ ${formatUah(totals.ess_reserve_uah)} (${captureTxt}). Головна причина — ${RESERVE_CAUSE_TEXT[cause]}.`
+  if (exportHeavy) {
+    mainReserve +=
+      ` Об'єкт масово експортує денну СЕС (${formatMwh(totals.grid_export_kwh)}) по ~${formatPrice(totals.avg_export_price_uah_per_kwh)} грн/кВт·год ` +
+      `при імпорті ~${formatPrice(totals.avg_import_price_uah_per_kwh)} — перенесення споживання в денні години дає різницю ~${formatPrice(priceGap)} грн/кВт·год.`
+  }
+
+  const improveParts: string[] = []
+  if (exportHeavy) {
+    improveParts.push('підняти денне навантаження в години 10:00–16:00, коли власна СЕС інакше йде в мережу')
+  }
+  improveParts.push(RESERVE_IMPROVE_TEXT[cause])
+  const toImprove =
+    improveParts
+      .map((p, i) => (i === 0 ? p.charAt(0).toUpperCase() + p.slice(1) : p))
+      .join('; ') + '.'
+
+  return { title, howItWent, mainReserve, toImprove }
+}
+
+function MonthlyAiAnalysis({
+  totals,
+  days,
+  organizationID,
+  month,
+}: {
+  totals: EconomicsMonthlyTotals
+  days: EconomicsMonthlyDay[]
+  organizationID: string
+  month: string
+}) {
   const [openDate, setOpenDate] = useState<string | null>(null)
+  const hasOptimum = totals.ess_optimum_uah > 0
+  const heading = `${formatOrganizationLabel(organizationID)} · ${formatMonthTitle(month)}`
+  const narrative = useMemo(() => buildNarrative(totals, heading), [totals, heading])
 
   const rows = useMemo(
     () =>
@@ -434,48 +529,66 @@ function MonthlyOptimum({ totals, days }: { totals: EconomicsMonthlyTotals; days
   )
 
   return (
-    <section className="economics-card economics-month-section" aria-label="УЗЕ: факт vs оптимум">
-      <div className="economics-month-section-head">
-        <h3 className="economics-month-section-title">УЗЕ: факт vs оптимум</h3>
-        <div className="economics-month-muted">ефект, грн</div>
+    <section className="economics-card economics-month-section economics-ai" aria-label="AI-аналіз місяця">
+      <div className="economics-ai-head">
+        <div className="economics-ai-title">
+          <span className="economics-ai-mark" aria-hidden="true">AI</span>
+          <h3 className="economics-month-section-title">AI-аналіз місяця</h3>
+        </div>
+        <span className="economics-ai-badge">управлінський висновок</span>
       </div>
-      <div className="economics-optimum-kpis">
-        <div className="economics-optimum-kpi">
-          <span className="economics-optimum-kpi-label">
-            Оптимум
-            <OptimumInfo tip="Модельний максимум ефекту УЗЕ за фактичних цін РДН, генерації СЕС, споживання, ємності, SOC, потужності, ККД та зносу. Заряд від СЕС має собівартість 0." />
-          </span>
-          <span className="economics-optimum-kpi-value">{formatUah(totals.ess_optimum_uah)}</span>
+
+      <div className="economics-ai-body">
+        <p className="economics-ai-summary">{narrative.title}</p>
+        <div className="economics-ai-section">
+          <span className="economics-ai-label">Як пройшов місяць</span>
+          <p>{narrative.howItWent}</p>
         </div>
-        <div className="economics-optimum-kpi">
-          <span className="economics-optimum-kpi-label">
-            Факт
-            <OptimumInfo tip="Фактичний ефект УЗЕ = УЗЕ → споживання + УЗЕ → мережа − заряд УЗЕ з мережі − втрати та знос (заряд від СЕС безкоштовний)." />
-          </span>
-          <span className="economics-optimum-kpi-value good">{formatUah(totals.ess_fact_uah)}</span>
+        <div className="economics-ai-section">
+          <span className="economics-ai-label">Головний резерв</span>
+          <p>{narrative.mainReserve}</p>
         </div>
-        <div className="economics-optimum-kpi">
-          <span className="economics-optimum-kpi-label">
-            Захоплено
-            <OptimumInfo tip="Факт / Оптимум. Показує, яку частку доступної можливості УЗЕ реально використала." />
-          </span>
-          <span className="economics-optimum-kpi-value">{hasOptimum ? formatPercent(captured) : '—'}</span>
+        <div className="economics-ai-section">
+          <span className="economics-ai-label">Що покращити</span>
+          <p>{narrative.toImprove}</p>
         </div>
-        <div className="economics-optimum-kpi">
-          <span className="economics-optimum-kpi-label">
-            Резерв
-            <OptimumInfo tip="Оптимум − Факт. Це не збиток, а оцінка недовикористаної можливості за місяць." />
-          </span>
-          <span className="economics-optimum-kpi-value amber">{formatUah(totals.ess_reserve_uah)}</span>
+        <div className="economics-ai-chips">
+          <span className="economics-ai-chip">телеметрія SmartLogger</span>
+          <span className="economics-ai-chip">РДН: Оператор ринку</span>
+        </div>
+      </div>
+
+      <div className="economics-ai-facts">
+        <div className="economics-ai-fact">
+          <span>Ефект проєкту</span>
+          <b className={signClass(totals.effect_uah)}>{formatUah(totals.effect_uah)}</b>
+        </div>
+        <div className="economics-ai-fact">
+          <span>EBITDA</span>
+          <b className={signClass(totals.ebitda_uah)}>{formatUah(totals.ebitda_uah)}</b>
+        </div>
+        <div className="economics-ai-fact">
+          <span>Факт УЗЕ / оптимум</span>
+          <b>{hasOptimum ? formatPercent(totals.ess_captured_share) : '—'}</b>
+        </div>
+        <div className="economics-ai-fact">
+          <span>Оцінка резерву</span>
+          <b className="economics-ai-amber">{formatUah(totals.ess_reserve_uah)}</b>
         </div>
       </div>
 
       {rows.length > 0 ? (
-        <>
-          <div className="economics-optimum-legend">
-            <span><i style={{ background: '#7c3aed' }} />фактичний ефект</span>
-            <span><i style={{ background: '#f59e0b' }} />недовикористано</span>
-            <span><i style={{ background: '#e5e7eb' }} />оптимум</span>
+        <div className="economics-ai-reserve">
+          <div className="economics-ai-reserve-head">
+            <span className="economics-ai-label amber">
+              Резерв · неефективне використання УЗЕ
+              <OptimumInfo tip="Оптимум − Факт за добу. Це не збиток, а оцінка недовикористаної можливості УЗЕ (модельний максимум у межах фактичних потужності, SOC, ККД та зносу)." />
+            </span>
+            <div className="economics-optimum-legend">
+              <span><i style={{ background: '#7c3aed' }} />фактичний ефект</span>
+              <span><i style={{ background: '#f59e0b' }} />недовикористано</span>
+              <span><i style={{ background: '#e5e7eb' }} />оптимум</span>
+            </div>
           </div>
           <div className="economics-optimum-list">
             <div className="economics-optimum-row head">
@@ -517,7 +630,7 @@ function MonthlyOptimum({ totals, days }: { totals: EconomicsMonthlyTotals; days
             Оптимум — найкращий диспетчинг у межах фактично продемонстрованих
             можливостей УЗЕ (потужність, діапазон SOC, ККД виведені з даних місяця).
           </p>
-        </>
+        </div>
       ) : (
         <p className="economics-month-empty-note">Недостатньо активності УЗЕ в місяці для оцінки оптимуму.</p>
       )}

@@ -1909,6 +1909,156 @@ button.economics-optimum-row.open {
   }
 }
 
+/* --- Monthly AI analysis block --- */
+.economics-ai-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.economics-ai-title {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.economics-ai-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.3px;
+}
+
+.economics-ai-badge {
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: #ecfdf5;
+  color: #047857;
+  font-size: 11px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.economics-ai-body {
+  border: 1px solid #eef1f6;
+  border-radius: 10px;
+  background: #fbfcfe;
+  padding: 14px 16px;
+}
+
+.economics-ai-summary {
+  margin: 0 0 12px;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.4;
+  color: #0f172a;
+}
+
+.economics-ai-section {
+  margin-top: 10px;
+}
+
+.economics-ai-section p {
+  margin: 3px 0 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: #475569;
+}
+
+.economics-ai-label {
+  display: inline-flex;
+  align-items: center;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+
+.economics-ai-label.amber {
+  color: #b45309;
+}
+
+.economics-ai-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 14px;
+}
+
+.economics-ai-chip {
+  padding: 4px 10px;
+  border: 1px solid #e6eaf1;
+  border-radius: 999px;
+  background: #f1f5f9;
+  font-size: 11px;
+  font-weight: 600;
+  color: #64748b;
+}
+
+.economics-ai-facts {
+  display: grid;
+  gap: 0;
+  margin-top: 14px;
+  border: 1px solid #eef1f6;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.economics-ai-fact {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  font-size: 13px;
+  color: #475569;
+}
+
+.economics-ai-fact:not(:last-child) {
+  border-bottom: 1px solid #f1f4f8;
+}
+
+.economics-ai-fact b {
+  font-weight: 760;
+  font-variant-numeric: tabular-nums;
+  color: #0f172a;
+}
+
+.economics-ai-fact b.cell-positive {
+  color: #16a34a;
+}
+
+.economics-ai-fact b.cell-negative {
+  color: #dc2626;
+}
+
+.economics-ai-amber {
+  color: #d97706 !important;
+}
+
+.economics-ai-reserve {
+  margin-top: 16px;
+}
+
+.economics-ai-reserve-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
 .economics-info {
   display: inline-flex;
   align-items: center;
