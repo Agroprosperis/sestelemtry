@@ -135,6 +135,17 @@ func mustDate(s string) time.Time {
 	return d
 }
 
+// fullDayDAM returns 24 priced DAM hours (zone 2) for the given delivery
+// date so a computed day has no missing-price hours.
+func fullDayDAM(date string) []DAMHour {
+	d := mustDate(date)
+	out := make([]DAMHour, 0, 24)
+	for h := 1; h <= 24; h++ {
+		out = append(out, DAMHour{DeliveryDate: d, Hour: h, Zone: 2, PriceUAHPerMWh: ptr(2000)})
+	}
+	return out
+}
+
 func TestServiceComputeDayPersists(t *testing.T) {
 	b, _ := newKyivBackend(t)
 	// One hour with PV + DAM price so the row is priced.
@@ -198,6 +209,10 @@ func TestServiceComputeDayNoCanonical(t *testing.T) {
 
 func TestServiceGetDayReadThroughFinal(t *testing.T) {
 	b, _ := newKyivBackend(t)
+	// A fully-priced past day: all 24 hours have a DAM price so the
+	// stored day has no missing-price hours and is eligible for the
+	// immutable-final cache fast path.
+	b.dam = fullDayDAM("2026-04-01")
 	svc := NewService(b)
 	// First read computes + stores a final (past) day.
 	if _, err := svc.GetDay(context.Background(), "org1", "2026-04-01", "Europe/Kyiv"); err != nil {
@@ -207,8 +222,8 @@ func TestServiceGetDayReadThroughFinal(t *testing.T) {
 		t.Fatalf("first read should compute+save once, got %d", b.saveCount)
 	}
 	flowsAfterFirst := b.flowsCalls
-	// Second read of a final day must serve cache (no recompute → no new
-	// flow gathering, no new save).
+	// Second read of a final, fully-priced day must serve cache (no
+	// recompute → no new flow gathering, no new save).
 	if _, err := svc.GetDay(context.Background(), "org1", "2026-04-01", "Europe/Kyiv"); err != nil {
 		t.Fatalf("GetDay 2: %v", err)
 	}
@@ -217,6 +232,38 @@ func TestServiceGetDayReadThroughFinal(t *testing.T) {
 	}
 	if b.flowsCalls != flowsAfterFirst {
 		t.Errorf("final day should not re-gather flows")
+	}
+}
+
+// TestServiceGetDayFinalMissingPriceRecomputes covers the self-heal
+// path: a final day stored with missing DAM prices (the scheduled fetch
+// hadn't landed when it was first computed) must NOT be served from the
+// immutable-final cache — a second read recomputes so prices ingested in
+// the meantime (late OREE publication / collector backfill) are picked up.
+func TestServiceGetDayFinalMissingPriceRecomputes(t *testing.T) {
+	b, _ := newKyivBackend(t)
+	svc := NewService(b)
+	// First read computes a past day with no DAM prices → final but with
+	// missing-price hours.
+	first, err := svc.GetDay(context.Background(), "org1", "2026-04-01", "Europe/Kyiv")
+	if err != nil {
+		t.Fatalf("GetDay: %v", err)
+	}
+	if !first.IsFinal {
+		t.Fatalf("a fully-past day should be final")
+	}
+	if first.Totals.HoursMissingPrice == 0 {
+		t.Fatalf("expected missing-price hours for an unpriced day")
+	}
+	if b.saveCount != 1 {
+		t.Fatalf("first read should compute+save once, got %d", b.saveCount)
+	}
+	// Second read must recompute (not serve the missing-price cache).
+	if _, err := svc.GetDay(context.Background(), "org1", "2026-04-01", "Europe/Kyiv"); err != nil {
+		t.Fatalf("GetDay 2: %v", err)
+	}
+	if b.saveCount != 2 {
+		t.Errorf("final day with missing prices should recompute on read, save count %d", b.saveCount)
 	}
 }
 

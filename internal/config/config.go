@@ -103,15 +103,22 @@ type OREERetry struct {
 // OREE configures the optional dam-collector service that ingests Day-Ahead
 // Market prices from https://www.oree.com.ua/ once per day.
 type OREE struct {
-	Enabled            bool          `yaml:"enabled"`
-	BaseURL            string        `yaml:"base_url"`
-	Zone               int           `yaml:"zone"`
-	RunAt              string        `yaml:"run_at"`
-	Timezone           string        `yaml:"timezone"`
-	DeliveryOffsetDays int           `yaml:"delivery_offset_days"`
-	HTTPTimeout        time.Duration `yaml:"http_timeout"`
-	UserAgent          string        `yaml:"user_agent"`
-	Retry              OREERetry     `yaml:"retry"`
+	Enabled            bool   `yaml:"enabled"`
+	BaseURL            string `yaml:"base_url"`
+	Zone               int    `yaml:"zone"`
+	RunAt              string `yaml:"run_at"`
+	Timezone           string `yaml:"timezone"`
+	DeliveryOffsetDays int    `yaml:"delivery_offset_days"`
+	// BackfillDays asks the collector to also re-check this many recent
+	// past delivery dates on startup and after each daily run, fetching
+	// any day that has fewer than 24 stored hours. This self-heals days
+	// the scheduled run missed (failed OREE publication window, daemon
+	// downtime) without operator intervention. Unset defaults to 7; a
+	// value <= 0 disables backfill.
+	BackfillDays int           `yaml:"backfill_days"`
+	HTTPTimeout  time.Duration `yaml:"http_timeout"`
+	UserAgent    string        `yaml:"user_agent"`
+	Retry        OREERetry     `yaml:"retry"`
 }
 
 // Weather configures the optional weather-collector service that
@@ -270,6 +277,9 @@ func (c *Root) applyOREEDefaults() {
 	if strings.TrimSpace(o.Timezone) == "" {
 		o.Timezone = "Europe/Kyiv"
 	}
+	if o.BackfillDays == 0 {
+		o.BackfillDays = 7
+	}
 	if o.HTTPTimeout <= 0 {
 		o.HTTPTimeout = 30 * time.Second
 	}
@@ -379,6 +389,9 @@ func (c *Root) validateOREE() error {
 	}
 	if o.DeliveryOffsetDays < -30 || o.DeliveryOffsetDays > 7 {
 		return fmt.Errorf("config: oree.delivery_offset_days must be in [-30..7]")
+	}
+	if o.BackfillDays > 60 {
+		return fmt.Errorf("config: oree.backfill_days must be <= 60")
 	}
 	return nil
 }

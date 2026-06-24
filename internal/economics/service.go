@@ -217,7 +217,12 @@ func (s *Service) GetDay(ctx context.Context, orgID, date, tz string) (StoredDay
 	if err != nil {
 		return StoredDay{}, fmt.Errorf("load day: %w", err)
 	}
-	if ok && stored.IsFinal {
+	// A final, fully-priced day is immutable — serve it verbatim. We
+	// deliberately do NOT short-circuit a final day that still has
+	// missing DAM prices: those prices may have been ingested after the
+	// day was finalized (late OREE publication / collector backfill), so
+	// it must fall through to a fresh recompute to self-heal.
+	if ok && stored.IsFinal && stored.Totals.HoursMissingPrice == 0 {
 		return stored, nil
 	}
 	// A still-open day is normally recomputed on read so the dashboard
@@ -225,9 +230,12 @@ func (s *Service) GetDay(ctx context.Context, orgID, date, tz string) (StoredDay
 	// economics-recompute daemon keeps today warm, serve its recent
 	// cache instead — that turns the slow live recompute into a fast
 	// cache hit. We only trust the cache inside freshTodayWindow so a
-	// stopped daemon transparently falls back to live recompute.
-	if ok && s.freshTodayWindow > 0 && !stored.ComputedAt.IsZero() &&
-		time.Since(stored.ComputedAt) < s.freshTodayWindow {
+	// stopped daemon transparently falls back to live recompute, and
+	// only when every hour is priced — a cache computed before the day's
+	// RDN prices landed would otherwise pin the "ціни РДН відсутні"
+	// warning until the nightly finalize pass.
+	if ok && stored.Totals.HoursMissingPrice == 0 && s.freshTodayWindow > 0 &&
+		!stored.ComputedAt.IsZero() && time.Since(stored.ComputedAt) < s.freshTodayWindow {
 		return stored, nil
 	}
 	return s.ComputeDay(ctx, orgID, date, tz)

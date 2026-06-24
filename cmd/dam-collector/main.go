@@ -99,6 +99,7 @@ func main() {
 		"run_at", cfg.OREE.RunAt,
 		"timezone", cfg.OREE.Timezone,
 		"delivery_offset_days", cfg.OREE.DeliveryOffsetDays,
+		"backfill_days", cfg.OREE.BackfillDays,
 	)
 
 	// Catch-up on startup: if the target date isn't fully populated, fetch now.
@@ -108,6 +109,10 @@ func main() {
 			log.Error("dam_catchup", "err", err)
 		}
 	}
+	// Self-heal recent past days the scheduler may have missed (failed
+	// publication window, daemon downtime). Runs on startup and after
+	// every daily fetch.
+	backfillRecent(ctx, log, client, pool, cfg.OREE, tz)
 
 	for {
 		next := nextRunAt(time.Now(), tz, hour, minute)
@@ -121,6 +126,53 @@ func main() {
 		target := targetDate(time.Now(), tz, cfg.OREE.DeliveryOffsetDays)
 		if err := fetchAndStore(ctx, log, client, pool, cfg.OREE, target); err != nil {
 			log.Error("dam_fetch", "err", err)
+		}
+		backfillRecent(ctx, log, client, pool, cfg.OREE, tz)
+	}
+}
+
+// backfillRecent re-checks the last cfg.BackfillDays delivery dates
+// (today going back) and fetches any that have fewer than 24 stored
+// hours. Days that already hold a full 24 rows are skipped silently.
+// Unlike the scheduled "tomorrow" fetch it uses a single attempt with no
+// backoff: a past day is either published or it isn't, so we never want
+// to block the daemon in a 25-minute retry loop per missing historical
+// day.
+func backfillRecent(
+	ctx context.Context,
+	log *slog.Logger,
+	client *oree.Client,
+	pool *pgxpool.Pool,
+	cfg config.OREE,
+	tz *time.Location,
+) {
+	if cfg.BackfillDays <= 0 {
+		return
+	}
+	today := targetDate(time.Now(), tz, 0)
+	for i := cfg.BackfillDays; i >= 0; i-- {
+		if ctx.Err() != nil {
+			return
+		}
+		day := today.AddDate(0, 0, -i)
+		n, err := storage.CountDAMRowsForDate(ctx, pool, day, cfg.Zone)
+		if err != nil {
+			log.Warn("dam_backfill_count", "delivery_date", day.Format("2006-01-02"), "err", err)
+			continue
+		}
+		if n >= 24 {
+			continue
+		}
+		log.Info("dam_backfill_day",
+			"delivery_date", day.Format("2006-01-02"),
+			"zone", cfg.Zone,
+			"have_rows", n,
+		)
+		if _, err := dam.FetchAndStore(ctx, log, client, pool, day, cfg.Zone, 1, 0); err != nil {
+			log.Warn("dam_backfill_day_failed",
+				"delivery_date", day.Format("2006-01-02"),
+				"err", err,
+			)
 		}
 	}
 }
