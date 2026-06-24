@@ -146,7 +146,7 @@ export function EconomicsKpis({ totals, tariffs }: Props) {
           <span className="kpi-label">Еквівалентні цикли УЗЕ</span>
           <span className="kpi-value">{equivalentCycles.toFixed(2)}</span>
           <span className="kpi-sub">
-            розряд {formatKwh(totals.essDischarged)} / ємність {tariffs.essCapacityKwh} кВт·год
+            розряд {formatKwh(totals.essDischarged)} / корисна ємність {tariffs.essCapacityKwh} кВт·год
           </span>
         </div>
         <div className="kpi-card kpi-card-secondary">

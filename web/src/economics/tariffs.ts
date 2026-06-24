@@ -12,7 +12,10 @@
 //   - `degradationUahPerKwh`: вартість циклів УЗЕ (питомий знос)
 //   - `supplierMargin` / `otherFees`: оператор-специфічні; зазвичай 0
 //   - `includeVat=false`: моделюємо нетто; UI окремо показує brutto
-//   - `essCapacityKwh`: для розрахунку equivalent cycles на годину
+//   - `essCapacityKwh`: КОРИСНА ємність УЗЕ (енергоємність вікна SOC
+//     10–90%). Використовується і для якоря залишку УЗЕ (SOC мапиться
+//     через вікно 10–90% на цю ємність), і як знаменник для equivalent
+//     cycles. Для пакету 645 кВт·год вводити 516.
 //
 // `essCapacityKwh` is technically not a tariff but it lives in the
 // same form on the page (and is persisted in the same JSONB blob), so

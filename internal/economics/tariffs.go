@@ -10,9 +10,11 @@ import "time"
 
 // Tariffs encapsulates every per-kWh number the model needs. All values
 // are UAH/kWh except ExportDiscount and VatRate (unitless 0..1
-// fractions) and the IncludeVat toggle. EssCapacityKwh is the battery
-// capacity used to anchor the SOC residual. Mirrors the frontend
-// `Tariffs` type and the API `OrgTariffs` DTO field-for-field.
+// fractions) and the IncludeVat toggle. EssCapacityKwh is the *usable*
+// battery capacity (the energy span of the 10–90% SOC window); it both
+// anchors the SOC residual (see usableKwhFromSOC) and is the denominator
+// for equivalent cycles. Mirrors the frontend `Tariffs` type and the
+// API `OrgTariffs` DTO field-for-field.
 type Tariffs struct {
 	DistributionUahPerKwh   float64
 	TransmissionUahPerKwh   float64

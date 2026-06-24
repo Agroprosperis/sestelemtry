@@ -103,6 +103,7 @@ function NumericField({
   max,
   onChange,
   suffix,
+  hint,
 }: {
   label: string
   value: number
@@ -111,11 +112,19 @@ function NumericField({
   max?: number
   onChange: (next: number) => void
   suffix?: string
+  hint?: string
 }) {
   const id = useId()
   return (
     <label className="economics-field" htmlFor={id}>
-      <span>{label}</span>
+      <span>
+        {label}
+        {hint && (
+          <span className="economics-info" data-tip={hint} role="img" aria-label={hint}>
+            i
+          </span>
+        )}
+      </span>
       <span className="economics-field-input">
         <input
           id={id}
@@ -345,6 +354,7 @@ export function EconomicsHeader({
             step={1}
             min={1}
             suffix="кВт·год"
+            hint="Корисна ємність УЗЕ — енергоємність робочого вікна SOC 10–90%. Для пакету 645 кВт·год вводьте 516. SOC 10% = порожньо, 90% = повна корисна. Використовується для залишку УЗЕ і еквівалентних циклів."
             onChange={(essCapacityKwh) => update({ essCapacityKwh })}
           />
           <label className="economics-field economics-field-checkbox">

@@ -133,7 +133,8 @@ func TestFindAnchorMostRecentDrop(t *testing.T) {
 		31: {flow: chargeFlow(100), rdnUahPerKwh: ptr(2)},
 	})
 	state := findAnchorAndPreRoll(history, nil, flatTariffs)
-	near(t, "kwh", state.Kwh, 116)
+	// usable(8) = clamp((8-10)/80,0,1)*200 = 0, then +100 grid charge.
+	near(t, "kwh", state.Kwh, 100)
 	near(t, "uah", state.Uah, 200)
 }
 
@@ -171,7 +172,8 @@ func TestFindAnchorMidWindowSeed(t *testing.T) {
 		25: {flow: chargeFlow(50), rdnUahPerKwh: ptr(4)},
 	})
 	state := findAnchorAndPreRoll(history, nil, flatTariffs)
-	near(t, "kwh", state.Kwh, 170)
+	// usable(60) = (60-10)/80*200 = 125, then +50 grid charge.
+	near(t, "kwh", state.Kwh, 175)
 	near(t, "uah", state.Uah, 200)
 }
 
@@ -181,7 +183,8 @@ func TestFindAnchorTodayHour0LowSoc(t *testing.T) {
 		31: {flow: chargeFlow(100), rdnUahPerKwh: ptr(2)},
 	})
 	state := findAnchorAndPreRoll(history, ptr(9), flatTariffs)
-	near(t, "kwh", state.Kwh, 18)
+	// today hour-0 SOC 9% ≤ reset threshold; usable(9) clamps to 0.
+	near(t, "kwh", state.Kwh, 0)
 	near(t, "uah", state.Uah, 0)
 }
 
@@ -191,14 +194,16 @@ func TestFindAnchorRollsAll47(t *testing.T) {
 		10: {flow: chargeFlow(50), rdnUahPerKwh: ptr(4)},
 	})
 	state := findAnchorAndPreRoll(history, nil, flatTariffs)
-	near(t, "kwh", state.Kwh, 64)
+	// usable(7) clamps to 0, then +50 grid charge.
+	near(t, "kwh", state.Kwh, 50)
 	near(t, "uah", state.Uah, 200)
 }
 
 func TestFindAnchorLastHour(t *testing.T) {
 	history := makeHistory(map[int]hourHistoryRecord{47: {socPercentStart: ptr(6)}})
 	state := findAnchorAndPreRoll(history, nil, flatTariffs)
-	near(t, "kwh", state.Kwh, 12)
+	// usable(6) clamps to 0; no roll after the last hour.
+	near(t, "kwh", state.Kwh, 0)
 	near(t, "uah", state.Uah, 0)
 }
 
@@ -209,7 +214,8 @@ func TestFindAnchorSkipsNullRdn(t *testing.T) {
 		32: {flow: chargeFlow(100), rdnUahPerKwh: ptr(3)},
 	})
 	state := findAnchorAndPreRoll(history, nil, flatTariffs)
-	near(t, "kwh", state.Kwh, 110)
+	// usable(5) clamps to 0; null-RDN hour skipped, then +100 grid charge.
+	near(t, "kwh", state.Kwh, 100)
 	near(t, "uah", state.Uah, 300)
 }
 
@@ -220,7 +226,8 @@ func TestFindAnchorPicksLatestDrop(t *testing.T) {
 		30: {socPercentStart: ptr(4)},
 	})
 	state := findAnchorAndPreRoll(history, nil, flatTariffs)
-	near(t, "kwh", state.Kwh, 8)
+	// latest drop (idx30, soc 4%) anchors; usable(4) clamps to 0.
+	near(t, "kwh", state.Kwh, 0)
 	near(t, "uah", state.Uah, 0)
 }
 

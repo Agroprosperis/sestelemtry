@@ -193,6 +193,14 @@ export function TariffScheduleEditor({ organizationID, tariffs, defaultEffective
                 </th>
                 <th scope="col" className="num">
                   Ємність
+                  <span
+                    className="economics-info"
+                    data-tip="Корисна ємність УЗЕ (вікно SOC 10–90%). Для пакету 645 кВт·год вводьте 516."
+                    role="img"
+                    aria-label="Корисна ємність УЗЕ (вікно SOC 10–90%). Для пакету 645 кВт·год вводьте 516."
+                  >
+                    i
+                  </span>
                   <small>кВт·год</small>
                 </th>
                 <th scope="col" className="actions" aria-label="Дії" />

@@ -355,9 +355,10 @@ export type HourEconomicsRow = {
   rdnUahPerKwh: number | null
   flow: HourFlows
   economics: HourEconomics
-  // ESS residual energy at the START of the hour, in kWh. Hour 0
-  // is anchored from `(soc_percent / 100) · tariffs.essCapacityKwh`
-  // observed at the start of the day; every subsequent hour is
+  // ESS residual energy at the START of the hour, in kWh. Hour 0 is
+  // anchored from the start-of-day SOC mapped through the usable 10–90%
+  // window onto the usable `tariffs.essCapacityKwh` (SOC 10% → 0 kWh,
+  // 90% → essCapacityKwh); every subsequent hour is
   // rolled forward by the previous hour's net charge / discharge:
   //   residual[h+1] = residual[h] + pvToEss[h] + gridToEss[h]
   //                              − essToLoad[h] − essToGrid[h]

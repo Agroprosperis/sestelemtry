@@ -13,9 +13,32 @@ const (
 	historyHours = 48
 	// socResetThresholdPercent defines "deeply discharged": at or
 	// below this fraction of capacity the residual is treated as a
-	// free leftover and the WAC ledger restarts.
+	// free leftover and the WAC ledger restarts. It doubles as the
+	// lower bound of the usable SOC window (see usableKwhFromSOC).
 	socResetThresholdPercent = 10.0
+	// socUsableMaxPercent is the upper bound of the usable SOC window.
+	// The device reports SOC on the full-pack 0–100% scale, but only
+	// the 10–90% band is usable, so it maps linearly onto the usable
+	// EssCapacityKwh.
+	socUsableMaxPercent = 90.0
 )
+
+// usableKwhFromSOC converts a device SOC percentage (full-pack 0–100
+// scale) into usable residual energy in kWh. The 10–90% window maps
+// linearly onto [0, capacityKwh], where capacityKwh is the *usable*
+// capacity entered in the tariffs (SOC 10% → 0 kWh, 90% → capacityKwh).
+// SOC outside the window clamps to the nearest edge, so the result is
+// always within [0, capacityKwh].
+func usableKwhFromSOC(socPercent, capacityKwh float64) float64 {
+	frac := (socPercent - socResetThresholdPercent) / (socUsableMaxPercent - socResetThresholdPercent)
+	if frac < 0 {
+		frac = 0
+	}
+	if frac > 1 {
+		frac = 1
+	}
+	return frac * capacityKwh
+}
 
 // Point mirrors a /timeseries point (Time, MetricKey, Value).
 type Point struct {
@@ -157,11 +180,12 @@ func AssembleDay(in DayInput) ([]*HourRow, ReconcileResult) {
 		}
 	}
 
-	// Залишок УЗЕ second pass: anchor hour 0 from SOC[0] · capacity,
-	// then roll the running residual forward by net charge − discharge.
+	// Залишок УЗЕ second pass: anchor hour 0 from SOC[0] mapped through
+	// the usable 10–90% window onto the usable capacity, then roll the
+	// running residual forward by net charge − discharge.
 	var running *float64
 	if soc0, ok := socByOffset[0]; ok && !math.IsInf(soc0, 0) && !math.IsNaN(soc0) {
-		v := (soc0 / 100) * in.Tariffs.EssCapacityKwh
+		v := usableKwhFromSOC(soc0, in.Tariffs.EssCapacityKwh)
 		running = &v
 	}
 	for h := 0; h < 24; h++ {
@@ -313,7 +337,7 @@ func buildHistoryRecords(in DayInput, socByOffset map[int]float64) []hourHistory
 func findAnchorAndPreRoll(history []hourHistoryRecord, todayHour0SocPercent *float64, t Tariffs) EssState {
 	if todayHour0SocPercent != nil && !math.IsInf(*todayHour0SocPercent, 0) && !math.IsNaN(*todayHour0SocPercent) &&
 		*todayHour0SocPercent <= socResetThresholdPercent {
-		kwh := math.Max(0, (*todayHour0SocPercent/100)*t.EssCapacityKwh)
+		kwh := usableKwhFromSOC(*todayHour0SocPercent, t.EssCapacityKwh)
 		return EssState{Kwh: kwh, Uah: 0}
 	}
 
@@ -338,7 +362,7 @@ func findAnchorAndPreRoll(history []hourHistoryRecord, todayHour0SocPercent *flo
 	}
 
 	anchorSoc := *history[anchorIdx].socPercentStart
-	state := EssState{Kwh: math.Max(0, (anchorSoc/100)*t.EssCapacityKwh), Uah: 0}
+	state := EssState{Kwh: usableKwhFromSOC(anchorSoc, t.EssCapacityKwh), Uah: 0}
 	for i := anchorIdx + 1; i < len(history); i++ {
 		rec := history[i]
 		if rec.rdnUahPerKwh == nil {
