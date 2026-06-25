@@ -16,11 +16,12 @@ type MonthRollup struct {
 	Totals MonthlyTotals
 }
 
-// QuarterSummary is one quarter card: the project effect (UAH) and PV
-// production (kWh) summed over the quarter's months. Quarter is 1..4.
+// QuarterSummary is one quarter card: the project effect, EBITDA (UAH)
+// and PV production (kWh) summed over the quarter's months. Quarter is 1..4.
 type QuarterSummary struct {
 	Quarter   int
 	EffectUah float64
+	EbitdaUah float64
 	PvKwh     float64
 }
 
@@ -106,6 +107,7 @@ func AggregateYear(
 
 		q := &quarters[(m-1)/3]
 		q.EffectUah += mt.Effect
+		q.EbitdaUah += mt.Ebitda
 		q.PvKwh += mt.PV
 
 		if mt.HoursWithData == 0 {

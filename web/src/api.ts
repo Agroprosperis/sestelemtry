@@ -624,10 +624,11 @@ export type EconomicsAnnualMonthRollup = {
   totals: EconomicsMonthlyTotals
 }
 
-// EconomicsAnnualQuarter is one quarter card: project effect + PV.
+// EconomicsAnnualQuarter is one quarter card: project effect, EBITDA + PV.
 export type EconomicsAnnualQuarter = {
   quarter: number
   effect_uah: number
+  ebitda_uah: number
   pv_kwh: number
 }
 

@@ -1712,9 +1712,14 @@
 .economics-finance-title,
 .economics-metric-row {
   display: grid;
-  grid-template-columns: 1fr auto auto;
-  gap: 14px;
+  grid-template-columns: 1fr 120px 46px;
+  gap: 12px;
   align-items: center;
+}
+
+.economics-finance-title > span:not(:first-child),
+.economics-metric-row > span:not(:first-child) {
+  text-align: right;
 }
 
 .economics-finance-title {
@@ -2433,6 +2438,13 @@ button.economics-optimum-row.open {
   margin-top: 4px;
   font-size: 11.5px;
   color: #64748b;
+}
+
+.economics-quarter-sub {
+  margin-top: 2px;
+  font-size: 11.5px;
+  color: #94a3b8;
+  font-variant-numeric: tabular-nums;
 }
 
 @media (max-width: 900px) {

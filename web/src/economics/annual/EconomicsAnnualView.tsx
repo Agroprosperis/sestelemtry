@@ -101,8 +101,9 @@ function QuarterCards({ quarters, period }: { quarters: EconomicsAnnualQuarter[]
             style={{ borderTop: `3px solid ${Q_COLORS[i]}` }}
           >
             <div className="economics-quarter-label">{Q_ROMAN[i]} кв. {year}</div>
-            <div className={`economics-quarter-value ${signClass(q.effect_uah)}`}>{formatUah(q.effect_uah)}</div>
-            <div className="economics-quarter-note">ефект · {formatMwh(q.pv_kwh)} СЕС</div>
+            <div className={`economics-quarter-value ${signClass(q.ebitda_uah)}`}>{formatUah(q.ebitda_uah)}</div>
+            <div className="economics-quarter-note">EBITDA · {formatMwh(q.pv_kwh)} СЕС</div>
+            <div className="economics-quarter-sub">ефект {formatUah(q.effect_uah)}</div>
           </article>
         )
       })}

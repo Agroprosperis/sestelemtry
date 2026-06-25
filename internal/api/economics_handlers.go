@@ -447,10 +447,11 @@ type EconomicsAnnualMonthRollup struct {
 	Totals EconomicsMonthlyTotals `json:"totals"`
 }
 
-// EconomicsAnnualQuarter is one quarter card: project effect + PV.
+// EconomicsAnnualQuarter is one quarter card: project effect, EBITDA + PV.
 type EconomicsAnnualQuarter struct {
 	Quarter   int     `json:"quarter"`
 	EffectUah float64 `json:"effect_uah"`
+	EbitdaUah float64 `json:"ebitda_uah"`
 	PvKwh     float64 `json:"pv_kwh"`
 }
 
@@ -536,6 +537,7 @@ func (h *Handlers) economicsAnnual(w http.ResponseWriter, r *http.Request) {
 		resp.Quarters = append(resp.Quarters, EconomicsAnnualQuarter{
 			Quarter:   q.Quarter,
 			EffectUah: q.EffectUah,
+			EbitdaUah: q.EbitdaUah,
 			PvKwh:     q.PvKwh,
 		})
 	}
