@@ -14,3 +14,6 @@ config.pe-single.yaml
 *.log
 tmp/
 temp/
+
+# Local working/reference material (not part of the app)
+economic/
