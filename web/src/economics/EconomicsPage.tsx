@@ -95,7 +95,19 @@ function readRangeFromUrl(): EconomicsRange {
   return 'day'
 }
 
-function updateUrl(date: string, range: EconomicsRange) {
+// readWindowFromUrl picks the optional sliding-period window (year view).
+// Both `from` and `to` must be present and look like YYYY-MM, otherwise
+// the year view falls back to the calendar year of the anchor.
+function readWindowFromUrl(): { from: string; to: string } {
+  if (typeof window === 'undefined') return { from: '', to: '' }
+  const params = new URLSearchParams(window.location.search)
+  const from = (params.get('from') ?? '').trim()
+  const to = (params.get('to') ?? '').trim()
+  if (/^\d{4}-\d{2}$/.test(from) && /^\d{4}-\d{2}$/.test(to)) return { from, to }
+  return { from: '', to: '' }
+}
+
+function updateUrl(date: string, range: EconomicsRange, windowFrom: string, windowTo: string) {
   if (typeof window === 'undefined') return
   const url = new URL(window.location.href)
   url.searchParams.set('view', 'economics')
@@ -105,6 +117,13 @@ function updateUrl(date: string, range: EconomicsRange) {
   } else {
     url.searchParams.delete('range')
   }
+  if (range === 'year' && windowFrom && windowTo) {
+    url.searchParams.set('from', windowFrom)
+    url.searchParams.set('to', windowTo)
+  } else {
+    url.searchParams.delete('from')
+    url.searchParams.delete('to')
+  }
   for (const key of LEGACY_QUERY_KEYS) url.searchParams.delete(key)
   window.history.replaceState({}, '', url.toString())
 }
@@ -113,6 +132,9 @@ export function EconomicsPage() {
   const { organizationID, options, change: onOrganizationChange } = useOrganizationParam()
   const [date, setDate] = useState<string>(readDateFromUrl)
   const [range, setRange] = useState<EconomicsRange>(readRangeFromUrl)
+  const initialWindow = readWindowFromUrl()
+  const [windowFrom, setWindowFrom] = useState<string>(initialWindow.from)
+  const [windowTo, setWindowTo] = useState<string>(initialWindow.to)
   const {
     tariffs,
     status: tariffsStatus,
@@ -126,8 +148,8 @@ export function EconomicsPage() {
   // persisted per-org on the backend and intentionally don't show up
   // in the URL.
   useEffect(() => {
-    updateUrl(date, range)
-  }, [date, range])
+    updateUrl(date, range, windowFrom, windowTo)
+  }, [date, range, windowFrom, windowTo])
 
   // refreshKey bumps every time a successful POST to
   // /api/v1/dam-prices/refresh comes back, forcing useEconomicsData
@@ -173,11 +195,15 @@ export function EconomicsPage() {
     refreshKey,
   })
 
-  // period is the YYYY calendar year derived from the day anchor.
+  // period is the YYYY calendar year derived from the day anchor; an
+  // explicit from/to window (if set) overrides it in the year view.
   const period = date.slice(0, 4)
+  const useWindow = range === 'year' && Boolean(windowFrom && windowTo)
   const annual = useEconomicsAnnualData({
     organizationID: range === 'year' ? organizationID : '',
-    period: range === 'year' ? period : '',
+    period: range === 'year' && !useWindow ? period : '',
+    from: useWindow ? windowFrom : '',
+    to: useWindow ? windowTo : '',
     refreshKey,
   })
 
@@ -212,6 +238,13 @@ export function EconomicsPage() {
         onOrganizationChange={onOrganizationChange}
         range={range}
         onRangeChange={setRange}
+        monthsWithData={range === 'year' ? annual.year?.months_with_data : undefined}
+        windowFrom={windowFrom || (range === 'year' ? `${period}-01` : '')}
+        windowTo={windowTo || (range === 'year' ? `${period}-12` : '')}
+        onWindowChange={(nextFrom, nextTo) => {
+          setWindowFrom(nextFrom)
+          setWindowTo(nextTo)
+        }}
         date={date}
         onDateChange={setDate}
         tariffs={tariffs}

@@ -14,8 +14,11 @@ export type EconomicsAnnualData = {
 
 type Input = {
   organizationID: string
-  // YYYY calendar year in LOCAL_TZ.
+  // YYYY calendar year in LOCAL_TZ. Used when from/to are empty.
   period: string
+  // Optional sliding window (both YYYY-MM); when set they override period.
+  from?: string
+  to?: string
   // refreshKey re-fires the fetch without changing inputs (e.g. after a
   // DAM-price refresh or a recompute). `undefined` → 0.
   refreshKey?: number
@@ -32,8 +35,9 @@ export function useEconomicsAnnualData(input: Input): EconomicsAnnualData {
     error: null,
   }))
 
+  const useWindow = Boolean(input.from && input.to)
   useEffect(() => {
-    if (!input.organizationID || !input.period) {
+    if (!input.organizationID || (!input.period && !useWindow)) {
       setData({ year: null, loading: false, error: null })
       return
     }
@@ -41,7 +45,13 @@ export function useEconomicsAnnualData(input: Input): EconomicsAnnualData {
     setData((prev) => ({ ...prev, loading: true, error: null }))
 
     fetchEconomicsAnnual(
-      { organizationID: input.organizationID, period: input.period, tz: LOCAL_TZ },
+      {
+        organizationID: input.organizationID,
+        period: useWindow ? undefined : input.period,
+        from: useWindow ? input.from : undefined,
+        to: useWindow ? input.to : undefined,
+        tz: LOCAL_TZ,
+      },
       controller.signal,
     )
       .then((resp) => {
@@ -59,7 +69,7 @@ export function useEconomicsAnnualData(input: Input): EconomicsAnnualData {
       })
 
     return () => controller.abort()
-  }, [input.organizationID, input.period, input.refreshKey])
+  }, [input.organizationID, input.period, input.from, input.to, useWindow, input.refreshKey])
 
   return data
 }

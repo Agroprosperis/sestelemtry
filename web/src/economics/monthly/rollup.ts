@@ -22,7 +22,7 @@ export function signClass(v: number): string {
 // PeriodScope lets the shared rollup blocks (KPIs / Finance / Waterfall /
 // Balance / narrative) read identically for the month and year views,
 // swapping only the period wording.
-export type PeriodScope = 'month' | 'year'
+export type PeriodScope = 'month' | 'year' | 'period'
 
 type PeriodWords = {
   // "за місяць" / "за рік" — appended to amounts and chart units.
@@ -36,6 +36,8 @@ type PeriodWords = {
 export const PERIOD_WORDS: Record<PeriodScope, PeriodWords> = {
   month: { per: 'за місяць', of: 'місяця', noun: 'місяць' },
   year: { per: 'за рік', of: 'року', noun: 'рік' },
+  // Sliding window that isn't a full calendar year.
+  period: { per: 'за період', of: 'періоду', noun: 'період' },
 }
 
 export type Narrative = {
@@ -186,7 +188,7 @@ export function buildAiPanel(
   const consumption = totals.pv_to_load_kwh + totals.ess_to_load_kwh + totals.grid_to_load_kwh
   const captured = totals.ess_optimum_uah > 0 ? totals.ess_captured_share : 0
 
-  if (opts.scope === 'year') {
+  if (opts.scope !== 'month') {
     const months = opts.monthsCount ?? 0
     return {
       summaryLine: `${opts.heading}: за ${months} міс. телеметрії СЕС ${formatMwh(totals.pv_kwh)}, ефект проєкту ${formatUah(totals.effect_uah)}.`,

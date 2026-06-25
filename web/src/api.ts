@@ -626,6 +626,7 @@ export type EconomicsAnnualMonthRollup = {
 
 // EconomicsAnnualQuarter is one quarter card: project effect, EBITDA + PV.
 export type EconomicsAnnualQuarter = {
+  year: number
   quarter: number
   effect_uah: number
   ebitda_uah: number
@@ -643,6 +644,9 @@ export type EconomicsAnnualMonthMargin = {
 export type EconomicsAnnualResponse = {
   organization_id: string
   period: string
+  // First/last month of the served window (YYYY-MM).
+  from: string
+  to: string
   tz: string
   months_with_data: number
   totals: EconomicsMonthlyTotals
@@ -651,16 +655,19 @@ export type EconomicsAnnualResponse = {
   monthly_margin: EconomicsAnnualMonthMargin[]
 }
 
-// fetchEconomicsAnnual reads the server-computed calendar-year rollup.
-// The backend reads whatever the recompute daemon persisted, so a
-// request always returns a consistent year.
+// fetchEconomicsAnnual reads the server-computed rollup. Pass `period`
+// (YYYY) for a calendar year, or `from`/`to` (both YYYY-MM) for a sliding
+// month window. The backend reads whatever the recompute daemon
+// persisted, so a request always returns a consistent period.
 export async function fetchEconomicsAnnual(
-  input: { organizationID: string; period: string; tz?: string },
+  input: { organizationID: string; period?: string; from?: string; to?: string; tz?: string },
   signal?: AbortSignal,
 ): Promise<EconomicsAnnualResponse> {
   const url = buildURL('/api/v1/economics/annual', {
     organization_id: input.organizationID,
-    period: input.period,
+    period: input.from && input.to ? undefined : input.period || undefined,
+    from: input.from || undefined,
+    to: input.to || undefined,
     tz: input.tz || undefined,
   })
   const res = await fetch(url, { signal })

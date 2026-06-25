@@ -135,3 +135,15 @@ export function formatMonthName(month: string): string {
 export function formatYearTitle(period: string): string {
   return /^\d{4}$/.test(period) ? `${period} рік` : period
 }
+
+// formatPeriodTitle renders an annual window title from its first/last
+// month (YYYY-MM): a full Jan–Dec span of one year reads "РРРР рік",
+// any other window reads "Лип 2025 — Трав 2026".
+export function formatPeriodTitle(from: string, to: string): string {
+  const f = /^(\d{4})-(\d{2})$/.exec(from)
+  const t = /^(\d{4})-(\d{2})$/.exec(to)
+  if (!f || !t) return ''
+  if (f[1] === t[1] && f[2] === '01' && t[2] === '12') return `${f[1]} рік`
+  const label = (m: RegExpExecArray) => `${MONTHS_SHORT_UK[Number(m[2]) - 1]} ${m[1]}`
+  return `${label(f)} — ${label(t)}`
+}

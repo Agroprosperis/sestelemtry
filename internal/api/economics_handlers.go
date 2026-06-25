@@ -449,6 +449,7 @@ type EconomicsAnnualMonthRollup struct {
 
 // EconomicsAnnualQuarter is one quarter card: project effect, EBITDA + PV.
 type EconomicsAnnualQuarter struct {
+	Year      int     `json:"year"`
 	Quarter   int     `json:"quarter"`
 	EffectUah float64 `json:"effect_uah"`
 	EbitdaUah float64 `json:"ebitda_uah"`
@@ -467,6 +468,8 @@ type EconomicsAnnualMonthMargin struct {
 type EconomicsAnnualResponse struct {
 	OrganizationID string                       `json:"organization_id"`
 	Period         string                       `json:"period"`
+	From           string                       `json:"from"`
+	To             string                       `json:"to"`
 	Tz             string                       `json:"tz"`
 	MonthsWithData int                          `json:"months_with_data"`
 	Totals         EconomicsMonthlyTotals       `json:"totals"`
@@ -494,32 +497,52 @@ func (h *Handlers) economicsAnnual(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "organization_id is required", http.StatusBadRequest)
 		return
 	}
-	periodStr := strings.TrimSpace(r.URL.Query().Get("period"))
-	if periodStr == "" {
-		http.Error(w, "period is required (YYYY)", http.StatusBadRequest)
-		return
-	}
 	tzStr := strings.TrimSpace(r.URL.Query().Get("tz"))
 	loc, err := loadLocation(tzStr)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	if _, err := time.ParseInLocation("2006", periodStr, loc); err != nil {
-		http.Error(w, "period must be YYYY", http.StatusBadRequest)
-		return
-	}
 
-	year, err := h.economics.GetYear(r.Context(), orgID, periodStr, loc.String())
+	// A sliding window is requested with from/to (both YYYY-MM). When
+	// absent we fall back to the calendar-year period (YYYY).
+	fromStr := strings.TrimSpace(r.URL.Query().Get("from"))
+	toStr := strings.TrimSpace(r.URL.Query().Get("to"))
+	periodStr := strings.TrimSpace(r.URL.Query().Get("period"))
+
+	var year economics.StoredYear
+	if fromStr != "" || toStr != "" {
+		if _, err := time.ParseInLocation("2006-01", fromStr, loc); err != nil {
+			http.Error(w, "from must be YYYY-MM", http.StatusBadRequest)
+			return
+		}
+		if _, err := time.ParseInLocation("2006-01", toStr, loc); err != nil {
+			http.Error(w, "to must be YYYY-MM", http.StatusBadRequest)
+			return
+		}
+		year, err = h.economics.GetPeriod(r.Context(), orgID, fromStr, toStr, loc.String())
+	} else {
+		if periodStr == "" {
+			http.Error(w, "period is required (YYYY)", http.StatusBadRequest)
+			return
+		}
+		if _, perr := time.ParseInLocation("2006", periodStr, loc); perr != nil {
+			http.Error(w, "period must be YYYY", http.StatusBadRequest)
+			return
+		}
+		year, err = h.economics.GetYear(r.Context(), orgID, periodStr, loc.String())
+	}
 	if err != nil {
-		h.log.Error("api_economics_annual", "organization_id", orgID, "period", periodStr, "tz", loc.String(), "err", err)
+		h.log.Error("api_economics_annual", "organization_id", orgID, "period", periodStr, "from", fromStr, "to", toStr, "tz", loc.String(), "err", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 
 	resp := EconomicsAnnualResponse{
 		OrganizationID: orgID,
-		Period:         periodStr,
+		Period:         year.Period,
+		From:           year.From,
+		To:             year.To,
 		Tz:             loc.String(),
 		MonthsWithData: year.MonthsWithData,
 		Totals:         monthlyTotalsToJSON(year.Totals),
@@ -535,6 +558,7 @@ func (h *Handlers) economicsAnnual(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, q := range year.Quarters {
 		resp.Quarters = append(resp.Quarters, EconomicsAnnualQuarter{
+			Year:      q.Year,
 			Quarter:   q.Quarter,
 			EffectUah: q.EffectUah,
 			EbitdaUah: q.EbitdaUah,

@@ -25,7 +25,15 @@ import {
   MonthlyWaterfall,
   OptimumInfo,
 } from '../monthly/EconomicsMonthlyView'
-import { buildAiPanel, HOURS, heatTier, reserveSplit, signClass, uahShort } from '../monthly/rollup'
+import {
+  buildAiPanel,
+  HOURS,
+  heatTier,
+  type PeriodScope,
+  reserveSplit,
+  signClass,
+  uahShort,
+} from '../monthly/rollup'
 import {
   formatCycles,
   formatKwh,
@@ -35,6 +43,7 @@ import {
   formatMwh,
   formatMwhNumber,
   formatPercent,
+  formatPeriodTitle,
   formatPrice,
   formatUah,
   formatYearTitle,
@@ -53,30 +62,40 @@ export function EconomicsAnnualView({ data, organizationID, onSelectMonth }: Pro
     () => data.months.filter((m) => m.totals.hours_with_data > 0),
     [data.months],
   )
+  const periodTitle = formatPeriodTitle(data.from, data.to) || formatYearTitle(data.period)
+  const exportSlug = data.from && data.to ? `${data.from}_${data.to}` : data.period
+  // A full Jan→Dec span of one calendar year reads "за рік"; any other
+  // sliding window reads "за період".
+  const isCalendarYear =
+    data.from.slice(5) === '01' &&
+    data.to.slice(5) === '12' &&
+    data.from.slice(0, 4) === data.to.slice(0, 4)
+  const scope: PeriodScope = isCalendarYear ? 'year' : 'period'
   return (
     <>
-      <MonthlyKpis totals={t} scope="year" />
-      <QuarterCards quarters={data.quarters} period={data.period} />
+      <MonthlyKpis totals={t} scope={scope} />
+      <QuarterCards quarters={data.quarters} />
       <div className="economics-month-grid2">
-        <MonthlyFinance totals={t} scope="year" />
-        <MonthlyWaterfall totals={t} scope="year" />
+        <MonthlyFinance totals={t} scope={scope} />
+        <MonthlyWaterfall totals={t} scope={scope} />
       </div>
       <AnnualAiAnalysis
         totals={t}
         months={withData}
         organizationID={organizationID}
-        period={data.period}
+        periodTitle={periodTitle}
+        scope={scope}
       />
       <div className="economics-month-grid2">
         <AnnualTrend months={data.months} totals={t} onSelectMonth={onSelectMonth} />
-        <MonthlyBalance totals={t} scope="year" />
+        <MonthlyBalance totals={t} scope={scope} />
       </div>
       <MonthHourHeatmap margins={data.monthly_margin} />
       <AnnualMonthlyTable
         months={withData}
         totals={t}
         organizationID={organizationID}
-        period={data.period}
+        exportSlug={exportSlug}
         onSelectMonth={onSelectMonth}
       />
     </>
@@ -88,19 +107,18 @@ export function EconomicsAnnualView({ data, organizationID, onSelectMonth }: Pro
 const Q_ROMAN = ['I', 'II', 'III', 'IV']
 const Q_COLORS = ['#2f6fed', '#12b76a', '#f59e0b', '#7c3aed']
 
-function QuarterCards({ quarters, period }: { quarters: EconomicsAnnualQuarter[]; period: string }) {
-  const year = period.slice(0, 4)
+function QuarterCards({ quarters }: { quarters: EconomicsAnnualQuarter[] }) {
   return (
     <section className="economics-quarter-grid" aria-label="Квартальні підсумки">
       {quarters.map((q) => {
         const i = (q.quarter - 1) % 4
         return (
           <article
-            key={q.quarter}
+            key={`${q.year}-${q.quarter}`}
             className="economics-card economics-quarter-card"
             style={{ borderTop: `3px solid ${Q_COLORS[i]}` }}
           >
-            <div className="economics-quarter-label">{Q_ROMAN[i]} кв. {year}</div>
+            <div className="economics-quarter-label">{Q_ROMAN[i]} кв. {q.year}</div>
             <div className={`economics-quarter-value ${signClass(q.ebitda_uah)}`}>{formatUah(q.ebitda_uah)}</div>
             <div className="economics-quarter-note">EBITDA · {formatMwh(q.pv_kwh)} СЕС</div>
             <div className="economics-quarter-sub">ефект {formatUah(q.effect_uah)}</div>
@@ -331,23 +349,25 @@ function AnnualAiAnalysis({
   totals,
   months,
   organizationID,
-  period,
+  periodTitle,
+  scope,
 }: {
   totals: EconomicsMonthlyTotals
   months: EconomicsAnnualMonthRollup[]
   organizationID: string
-  period: string
+  periodTitle: string
+  scope: PeriodScope
 }) {
-  const heading = `${formatOrganizationLabel(organizationID)} · ${formatYearTitle(period)}`
+  const heading = `${formatOrganizationLabel(organizationID)} · ${periodTitle}`
   const panel = useMemo(
     () =>
       buildAiPanel(totals, {
         heading,
-        scope: 'year',
-        periodLabel: formatYearTitle(period),
+        scope,
+        periodLabel: periodTitle,
         monthsCount: months.length,
       }),
-    [totals, heading, period, months.length],
+    [totals, heading, periodTitle, scope, months.length],
   )
 
   // Per-month elevator-schedule reserve (PV exported vs grid-served load),
@@ -512,7 +532,7 @@ function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
-function exportToExcel(months: EconomicsAnnualMonthRollup[], period: string) {
+function exportToExcel(months: EconomicsAnnualMonthRollup[], slug: string) {
   const head = `<tr>${COLUMNS.map((c) => `<th>${escapeHtml(c)}</th>`).join('')}</tr>`
   const body = months
     .map((m) => `<tr>${monthRowValues(m).map((v) => `<td>${escapeHtml(v)}</td>`).join('')}</tr>`)
@@ -522,7 +542,7 @@ function exportToExcel(months: EconomicsAnnualMonthRollup[], period: string) {
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url
-  link.download = `economics-annual-${period}.xls`
+  link.download = `economics-annual-${slug}.xls`
   document.body.appendChild(link)
   link.click()
   link.remove()
@@ -533,13 +553,13 @@ function AnnualMonthlyTable({
   months,
   totals,
   organizationID,
-  period,
+  exportSlug,
   onSelectMonth,
 }: {
   months: EconomicsAnnualMonthRollup[]
   totals: EconomicsMonthlyTotals
   organizationID: string
-  period: string
+  exportSlug: string
   onSelectMonth: (month: string) => void
 }) {
   const pvSelf = totals.pv_to_load_kwh + totals.pv_to_ess_kwh
@@ -551,7 +571,7 @@ function AnnualMonthlyTable({
           Помісячна деталізація року
           <span className="economics-table-context"> · {formatOrganizationLabel(organizationID)}</span>
         </h3>
-        <button type="button" className="economics-export-btn" onClick={() => exportToExcel(months, period)}>
+        <button type="button" className="economics-export-btn" onClick={() => exportToExcel(months, exportSlug)}>
           Вивантажити в Excel
         </button>
       </div>

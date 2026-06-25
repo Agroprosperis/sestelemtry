@@ -17,8 +17,11 @@ type MonthRollup struct {
 }
 
 // QuarterSummary is one quarter card: the project effect, EBITDA (UAH)
-// and PV production (kWh) summed over the quarter's months. Quarter is 1..4.
+// and PV production (kWh) summed over the quarter's months. Quarter is
+// 1..4 and Year identifies the calendar year so a sliding window that
+// spans a year boundary labels its quarters unambiguously.
 type QuarterSummary struct {
+	Year      int
 	Quarter   int
 	EffectUah float64
 	EbitdaUah float64
@@ -38,7 +41,9 @@ type MonthMargin struct {
 // quarter cards, and the month x hour-of-day marginality heatmap.
 type StoredYear struct {
 	OrganizationID string
-	Period         string // YYYY
+	Period         string // YYYY (calendar year) or "YYYY-MM..YYYY-MM" (window)
+	From           string // first month of the window, YYYY-MM
+	To             string // last month of the window, YYYY-MM
 	Tz             string
 	Totals         MonthlyTotals
 	Months         []MonthRollup
@@ -64,11 +69,31 @@ func AggregateYear(
 	resolveTariff func(day time.Time) (capacityKwh, degradationUahPerKwh float64),
 ) StoredYear {
 	year := parseYear(period)
+	keys := make([]string, 0, 12)
+	for m := 1; m <= 12; m++ {
+		keys = append(keys, fmt.Sprintf("%04d-%02d", year, m))
+	}
+	return AggregatePeriod(period, keys, loc, days, hourly, resolveTariff)
+}
 
+// AggregatePeriod is the generalized rollup behind AggregateYear: it folds
+// the given ordered list of YYYY-MM month keys (a calendar year, or an
+// arbitrary sliding window that may cross a year boundary) into a single
+// period rollup. Quarters are grouped by (calendar year, quarter) in the
+// order they first appear, so a Jul→Jun window yields Q3, Q4, Q1, Q2 of
+// the spanning years.
+func AggregatePeriod(
+	periodLabel string,
+	monthKeys []string,
+	loc *time.Location,
+	days []DailyRecord,
+	hourly []HourlyRecord,
+	resolveTariff func(day time.Time) (capacityKwh, degradationUahPerKwh float64),
+) StoredYear {
 	// Bucket the daily / hourly records by calendar month so each month
 	// is aggregated against exactly its own slice.
-	daysByMonth := make(map[string][]DailyRecord, 12)
-	hourlyByMonth := make(map[string][]HourlyRecord, 12)
+	daysByMonth := make(map[string][]DailyRecord, len(monthKeys))
+	hourlyByMonth := make(map[string][]HourlyRecord, len(monthKeys))
 	for _, d := range days {
 		k := d.Day.In(loc).Format("2006-01")
 		daysByMonth[k] = append(daysByMonth[k], d)
@@ -86,15 +111,19 @@ func AggregateYear(
 		haveRdnMax             bool
 		bestSet, minSet        bool
 		lastMonthWithData      *MonthlyTotals
-		months                 = make([]MonthRollup, 0, 12)
-		monthlyMargin          = make([]MonthMargin, 0, 12)
-		quarters               = [4]QuarterSummary{{Quarter: 1}, {Quarter: 2}, {Quarter: 3}, {Quarter: 4}}
+		months                 = make([]MonthRollup, 0, len(monthKeys))
+		monthlyMargin          = make([]MonthMargin, 0, len(monthKeys))
+		quarters               = make([]QuarterSummary, 0, 4)
+		quarterIdx             = make(map[[2]int]int, 4)
 		monthsWithData         int
 	)
 
-	for m := 1; m <= 12; m++ {
-		monthKey := fmt.Sprintf("%04d-%02d", year, m)
-		firstDay := time.Date(year, time.Month(m), 1, 0, 0, 0, 0, loc)
+	for _, monthKey := range monthKeys {
+		var ky, km int
+		if _, err := fmt.Sscanf(monthKey, "%4d-%2d", &ky, &km); err != nil || km < 1 || km > 12 {
+			continue
+		}
+		firstDay := time.Date(ky, time.Month(km), 1, 0, 0, 0, 0, loc)
 		capacityKwh, degr := resolveTariff(firstDay)
 
 		sm := AggregateMonth(monthKey, loc, daysByMonth[monthKey], hourlyByMonth[monthKey], capacityKwh, degr)
@@ -105,10 +134,16 @@ func AggregateYear(
 			Hours: monthHourMargin(hourlyByMonth[monthKey], loc),
 		})
 
-		q := &quarters[(m-1)/3]
-		q.EffectUah += mt.Effect
-		q.EbitdaUah += mt.Ebitda
-		q.PvKwh += mt.PV
+		qkey := [2]int{ky, (km-1)/3 + 1}
+		qi, ok := quarterIdx[qkey]
+		if !ok {
+			quarters = append(quarters, QuarterSummary{Year: ky, Quarter: qkey[1]})
+			qi = len(quarters) - 1
+			quarterIdx[qkey] = qi
+		}
+		quarters[qi].EffectUah += mt.Effect
+		quarters[qi].EbitdaUah += mt.Ebitda
+		quarters[qi].PvKwh += mt.PV
 
 		if mt.HoursWithData == 0 {
 			continue
@@ -212,12 +247,19 @@ func AggregateYear(
 		totals.EssCostBasisUahEod = lastMonthWithData.EssCostBasisUahEod
 	}
 
+	from, to := "", ""
+	if len(months) > 0 {
+		from = months[0].Month
+		to = months[len(months)-1].Month
+	}
 	return StoredYear{
-		Period:         period,
+		Period:         periodLabel,
+		From:           from,
+		To:             to,
 		Tz:             loc.String(),
 		Totals:         totals,
 		Months:         months,
-		Quarters:       quarters[:],
+		Quarters:       quarters,
 		MonthlyMargin:  monthlyMargin,
 		MonthsWithData: monthsWithData,
 	}
@@ -295,6 +337,65 @@ func (s *Service) GetYear(ctx context.Context, orgID, period, tz string) (Stored
 	}
 
 	result := AggregateYear(period, loc, daily, hourly, resolve)
+	result.OrganizationID = orgID
+	return result, nil
+}
+
+// maxWindowMonths bounds a sliding-period request so a malformed or
+// abusive range can't pull an unbounded amount of history.
+const maxWindowMonths = 36
+
+// GetPeriod returns economics for an arbitrary inclusive month window
+// [from..to] (both YYYY-MM in tz), reading the persisted daily/hourly
+// records the same read-only way as GetYear. The window is clamped to
+// maxWindowMonths and from/to are ordered if passed reversed.
+func (s *Service) GetPeriod(ctx context.Context, orgID, from, to, tz string) (StoredYear, error) {
+	loc, err := loadLocation(tz)
+	if err != nil {
+		return StoredYear{}, err
+	}
+	start, err := time.ParseInLocation("2006-01", from, loc)
+	if err != nil {
+		return StoredYear{}, fmt.Errorf("from must be YYYY-MM")
+	}
+	end, err := time.ParseInLocation("2006-01", to, loc)
+	if err != nil {
+		return StoredYear{}, fmt.Errorf("to must be YYYY-MM")
+	}
+	if end.Before(start) {
+		start, end = end, start
+	}
+
+	// Build the ordered month keys, clamping the span to the cap.
+	keys := make([]string, 0, 12)
+	cur := start
+	for !cur.After(end) && len(keys) < maxWindowMonths {
+		keys = append(keys, cur.Format("2006-01"))
+		cur = cur.AddDate(0, 1, 0)
+	}
+
+	firstDay := time.Date(start.Year(), start.Month(), 1, 0, 0, 0, 0, loc)
+	lastKey, _ := time.ParseInLocation("2006-01", keys[len(keys)-1], loc)
+	nextAfter := time.Date(lastKey.Year(), lastKey.Month(), 1, 0, 0, 0, 0, loc).AddDate(0, 1, 0)
+	lastDay := nextAfter.AddDate(0, 0, -1)
+
+	daily, err := s.backend.LoadDailyRange(ctx, orgID, firstDay, lastDay)
+	if err != nil {
+		return StoredYear{}, fmt.Errorf("load daily range: %w", err)
+	}
+	hourly, _ := s.backend.LoadHourlyRange(ctx, orgID, firstDay, nextAfter)
+
+	schedule, _ := s.backend.TariffSchedule(ctx, orgID)
+	resolve := func(day time.Time) (float64, float64) {
+		t, ok := schedule.ResolveForDay(day)
+		if !ok {
+			t = DefaultTariffs
+		}
+		return t.EssCapacityKwh, t.DegradationUahPerKwh
+	}
+
+	label := keys[0] + ".." + keys[len(keys)-1]
+	result := AggregatePeriod(label, keys, loc, daily, hourly, resolve)
 	result.OrganizationID = orgID
 	return result, nil
 }

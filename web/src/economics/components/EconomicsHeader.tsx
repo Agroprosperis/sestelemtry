@@ -49,10 +49,12 @@ function rangeTitle(range: EconomicsRange): string {
   }
 }
 
-function rangeSubtitle(range: EconomicsRange): string {
+function rangeSubtitle(range: EconomicsRange, monthsWithData?: number): string {
   switch (range) {
     case 'year':
-      return 'управлінський звіт за рік на базі цін РДН і тарифів.'
+      return monthsWithData && monthsWithData > 0
+        ? `управлінський звіт за рік · ${monthsWithData} міс. телеметрії`
+        : 'управлінський звіт за рік на базі цін РДН і тарифів.'
     case 'month':
       return 'управлінський звіт за місяць на базі цін РДН і тарифів.'
     default:
@@ -66,6 +68,14 @@ type Props = {
   onOrganizationChange: (next: string) => void
   range: EconomicsRange
   onRangeChange: (next: EconomicsRange) => void
+  // Months of telemetry in the active year (year view only), surfaced
+  // in the subtitle per SPEC §3.1.
+  monthsWithData?: number
+  // Sliding-period window (year view only), both YYYY-MM. onWindowChange
+  // with empty strings resets to the calendar year of the anchor.
+  windowFrom: string
+  windowTo: string
+  onWindowChange: (from: string, to: string) => void
   date: string
   onDateChange: (next: string) => void
   tariffs: Tariffs
@@ -189,6 +199,10 @@ export function EconomicsHeader({
   onOrganizationChange,
   range,
   onRangeChange,
+  monthsWithData,
+  windowFrom,
+  windowTo,
+  onWindowChange,
   date,
   onDateChange,
   tariffs,
@@ -221,7 +235,7 @@ export function EconomicsHeader({
           <div className="economics-header-titles">
             <h1>{rangeTitle(range)}</h1>
             <p>
-              {formatOrganizationLabel(organizationID)} · {rangeSubtitle(range)}
+              {formatOrganizationLabel(organizationID)} · {rangeSubtitle(range, monthsWithData)}
             </p>
           </div>
         </div>
@@ -257,11 +271,39 @@ export function EconomicsHeader({
               Рік
             </button>
           </div>
-          <PeriodPicker
-            preset={range}
-            anchor={parseDateString(date)}
-            onChange={(next) => onDateChange(formatDateString(next))}
-          />
+          {range === 'year' ? (
+            <div className="economics-window-range" role="group" aria-label="Період аналізу">
+              <input
+                type="month"
+                aria-label="Період з"
+                value={windowFrom}
+                max={windowTo || undefined}
+                onChange={(e) => onWindowChange(e.target.value, windowTo)}
+              />
+              <span className="economics-window-dash">—</span>
+              <input
+                type="month"
+                aria-label="Період по"
+                value={windowTo}
+                min={windowFrom || undefined}
+                onChange={(e) => onWindowChange(windowFrom, e.target.value)}
+              />
+              <button
+                type="button"
+                className="economics-window-reset"
+                onClick={() => onWindowChange('', '')}
+                title="Календарний рік анкера"
+              >
+                рік
+              </button>
+            </div>
+          ) : (
+            <PeriodPicker
+              preset={range}
+              anchor={parseDateString(date)}
+              onChange={(next) => onDateChange(formatDateString(next))}
+            />
+          )}
           <button
             type="button"
             className={

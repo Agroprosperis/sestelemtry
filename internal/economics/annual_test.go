@@ -158,6 +158,49 @@ func TestAggregateYearSumsMonthsAndQuarters(t *testing.T) {
 	}
 }
 
+// TestAggregatePeriodSlidingWindow checks that an arbitrary month window
+// crossing a year boundary buckets quarters by (year, quarter) in order
+// and sums the totals over only the windowed months.
+func TestAggregatePeriodSlidingWindow(t *testing.T) {
+	loc := time.UTC
+	nov := time.Date(2025, 11, 12, 0, 0, 0, 0, loc)
+	jan := time.Date(2026, 1, 8, 0, 0, 0, 0, loc)
+	// A day in October 2025 must be ignored: it's outside the window.
+	oct := time.Date(2025, 10, 3, 0, 0, 0, 0, loc)
+
+	mk := func(when time.Time, effect, pv float64) DailyRecord {
+		return DailyRecord{
+			Day: when, IsFinal: true,
+			Totals: DailyTotals{Effect: effect, PV: pv, HoursWithData: 24},
+		}
+	}
+	days := []DailyRecord{mk(oct, 999, 999), mk(nov, 400, 800), mk(jan, 300, 600)}
+
+	keys := []string{"2025-11", "2025-12", "2026-01", "2026-02"}
+	got := AggregatePeriod("2025-11..2026-02", keys, loc, days, nil, constTariff(100, 0.6))
+
+	if len(got.Months) != 4 || got.From != "2025-11" || got.To != "2026-02" {
+		t.Fatalf("window months=%d from=%q to=%q, want 4 / 2025-11 / 2026-02", len(got.Months), got.From, got.To)
+	}
+	if got.MonthsWithData != 2 {
+		t.Fatalf("MonthsWithData = %d, want 2 (Nov, Jan)", got.MonthsWithData)
+	}
+	// October day is outside the window → not counted.
+	if got.Totals.Effect != 700 {
+		t.Fatalf("window Effect = %v, want 700 (400 + 300)", got.Totals.Effect)
+	}
+	// Quarters in appearance order: Q4 2025 (Nov+Dec), Q1 2026 (Jan+Feb).
+	if len(got.Quarters) != 2 {
+		t.Fatalf("Quarters len = %d, want 2", len(got.Quarters))
+	}
+	if got.Quarters[0].Year != 2025 || got.Quarters[0].Quarter != 4 || got.Quarters[0].EffectUah != 400 {
+		t.Fatalf("Q[0] = %+v, want 2025/Q4/400", got.Quarters[0])
+	}
+	if got.Quarters[1].Year != 2026 || got.Quarters[1].Quarter != 1 || got.Quarters[1].EffectUah != 300 {
+		t.Fatalf("Q[1] = %+v, want 2026/Q1/300", got.Quarters[1])
+	}
+}
+
 // TestGetYearReadOnly verifies GetYear is a pure read: it serves whatever
 // the daemon persisted across the calendar year, never recomputes, and
 // rolls the stored months into the year totals.
