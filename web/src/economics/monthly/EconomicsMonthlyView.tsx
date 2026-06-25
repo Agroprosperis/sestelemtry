@@ -31,7 +31,9 @@ import {
   formatUah,
 } from './format'
 import {
-  buildNarrative,
+  type AiCard,
+  type AiPanel,
+  buildAiPanel,
   HOURS,
   heatTier,
   PERIOD_WORDS,
@@ -50,18 +52,16 @@ export function EconomicsMonthlyView({ data, organizationID }: Props) {
   return (
     <>
       <MonthlyKpis totals={t} />
+      <MonthlyAiAnalysis totals={t} days={data.days} organizationID={organizationID} month={data.month} />
       <div className="economics-month-grid2">
         <MonthlyFinance totals={t} />
         <MonthlyWaterfall totals={t} />
       </div>
       <div className="economics-month-grid2">
-        <MonthlyBalance totals={t} />
-        <MonthlyAiAnalysis totals={t} days={data.days} organizationID={organizationID} month={data.month} />
-      </div>
-      <div className="economics-month-grid2">
         <MonthlyTrend days={data.days} totals={t} />
-        <MonthlyHeatmap margins={data.hourly_margin} />
+        <MonthlyBalance totals={t} />
       </div>
+      <MonthlyHeatmap margins={data.hourly_margin} />
       <MonthlyDailyTable days={data.days} totals={t} organizationID={organizationID} month={data.month} />
     </>
   )
@@ -176,7 +176,7 @@ export function MonthlyFinance({ totals, scope = 'month' }: { totals: EconomicsM
           value={formatUah(totals.min_effect_day.effect_uah)}
           note={totals.min_effect_day.date ? formatDayLabel(totals.min_effect_day.date) : '—'}
         />
-        <MiniCard label="Окупність за темпом" value="—" note="потрібні дані CAPEX" />
+        <MiniCard label="Розряд УЗЕ" value={formatMwh(totals.ess_discharged_kwh)} note={w.per} />
       </div>
     </section>
   )
@@ -418,12 +418,88 @@ export function OptimumInfo({ tip }: { tip: string }) {
   )
 }
 
+// --- Shared AI panel blocks ---
+//
+// AiLead renders the management lead: the bold one-line summary, the
+// numbered brief, the data sources and the side "result" panel. AiCardGrid
+// renders the action cards. Both are driven entirely by the deterministic
+// AiPanel model (see buildAiPanel in ./rollup) and are reused by the
+// annual view.
+
+export function AiLead({ panel }: { panel: AiPanel }) {
+  return (
+    <div className="economics-ai-lead">
+      <div className="economics-ai-lead-text">
+        <strong className="economics-ai-summary">{panel.summaryLine}</strong>
+        <div className="economics-ai-brief" aria-label="Короткий підсумок AI-аналізу">
+          {panel.briefRows.map((row, i) => (
+            <div key={row.label} className={`economics-ai-brief-row ${row.kind}`}>
+              <span className="economics-ai-brief-num">{i + 1}</span>
+              <span>
+                <b>{row.label}</b>
+                {row.text}
+              </span>
+            </div>
+          ))}
+        </div>
+        <div className="economics-ai-sources" aria-label="Джерела аналізу">
+          <span className="economics-ai-source-label">На основі даних:</span>
+          {panel.sources.map((s) => (
+            <span key={s}>{s}</span>
+          ))}
+        </div>
+        {panel.weatherNote ? <p className="economics-ai-weather-note">{panel.weatherNote}</p> : null}
+      </div>
+      <div className="economics-ai-result">
+        {panel.result.map((r) => (
+          <div key={r.label} className="economics-ai-result-row">
+            <span>{r.label}</span>
+            <strong className={r.amber ? 'economics-ai-amber' : undefined}>{r.value}</strong>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+export function AiCardGrid({
+  cards,
+  detailHref,
+  detailLabel,
+}: {
+  cards: AiCard[]
+  detailHref: string
+  detailLabel: string
+}) {
+  return (
+    <div className="economics-ai-grid">
+      {cards.map((c) => (
+        <div key={c.title} className={`economics-ai-card ${c.variant}`}>
+          <span className="economics-ai-status">{c.status}</span>
+          <h4 className="economics-ai-card-title">{c.title}</h4>
+          <div className="economics-ai-impact">{c.impact}</div>
+          <div className="economics-ai-action">{c.action}</div>
+          {c.chips.length > 0 ? (
+            <div className="economics-ai-days">
+              {c.chips.map((chip) => (
+                <span key={chip}>{chip}</span>
+              ))}
+            </div>
+          ) : null}
+          <a className="economics-ai-detail-link" href={detailHref}>
+            {detailLabel}
+          </a>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 // --- Monthly AI analysis ---
 //
-// A management-facing narrative card that replaces the legacy "УЗЕ: факт
-// vs оптимум" widget. The narrative text is fully deterministic (built
-// only from already-computed figures) and shared with the annual view
-// via buildNarrative in ./rollup.
+// A management-facing panel: deterministic lead + result summary, three
+// action cards (elevator schedule, battery timing, weak day), and the
+// per-day ESS reserve decomposition kept as a collapsible detail.
 
 function MonthlyAiAnalysis({
   totals,
@@ -437,9 +513,14 @@ function MonthlyAiAnalysis({
   month: string
 }) {
   const [openDate, setOpenDate] = useState<string | null>(null)
-  const hasOptimum = totals.ess_optimum_uah > 0
   const heading = `${formatOrganizationLabel(organizationID)} · ${formatMonthTitle(month)}`
-  const narrative = useMemo(() => buildNarrative(totals, heading), [totals, heading])
+  const panel = useMemo(() => {
+    const weakest =
+      totals.min_effect_day && totals.min_effect_day.date
+        ? { label: formatDayLabel(totals.min_effect_day.date), sub: formatUah(totals.min_effect_day.effect_uah) }
+        : null
+    return buildAiPanel(totals, { heading, scope: 'month', periodLabel: formatMonthTitle(month), weakest })
+  }, [totals, heading, month])
 
   const rows = useMemo(
     () =>
@@ -460,47 +541,13 @@ function MonthlyAiAnalysis({
         <span className="economics-ai-badge">управлінський висновок</span>
       </div>
 
-      <div className="economics-ai-body">
-        <p className="economics-ai-summary">{narrative.title}</p>
-        <div className="economics-ai-section">
-          <span className="economics-ai-label">Як пройшов місяць</span>
-          <p>{narrative.howItWent}</p>
-        </div>
-        <div className="economics-ai-section">
-          <span className="economics-ai-label">Головний резерв</span>
-          <p>{narrative.mainReserve}</p>
-        </div>
-        <div className="economics-ai-section">
-          <span className="economics-ai-label">Що покращити</span>
-          <p>{narrative.toImprove}</p>
-        </div>
-        <div className="economics-ai-chips">
-          <span className="economics-ai-chip">телеметрія SmartLogger</span>
-          <span className="economics-ai-chip">РДН: Оператор ринку</span>
-        </div>
-      </div>
-
-      <div className="economics-ai-facts">
-        <div className="economics-ai-fact">
-          <span>Ефект проєкту</span>
-          <b className={signClass(totals.effect_uah)}>{formatUah(totals.effect_uah)}</b>
-        </div>
-        <div className="economics-ai-fact">
-          <span>EBITDA</span>
-          <b className={signClass(totals.ebitda_uah)}>{formatUah(totals.ebitda_uah)}</b>
-        </div>
-        <div className="economics-ai-fact">
-          <span>Факт УЗЕ / оптимум</span>
-          <b>{hasOptimum ? formatPercent(totals.ess_captured_share) : '—'}</b>
-        </div>
-        <div className="economics-ai-fact">
-          <span>Оцінка резерву</span>
-          <b className="economics-ai-amber">{formatUah(totals.ess_reserve_uah)}</b>
-        </div>
-      </div>
+      <AiLead panel={panel} />
+      <AiCardGrid cards={panel.cards} detailHref="#economics-detail-table" detailLabel="Денна деталізація ↓" />
 
       {rows.length > 0 ? (
-        <div className="economics-ai-reserve">
+        <details className="economics-ai-reserve-details">
+          <summary>Деталізація резерву УЗЕ по днях</summary>
+          <div className="economics-ai-reserve">
           <div className="economics-ai-reserve-head">
             <span className="economics-ai-label amber">
               Резерв · неефективне використання УЗЕ
@@ -552,7 +599,8 @@ function MonthlyAiAnalysis({
             Оптимум — найкращий диспетчинг у межах фактично продемонстрованих
             можливостей УЗЕ (потужність, діапазон SOC, ККД виведені з даних місяця).
           </p>
-        </div>
+          </div>
+        </details>
       ) : (
         <p className="economics-month-empty-note">Недостатньо активності УЗЕ в місяці для оцінки оптимуму.</p>
       )}
@@ -998,7 +1046,7 @@ function MonthlyDailyTable({
   const pvSelf = totals.pv_to_load_kwh + totals.pv_to_ess_kwh
   const selfShare = totals.pv_kwh > 0 ? pvSelf / totals.pv_kwh : 0
   return (
-    <section className="economics-table-wrap" aria-label="Денна деталізація місяця">
+    <section id="economics-detail-table" className="economics-table-wrap" aria-label="Денна деталізація місяця">
       <div className="economics-month-section-head">
         <h3>
           Денна деталізація місяця

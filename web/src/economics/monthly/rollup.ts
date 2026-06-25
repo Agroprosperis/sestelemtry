@@ -118,6 +118,189 @@ export function buildNarrative(
   return { title, howItWent, mainReserve, toImprove }
 }
 
+// uahShort renders a compact "N тис. ₴" / "N млн ₴" amount for the AI
+// impact chips; small amounts fall back to the full formatter.
+export function uahShort(v: number): string {
+  const a = Math.abs(v)
+  if (a >= 1_000_000) {
+    return `${(v / 1_000_000).toLocaleString('uk-UA', { maximumFractionDigits: 1 })} млн ₴`
+  }
+  if (a >= 1000) {
+    return `${Math.round(v / 1000).toLocaleString('uk-UA')} тис. ₴`
+  }
+  return formatUah(v)
+}
+
+// AI panel model — the deterministic management narrative shared by the
+// month and year views. All text is built from already-computed figures.
+export type AiBriefRow = { kind: 'summary' | 'reserve' | 'action'; label: string; text: string }
+export type AiResultRow = { label: string; value: string; amber?: boolean }
+export type AiCardVariant = 'plan' | 'warn' | 'context'
+export type AiCard = {
+  variant: AiCardVariant
+  status: string
+  title: string
+  impact: string
+  action: string
+  chips: string[]
+}
+export type AiReserveSplit = { elevator: number; ess: number; total: number }
+export type AiPanel = {
+  summaryLine: string
+  briefRows: AiBriefRow[]
+  sources: string[]
+  weatherNote?: string
+  result: AiResultRow[]
+  cards: AiCard[]
+  reserves: AiReserveSplit
+}
+
+// reserveSplit estimates the two headline opportunities: shifting
+// flexible daytime load to consume PV that is currently exported
+// (elevator schedule) valued at the import–export price gap, and the
+// confirmed ESS dispatch reserve from the optimum model.
+export function reserveSplit(totals: EconomicsMonthlyTotals): AiReserveSplit {
+  const priceGap = Math.max(0, totals.avg_import_price_uah_per_kwh - totals.avg_export_price_uah_per_kwh)
+  const shiftableKwh = Math.min(totals.pv_to_grid_kwh, totals.grid_to_load_kwh)
+  const elevator = shiftableKwh * priceGap
+  const ess = Math.max(0, totals.ess_reserve_uah)
+  return { elevator, ess, total: elevator + ess }
+}
+
+// buildAiPanel composes the full AI narrative for a period. periodLabel
+// is the human period ("Травень 2026" / "Липень 2025 — Травень 2026"),
+// weakest is the weakest day (month view) used for the context card, and
+// monthsCount feeds the year summary / sources.
+export function buildAiPanel(
+  totals: EconomicsMonthlyTotals,
+  opts: {
+    heading: string
+    scope: PeriodScope
+    periodLabel: string
+    weakest?: { label: string; sub: string } | null
+    monthsCount?: number
+  },
+): AiPanel {
+  const r = reserveSplit(totals)
+  const exportHeavy = totals.grid_export_kwh > totals.load_kwh
+  const consumption = totals.pv_to_load_kwh + totals.ess_to_load_kwh + totals.grid_to_load_kwh
+  const captured = totals.ess_optimum_uah > 0 ? totals.ess_captured_share : 0
+
+  if (opts.scope === 'year') {
+    const months = opts.monthsCount ?? 0
+    return {
+      summaryLine: `${opts.heading}: за ${months} міс. телеметрії СЕС ${formatMwh(totals.pv_kwh)}, ефект проєкту ${formatUah(totals.effect_uah)}.`,
+      briefRows: [
+        {
+          kind: 'summary',
+          label: 'Як пройшов період',
+          text: `СЕС ${formatMwh(totals.pv_kwh)}, споживання ${formatMwh(consumption)}, імпорт ${formatMwh(totals.grid_import_kwh)} / експорт ${formatMwh(totals.grid_export_kwh)}. Розрахунок за архівом FusionSolar + РДН.`,
+        },
+        {
+          kind: 'reserve',
+          label: 'Головний резерв',
+          text: `Перенесення гнучких робіт на денні години — ${uahShort(r.elevator)} за період. Помісячна деталізація нижче.`,
+        },
+      ],
+      sources: ['FusionSolar / SmartLogger', 'РДН: Оператор ринку', `${months} місячних зрізів`],
+      weatherNote:
+        'Архів FusionSolar: повна телеметрія СЕС/УЗЕ/мережі за весь період. Можливі невеликі пробіли після імпорту.',
+      result: [
+        { label: 'Період аналізу', value: opts.periodLabel },
+        { label: 'Резерв графіка', value: uahShort(r.elevator), amber: true },
+        { label: 'Резерв таймінгу УЗЕ', value: uahShort(r.ess) },
+        { label: 'Сумарний резерв', value: uahShort(r.total) },
+      ],
+      cards: [
+        {
+          variant: 'plan',
+          status: 'найбільший резерв',
+          title: 'Графік робіт елеватора',
+          impact: uahShort(r.elevator),
+          action: `За період експортовано ${formatMwh(totals.grid_export_kwh)} і куплено ${formatMwh(totals.grid_import_kwh)} — велика частина СЕС пішла в мережу замість денного навантаження.`,
+          chips: [`експорт ${formatMwh(totals.grid_export_kwh)}`, `імпорт ${formatMwh(totals.grid_import_kwh)}`],
+        },
+        {
+          variant: 'warn',
+          status: 'режим УЗЕ',
+          title: 'Таймінг батареї',
+          impact: uahShort(r.ess),
+          action:
+            totals.ess_optimum_uah > 0
+              ? `УЗЕ захопила ${formatPercent(captured)} доступного оптимуму. Основні втрати — на переходах між датами, коли розряд потрапляв у нижчі години РДН.`
+              : 'Недостатньо активності УЗЕ за період для оцінки оптимуму.',
+          chips: [`резерв ${uahShort(r.ess)}`, `розряд ${formatMwh(totals.ess_discharged_kwh)}`],
+        },
+      ],
+      reserves: r,
+    }
+  }
+
+  // Month scope.
+  const reserveText = exportHeavy
+    ? `Високий експорт СЕС при низькому денному навантаженні — перенесення гнучких робіт дає до ${uahShort(r.elevator)} за місяць.`
+    : `Головний резерв — таймінг УЗЕ ${uahShort(r.ess)}: розряд не завжди потрапляв у найдорожчі години.`
+  const actionText = exportHeavy
+    ? `Пріоритет — графік елеватора в сонячні години. Резерв таймінгу УЗЕ — ${uahShort(r.ess)}.`
+    : `Зміщувати розряд УЗЕ ближче до вечірнього піку. Резерв графіка робіт — ${uahShort(r.elevator)}.`
+
+  const cards: AiCard[] = [
+    {
+      variant: 'plan',
+      status: 'найбільший резерв',
+      title: 'Графік робіт елеватора',
+      impact: `до ${uahShort(r.elevator)}`,
+      action: `За місяць експортовано ${formatMwh(totals.grid_export_kwh)} при імпорті ${formatMwh(totals.grid_import_kwh)} — велика частина СЕС пішла в мережу.`,
+      chips: [
+        `експорт ${formatMwh(totals.grid_export_kwh)}`,
+        `імпорт ${formatMwh(totals.grid_import_kwh)}`,
+        ...(opts.weakest ? [`${opts.weakest.label}: ${opts.weakest.sub}`] : []),
+      ],
+    },
+    {
+      variant: 'warn',
+      status: 'режим УЗЕ',
+      title: 'Добовий план батареї',
+      impact: `≈${uahShort(r.ess)}`,
+      action:
+        'Резерв таймінгу розряду — ковзне планування на 24–36 годин, а не окремими календарними днями.',
+      chips: [`резерв ≈${uahShort(r.ess)}`, `розряд ${formatMwh(totals.ess_discharged_kwh)}`],
+    },
+  ]
+  if (opts.weakest) {
+    cards.push({
+      variant: 'context',
+      status: 'контекст',
+      title: 'Слабкий день СЕС',
+      impact: `${opts.weakest.label} · низька СЕС`,
+      action: `Найслабший день за ефектом — ${opts.weakest.label} (${opts.weakest.sub}). Деталі в таблиці внизу.`,
+      chips: [],
+    })
+  }
+
+  return {
+    summaryLine: `${opts.heading}: СЕС ${formatMwh(totals.pv_kwh)}, ефект ${formatUah(totals.effect_uah)}, експорт ${formatMwh(totals.grid_export_kwh)}.`,
+    briefRows: [
+      {
+        kind: 'summary',
+        label: 'Як пройшов місяць',
+        text: `СЕС ${formatMwh(totals.pv_kwh)}, імпорт ${formatMwh(totals.grid_import_kwh)} / експорт ${formatMwh(totals.grid_export_kwh)}. Розрахунок за FusionSolar + РДН.`,
+      },
+      { kind: 'reserve', label: 'Головний резерв', text: reserveText },
+      { kind: 'action', label: 'Що покращити', text: actionText },
+    ],
+    sources: ['телеметрія SmartLogger', 'РДН: Оператор ринку', 'погодний архів'],
+    result: [
+      { label: 'Період аналізу', value: opts.periodLabel },
+      { label: 'Основний резерв', value: `до ${uahShort(r.elevator)}`, amber: true },
+      { label: 'УЗЕ підтверджено', value: `≈${uahShort(r.ess)}` },
+      { label: 'Разом до дій', value: `до ${uahShort(r.total)}` },
+    ],
+    cards,
+    reserves: r,
+  }
+}
+
 // heatTier maps an ESS discharge margin (UAH/kWh) to its heatmap colour
 // tier; null / non-finite values render an empty cell.
 export function heatTier(v: number | null): string {

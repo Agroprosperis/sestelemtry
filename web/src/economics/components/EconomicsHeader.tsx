@@ -41,11 +41,11 @@ export type EconomicsRange = 'day' | 'month' | 'year'
 function rangeTitle(range: EconomicsRange): string {
   switch (range) {
     case 'year':
-      return 'Річна економіка (СЕС + УЗЕ)'
+      return 'Річний дашборд СЕС + УЗЕ'
     case 'month':
-      return 'Місячна економіка (СЕС + УЗЕ)'
+      return 'Місячний дашборд СЕС + УЗЕ'
     default:
-      return 'Добова економіка (СЕС + УЗЕ)'
+      return 'Добовий дашборд СЕС + УЗЕ'
   }
 }
 

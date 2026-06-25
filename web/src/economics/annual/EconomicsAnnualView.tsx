@@ -18,13 +18,14 @@ import type {
 } from '../../api'
 import { formatOrganizationLabel } from '../../dashboard/config'
 import {
+  AiLead,
   MonthlyBalance,
   MonthlyFinance,
   MonthlyKpis,
   MonthlyWaterfall,
   OptimumInfo,
 } from '../monthly/EconomicsMonthlyView'
-import { buildNarrative, HOURS, heatTier, signClass } from '../monthly/rollup'
+import { buildAiPanel, HOURS, heatTier, reserveSplit, signClass, uahShort } from '../monthly/rollup'
 import {
   formatCycles,
   formatKwh,
@@ -55,24 +56,22 @@ export function EconomicsAnnualView({ data, organizationID, onSelectMonth }: Pro
   return (
     <>
       <MonthlyKpis totals={t} scope="year" />
-      <QuarterCards quarters={data.quarters} />
+      <QuarterCards quarters={data.quarters} period={data.period} />
       <div className="economics-month-grid2">
         <MonthlyFinance totals={t} scope="year" />
         <MonthlyWaterfall totals={t} scope="year" />
       </div>
-      <div className="economics-month-grid2">
-        <MonthlyBalance totals={t} scope="year" />
-        <AnnualAiAnalysis
-          totals={t}
-          months={withData}
-          organizationID={organizationID}
-          period={data.period}
-        />
-      </div>
+      <AnnualAiAnalysis
+        totals={t}
+        months={withData}
+        organizationID={organizationID}
+        period={data.period}
+      />
       <div className="economics-month-grid2">
         <AnnualTrend months={data.months} totals={t} onSelectMonth={onSelectMonth} />
-        <MonthHourHeatmap margins={data.monthly_margin} />
+        <MonthlyBalance totals={t} scope="year" />
       </div>
+      <MonthHourHeatmap margins={data.monthly_margin} />
       <AnnualMonthlyTable
         months={withData}
         totals={t}
@@ -86,21 +85,27 @@ export function EconomicsAnnualView({ data, organizationID, onSelectMonth }: Pro
 
 // --- Quarter cards (SPEC §3.3) ---
 
-function QuarterCards({ quarters }: { quarters: EconomicsAnnualQuarter[] }) {
+const Q_ROMAN = ['I', 'II', 'III', 'IV']
+const Q_COLORS = ['#2f6fed', '#12b76a', '#f59e0b', '#7c3aed']
+
+function QuarterCards({ quarters, period }: { quarters: EconomicsAnnualQuarter[]; period: string }) {
+  const year = period.slice(0, 4)
   return (
-    <section className="economics-kpis" aria-label="Поквартальний підсумок">
-      <div className="kpi-strip">
-        {quarters.map((q) => (
-          <div
+    <section className="economics-quarter-grid" aria-label="Квартальні підсумки">
+      {quarters.map((q) => {
+        const i = (q.quarter - 1) % 4
+        return (
+          <article
             key={q.quarter}
-            className={q.effect_uah >= 0 ? 'kpi-card kpi-card-success' : 'kpi-card kpi-card-danger'}
+            className="economics-card economics-quarter-card"
+            style={{ borderTop: `3px solid ${Q_COLORS[i]}` }}
           >
-            <span className="kpi-label">Q{q.quarter} · ефект проєкту</span>
-            <span className="kpi-value">{formatUah(q.effect_uah)}</span>
-            <span className="kpi-sub">СЕС {formatMwh(q.pv_kwh)}</span>
-          </div>
-        ))}
-      </div>
+            <div className="economics-quarter-label">{Q_ROMAN[i]} кв. {year}</div>
+            <div className={`economics-quarter-value ${signClass(q.effect_uah)}`}>{formatUah(q.effect_uah)}</div>
+            <div className="economics-quarter-note">ефект · {formatMwh(q.pv_kwh)} СЕС</div>
+          </article>
+        )
+      })}
     </section>
   )
 }
@@ -315,7 +320,11 @@ function MonthHourHeatmap({ margins }: { margins: EconomicsAnnualMonthMargin[] }
   )
 }
 
-// --- Annual AI analysis (reuses the deterministic monthly narrative) ---
+// --- Annual AI analysis ---
+//
+// Same deterministic management panel as the month view (lead + result),
+// with the two headline opportunities (elevator schedule, battery timing)
+// rendered as accordion items that each expand into a per-month list.
 
 function AnnualAiAnalysis({
   totals,
@@ -328,19 +337,39 @@ function AnnualAiAnalysis({
   organizationID: string
   period: string
 }) {
-  const hasOptimum = totals.ess_optimum_uah > 0
   const heading = `${formatOrganizationLabel(organizationID)} · ${formatYearTitle(period)}`
-  const narrative = useMemo(() => buildNarrative(totals, heading, 'рік'), [totals, heading])
+  const panel = useMemo(
+    () =>
+      buildAiPanel(totals, {
+        heading,
+        scope: 'year',
+        periodLabel: formatYearTitle(period),
+        monthsCount: months.length,
+      }),
+    [totals, heading, period, months.length],
+  )
 
-  // Every month of the period with modelled optimum (≤ 12 rows), sorted
-  // by reserve — SPEC §3.4 wants the full month list, not a top-N slice.
-  const rows = useMemo(
+  // Per-month elevator-schedule reserve (PV exported vs grid-served load),
+  // largest first — the breakdown behind the headline schedule reserve.
+  const scheduleMonths = useMemo(
+    () =>
+      months
+        .map((m) => ({ month: m.month, reserve: reserveSplit(m.totals).elevator }))
+        .filter((x) => x.reserve > 0)
+        .sort((a, b) => b.reserve - a.reserve),
+    [months],
+  )
+
+  // Per-month ESS dispatch reserve (optimum − fact), largest first.
+  const bessMonths = useMemo(
     () =>
       months
         .filter((m) => m.totals.ess_optimum_uah > 0)
         .sort((a, b) => b.totals.ess_reserve_uah - a.totals.ess_reserve_uah),
     [months],
   )
+
+  const [plan, warn] = panel.cards
 
   return (
     <section className="economics-card economics-month-section economics-ai" aria-label="AI-аналіз року">
@@ -349,94 +378,96 @@ function AnnualAiAnalysis({
           <span className="economics-ai-mark" aria-hidden="true">AI</span>
           <h3 className="economics-month-section-title">AI-аналіз року</h3>
         </div>
-        <span className="economics-ai-badge">управлінський висновок</span>
+        <span className="economics-ai-badge">річний управлінський висновок</span>
       </div>
 
-      <div className="economics-ai-body">
-        <p className="economics-ai-summary">{narrative.title}</p>
-        <div className="economics-ai-section">
-          <span className="economics-ai-label">Як пройшов рік</span>
-          <p>{narrative.howItWent}</p>
-        </div>
-        <div className="economics-ai-section">
-          <span className="economics-ai-label">Головний резерв</span>
-          <p>{narrative.mainReserve}</p>
-        </div>
-        <div className="economics-ai-section">
-          <span className="economics-ai-label">Що покращити</span>
-          <p>{narrative.toImprove}</p>
-        </div>
-        <div className="economics-ai-chips">
-          <span className="economics-ai-chip">телеметрія SmartLogger</span>
-          <span className="economics-ai-chip">РДН: Оператор ринку</span>
-        </div>
-      </div>
+      <AiLead panel={panel} />
 
-      <div className="economics-ai-facts">
-        <div className="economics-ai-fact">
-          <span>Ефект проєкту</span>
-          <b className={signClass(totals.effect_uah)}>{formatUah(totals.effect_uah)}</b>
-        </div>
-        <div className="economics-ai-fact">
-          <span>EBITDA</span>
-          <b className={signClass(totals.ebitda_uah)}>{formatUah(totals.ebitda_uah)}</b>
-        </div>
-        <div className="economics-ai-fact">
-          <span>Факт УЗЕ / оптимум</span>
-          <b>{hasOptimum ? formatPercent(totals.ess_captured_share) : '—'}</b>
-        </div>
-        <div className="economics-ai-fact">
-          <span>Оцінка резерву</span>
-          <b className="economics-ai-amber">{formatUah(totals.ess_reserve_uah)}</b>
-        </div>
-      </div>
-
-      {rows.length > 0 ? (
-        <div className="economics-ai-reserve">
-          <div className="economics-ai-reserve-head">
-            <span className="economics-ai-label amber">
-              Резерв · неефективне використання УЗЕ по місяцях
-              <OptimumInfo tip="Оптимум − Факт за місяць. Це не збиток, а оцінка недовикористаної можливості УЗЕ (модельний максимум у межах фактичних потужності, SOC, ККД та зносу)." />
-            </span>
-            <div className="economics-optimum-legend">
-              <span><i style={{ background: '#7c3aed' }} />фактичний ефект</span>
-              <span><i style={{ background: '#f59e0b' }} />недовикористано</span>
-              <span><i style={{ background: '#e5e7eb' }} />оптимум</span>
-            </div>
-          </div>
-          <div className="economics-optimum-list">
-            <div className="economics-optimum-row head">
-              <span>Місяць</span>
-              <span>захоплення</span>
-              <span>опт.</span>
-              <span>факт</span>
-              <span>резерв</span>
-            </div>
-            {rows.map((m) => {
-              const o = m.totals
-              const factShare = o.ess_optimum_uah > 0 ? Math.max(0, Math.min(1, o.ess_fact_uah / o.ess_optimum_uah)) : 0
-              return (
-                <div key={m.month} className="economics-optimum-row">
-                  <strong>{formatMonthTitle(m.month)}</strong>
-                  <div className="economics-capture-bar">
-                    <span className="fact" style={{ width: `${factShare * 100}%` }} />
-                    <span className="missed" style={{ width: `${(1 - factShare) * 100}%` }} />
+      <div className="economics-ai-accordion">
+        {plan ? (
+          <details className="economics-ai-acc-item plan" open>
+            <summary>
+              <span className="economics-ai-status">{plan.status}</span>
+              <span className="economics-ai-card-title">{plan.title}</span>
+              <span className="economics-ai-impact">{plan.impact}</span>
+            </summary>
+            <div className="economics-ai-acc-body">
+              <p className="economics-ai-action">{plan.action}</p>
+              {scheduleMonths.length > 0 ? (
+                <>
+                  <div className="economics-ai-top-months-head">Резерв переносу робіт по місяцях</div>
+                  <div className="economics-ai-days">
+                    {scheduleMonths.map((x) => (
+                      <span key={x.month}>
+                        {formatMonthShort(x.month)} · {uahShort(x.reserve)}
+                      </span>
+                    ))}
                   </div>
-                  <span>{formatUah(o.ess_optimum_uah)}</span>
-                  <span className="good">{formatUah(o.ess_fact_uah)}</span>
-                  <span className="amber">{formatUah(o.ess_reserve_uah)}</span>
+                </>
+              ) : null}
+            </div>
+          </details>
+        ) : null}
+
+        {warn ? (
+          <details className="economics-ai-acc-item warn">
+            <summary>
+              <span className="economics-ai-status">{warn.status}</span>
+              <span className="economics-ai-card-title">{warn.title}</span>
+              <span className="economics-ai-impact">{warn.impact}</span>
+            </summary>
+            <div className="economics-ai-acc-body">
+              <p className="economics-ai-action">{warn.action}</p>
+              {bessMonths.length > 0 ? (
+                <div className="economics-ai-reserve">
+                  <div className="economics-ai-reserve-head">
+                    <span className="economics-ai-label amber">
+                      Резерв таймінгу УЗЕ по місяцях
+                      <OptimumInfo tip="Оптимум − Факт за місяць. Це не збиток, а оцінка недовикористаної можливості УЗЕ (модельний максимум у межах фактичних потужності, SOC, ККД та зносу)." />
+                    </span>
+                    <div className="economics-optimum-legend">
+                      <span><i style={{ background: '#7c3aed' }} />фактичний ефект</span>
+                      <span><i style={{ background: '#f59e0b' }} />недовикористано</span>
+                      <span><i style={{ background: '#e5e7eb' }} />оптимум</span>
+                    </div>
+                  </div>
+                  <div className="economics-optimum-list">
+                    <div className="economics-optimum-row head">
+                      <span>Місяць</span>
+                      <span>захоплення</span>
+                      <span>опт.</span>
+                      <span>факт</span>
+                      <span>резерв</span>
+                    </div>
+                    {bessMonths.map((m) => {
+                      const o = m.totals
+                      const factShare = o.ess_optimum_uah > 0 ? Math.max(0, Math.min(1, o.ess_fact_uah / o.ess_optimum_uah)) : 0
+                      return (
+                        <div key={m.month} className="economics-optimum-row">
+                          <strong>{formatMonthTitle(m.month)}</strong>
+                          <div className="economics-capture-bar">
+                            <span className="fact" style={{ width: `${factShare * 100}%` }} />
+                            <span className="missed" style={{ width: `${(1 - factShare) * 100}%` }} />
+                          </div>
+                          <span>{formatUah(o.ess_optimum_uah)}</span>
+                          <span className="good">{formatUah(o.ess_fact_uah)}</span>
+                          <span className="amber">{formatUah(o.ess_reserve_uah)}</span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                  <p className="economics-month-muted economics-optimum-note">
+                    Оптимум — найкращий диспетчинг у межах фактично продемонстрованих
+                    можливостей УЗЕ (потужність, діапазон SOC, ККД виведені з даних кожного місяця).
+                  </p>
                 </div>
-              )
-            })}
-          </div>
-          <p className="economics-month-muted economics-optimum-note">
-            Оптимум — найкращий диспетчинг у межах фактично продемонстрованих
-            можливостей УЗЕ (потужність, діапазон SOC, ККД виведені з даних кожного місяця).
-          </p>
-        </div>
-      ) : (
-        <p className="economics-month-empty-note">Недостатньо активності УЗЕ за рік для оцінки оптимуму.</p>
-      )}
+              ) : (
+                <p className="economics-month-empty-note">Недостатньо активності УЗЕ за рік для оцінки оптимуму.</p>
+              )}
+            </div>
+          </details>
+        ) : null}
+      </div>
     </section>
   )
 }
@@ -513,7 +544,7 @@ function AnnualMonthlyTable({
   const pvSelf = totals.pv_to_load_kwh + totals.pv_to_ess_kwh
   const selfShare = totals.pv_kwh > 0 ? pvSelf / totals.pv_kwh : 0
   return (
-    <section className="economics-table-wrap" aria-label="Помісячна деталізація року">
+    <section id="economics-detail-table" className="economics-table-wrap" aria-label="Помісячна деталізація року">
       <div className="economics-month-section-head">
         <h3>
           Помісячна деталізація року
