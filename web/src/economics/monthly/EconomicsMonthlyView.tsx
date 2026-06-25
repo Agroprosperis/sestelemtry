@@ -74,9 +74,9 @@ export function MonthlyKpis({ totals, scope = 'month' }: { totals: EconomicsMont
   const avoidedImportKwh = totals.pv_to_load_kwh + totals.ess_to_load_kwh
   const pvSelfConsumed = totals.pv_to_load_kwh + totals.pv_to_ess_kwh
   const pvSelfShare = totals.pv_kwh > 0 ? pvSelfConsumed / totals.pv_kwh : 0
-  const effectClass = totals.effect_uah >= 0 ? 'kpi-card kpi-card-success' : 'kpi-card kpi-card-danger'
+  const ebitdaClass = totals.ebitda_uah >= 0 ? 'kpi-card kpi-card-success' : 'kpi-card kpi-card-danger'
   const essClass = totals.ess_net_uah >= 0 ? 'kpi-card kpi-card-info' : 'kpi-card kpi-card-warning'
-  const savingShare = totals.baseline_cost_uah > 0 ? totals.effect_uah / totals.baseline_cost_uah : 0
+  const savingShare = totals.baseline_cost_uah > 0 ? totals.ebitda_uah / totals.baseline_cost_uah : 0
 
   return (
     <section className="economics-kpis" aria-label={`Ключові показники ${w.of}`}>
@@ -91,10 +91,11 @@ export function MonthlyKpis({ totals, scope = 'month' }: { totals: EconomicsMont
           <span className="kpi-value">{formatUah(totals.actual_cost_uah)}</span>
           <span className="kpi-sub">імпорт − експорт + знос УЗЕ</span>
         </div>
-        <div className={effectClass}>
-          <span className="kpi-label">Ефект проєкту {w.per}</span>
-          <span className="kpi-value">{formatUah(totals.effect_uah)}</span>
-          <span className="kpi-sub">економія {formatPercent(savingShare)} від бази</span>
+        <div className={`${ebitdaClass} kpi-card-ebitda`} tabIndex={0}>
+          <span className="kpi-label">EBITDA {w.per}</span>
+          <span className="kpi-value">{formatUah(totals.ebitda_uah)}</span>
+          <span className="kpi-sub">економія {formatPercent(savingShare)} від бази · наведіть для розкладки</span>
+          <MonthlyEbitdaBreakdown totals={totals} />
         </div>
         <div className={essClass}>
           <span className="kpi-label">Реалізований ефект УЗЕ</span>
@@ -130,6 +131,51 @@ export function MonthlyKpis({ totals, scope = 'month' }: { totals: EconomicsMont
         </div>
       </div>
     </section>
+  )
+}
+
+// MonthlyEbitdaBreakdown is the revenue/expense detail shown as a
+// hover/focus popover under the EBITDA KPI card, mirroring the daily view.
+function MonthlyEbitdaBreakdown({ totals }: { totals: EconomicsMonthlyTotals }) {
+  const revenueLines = [
+    { label: 'СЕС → мережа', amount: totals.revenue_pv_export_uah },
+    { label: 'СЕС → споживання', amount: totals.revenue_pv_self_uah },
+    { label: 'УЗЕ → мережа', amount: totals.revenue_ess_export_uah },
+    { label: 'УЗЕ → споживання', amount: totals.revenue_ess_self_uah },
+  ]
+  const expenseLines = [
+    { label: 'Заряд УЗЕ із мережі', amount: totals.expense_grid_charge_uah },
+    { label: 'Знос / ресурс УЗЕ', amount: Math.max(totals.ess_degradation_cost_uah, 0) },
+  ]
+  const expenseTotal = expenseLines.reduce((acc, l) => acc + l.amount, 0)
+
+  return (
+    <div className="economics-ebitda-breakdown" role="tooltip">
+      <div className="economics-ebitda-col">
+        <div className="economics-ebitda-col-head">
+          <span>Дохід</span>
+          <span>{formatUah(totals.revenue_total_uah)}</span>
+        </div>
+        {revenueLines.map((line) => (
+          <div className="economics-ebitda-line" key={line.label}>
+            <span>{line.label}</span>
+            <b>{formatUah(line.amount)}</b>
+          </div>
+        ))}
+      </div>
+      <div className="economics-ebitda-col">
+        <div className="economics-ebitda-col-head">
+          <span>Витрати</span>
+          <span>{formatUah(expenseTotal)}</span>
+        </div>
+        {expenseLines.map((line) => (
+          <div className="economics-ebitda-line" key={line.label}>
+            <span>{line.label}</span>
+            <b>{formatUah(line.amount)}</b>
+          </div>
+        ))}
+      </div>
+    </div>
   )
 }
 
