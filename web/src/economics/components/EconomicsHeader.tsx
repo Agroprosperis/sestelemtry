@@ -19,6 +19,29 @@ function parseDateString(value: string): Date {
   return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
 }
 
+// monthShift returns the YYYY-MM that is `delta` months away from `ym`.
+function monthShift(ym: string, delta: number): string {
+  const m = /^(\d{4})-(\d{2})$/.exec(ym)
+  if (!m) return ym
+  const d = new Date(Number(m[1]), Number(m[2]) - 1 + delta, 1)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+}
+
+// monthSpan returns the inclusive count of months in [from..to].
+function monthSpan(from: string, to: string): number {
+  const f = /^(\d{4})-(\d{2})$/.exec(from)
+  const t = /^(\d{4})-(\d{2})$/.exec(to)
+  if (!f || !t) return 1
+  return (Number(t[1]) - Number(f[1])) * 12 + (Number(t[2]) - Number(f[2])) + 1
+}
+
+// currentMonth is "now" as YYYY-MM, used to cap the window's upper bound
+// and disable the "next" arrow once the window reaches the present.
+function currentMonth(): string {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+}
+
 function formatDateString(d: Date): string {
   const y = d.getFullYear()
   const mo = String(d.getMonth() + 1).padStart(2, '0')
@@ -272,29 +295,49 @@ export function EconomicsHeader({
             </button>
           </div>
           {range === 'year' ? (
-            <div className="economics-window-range" role="group" aria-label="Період аналізу">
+            <div className="economics-period-picker" role="group" aria-label="Період аналізу">
+              <button
+                type="button"
+                className="economics-period-nav"
+                aria-label="Попередній період"
+                title="Зсунути період назад"
+                onClick={() => {
+                  const len = monthSpan(windowFrom, windowTo)
+                  onWindowChange(monthShift(windowFrom, -len), monthShift(windowTo, -len))
+                }}
+              >
+                ‹
+              </button>
               <input
                 type="month"
+                className="economics-period-field"
                 aria-label="Період з"
                 value={windowFrom}
                 max={windowTo || undefined}
                 onChange={(e) => onWindowChange(e.target.value, windowTo)}
               />
-              <span className="economics-window-dash">—</span>
+              <span className="economics-period-dash">—</span>
               <input
                 type="month"
+                className="economics-period-field"
                 aria-label="Період по"
                 value={windowTo}
                 min={windowFrom || undefined}
+                max={currentMonth()}
                 onChange={(e) => onWindowChange(windowFrom, e.target.value)}
               />
               <button
                 type="button"
-                className="economics-window-reset"
-                onClick={() => onWindowChange('', '')}
-                title="Календарний рік анкера"
+                className="economics-period-nav"
+                aria-label="Наступний період"
+                title="Зсунути період вперед"
+                disabled={windowTo >= currentMonth()}
+                onClick={() => {
+                  const len = monthSpan(windowFrom, windowTo)
+                  onWindowChange(monthShift(windowFrom, len), monthShift(windowTo, len))
+                }}
               >
-                рік
+                ›
               </button>
             </div>
           ) : (

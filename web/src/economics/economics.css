@@ -2447,39 +2447,63 @@ button.economics-optimum-row.open {
   font-variant-numeric: tabular-nums;
 }
 
-/* --- Year-view sliding-period range control --- */
-.economics-window-range {
+/* --- Year-view sliding-period picker (pill with prev/next slide) --- */
+.economics-period-picker {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-}
-
-.economics-window-range input[type='month'] {
-  padding: 6px 8px;
+  gap: 2px;
+  padding: 3px 4px;
   border: 1px solid #d6dce5;
-  border-radius: 8px;
-  font-size: 13px;
-  color: #0f172a;
+  border-radius: 10px;
   background: #fff;
 }
 
-.economics-window-dash {
-  color: #94a3b8;
-}
-
-.economics-window-reset {
-  padding: 6px 10px;
-  border: 1px solid #d6dce5;
+.economics-period-nav {
+  width: 28px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
   border-radius: 8px;
-  background: #f8fafc;
-  font-size: 12px;
-  font-weight: 650;
+  font-size: 18px;
+  line-height: 1;
   color: #475569;
   cursor: pointer;
 }
 
-.economics-window-reset:hover {
+.economics-period-nav:hover:not(:disabled) {
   background: #eef2f7;
+}
+
+.economics-period-nav:disabled {
+  color: #cbd5e1;
+  cursor: default;
+}
+
+.economics-period-field {
+  border: none;
+  background: transparent;
+  font-size: 13px;
+  font-weight: 600;
+  color: #0f172a;
+  padding: 5px 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+.economics-period-field:focus {
+  outline: none;
+}
+
+.economics-period-field::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  opacity: 0.6;
+}
+
+.economics-period-dash {
+  color: #94a3b8;
+  padding: 0 2px;
 }
 
 @media (max-width: 900px) {
