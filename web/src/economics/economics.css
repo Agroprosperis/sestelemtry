@@ -2160,3 +2160,13 @@ button.economics-optimum-row.open {
   }
 }
 
+/* Annual per-month table: each data row drills down to that month's
+ * view, so flag it as interactive and highlight on hover. */
+.economics-row-clickable {
+  cursor: pointer;
+}
+
+.economics-table tbody tr.economics-row-clickable:hover td {
+  background: #eef2f7;
+}
+

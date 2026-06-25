@@ -8,9 +8,11 @@ import { EconomicsKpis } from './components/EconomicsKpis'
 import { EconomicsRecomputeModal } from './components/EconomicsRecomputeModal'
 import { EconomicsTable } from './components/EconomicsTable'
 import { EconomicsMonthlyView } from './monthly/EconomicsMonthlyView'
+import { EconomicsAnnualView } from './annual/EconomicsAnnualView'
 import './economics.css'
 import { useEconomicsData } from './useEconomicsData'
 import { useEconomicsMonthlyData } from './useEconomicsMonthlyData'
+import { useEconomicsAnnualData } from './useEconomicsAnnualData'
 import { useOrgTariffs } from './useOrgTariffs'
 
 // DamRefreshState is the small UI state machine that drives the
@@ -82,12 +84,15 @@ const LEGACY_QUERY_KEYS = [
   'ess_capacity',
 ]
 
-// readRangeFromUrl picks the period granularity (day / month). Defaults
-// to 'day' so existing links and the common case stay unchanged.
+// readRangeFromUrl picks the period granularity (day / month / year).
+// Defaults to 'day' so existing links and the common case stay unchanged.
 function readRangeFromUrl(): EconomicsRange {
   if (typeof window === 'undefined') return 'day'
   const params = new URLSearchParams(window.location.search)
-  return params.get('range') === 'month' ? 'month' : 'day'
+  const raw = params.get('range')
+  if (raw === 'month') return 'month'
+  if (raw === 'year') return 'year'
+  return 'day'
 }
 
 function updateUrl(date: string, range: EconomicsRange) {
@@ -95,8 +100,8 @@ function updateUrl(date: string, range: EconomicsRange) {
   const url = new URL(window.location.href)
   url.searchParams.set('view', 'economics')
   url.searchParams.set('anchor', date)
-  if (range === 'month') {
-    url.searchParams.set('range', 'month')
+  if (range === 'month' || range === 'year') {
+    url.searchParams.set('range', range)
   } else {
     url.searchParams.delete('range')
   }
@@ -168,6 +173,26 @@ export function EconomicsPage() {
     refreshKey,
   })
 
+  // period is the YYYY calendar year derived from the day anchor.
+  const period = date.slice(0, 4)
+  const annual = useEconomicsAnnualData({
+    organizationID: range === 'year' ? organizationID : '',
+    period: range === 'year' ? period : '',
+    refreshKey,
+  })
+
+  // jumpToMonth switches the page to the month view of the given YYYY-MM
+  // (drill-down from an annual trend bar / table row). We keep the day
+  // anchor at the first of that month so the month picker lands cleanly.
+  const jumpToMonth = useCallback(
+    (monthStr: string) => {
+      if (!/^\d{4}-\d{2}$/.test(monthStr)) return
+      setDate(`${monthStr}-01`)
+      setRange('month')
+    },
+    [setDate, setRange],
+  )
+
   const onBackToDashboard = useCallback(() => {
     if (typeof window === 'undefined') return
     const url = new URL(window.location.href)
@@ -217,7 +242,26 @@ export function EconomicsPage() {
         />
       )}
 
-      {range === 'month' ? (
+      {range === 'year' ? (
+        <>
+          {annual.error && (
+            <section className="economics-banner economics-banner-error" role="alert">
+              Не вдалося завантажити дані: {annual.error}
+            </section>
+          )}
+          {annual.loading ? (
+            <p className="economics-loading">Завантаження…</p>
+          ) : annual.year ? (
+            <EconomicsAnnualView
+              data={annual.year}
+              organizationID={organizationID}
+              onSelectMonth={jumpToMonth}
+            />
+          ) : (
+            <p className="economics-loading">Немає даних за рік.</p>
+          )}
+        </>
+      ) : range === 'month' ? (
         <>
           {monthly.error && (
             <section className="economics-banner economics-banner-error" role="alert">

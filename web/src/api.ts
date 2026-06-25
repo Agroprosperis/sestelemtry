@@ -616,6 +616,61 @@ export async function fetchEconomicsMonthly(
   return res.json()
 }
 
+// EconomicsAnnualMonthRollup is one month's contribution to the annual
+// view: the YYYY-MM label plus that month's totals (same shape as the
+// monthly dashboard, so the year trend/table reuse the fields).
+export type EconomicsAnnualMonthRollup = {
+  month: string
+  totals: EconomicsMonthlyTotals
+}
+
+// EconomicsAnnualQuarter is one quarter card: project effect + PV.
+export type EconomicsAnnualQuarter = {
+  quarter: number
+  effect_uah: number
+  pv_kwh: number
+}
+
+// EconomicsAnnualMonthMargin is one annual-heatmap row: 24 hour-of-day
+// ESS margins (UAH per kWh discharged) averaged across the month; null
+// when that hour had no discharge all month.
+export type EconomicsAnnualMonthMargin = {
+  month: string
+  hours: Array<number | null>
+}
+
+export type EconomicsAnnualResponse = {
+  organization_id: string
+  period: string
+  tz: string
+  months_with_data: number
+  totals: EconomicsMonthlyTotals
+  months: EconomicsAnnualMonthRollup[]
+  quarters: EconomicsAnnualQuarter[]
+  monthly_margin: EconomicsAnnualMonthMargin[]
+}
+
+// fetchEconomicsAnnual reads the server-computed calendar-year rollup.
+// The backend reads whatever the recompute daemon persisted, so a
+// request always returns a consistent year.
+export async function fetchEconomicsAnnual(
+  input: { organizationID: string; period: string; tz?: string },
+  signal?: AbortSignal,
+): Promise<EconomicsAnnualResponse> {
+  const url = buildURL('/api/v1/economics/annual', {
+    organization_id: input.organizationID,
+    period: input.period,
+    tz: input.tz || undefined,
+  })
+  const res = await fetch(url, { signal })
+  if (!res.ok) {
+    const body = await res.text().catch(() => '')
+    const suffix = body ? ` — ${body.trim()}` : ''
+    throw new Error(`economics/annual request failed: ${res.status}${suffix}`)
+  }
+  return res.json()
+}
+
 // EconomicsRecomputeResult mirrors internal/economics.RangeResult.
 export type EconomicsRecomputeResult = {
   from: string

@@ -1,0 +1,220 @@
+package economics
+
+import (
+	"context"
+	"math"
+	"testing"
+	"time"
+)
+
+// constTariff returns a fixed (capacity, degradation) resolver for the
+// annual aggregator tests.
+func constTariff(capacityKwh, degr float64) func(time.Time) (float64, float64) {
+	return func(time.Time) (float64, float64) { return capacityKwh, degr }
+}
+
+// TestAggregateYearSumsMonthsAndQuarters checks that the year totals are
+// the sum of the per-month rollups, that the equivalent cycles sum, that
+// the quarter cards bucket months correctly, and that the month x hour
+// marginality heatmap is built per month.
+func TestAggregateYearSumsMonthsAndQuarters(t *testing.T) {
+	loc := time.UTC
+	jan := time.Date(2026, 1, 15, 0, 0, 0, 0, loc)
+	feb := time.Date(2026, 2, 10, 0, 0, 0, 0, loc)
+	apr := time.Date(2026, 4, 5, 0, 0, 0, 0, loc)
+
+	days := []DailyRecord{
+		{
+			Day: jan, IsFinal: true,
+			Totals: DailyTotals{
+				BaselineCost: 1000, ActualCost: 400, Effect: 600, EssNet: 120,
+				Load: 500, PV: 800, GridImport: 200, GridExport: 100,
+				EssCharged: 50, EssDischarged: 40,
+				PVToLoad: 300, PVToEss: 20, PVToGrid: 80,
+				GridToLoad: 180, GridToEss: 20, EssToLoad: 30, EssToGrid: 10,
+				AvgImportPrice: 10, AvgExportPrice: 5,
+				RevenuePvExport: 40, RevenuePvSelf: 300, RevenueEssExport: 50, RevenueEssSelf: 60,
+				ExpenseGridCharge: 30, HoursWithData: 24,
+				EssAvgCostBasisEod: 7, EssResidualKwhEod: 100, EssCostBasisUahEod: 700,
+			},
+		},
+		{
+			Day: feb, IsFinal: true,
+			Totals: DailyTotals{
+				BaselineCost: 2000, ActualCost: 900, Effect: 1100, EssNet: 200,
+				Load: 600, PV: 900, GridImport: 300, GridExport: 50,
+				EssCharged: 60, EssDischarged: 50,
+				PVToLoad: 400, PVToEss: 30, PVToGrid: 20,
+				GridToLoad: 270, GridToEss: 30, EssToLoad: 40, EssToGrid: 5,
+				AvgImportPrice: 20, AvgExportPrice: 6,
+				RevenuePvExport: 12, RevenuePvSelf: 400, RevenueEssExport: 30, RevenueEssSelf: 80,
+				ExpenseGridCharge: 60, HoursWithData: 24,
+				EssAvgCostBasisEod: 9, EssResidualKwhEod: 120, EssCostBasisUahEod: 1080,
+			},
+		},
+		{
+			Day: apr, IsFinal: true,
+			Totals: DailyTotals{
+				BaselineCost: 500, ActualCost: 200, Effect: 300, EssNet: 70,
+				Load: 300, PV: 500, GridImport: 100, GridExport: 40,
+				EssCharged: 25, EssDischarged: 20,
+				PVToLoad: 150, PVToEss: 10, PVToGrid: 40,
+				GridToLoad: 90, GridToEss: 10, EssToLoad: 15, EssToGrid: 5,
+				AvgImportPrice: 15, AvgExportPrice: 4,
+				RevenuePvExport: 8, RevenuePvSelf: 150, RevenueEssExport: 12, RevenueEssSelf: 30,
+				ExpenseGridCharge: 20, HoursWithData: 24,
+				EssAvgCostBasisEod: 8, EssResidualKwhEod: 80, EssCostBasisUahEod: 640,
+			},
+		},
+	}
+
+	hourly := []HourlyRecord{
+		{HourStart: jan.Add(19 * time.Hour), Rdn: floatPtr(12), GridImport: 100, EssNet: 90, EssDischarged: 30},
+		{HourStart: feb.Add(20 * time.Hour), Rdn: floatPtr(18), GridImport: 200, EssNet: 60, EssDischarged: 20},
+	}
+
+	got := AggregateYear("2026", loc, days, hourly, constTariff(100, 0.6))
+
+	if len(got.Months) != 12 {
+		t.Fatalf("Months len = %d, want 12", len(got.Months))
+	}
+	if got.MonthsWithData != 3 {
+		t.Fatalf("MonthsWithData = %d, want 3", got.MonthsWithData)
+	}
+
+	// Year totals == sum of the months.
+	var sumEffect, sumPV, sumDischarge, sumCycles float64
+	for _, m := range got.Months {
+		sumEffect += m.Totals.Effect
+		sumPV += m.Totals.PV
+		sumDischarge += m.Totals.EssDischarged
+		sumCycles += m.Totals.EquivalentCycles
+	}
+	if math.Abs(got.Totals.Effect-sumEffect) > 1e-9 || got.Totals.Effect != 2000 {
+		t.Fatalf("year Effect = %v, want sum %v (2000)", got.Totals.Effect, sumEffect)
+	}
+	if math.Abs(got.Totals.PV-sumPV) > 1e-9 || got.Totals.PV != 2200 {
+		t.Fatalf("year PV = %v, want sum %v (2200)", got.Totals.PV, sumPV)
+	}
+	if got.Totals.EssDischarged != 110 {
+		t.Fatalf("year EssDischarged = %v, want 110", got.Totals.EssDischarged)
+	}
+	// Cycles sum per month (each uses its own capacity): 0.4 + 0.5 + 0.2.
+	if math.Abs(got.Totals.EquivalentCycles-sumCycles) > 1e-9 || math.Abs(got.Totals.EquivalentCycles-1.1) > 1e-9 {
+		t.Fatalf("year EquivalentCycles = %v, want 1.1", got.Totals.EquivalentCycles)
+	}
+
+	// kWh-weighted import price across months:
+	// (10*200 + 20*300 + 15*100) / 600 = 9500/600.
+	if math.Abs(got.Totals.AvgImportPrice-(9500.0/600.0)) > 1e-9 {
+		t.Fatalf("year AvgImportPrice = %v, want %v", got.Totals.AvgImportPrice, 9500.0/600.0)
+	}
+
+	// Quarters: Q1 = Jan+Feb, Q2 = Apr, Q3/Q4 empty.
+	if len(got.Quarters) != 4 {
+		t.Fatalf("Quarters len = %d, want 4", len(got.Quarters))
+	}
+	if got.Quarters[0].Quarter != 1 || math.Abs(got.Quarters[0].EffectUah-1700) > 1e-9 || math.Abs(got.Quarters[0].PvKwh-1700) > 1e-9 {
+		t.Fatalf("Q1 = %+v, want effect 1700 / pv 1700", got.Quarters[0])
+	}
+	if got.Quarters[1].Quarter != 2 || math.Abs(got.Quarters[1].EffectUah-300) > 1e-9 || math.Abs(got.Quarters[1].PvKwh-500) > 1e-9 {
+		t.Fatalf("Q2 = %+v, want effect 300 / pv 500", got.Quarters[1])
+	}
+	if got.Quarters[2].EffectUah != 0 || got.Quarters[3].EffectUah != 0 {
+		t.Fatalf("Q3/Q4 effect = %v/%v, want 0/0", got.Quarters[2].EffectUah, got.Quarters[3].EffectUah)
+	}
+
+	// Best / worst day across the year.
+	if got.Totals.BestDay.Date != "2026-02-10" || got.Totals.BestDay.EffectUah != 1100 {
+		t.Fatalf("BestDay = %+v, want 2026-02-10/1100", got.Totals.BestDay)
+	}
+	if got.Totals.MinEffectDay.Date != "2026-04-05" || got.Totals.MinEffectDay.EffectUah != 300 {
+		t.Fatalf("MinEffectDay = %+v, want 2026-04-05/300", got.Totals.MinEffectDay)
+	}
+
+	// EOD snapshot from the last month with data (April).
+	if got.Totals.EssResidualKwhEod != 80 || got.Totals.EssCostBasisUahEod != 640 {
+		t.Fatalf("EOD snapshot = %v/%v, want 80/640", got.Totals.EssResidualKwhEod, got.Totals.EssCostBasisUahEod)
+	}
+
+	// Monthly margin heatmap: 12 rows, 24 hours each. Jan hour 19 margin =
+	// essNet/essDischarged = 90/30 = 3; Feb hour 20 = 60/20 = 3.
+	if len(got.MonthlyMargin) != 12 {
+		t.Fatalf("MonthlyMargin rows = %d, want 12", len(got.MonthlyMargin))
+	}
+	janRow := got.MonthlyMargin[0]
+	if janRow.Month != "2026-01" || len(janRow.Hours) != 24 {
+		t.Fatalf("Jan margin row = %+v, want 2026-01 with 24 hours", janRow)
+	}
+	if h := janRow.Hours[19]; h == nil || math.Abs(*h-3) > 1e-9 {
+		t.Fatalf("Jan hour19 margin = %v, want 3", h)
+	}
+	if h := got.MonthlyMargin[1].Hours[20]; h == nil || math.Abs(*h-3) > 1e-9 {
+		t.Fatalf("Feb hour20 margin = %v, want 3", h)
+	}
+	// A no-discharge hour stays nil.
+	if h := janRow.Hours[3]; h != nil {
+		t.Fatalf("Jan hour3 margin = %v, want nil", h)
+	}
+}
+
+// TestGetYearReadOnly verifies GetYear is a pure read: it serves whatever
+// the daemon persisted across the calendar year, never recomputes, and
+// rolls the stored months into the year totals.
+func TestGetYearReadOnly(t *testing.T) {
+	loc, err := time.LoadLocation("Europe/Kyiv")
+	if err != nil {
+		t.Skip("tzdata unavailable")
+	}
+	b := &fakeBackend{
+		flows: map[string][]FlowRow{},
+		schedule: Schedule{{
+			EffectiveFrom: mustDate("1970-01-01"),
+			Tariffs:       flatTariffs,
+		}},
+	}
+	svc := NewService(b)
+
+	// Seed final days in two different months of 2020.
+	for _, d := range []struct {
+		when   time.Time
+		effect float64
+	}{
+		{time.Date(2020, 3, 10, 0, 0, 0, 0, loc), 500},
+		{time.Date(2020, 8, 20, 0, 0, 0, 0, loc), 700},
+	} {
+		b.SaveDay(context.Background(), StoredDay{
+			Day:     d.when,
+			IsFinal: true,
+			Totals:  DailyTotals{Effect: d.effect, HoursWithData: 24},
+		})
+	}
+	b.saveCount = 0
+
+	year, err := svc.GetYear(context.Background(), "org-a", "2020", loc.String())
+	if err != nil {
+		t.Fatalf("GetYear: %v", err)
+	}
+	if year.Period != "2020" {
+		t.Fatalf("Period = %q, want 2020", year.Period)
+	}
+	if b.saveCount != 0 {
+		t.Fatalf("saveCount = %d, want 0 (read path must not recompute)", b.saveCount)
+	}
+	if len(year.Months) != 12 {
+		t.Fatalf("Months = %d, want 12", len(year.Months))
+	}
+	if year.MonthsWithData != 2 {
+		t.Fatalf("MonthsWithData = %d, want 2", year.MonthsWithData)
+	}
+	if year.Totals.Effect != 1200 {
+		t.Fatalf("year Effect = %v, want 1200 (500 + 700)", year.Totals.Effect)
+	}
+	// March is Q1, August is Q3.
+	if year.Quarters[0].EffectUah != 500 {
+		t.Fatalf("Q1 effect = %v, want 500", year.Quarters[0].EffectUah)
+	}
+	if year.Quarters[2].EffectUah != 700 {
+		t.Fatalf("Q3 effect = %v, want 700", year.Quarters[2].EffectUah)
+	}
+}

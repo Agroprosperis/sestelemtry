@@ -104,3 +104,34 @@ export function formatMonthTitle(month: string): string {
   if (idx < 0 || idx >= 12) return month
   return `${MONTHS_UK[idx]} ${m[1]}`
 }
+
+// MONTHS_SHORT_UK are the three-letter month abbreviations used for the
+// annual trend's 12 columns and the per-month table.
+const MONTHS_SHORT_UK = [
+  'Січ', 'Лют', 'Бер', 'Кві', 'Тра', 'Чер',
+  'Лип', 'Сер', 'Вер', 'Жов', 'Лис', 'Гру',
+]
+
+// formatMonthShort turns YYYY-MM into "Січ" for compact axis ticks.
+export function formatMonthShort(month: string): string {
+  const m = /^(\d{4})-(\d{2})$/.exec(month)
+  if (!m) return month
+  const idx = Number(m[2]) - 1
+  if (idx < 0 || idx >= 12) return month
+  return MONTHS_SHORT_UK[idx]
+}
+
+// formatMonthName turns YYYY-MM into the full capitalised month name
+// (without the year) for the annual per-month table rows.
+export function formatMonthName(month: string): string {
+  const m = /^(\d{4})-(\d{2})$/.exec(month)
+  if (!m) return month
+  const idx = Number(m[2]) - 1
+  if (idx < 0 || idx >= 12) return month
+  return MONTHS_UK[idx]
+}
+
+// formatYearTitle turns YYYY into "РРРР рік" for the page subtitle.
+export function formatYearTitle(period: string): string {
+  return /^\d{4}$/.test(period) ? `${period} рік` : period
+}

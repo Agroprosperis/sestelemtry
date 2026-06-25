@@ -1,0 +1,577 @@
+import { useMemo } from 'react'
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  ReferenceLine,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts'
+import type {
+  EconomicsAnnualMonthMargin,
+  EconomicsAnnualMonthRollup,
+  EconomicsAnnualQuarter,
+  EconomicsAnnualResponse,
+  EconomicsMonthlyTotals,
+} from '../../api'
+import { formatOrganizationLabel } from '../../dashboard/config'
+import {
+  MonthlyBalance,
+  MonthlyFinance,
+  MonthlyKpis,
+  MonthlyWaterfall,
+  OptimumInfo,
+} from '../monthly/EconomicsMonthlyView'
+import { buildNarrative, HOURS, heatTier, signClass } from '../monthly/rollup'
+import {
+  formatCycles,
+  formatKwh,
+  formatMonthName,
+  formatMonthShort,
+  formatMonthTitle,
+  formatMwh,
+  formatMwhNumber,
+  formatPercent,
+  formatPrice,
+  formatUah,
+  formatYearTitle,
+} from '../monthly/format'
+
+type Props = {
+  data: EconomicsAnnualResponse
+  organizationID: string
+  // onSelectMonth drills down to the month view of the clicked YYYY-MM.
+  onSelectMonth: (month: string) => void
+}
+
+export function EconomicsAnnualView({ data, organizationID, onSelectMonth }: Props) {
+  const t = data.totals
+  const withData = useMemo(
+    () => data.months.filter((m) => m.totals.hours_with_data > 0),
+    [data.months],
+  )
+  return (
+    <>
+      <MonthlyKpis totals={t} scope="year" />
+      <QuarterCards quarters={data.quarters} />
+      <div className="economics-month-grid2">
+        <MonthlyFinance totals={t} scope="year" />
+        <MonthlyWaterfall totals={t} scope="year" />
+      </div>
+      <div className="economics-month-grid2">
+        <MonthlyBalance totals={t} scope="year" />
+        <AnnualAiAnalysis
+          totals={t}
+          months={withData}
+          organizationID={organizationID}
+          period={data.period}
+        />
+      </div>
+      <div className="economics-month-grid2">
+        <AnnualTrend months={data.months} totals={t} onSelectMonth={onSelectMonth} />
+        <MonthHourHeatmap margins={data.monthly_margin} />
+      </div>
+      <AnnualMonthlyTable
+        months={withData}
+        totals={t}
+        organizationID={organizationID}
+        period={data.period}
+        onSelectMonth={onSelectMonth}
+      />
+    </>
+  )
+}
+
+// --- Quarter cards (SPEC §3.3) ---
+
+function QuarterCards({ quarters }: { quarters: EconomicsAnnualQuarter[] }) {
+  return (
+    <section className="economics-kpis" aria-label="Поквартальний підсумок">
+      <div className="kpi-strip">
+        {quarters.map((q) => (
+          <div
+            key={q.quarter}
+            className={q.effect_uah >= 0 ? 'kpi-card kpi-card-success' : 'kpi-card kpi-card-danger'}
+          >
+            <span className="kpi-label">Q{q.quarter} · ефект проєкту</span>
+            <span className="kpi-value">{formatUah(q.effect_uah)}</span>
+            <span className="kpi-sub">СЕС {formatMwh(q.pv_kwh)}</span>
+          </div>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+// --- Annual energy trend (12 month stacked bars, SPEC §3.6) ---
+
+type AnnualTrendRow = {
+  month: string
+  label: string
+  hasData: boolean
+  gridImport: number
+  essDischarge: number
+  pv: number
+  gridExport: number
+  essCharge: number
+  load: number
+}
+
+const trendNumberFmt = new Intl.NumberFormat('uk-UA', { minimumFractionDigits: 1, maximumFractionDigits: 1 })
+
+const TREND_SERIES = [
+  { key: 'gridImport', name: 'з мережі', color: '#12b76a' },
+  { key: 'essDischarge', name: 'розряд УЗЕ', color: '#5fc993' },
+  { key: 'pv', name: 'виробіток СЕС', color: '#91d9aa' },
+  { key: 'gridExport', name: 'експорт у мережу', color: '#f97316' },
+  { key: 'essCharge', name: 'заряд УЗЕ', color: '#fb923c' },
+  { key: 'load', name: 'споживання', color: '#fdba74' },
+] as const
+
+type TrendTooltipProps = {
+  active?: boolean
+  payload?: { payload: AnnualTrendRow }[]
+}
+
+function TrendTooltip({ active, payload }: TrendTooltipProps) {
+  if (!active || !payload?.length) return null
+  const row = payload[0].payload
+  return (
+    <div className="economics-trend-tip">
+      <div className="economics-trend-tip-day">{formatMonthTitle(row.month)}</div>
+      {TREND_SERIES.map((s) => (
+        <div className="economics-trend-tip-row" key={s.key}>
+          <i style={{ background: s.color }} />
+          <span>{s.name}</span>
+          <b>{trendNumberFmt.format(Math.abs(row[s.key]))}</b>
+        </div>
+      ))}
+      {row.hasData ? <div className="economics-month-muted">Натисніть, щоб відкрити місяць</div> : null}
+    </div>
+  )
+}
+
+// chartClickState is the loose shape recharts hands the click callback;
+// activePayload[0].payload is the row of the clicked category.
+type ChartClickState = { activePayload?: Array<{ payload?: AnnualTrendRow }> }
+
+function AnnualTrend({
+  months,
+  totals,
+  onSelectMonth,
+}: {
+  months: EconomicsAnnualMonthRollup[]
+  totals: EconomicsMonthlyTotals
+  onSelectMonth: (month: string) => void
+}) {
+  const rows = useMemo<AnnualTrendRow[]>(
+    () =>
+      months.map((m) => ({
+        month: m.month,
+        label: formatMonthShort(m.month),
+        hasData: m.totals.hours_with_data > 0,
+        gridImport: m.totals.grid_import_kwh / 1000,
+        essDischarge: m.totals.ess_discharged_kwh / 1000,
+        pv: m.totals.pv_kwh / 1000,
+        gridExport: -m.totals.grid_export_kwh / 1000,
+        essCharge: -m.totals.ess_charged_kwh / 1000,
+        load: -m.totals.load_kwh / 1000,
+      })),
+    [months],
+  )
+
+  const pvSelf = totals.pv_to_load_kwh
+  const pvOther = totals.pv_to_grid_kwh + totals.pv_to_ess_kwh
+  const pvSelfShare = totals.pv_kwh > 0 ? pvSelf / totals.pv_kwh : 0
+  const loadFromRenewable = totals.pv_to_load_kwh + totals.ess_to_load_kwh
+  const loadFromGrid = totals.grid_to_load_kwh
+  const consumption = loadFromRenewable + loadFromGrid
+  const loadRenewableShare = consumption > 0 ? loadFromRenewable / consumption : 0
+
+  // recharts types the click arg as its internal MouseHandlerDataParam;
+  // we only need activePayload[0].payload, so read it through a cast.
+  const handleClick = (state: unknown) => {
+    const row = (state as ChartClickState | undefined)?.activePayload?.[0]?.payload
+    if (row?.hasData) onSelectMonth(row.month)
+  }
+
+  return (
+    <section className="economics-card economics-month-section" aria-label="Енергетичний тренд по місяцях">
+      <div className="economics-month-section-head">
+        <h3 className="economics-month-section-title">Енергетичний тренд по місяцях</h3>
+        <span className="economics-month-muted">МВт·год/місяць</span>
+      </div>
+      <div className="economics-trend-summary">
+        <div className="economics-trend-metric">
+          <div>
+            <strong>Вироблено СЕС: {formatMwhNumber(totals.pv_kwh)}</strong>
+            <span className="economics-trend-mwh">МВт·год</span>
+          </div>
+          <div className="economics-ratio-line">
+            <span>{formatPercent(pvSelfShare)}</span>
+            <div className="economics-ratio-bar">
+              <span style={{ width: `${pvSelfShare * 100}%`, background: '#12b76a' }} />
+              <span style={{ width: `${(1 - pvSelfShare) * 100}%`, background: '#91d9aa' }} />
+            </div>
+            <span>{formatPercent(1 - pvSelfShare)}</span>
+          </div>
+          <div className="economics-month-muted">спожито {formatMwh(pvSelf)} / експорт + заряд УЗЕ {formatMwh(pvOther)}</div>
+        </div>
+        <div className="economics-trend-metric">
+          <div>
+            <strong>Споживання об'єкта: {formatMwhNumber(consumption)}</strong>
+            <span className="economics-trend-mwh">МВт·год</span>
+          </div>
+          <div className="economics-ratio-line">
+            <span>{formatPercent(loadRenewableShare)}</span>
+            <div className="economics-ratio-bar">
+              <span style={{ width: `${loadRenewableShare * 100}%`, background: '#f97316' }} />
+              <span style={{ width: `${(1 - loadRenewableShare) * 100}%`, background: '#fdba74' }} />
+            </div>
+            <span>{formatPercent(1 - loadRenewableShare)}</span>
+          </div>
+          <div className="economics-month-muted">від СЕС+УЗЕ {formatMwh(loadFromRenewable)} / з мережі {formatMwh(loadFromGrid)}</div>
+        </div>
+      </div>
+      <div className="economics-month-chart">
+        <ResponsiveContainer width="100%" height={300}>
+          <BarChart
+            data={rows}
+            margin={{ top: 8, right: 8, bottom: 0, left: 0 }}
+            stackOffset="sign"
+            barCategoryGap="18%"
+            onClick={handleClick}
+            style={{ cursor: 'pointer' }}
+          >
+            <CartesianGrid strokeDasharray="2 5" stroke="#e7ecf2" vertical={false} />
+            <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#8a94a6' }} interval={0} tickLine={false} axisLine={false} />
+            <YAxis tick={{ fontSize: 11, fill: '#98a2b3' }} width={40} tickLine={false} axisLine={false} />
+            <Tooltip content={<TrendTooltip />} cursor={{ fill: 'rgba(148, 163, 184, 0.12)' }} />
+            <ReferenceLine y={0} stroke="#98a2b3" />
+            <Bar dataKey="pv" name="виробіток СЕС" stackId="pos" fill="#91d9aa" maxBarSize={36} />
+            <Bar dataKey="essDischarge" name="розряд УЗЕ" stackId="pos" fill="#5fc993" maxBarSize={36} />
+            <Bar dataKey="gridImport" name="з мережі" stackId="pos" fill="#12b76a" maxBarSize={36} radius={[3, 3, 0, 0]} />
+            <Bar dataKey="load" name="споживання" stackId="neg" fill="#fdba74" maxBarSize={36} />
+            <Bar dataKey="essCharge" name="заряд УЗЕ" stackId="neg" fill="#fb923c" maxBarSize={36} />
+            <Bar dataKey="gridExport" name="експорт у мережу" stackId="neg" fill="#f97316" maxBarSize={36} radius={[0, 0, 3, 3]} />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+      <div className="economics-trend-legend">
+        {TREND_SERIES.map((s) => (
+          <span key={s.key}>
+            <i style={{ background: s.color }} />
+            {s.name}
+          </span>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+// --- Month x hour-of-day marginality heatmap (SPEC §3.7) ---
+
+function MonthHourHeatmap({ margins }: { margins: EconomicsAnnualMonthMargin[] }) {
+  return (
+    <section className="economics-card economics-month-section" aria-label="Маржинальність УЗЕ по місяцях">
+      <div className="economics-month-section-head">
+        <h3 className="economics-month-section-title">Heatmap: маржинальність УЗЕ (місяць × година)</h3>
+        <span className="economics-month-muted">грн/кВт·год розряду</span>
+      </div>
+      <div className="economics-heatmap-scroll">
+        <table className="economics-heatmap">
+          <thead>
+            <tr>
+              <th className="economics-heatmap-corner">Місяць</th>
+              {HOURS.map((h) => (
+                <th key={h}>{String(h).padStart(2, '0')}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {margins.map((row) => (
+              <tr key={row.month}>
+                <th scope="row">{formatMonthShort(row.month)}</th>
+                {HOURS.map((h) => {
+                  const v = row.hours[h] ?? null
+                  return (
+                    <td key={h} className={heatTier(v)}>
+                      {v === null ? '' : Math.round(v)}
+                    </td>
+                  )
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="economics-month-explain">
+        Колір показує середню маржу розряду УЗЕ за годину доби, усереднену по днях місяця: сірий 0–1,
+        світло-зелений 2–5, зелений 6–11, темно-зелений понад 12 грн/кВт·год.
+      </p>
+    </section>
+  )
+}
+
+// --- Annual AI analysis (reuses the deterministic monthly narrative) ---
+
+function AnnualAiAnalysis({
+  totals,
+  months,
+  organizationID,
+  period,
+}: {
+  totals: EconomicsMonthlyTotals
+  months: EconomicsAnnualMonthRollup[]
+  organizationID: string
+  period: string
+}) {
+  const hasOptimum = totals.ess_optimum_uah > 0
+  const heading = `${formatOrganizationLabel(organizationID)} · ${formatYearTitle(period)}`
+  const narrative = useMemo(() => buildNarrative(totals, heading, 'рік'), [totals, heading])
+
+  // Every month of the period with modelled optimum (≤ 12 rows), sorted
+  // by reserve — SPEC §3.4 wants the full month list, not a top-N slice.
+  const rows = useMemo(
+    () =>
+      months
+        .filter((m) => m.totals.ess_optimum_uah > 0)
+        .sort((a, b) => b.totals.ess_reserve_uah - a.totals.ess_reserve_uah),
+    [months],
+  )
+
+  return (
+    <section className="economics-card economics-month-section economics-ai" aria-label="AI-аналіз року">
+      <div className="economics-ai-head">
+        <div className="economics-ai-title">
+          <span className="economics-ai-mark" aria-hidden="true">AI</span>
+          <h3 className="economics-month-section-title">AI-аналіз року</h3>
+        </div>
+        <span className="economics-ai-badge">управлінський висновок</span>
+      </div>
+
+      <div className="economics-ai-body">
+        <p className="economics-ai-summary">{narrative.title}</p>
+        <div className="economics-ai-section">
+          <span className="economics-ai-label">Як пройшов рік</span>
+          <p>{narrative.howItWent}</p>
+        </div>
+        <div className="economics-ai-section">
+          <span className="economics-ai-label">Головний резерв</span>
+          <p>{narrative.mainReserve}</p>
+        </div>
+        <div className="economics-ai-section">
+          <span className="economics-ai-label">Що покращити</span>
+          <p>{narrative.toImprove}</p>
+        </div>
+        <div className="economics-ai-chips">
+          <span className="economics-ai-chip">телеметрія SmartLogger</span>
+          <span className="economics-ai-chip">РДН: Оператор ринку</span>
+        </div>
+      </div>
+
+      <div className="economics-ai-facts">
+        <div className="economics-ai-fact">
+          <span>Ефект проєкту</span>
+          <b className={signClass(totals.effect_uah)}>{formatUah(totals.effect_uah)}</b>
+        </div>
+        <div className="economics-ai-fact">
+          <span>EBITDA</span>
+          <b className={signClass(totals.ebitda_uah)}>{formatUah(totals.ebitda_uah)}</b>
+        </div>
+        <div className="economics-ai-fact">
+          <span>Факт УЗЕ / оптимум</span>
+          <b>{hasOptimum ? formatPercent(totals.ess_captured_share) : '—'}</b>
+        </div>
+        <div className="economics-ai-fact">
+          <span>Оцінка резерву</span>
+          <b className="economics-ai-amber">{formatUah(totals.ess_reserve_uah)}</b>
+        </div>
+      </div>
+
+      {rows.length > 0 ? (
+        <div className="economics-ai-reserve">
+          <div className="economics-ai-reserve-head">
+            <span className="economics-ai-label amber">
+              Резерв · неефективне використання УЗЕ по місяцях
+              <OptimumInfo tip="Оптимум − Факт за місяць. Це не збиток, а оцінка недовикористаної можливості УЗЕ (модельний максимум у межах фактичних потужності, SOC, ККД та зносу)." />
+            </span>
+            <div className="economics-optimum-legend">
+              <span><i style={{ background: '#7c3aed' }} />фактичний ефект</span>
+              <span><i style={{ background: '#f59e0b' }} />недовикористано</span>
+              <span><i style={{ background: '#e5e7eb' }} />оптимум</span>
+            </div>
+          </div>
+          <div className="economics-optimum-list">
+            <div className="economics-optimum-row head">
+              <span>Місяць</span>
+              <span>захоплення</span>
+              <span>опт.</span>
+              <span>факт</span>
+              <span>резерв</span>
+            </div>
+            {rows.map((m) => {
+              const o = m.totals
+              const factShare = o.ess_optimum_uah > 0 ? Math.max(0, Math.min(1, o.ess_fact_uah / o.ess_optimum_uah)) : 0
+              return (
+                <div key={m.month} className="economics-optimum-row">
+                  <strong>{formatMonthTitle(m.month)}</strong>
+                  <div className="economics-capture-bar">
+                    <span className="fact" style={{ width: `${factShare * 100}%` }} />
+                    <span className="missed" style={{ width: `${(1 - factShare) * 100}%` }} />
+                  </div>
+                  <span>{formatUah(o.ess_optimum_uah)}</span>
+                  <span className="good">{formatUah(o.ess_fact_uah)}</span>
+                  <span className="amber">{formatUah(o.ess_reserve_uah)}</span>
+                </div>
+              )
+            })}
+          </div>
+          <p className="economics-month-muted economics-optimum-note">
+            Оптимум — найкращий диспетчинг у межах фактично продемонстрованих
+            можливостей УЗЕ (потужність, діапазон SOC, ККД виведені з даних кожного місяця).
+          </p>
+        </div>
+      ) : (
+        <p className="economics-month-empty-note">Недостатньо активності УЗЕ за рік для оцінки оптимуму.</p>
+      )}
+    </section>
+  )
+}
+
+// --- Per-month detail table + Excel export (SPEC §3.8) ---
+
+const COLUMNS = [
+  'Місяць',
+  'РДН сер. (грн/кВт·год)',
+  'СЕС (кВт·год)',
+  'Споживання (кВт·год)',
+  'Імпорт (кВт·год)',
+  'Експорт (кВт·год)',
+  'Самоспож. (%)',
+  'УЗЕ цикли (екв.)',
+  'EBITDA (грн)',
+  'Ефект (грн)',
+  'УЗЕ ефект (грн)',
+]
+
+function monthRowValues(m: EconomicsAnnualMonthRollup): string[] {
+  const o = m.totals
+  const pvSelf = o.pv_to_load_kwh + o.pv_to_ess_kwh
+  const selfShare = o.pv_kwh > 0 ? pvSelf / o.pv_kwh : 0
+  return [
+    formatMonthName(m.month),
+    formatPrice(o.rdn_avg_uah_per_kwh),
+    formatKwh(o.pv_kwh),
+    formatKwh(o.load_kwh),
+    formatKwh(o.grid_import_kwh),
+    formatKwh(o.grid_export_kwh),
+    formatPercent(selfShare),
+    formatCycles(o.equivalent_cycles),
+    formatUah(o.ebitda_uah),
+    formatUah(o.effect_uah),
+    formatUah(o.ess_net_uah),
+  ]
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
+function exportToExcel(months: EconomicsAnnualMonthRollup[], period: string) {
+  const head = `<tr>${COLUMNS.map((c) => `<th>${escapeHtml(c)}</th>`).join('')}</tr>`
+  const body = months
+    .map((m) => `<tr>${monthRowValues(m).map((v) => `<td>${escapeHtml(v)}</td>`).join('')}</tr>`)
+    .join('')
+  const html = `<!doctype html><html><head><meta charset="utf-8"></head><body><table>${head}${body}</table></body></html>`
+  const blob = new Blob([html], { type: 'application/vnd.ms-excel;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `economics-annual-${period}.xls`
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
+}
+
+function AnnualMonthlyTable({
+  months,
+  totals,
+  organizationID,
+  period,
+  onSelectMonth,
+}: {
+  months: EconomicsAnnualMonthRollup[]
+  totals: EconomicsMonthlyTotals
+  organizationID: string
+  period: string
+  onSelectMonth: (month: string) => void
+}) {
+  const pvSelf = totals.pv_to_load_kwh + totals.pv_to_ess_kwh
+  const selfShare = totals.pv_kwh > 0 ? pvSelf / totals.pv_kwh : 0
+  return (
+    <section className="economics-table-wrap" aria-label="Помісячна деталізація року">
+      <div className="economics-month-section-head">
+        <h3>
+          Помісячна деталізація року
+          <span className="economics-table-context"> · {formatOrganizationLabel(organizationID)}</span>
+        </h3>
+        <button type="button" className="economics-export-btn" onClick={() => exportToExcel(months, period)}>
+          Вивантажити в Excel
+        </button>
+      </div>
+      <div className="economics-table-scroll">
+        <table className="economics-table economics-month-table">
+          <thead>
+            <tr>
+              {COLUMNS.map((c) => (
+                <th key={c}>{c}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {months.map((m) => {
+              const o = m.totals
+              return (
+                <tr
+                  key={m.month}
+                  className="economics-row-clickable"
+                  onClick={() => onSelectMonth(m.month)}
+                  title="Відкрити місяць"
+                >
+                  <td className="economics-month-table-left">{formatMonthName(m.month)}</td>
+                  <td>{formatPrice(o.rdn_avg_uah_per_kwh)}</td>
+                  <td>{formatKwh(o.pv_kwh)}</td>
+                  <td>{formatKwh(o.load_kwh)}</td>
+                  <td>{formatKwh(o.grid_import_kwh)}</td>
+                  <td>{formatKwh(o.grid_export_kwh)}</td>
+                  <td>{formatPercent(o.pv_kwh > 0 ? (o.pv_to_load_kwh + o.pv_to_ess_kwh) / o.pv_kwh : 0)}</td>
+                  <td>{formatCycles(o.equivalent_cycles)}</td>
+                  <td className={signClass(o.ebitda_uah)}>{formatUah(o.ebitda_uah)}</td>
+                  <td className={signClass(o.effect_uah)}>{formatUah(o.effect_uah)}</td>
+                  <td>{formatUah(o.ess_net_uah)}</td>
+                </tr>
+              )
+            })}
+            <tr className="economics-table-summary-row">
+              <td className="economics-month-table-left">Разом</td>
+              <td>{formatPrice(totals.rdn_avg_uah_per_kwh)}</td>
+              <td>{formatKwh(totals.pv_kwh)}</td>
+              <td>{formatKwh(totals.load_kwh)}</td>
+              <td>{formatKwh(totals.grid_import_kwh)}</td>
+              <td>{formatKwh(totals.grid_export_kwh)}</td>
+              <td>{formatPercent(selfShare)}</td>
+              <td>{formatCycles(totals.equivalent_cycles)}</td>
+              <td className={signClass(totals.ebitda_uah)}>{formatUah(totals.ebitda_uah)}</td>
+              <td className={signClass(totals.effect_uah)}>{formatUah(totals.effect_uah)}</td>
+              <td>{formatUah(totals.ess_net_uah)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  )
+}

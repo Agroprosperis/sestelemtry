@@ -32,10 +32,33 @@ function formatDateString(d: Date): string {
 // pulling the page in as a dependency cycle.
 export type DamRefreshState = 'idle' | 'loading' | 'error'
 
-// EconomicsRange is the period granularity toggle: a single day or a
-// whole calendar month. Year is intentionally excluded — the economics
-// rollup is day/month only.
-export type EconomicsRange = 'day' | 'month'
+// EconomicsRange is the period granularity toggle: a single day, a whole
+// calendar month, or a calendar year.
+export type EconomicsRange = 'day' | 'month' | 'year'
+
+// rangeTitle / rangeSubtitle pick the header copy for the active period
+// granularity so the day/month/year views read consistently.
+function rangeTitle(range: EconomicsRange): string {
+  switch (range) {
+    case 'year':
+      return 'Річна економіка (СЕС + УЗЕ)'
+    case 'month':
+      return 'Місячна економіка (СЕС + УЗЕ)'
+    default:
+      return 'Добова економіка (СЕС + УЗЕ)'
+  }
+}
+
+function rangeSubtitle(range: EconomicsRange): string {
+  switch (range) {
+    case 'year':
+      return 'управлінський звіт за рік на базі цін РДН і тарифів.'
+    case 'month':
+      return 'управлінський звіт за місяць на базі цін РДН і тарифів.'
+    default:
+      return 'розрахунок ефекту за обраний день на базі цін РДН і тарифів.'
+  }
+}
 
 type Props = {
   organizationID: string
@@ -196,12 +219,9 @@ export function EconomicsHeader({
             className="economics-header-logo"
           />
           <div className="economics-header-titles">
-            <h1>{range === 'month' ? 'Місячна економіка (СЕС + УЗЕ)' : 'Добова економіка (СЕС + УЗЕ)'}</h1>
+            <h1>{rangeTitle(range)}</h1>
             <p>
-              {formatOrganizationLabel(organizationID)} ·{' '}
-              {range === 'month'
-                ? 'управлінський звіт за місяць на базі цін РДН і тарифів.'
-                : 'розрахунок ефекту за обраний день на базі цін РДН і тарифів.'}
+              {formatOrganizationLabel(organizationID)} · {rangeSubtitle(range)}
             </p>
           </div>
         </div>
@@ -227,6 +247,14 @@ export function EconomicsHeader({
               onClick={() => onRangeChange('month')}
             >
               Місяць
+            </button>
+            <button
+              type="button"
+              className={range === 'year' ? 'active' : ''}
+              aria-pressed={range === 'year'}
+              onClick={() => onRangeChange('year')}
+            >
+              Рік
             </button>
           </div>
           <PeriodPicker

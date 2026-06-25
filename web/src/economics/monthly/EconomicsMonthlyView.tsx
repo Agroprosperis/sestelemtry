@@ -30,24 +30,19 @@ import {
   formatShare,
   formatUah,
 } from './format'
+import {
+  buildNarrative,
+  HOURS,
+  heatTier,
+  PERIOD_WORDS,
+  type PeriodScope,
+  signClass,
+  signedUah,
+} from './rollup'
 
 type Props = {
   data: EconomicsMonthlyResponse
   organizationID: string
-}
-
-// signedUah prints an explicit +/− prefix based on the value's sign,
-// using the absolute amount so the sign is never doubled (e.g. a
-// negative delta renders "−123 грн", a positive one "+123 грн").
-function signedUah(delta: number): string {
-  const sign = delta < 0 ? '−' : '+'
-  return `${sign}${formatUah(Math.abs(delta))}`
-}
-
-// signClass tints a currency cell green/red by sign so a loss-making
-// day (negative EBITDA / effect) is never shown in the "good" colour.
-function signClass(v: number): string {
-  return v >= 0 ? 'cell-positive' : 'cell-negative'
 }
 
 export function EconomicsMonthlyView({ data, organizationID }: Props) {
@@ -74,7 +69,8 @@ export function EconomicsMonthlyView({ data, organizationID }: Props) {
 
 // --- KPI strip ---
 
-function MonthlyKpis({ totals }: { totals: EconomicsMonthlyTotals }) {
+export function MonthlyKpis({ totals, scope = 'month' }: { totals: EconomicsMonthlyTotals; scope?: PeriodScope }) {
+  const w = PERIOD_WORDS[scope]
   const avoidedImportKwh = totals.pv_to_load_kwh + totals.ess_to_load_kwh
   const pvSelfConsumed = totals.pv_to_load_kwh + totals.pv_to_ess_kwh
   const pvSelfShare = totals.pv_kwh > 0 ? pvSelfConsumed / totals.pv_kwh : 0
@@ -83,7 +79,7 @@ function MonthlyKpis({ totals }: { totals: EconomicsMonthlyTotals }) {
   const savingShare = totals.baseline_cost_uah > 0 ? totals.effect_uah / totals.baseline_cost_uah : 0
 
   return (
-    <section className="economics-kpis" aria-label="Ключові показники місяця">
+    <section className="economics-kpis" aria-label={`Ключові показники ${w.of}`}>
       <div className="kpi-strip">
         <div className="kpi-card">
           <span className="kpi-label">Базова вартість (без проєкту)</span>
@@ -96,7 +92,7 @@ function MonthlyKpis({ totals }: { totals: EconomicsMonthlyTotals }) {
           <span className="kpi-sub">імпорт − експорт + знос УЗЕ</span>
         </div>
         <div className={effectClass}>
-          <span className="kpi-label">Ефект проєкту за місяць</span>
+          <span className="kpi-label">Ефект проєкту {w.per}</span>
           <span className="kpi-value">{formatUah(totals.effect_uah)}</span>
           <span className="kpi-sub">економія {formatPercent(savingShare)} від бази</span>
         </div>
@@ -139,7 +135,8 @@ function MonthlyKpis({ totals }: { totals: EconomicsMonthlyTotals }) {
 
 // --- Finance breakdown + mini grid ---
 
-function MonthlyFinance({ totals }: { totals: EconomicsMonthlyTotals }) {
+export function MonthlyFinance({ totals, scope = 'month' }: { totals: EconomicsMonthlyTotals; scope?: PeriodScope }) {
+  const w = PERIOD_WORDS[scope]
   const revenueLines = [
     { label: 'СЕС → споживання', amount: totals.revenue_pv_self_uah },
     { label: 'СЕС → мережа', amount: totals.revenue_pv_export_uah },
@@ -154,9 +151,9 @@ function MonthlyFinance({ totals }: { totals: EconomicsMonthlyTotals }) {
   const savingShare = totals.baseline_cost_uah > 0 ? totals.ebitda_uah / totals.baseline_cost_uah : 0
 
   return (
-    <section className="economics-card economics-month-section" aria-label="Фінансова розкладка за місяць">
+    <section className="economics-card economics-month-section" aria-label={`Фінансова розкладка ${w.per}`}>
       <div className="economics-month-section-head">
-        <h3 className="economics-month-section-title">Фінансова розкладка за місяць</h3>
+        <h3 className="economics-month-section-title">Фінансова розкладка {w.per}</h3>
         <div className="economics-month-legend">
           <span><i style={{ background: '#16a34a' }} />дохід / економія</span>
           <span><i style={{ background: '#dc2626' }} />витрати</span>
@@ -224,7 +221,8 @@ function MiniCard({ label, value, note, good }: { label: string; value: string; 
 
 // --- Waterfall ---
 
-function MonthlyWaterfall({ totals }: { totals: EconomicsMonthlyTotals }) {
+export function MonthlyWaterfall({ totals, scope = 'month' }: { totals: EconomicsMonthlyTotals; scope?: PeriodScope }) {
+  const w = PERIOD_WORDS[scope]
   const base = totals.baseline_cost_uah
   // `value` is each step's signed effect on cost (negative = reduces
   // cost). `display` derives its sign from `value` so a negative ESS
@@ -243,7 +241,7 @@ function MonthlyWaterfall({ totals }: { totals: EconomicsMonthlyTotals }) {
     <section className="economics-card economics-month-section" aria-label="Водоспад економіки">
       <div className="economics-month-section-head">
         <h3 className="economics-month-section-title">Водоспад економіки</h3>
-        <span className="economics-month-muted">грн за місяць</span>
+        <span className="economics-month-muted">грн {w.per}</span>
       </div>
       <div className="economics-waterfall">
         {items.map((item) => (
@@ -412,7 +410,7 @@ function MonthlyTrend({ days, totals }: { days: EconomicsMonthlyDay[]; totals: E
 // is the under-used opportunity (not a loss).
 const TOP_RESERVE_ROWS = 8
 
-function OptimumInfo({ tip }: { tip: string }) {
+export function OptimumInfo({ tip }: { tip: string }) {
   return (
     <span className="economics-info" data-tip={tip} role="img" aria-label={tip}>
       i
@@ -423,85 +421,9 @@ function OptimumInfo({ tip }: { tip: string }) {
 // --- Monthly AI analysis ---
 //
 // A management-facing narrative card that replaces the legacy "УЗЕ: факт
-// vs оптимум" widget. The text is fully deterministic (template), built
-// only from already-computed monthly figures — no external LLM and no
-// number that is not present in the data. The ESS fact-vs-optimum reserve
-// detail is preserved as a sub-section so nothing is lost in the swap.
-
-type Narrative = {
-  title: string
-  howItWent: string
-  mainReserve: string
-  toImprove: string
-}
-
-type ReserveCause = 'timing' | 'soc' | 'pv'
-
-const RESERVE_CAUSE_TEXT: Record<ReserveCause, string> = {
-  timing: 'розряд не завжди потрапляв у найдорожчі години',
-  soc: 'бракувало заряду батареї перед вечірнім піком',
-  pv: 'частина надлишку СЕС не потрапила в УЗЕ',
-}
-
-const RESERVE_IMPROVE_TEXT: Record<ReserveCause, string> = {
-  timing: 'зміщувати розряд УЗЕ ближче до вечірнього піку цін',
-  soc: 'тримати вищий SOC перед вечірнім піком',
-  pv: 'більше заряджати УЗЕ надлишком СЕС вдень',
-}
-
-function dominantReserveCause(totals: EconomicsMonthlyTotals): ReserveCause {
-  const causes: { key: ReserveCause; uah: number }[] = [
-    { key: 'timing', uah: totals.ess_reserve_timing_uah },
-    { key: 'soc', uah: totals.ess_reserve_soc_uah },
-    { key: 'pv', uah: totals.ess_reserve_pv_uah },
-  ]
-  return causes.reduce((best, c) => (c.uah > best.uah ? c : best), causes[0]).key
-}
-
-// buildNarrative turns the month totals into four deterministic sentences.
-// Branching keys off profitability and whether the site is export-heavy
-// (more energy exported than consumed) plus the dominant ESS reserve cause.
-function buildNarrative(totals: EconomicsMonthlyTotals, heading: string): Narrative {
-  const profitable = totals.effect_uah >= 0
-  const exportHeavy = totals.grid_export_kwh > totals.load_kwh
-  const cause = dominantReserveCause(totals)
-  const priceGap = totals.avg_import_price_uah_per_kwh - totals.avg_export_price_uah_per_kwh
-
-  let title: string
-  if (!profitable) {
-    title = `${heading}: місяць збитковий — ефект ${formatUah(totals.effect_uah)}.`
-  } else if (exportHeavy) {
-    title = `${heading}: місяць прибутковий, але більшість СЕС пішла в експорт, а не в економію об'єкта.`
-  } else {
-    title = `${heading}: місяць прибутковий, основний ефект — від власного споживання СЕС та УЗЕ.`
-  }
-
-  const howItWent =
-    `СЕС виробила ${formatMwh(totals.pv_kwh)}, об'єкт спожив ${formatMwh(totals.load_kwh)}. ` +
-    `Імпорт ${formatMwh(totals.grid_import_kwh)}, експорт ${formatMwh(totals.grid_export_kwh)}. ` +
-    `Ефект проєкту: ${formatUah(totals.effect_uah)}.`
-
-  const captureTxt =
-    totals.ess_optimum_uah > 0 ? `захоплено ${formatPercent(totals.ess_captured_share)}` : 'оцінка за фактом'
-  let mainReserve = `Підтверджений резерв УЗЕ ${formatUah(totals.ess_reserve_uah)} (${captureTxt}). Головна причина — ${RESERVE_CAUSE_TEXT[cause]}.`
-  if (exportHeavy) {
-    mainReserve +=
-      ` Об'єкт масово експортує денну СЕС (${formatMwh(totals.grid_export_kwh)}) по ~${formatPrice(totals.avg_export_price_uah_per_kwh)} грн/кВт·год ` +
-      `при імпорті ~${formatPrice(totals.avg_import_price_uah_per_kwh)} — перенесення споживання в денні години дає різницю ~${formatPrice(priceGap)} грн/кВт·год.`
-  }
-
-  const improveParts: string[] = []
-  if (exportHeavy) {
-    improveParts.push('підняти денне навантаження в години 10:00–16:00, коли власна СЕС інакше йде в мережу')
-  }
-  improveParts.push(RESERVE_IMPROVE_TEXT[cause])
-  const toImprove =
-    improveParts
-      .map((p, i) => (i === 0 ? p.charAt(0).toUpperCase() + p.slice(1) : p))
-      .join('; ') + '.'
-
-  return { title, howItWent, mainReserve, toImprove }
-}
+// vs оптимум" widget. The narrative text is fully deterministic (built
+// only from already-computed figures) and shared with the annual view
+// via buildNarrative in ./rollup.
 
 function MonthlyAiAnalysis({
   totals,
@@ -684,7 +606,8 @@ type BalanceBar = { name: string; total: number; segs: BalanceSeg[] }
 type SegTip = { title: string; lines: TipLine[]; x: number; y: number }
 type FlowMode = 'detail' | 'source' | 'destination'
 
-function MonthlyBalance({ totals }: { totals: EconomicsMonthlyTotals }) {
+export function MonthlyBalance({ totals, scope = 'month' }: { totals: EconomicsMonthlyTotals; scope?: PeriodScope }) {
+  const w = PERIOD_WORDS[scope]
   const [flowMode, setFlowMode] = useState<FlowMode>('detail')
   const [tip, setTip] = useState<SegTip | null>(null)
 
@@ -798,10 +721,10 @@ function MonthlyBalance({ totals }: { totals: EconomicsMonthlyTotals }) {
   const hideTip = () => setTip(null)
 
   return (
-    <section className="economics-card economics-month-section" aria-label="Енергетичний баланс за місяць">
+    <section className="economics-card economics-month-section" aria-label={`Енергетичний баланс ${w.per}`}>
       <div className="economics-month-section-head">
-        <h3 className="economics-month-section-title">Енергетичний баланс за місяць</h3>
-        <span className="economics-month-muted">МВт·год за місяць</span>
+        <h3 className="economics-month-section-title">Енергетичний баланс {w.per}</h3>
+        <span className="economics-month-muted">МВт·год {w.per}</span>
       </div>
       <div className="economics-flow-legend">
         <span><i className="economics-seg-dot green" />СЕС</span>
@@ -964,17 +887,6 @@ function BalanceSegment({
 }
 
 // --- ESS marginality heatmap ---
-
-function heatTier(v: number | null): string {
-  if (v === null || !Number.isFinite(v)) return 'economics-hm-empty'
-  if (v < 2) return 'economics-hm0'
-  if (v < 6) return 'economics-hm1'
-  if (v < 12) return 'economics-hm2'
-  if (v < 18) return 'economics-hm3'
-  return 'economics-hm4'
-}
-
-const HOURS = Array.from({ length: 24 }, (_, h) => h)
 
 function MonthlyHeatmap({ margins }: { margins: EconomicsMonthlyDayMargin[] }) {
   return (

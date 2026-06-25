@@ -439,6 +439,112 @@ func (h *Handlers) economicsMonthly(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// EconomicsAnnualMonthRollup is one month's contribution to the annual
+// view: the YYYY-MM label plus that month's totals (same shape the
+// monthly dashboard renders, so the year trend/table reuse the fields).
+type EconomicsAnnualMonthRollup struct {
+	Month  string                 `json:"month"`
+	Totals EconomicsMonthlyTotals `json:"totals"`
+}
+
+// EconomicsAnnualQuarter is one quarter card: project effect + PV.
+type EconomicsAnnualQuarter struct {
+	Quarter   int     `json:"quarter"`
+	EffectUah float64 `json:"effect_uah"`
+	PvKwh     float64 `json:"pv_kwh"`
+}
+
+// EconomicsAnnualMonthMargin is one heatmap row: 24 hour-of-day ESS
+// margins (UAH per kWh discharged) averaged across the month; null
+// when that hour had no discharge all month.
+type EconomicsAnnualMonthMargin struct {
+	Month string     `json:"month"`
+	Hours []*float64 `json:"hours"`
+}
+
+// EconomicsAnnualResponse is the body of GET /api/v1/economics/annual.
+type EconomicsAnnualResponse struct {
+	OrganizationID string                       `json:"organization_id"`
+	Period         string                       `json:"period"`
+	Tz             string                       `json:"tz"`
+	MonthsWithData int                          `json:"months_with_data"`
+	Totals         EconomicsMonthlyTotals       `json:"totals"`
+	Months         []EconomicsAnnualMonthRollup `json:"months"`
+	Quarters       []EconomicsAnnualQuarter     `json:"quarters"`
+	MonthlyMargin  []EconomicsAnnualMonthMargin `json:"monthly_margin"`
+}
+
+// economicsAnnual serves a calendar-year rollup of the per-month
+// economics, read-through (the economics-recompute daemon keeps the
+// underlying daily/hourly records warm; this path never recomputes).
+//
+//	GET /api/v1/economics/annual?organization_id=&period=YYYY&tz=
+func (h *Handlers) economicsAnnual(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if h.economics == nil {
+		http.Error(w, "economics service not configured", http.StatusServiceUnavailable)
+		return
+	}
+	orgID := strings.TrimSpace(r.URL.Query().Get("organization_id"))
+	if orgID == "" {
+		http.Error(w, "organization_id is required", http.StatusBadRequest)
+		return
+	}
+	periodStr := strings.TrimSpace(r.URL.Query().Get("period"))
+	if periodStr == "" {
+		http.Error(w, "period is required (YYYY)", http.StatusBadRequest)
+		return
+	}
+	tzStr := strings.TrimSpace(r.URL.Query().Get("tz"))
+	loc, err := loadLocation(tzStr)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if _, err := time.ParseInLocation("2006", periodStr, loc); err != nil {
+		http.Error(w, "period must be YYYY", http.StatusBadRequest)
+		return
+	}
+
+	year, err := h.economics.GetYear(r.Context(), orgID, periodStr, loc.String())
+	if err != nil {
+		h.log.Error("api_economics_annual", "organization_id", orgID, "period", periodStr, "tz", loc.String(), "err", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	resp := EconomicsAnnualResponse{
+		OrganizationID: orgID,
+		Period:         periodStr,
+		Tz:             loc.String(),
+		MonthsWithData: year.MonthsWithData,
+		Totals:         monthlyTotalsToJSON(year.Totals),
+		Months:         make([]EconomicsAnnualMonthRollup, 0, len(year.Months)),
+		Quarters:       make([]EconomicsAnnualQuarter, 0, len(year.Quarters)),
+		MonthlyMargin:  make([]EconomicsAnnualMonthMargin, 0, len(year.MonthlyMargin)),
+	}
+	for _, m := range year.Months {
+		resp.Months = append(resp.Months, EconomicsAnnualMonthRollup{
+			Month:  m.Month,
+			Totals: monthlyTotalsToJSON(m.Totals),
+		})
+	}
+	for _, q := range year.Quarters {
+		resp.Quarters = append(resp.Quarters, EconomicsAnnualQuarter{
+			Quarter:   q.Quarter,
+			EffectUah: q.EffectUah,
+			PvKwh:     q.PvKwh,
+		})
+	}
+	for _, m := range year.MonthlyMargin {
+		resp.MonthlyMargin = append(resp.MonthlyMargin, EconomicsAnnualMonthMargin{Month: m.Month, Hours: m.Hours})
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
 // economicsRecompute recomputes (and persists) economics over a date
 // range, streaming NDJSON progress (one line per day, then "done").
 //
