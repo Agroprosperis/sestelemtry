@@ -184,12 +184,28 @@ export function buildAiPanel(
   },
 ): AiPanel {
   const r = reserveSplit(totals)
-  const exportHeavy = totals.grid_export_kwh > totals.load_kwh
   const consumption = totals.pv_to_load_kwh + totals.ess_to_load_kwh + totals.grid_to_load_kwh
   const captured = totals.ess_optimum_uah > 0 ? totals.ess_captured_share : 0
 
+  // §3.5: the "main" reserve is the LARGER of the work-schedule and the
+  // ESS-timing levers. It gets the amber headline (with " · основний"),
+  // drives the narrative ("Головний резерв" / "Що покращити"), and carries
+  // the "найбільший резерв" badge on its card.
+  const mainIsEss = r.ess >= r.elevator
+  const mainLabel = `${mainIsEss ? 'Резерв таймінгу УЗЕ' : 'Резерв графіка'} · основний`
+  const mainValue = uahShort(mainIsEss ? r.ess : r.elevator)
+  const secLabel = mainIsEss ? 'Резерв графіка' : 'Резерв таймінгу УЗЕ'
+  const secValue = uahShort(mainIsEss ? r.elevator : r.ess)
+  const planStatus = mainIsEss ? 'резерв графіка' : 'найбільший резерв'
+  const essStatus = mainIsEss ? 'найбільший резерв' : 'режим УЗЕ'
+
   if (opts.scope !== 'month') {
     const months = opts.monthsCount ?? 0
+    const mainReserveText = mainIsEss
+      ? `Головний важіль — таймінг УЗЕ: ${uahShort(r.ess)} за період${
+          totals.ess_optimum_uah > 0 ? ` (захоплено ${formatPercent(captured)} оптимуму)` : ''
+        }. Помісячна деталізація нижче.`
+      : `Головний важіль — перенесення гнучких робіт на денні години: ${uahShort(r.elevator)} за період. Помісячна деталізація нижче.`
     return {
       summaryLine: `${opts.heading}: за ${months} міс. телеметрії СЕС ${formatMwh(totals.pv_kwh)}, ефект проєкту ${formatUah(totals.effect_uah)}.`,
       briefRows: [
@@ -201,7 +217,7 @@ export function buildAiPanel(
         {
           kind: 'reserve',
           label: 'Головний резерв',
-          text: `Перенесення гнучких робіт на денні години — ${uahShort(r.elevator)} за період. Помісячна деталізація нижче.`,
+          text: mainReserveText,
         },
       ],
       sources: ['FusionSolar / SmartLogger', 'РДН: Оператор ринку', `${months} місячних зрізів`],
@@ -209,14 +225,14 @@ export function buildAiPanel(
         'Архів FusionSolar: повна телеметрія СЕС/УЗЕ/мережі за весь період. Можливі невеликі пробіли після імпорту.',
       result: [
         { label: 'Період аналізу', value: opts.periodLabel },
-        { label: 'Резерв графіка', value: uahShort(r.elevator), amber: true },
-        { label: 'Резерв таймінгу УЗЕ', value: uahShort(r.ess) },
+        { label: mainLabel, value: mainValue, amber: true },
+        { label: secLabel, value: secValue },
         { label: 'Сумарний резерв', value: uahShort(r.total) },
       ],
       cards: [
         {
           variant: 'plan',
-          status: 'найбільший резерв',
+          status: planStatus,
           title: 'Графік робіт елеватора',
           impact: uahShort(r.elevator),
           action: `За період експортовано ${formatMwh(totals.grid_export_kwh)} і куплено ${formatMwh(totals.grid_import_kwh)} — велика частина СЕС пішла в мережу замість денного навантаження.`,
@@ -224,7 +240,7 @@ export function buildAiPanel(
         },
         {
           variant: 'warn',
-          status: 'режим УЗЕ',
+          status: essStatus,
           title: 'Таймінг батареї',
           impact: uahShort(r.ess),
           action:
@@ -239,17 +255,17 @@ export function buildAiPanel(
   }
 
   // Month scope.
-  const reserveText = exportHeavy
-    ? `Високий експорт СЕС при низькому денному навантаженні — перенесення гнучких робіт дає до ${uahShort(r.elevator)} за місяць.`
-    : `Головний резерв — таймінг УЗЕ ${uahShort(r.ess)}: розряд не завжди потрапляв у найдорожчі години.`
-  const actionText = exportHeavy
-    ? `Пріоритет — графік елеватора в сонячні години. Резерв таймінгу УЗЕ — ${uahShort(r.ess)}.`
-    : `Зміщувати розряд УЗЕ ближче до вечірнього піку. Резерв графіка робіт — ${uahShort(r.elevator)}.`
+  const reserveText = mainIsEss
+    ? `Головний резерв — таймінг УЗЕ ${uahShort(r.ess)}: розряд не завжди потрапляв у найдорожчі години.`
+    : `Високий експорт СЕС при низькому денному навантаженні — перенесення гнучких робіт дає до ${uahShort(r.elevator)} за місяць.`
+  const actionText = mainIsEss
+    ? `Пріоритет — зміщувати розряд УЗЕ ближче до вечірнього піку (${uahShort(r.ess)}). Резерв графіка робіт — ${uahShort(r.elevator)}.`
+    : `Пріоритет — графік елеватора в сонячні години (${uahShort(r.elevator)}). Резерв таймінгу УЗЕ — ${uahShort(r.ess)}.`
 
   const cards: AiCard[] = [
     {
       variant: 'plan',
-      status: 'найбільший резерв',
+      status: planStatus,
       title: 'Графік робіт елеватора',
       impact: `до ${uahShort(r.elevator)}`,
       action: `За місяць експортовано ${formatMwh(totals.grid_export_kwh)} при імпорті ${formatMwh(totals.grid_import_kwh)} — велика частина СЕС пішла в мережу.`,
@@ -261,7 +277,7 @@ export function buildAiPanel(
     },
     {
       variant: 'warn',
-      status: 'режим УЗЕ',
+      status: essStatus,
       title: 'Добовий план батареї',
       impact: `≈${uahShort(r.ess)}`,
       action:
@@ -294,9 +310,9 @@ export function buildAiPanel(
     sources: ['телеметрія SmartLogger', 'РДН: Оператор ринку', 'погодний архів'],
     result: [
       { label: 'Період аналізу', value: opts.periodLabel },
-      { label: 'Основний резерв', value: `до ${uahShort(r.elevator)}`, amber: true },
-      { label: 'УЗЕ підтверджено', value: `≈${uahShort(r.ess)}` },
-      { label: 'Разом до дій', value: `до ${uahShort(r.total)}` },
+      { label: mainLabel, value: mainValue, amber: true },
+      { label: secLabel, value: secValue },
+      { label: 'Разом до дій', value: uahShort(r.total) },
     ],
     cards,
     reserves: r,

@@ -19,6 +19,7 @@ import type {
 import { formatOrganizationLabel } from '../../dashboard/config'
 import {
   AiLead,
+  EssDataQualityNote,
   MonthlyBalance,
   MonthlyFinance,
   MonthlyKpis,
@@ -403,6 +404,8 @@ function AnnualAiAnalysis({
       </div>
 
       <AiLead panel={panel} />
+
+      <EssDataQualityNote dq={totals.ess_data_quality} />
 
       <div className="economics-ai-accordion">
         {plan ? (

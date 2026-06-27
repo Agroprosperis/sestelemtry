@@ -142,27 +142,35 @@ func (h optimumHour) chargeCaps(mode chargeMode) (pvCap, gridCap float64) {
 	}
 }
 
-// optimizeDay returns the maximum achievable ESS effect for one civil day
-// under perfect foresight. Following the example's convention, charging
-// from PV surplus is FREE (cost basis 0); only grid charging costs the
-// import price. The objective is:
-//
-//	Σ [ dischargeToLoad·import + dischargeToGrid·export
-//	    − chargeFromGrid·import − discharged·degradation ]
-//
-// It is solved by forward DP over a discretized SOC grid. PV is filled
-// first (free), then the grid, so each SOC transition reduces to a single
-// greedy source/sink split; mode bounds how much PV / grid may be used.
-func optimizeDay(hours []optimumHour, startResidualKwh float64, p optimumParams, mode chargeMode) float64 {
+// pvChargePriceFor returns the project_net opportunity cost of charging
+// the battery from PV this hour: the forgone export revenue. Prices below
+// 0.1 UAH/kWh snap to free, so storing PV when the market is ~worthless is
+// not penalised (§3.1).
+func pvChargePriceFor(h optimumHour) float64 {
+	if h.exportPrice < 0.1 {
+		return 0
+	}
+	return h.exportPrice
+}
+
+// runOptimumDP solves the forward SOC dynamic program over the given hours
+// and returns the best achievable effect at every terminal SOC level (plus
+// the start level). project_net accounting: charging from PV costs the
+// forgone export price (snapped to 0 below 0.1), grid charging costs the
+// import price; discharge earns import (to load) / export (to grid) less
+// degradation. PV is filled first, then the grid, so each SOC transition
+// reduces to a single greedy source/sink split; mode bounds how much PV /
+// grid may be used.
+func runOptimumDP(hours []optimumHour, startResidualKwh float64, p optimumParams, mode chargeMode) (f []float64, start int, ok bool) {
 	span := p.socMaxKwh - p.socMinKwh
 	if span <= 0 || len(hours) == 0 {
-		return 0
+		return nil, 0, false
 	}
 	levels := optimumSocLevels
 	step := span / float64(levels-1)
 	socOf := func(i int) float64 { return p.socMinKwh + float64(i)*step }
 
-	start := int(math.Round((clampFloat(startResidualKwh, p.socMinKwh, p.socMaxKwh) - p.socMinKwh) / step))
+	start = int(math.Round((clampFloat(startResidualKwh, p.socMinKwh, p.socMaxKwh) - p.socMinKwh) / step))
 	if start < 0 {
 		start = 0
 	}
@@ -171,7 +179,7 @@ func optimizeDay(hours []optimumHour, startResidualKwh float64, p optimumParams,
 	}
 
 	negInf := math.Inf(-1)
-	f := make([]float64, levels)
+	f = make([]float64, levels)
 	for i := range f {
 		f[i] = negInf
 	}
@@ -194,6 +202,7 @@ func optimizeDay(hours []optimumHour, startResidualKwh float64, p optimumParams,
 		for i := range nf {
 			nf[i] = negInf
 		}
+		pvPrice := pvChargePriceFor(h)
 		for s := 0; s < levels; s++ {
 			if math.IsInf(f[s], -1) {
 				continue
@@ -216,12 +225,12 @@ func optimizeDay(hours []optimumHour, startResidualKwh float64, p optimumParams,
 				if chargeAC > p.maxChargeKwh+1e-9 {
 					break
 				}
-				cp := math.Min(pvCap, chargeAC) // PV first, free
+				cp := math.Min(pvCap, chargeAC) // PV first (project_net cost)
 				cg := chargeAC - cp
 				if cg > gridCap+1e-9 {
 					break // beyond this the grid cap is exceeded
 				}
-				v := f[s] - cg*h.importPrice
+				v := f[s] - cp*pvPrice - cg*h.importPrice
 				if v > nf[ns] {
 					nf[ns] = v
 				}
@@ -246,11 +255,45 @@ func optimizeDay(hours []optimumHour, startResidualKwh float64, p optimumParams,
 		}
 		f = nf
 	}
+	return f, start, true
+}
 
-	best := negInf
+// optimizeDay returns the maximum achievable ESS effect for one civil day
+// under perfect foresight, on the project_net basis (see runOptimumDP).
+// The terminal SOC is unconstrained, so the day's optimum may end anywhere
+// in the SOC window.
+func optimizeDay(hours []optimumHour, startResidualKwh float64, p optimumParams, mode chargeMode) float64 {
+	f, _, ok := runOptimumDP(hours, startResidualKwh, p, mode)
+	if !ok {
+		return 0
+	}
+	best := math.Inf(-1)
 	for _, v := range f {
 		if v > best {
 			best = v
+		}
+	}
+	if math.IsInf(best, -1) {
+		return 0
+	}
+	return best
+}
+
+// optimizeMonth runs one continuous SOC dynamic program across ALL hours
+// of the month in chronological order (the SOC is carried across day
+// boundaries) and returns the best terminal effect subject to
+// SOC_end ≥ SOC_start (§3.2). The end-≥-start restriction stops the
+// optimum from banking energy it never returns, so it is comparable to the
+// realised fact on the same project_net basis.
+func optimizeMonth(hours []optimumHour, startResidualKwh float64, p optimumParams, mode chargeMode) float64 {
+	f, start, ok := runOptimumDP(hours, startResidualKwh, p, mode)
+	if !ok {
+		return 0
+	}
+	best := math.Inf(-1)
+	for i := start; i < len(f); i++ {
+		if f[i] > best {
+			best = f[i]
 		}
 	}
 	if math.IsInf(best, -1) {

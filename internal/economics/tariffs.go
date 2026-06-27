@@ -25,6 +25,10 @@ type Tariffs struct {
 	IncludeVat              bool
 	VatRate                 float64
 	EssCapacityKwh          float64
+	// EssPowerLimitKw is the nominal ESS charge/discharge power ceiling
+	// (kW) used by the УЗЕ anomaly filter. 0 falls back to EssCapacityKwh
+	// (≈ 1C) inside AggregateMonth.
+	EssPowerLimitKw float64
 }
 
 // ScheduleEntry is one effective-dated tariff version. EffectiveFrom is

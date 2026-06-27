@@ -11,6 +11,7 @@ import {
   YAxis,
 } from 'recharts'
 import type {
+  EconomicsDataQuality,
   EconomicsMonthlyDay,
   EconomicsMonthlyDayMargin,
   EconomicsMonthlyResponse,
@@ -508,15 +509,7 @@ export function AiLead({ panel }: { panel: AiPanel }) {
   )
 }
 
-export function AiCardGrid({
-  cards,
-  detailHref,
-  detailLabel,
-}: {
-  cards: AiCard[]
-  detailHref: string
-  detailLabel: string
-}) {
+export function AiCardGrid({ cards }: { cards: AiCard[] }) {
   return (
     <div className="economics-ai-grid">
       {cards.map((c) => (
@@ -532,12 +525,22 @@ export function AiCardGrid({
               ))}
             </div>
           ) : null}
-          <a className="economics-ai-detail-link" href={detailHref}>
-            {detailLabel}
-          </a>
         </div>
       ))}
     </div>
+  )
+}
+
+// EssDataQualityNote renders the ⚠ УЗЕ anomaly-filter note when one or more
+// days were excluded from the fact/optimum/reserve (§3.4). It is shared by
+// the monthly and annual reserve sections.
+export function EssDataQualityNote({ dq }: { dq?: EconomicsDataQuality }) {
+  if (!dq || dq.data_ok || dq.anomalous_days <= 0) return null
+  return (
+    <p className="economics-ai-dq-note" role="note">
+      ⚠ Дані УЗЕ: виключено {dq.anomalous_days} дн. з аномальними показаннями
+      (заряд/розряд понад ліміт потужності). Факт, оптимум і резерв пораховано без них.
+    </p>
   )
 }
 
@@ -588,7 +591,9 @@ function MonthlyAiAnalysis({
       </div>
 
       <AiLead panel={panel} />
-      <AiCardGrid cards={panel.cards} detailHref="#economics-detail-table" detailLabel="Денна деталізація ↓" />
+      <AiCardGrid cards={panel.cards} />
+
+      <EssDataQualityNote dq={totals.ess_data_quality} />
 
       {rows.length > 0 ? (
         <details className="economics-ai-reserve-details">

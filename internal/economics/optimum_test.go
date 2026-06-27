@@ -76,7 +76,7 @@ func TestAggregateMonthOptimum(t *testing.T) {
 		GridToLoad: 100, EssDischarged: 40, EssNet: 10, EssRemainingKwhStart: floatPtr(40),
 	}
 
-	got := AggregateMonth("2026-06", loc, days, hourly, 100, 0)
+	got := AggregateMonth("2026-06", loc, days, hourly, 100, 0, 0)
 
 	// Optimum ≈ charge 40 @1 (−40) then discharge 40 to load @20 (+800) = 760.
 	if got.Totals.EssOptimum < 700 {
@@ -99,6 +99,100 @@ func TestAggregateMonthOptimum(t *testing.T) {
 	}
 	if len(got.Days) != 1 || got.Days[0].EssOptimum < got.Days[0].Totals.EssNet {
 		t.Fatalf("per-day optimum %+v must be ≥ fact", got.Days)
+	}
+}
+
+// TestDetectEssAnomalies flags a day whose hourly charge exceeds the
+// power limit × tolerance and reports it in the DataQuality summary.
+func TestDetectEssAnomalies(t *testing.T) {
+	loc := time.UTC
+	base := time.Date(2026, 6, 1, 0, 0, 0, 0, loc)
+	hourly := []HourlyRecord{
+		{HourStart: base.Add(3 * time.Hour), EssCharged: 40, EssDischarged: 0},
+		{HourStart: base.Add(24*time.Hour + 5*time.Hour), EssCharged: 400, EssDischarged: 0}, // day 2: impossible
+	}
+	bad, dq := detectEssAnomalies(hourly, loc, 100, essAnomalyTolerance) // limit 150
+	if len(bad) != 1 || !bad["2026-06-02"] {
+		t.Fatalf("bad = %v, want {2026-06-02}", bad)
+	}
+	if dq.DataOK || dq.AnomalousDays != 1 {
+		t.Fatalf("dq = %+v, want 1 anomalous day, not ok", dq)
+	}
+	if dq.MaxChargeKwhPerInterval != 400 {
+		t.Fatalf("MaxChargeKwhPerInterval = %v, want 400", dq.MaxChargeKwhPerInterval)
+	}
+	// Disabled filter (limit ≤ 0) excludes nothing.
+	if b2, dq2 := detectEssAnomalies(hourly, loc, 0, essAnomalyTolerance); len(b2) != 0 || !dq2.DataOK {
+		t.Fatalf("disabled filter excluded days: %v / %+v", b2, dq2)
+	}
+}
+
+// TestAggregateMonthExcludesAnomalousDays verifies that an anomalous day is
+// dropped from the fact/optimum and its per-day reserve row is zeroed,
+// while the DataQuality summary reports the exclusion.
+func TestAggregateMonthExcludesAnomalousDays(t *testing.T) {
+	loc := time.UTC
+	day1 := time.Date(2026, 6, 1, 0, 0, 0, 0, loc)
+	day2 := time.Date(2026, 6, 2, 0, 0, 0, 0, loc)
+	days := []DailyRecord{
+		{Day: day1, IsFinal: true, Totals: DailyTotals{EssNet: 10, EssDischarged: 40, HoursWithData: 24}},
+		{Day: day2, IsFinal: true, Totals: DailyTotals{EssNet: 5, EssDischarged: 40, HoursWithData: 24}},
+	}
+	mk := func(base time.Time, charge float64) []HourlyRecord {
+		hs := make([]HourlyRecord, 24)
+		for h := 0; h < 24; h++ {
+			hs[h] = HourlyRecord{HourStart: base.Add(time.Duration(h) * time.Hour)}
+		}
+		hs[3] = HourlyRecord{
+			HourStart: base.Add(3 * time.Hour), Rdn: floatPtr(1), ImportPrice: 1, ExportPrice: 1,
+			GridToEss: charge, EssCharged: charge, EssRemainingKwhStart: floatPtr(0),
+		}
+		hs[19] = HourlyRecord{
+			HourStart: base.Add(19 * time.Hour), Rdn: floatPtr(20), ImportPrice: 20, ExportPrice: 18,
+			GridToLoad: 100, EssDischarged: 40, EssNet: 10, EssRemainingKwhStart: floatPtr(40),
+		}
+		return hs
+	}
+	hourly := append(mk(day1, 40), mk(day2, 1000)...) // day2 charge 1000 ≫ 150 limit
+
+	got := AggregateMonth("2026-06", loc, days, hourly, 100, 0, 100)
+
+	if got.Totals.EssDataQuality.AnomalousDays != 1 || got.Totals.EssDataQuality.DataOK {
+		t.Fatalf("data quality = %+v, want 1 anomalous day, not ok", got.Totals.EssDataQuality)
+	}
+	// Fact counts only the clean day's EssNet (10).
+	if math.Abs(got.Totals.EssFact-10) > 1e-9 {
+		t.Fatalf("EssFact = %v, want 10 (anomalous day excluded)", got.Totals.EssFact)
+	}
+	for _, d := range got.Days {
+		if d.Date == "2026-06-02" && (d.EssOptimum != 0 || d.EssReserve != 0 || d.EssFact != 0) {
+			t.Fatalf("anomalous day row not zeroed: %+v", d)
+		}
+	}
+}
+
+// TestOptimizeMonthEndGeStart checks the continuous monthly DP refuses to
+// bank energy it never returns: with only a single cheap hour to charge and
+// no later expensive hour, the SOC_end ≥ SOC_start restriction yields no
+// profit (unlike optimizeDay, which may end with a charged battery).
+func TestOptimizeMonthEndGeStart(t *testing.T) {
+	p := optimumParams{
+		capacityKwh: 100, degradationUahPerKwh: 0,
+		maxChargeKwh: 50, maxDischargeKwh: 50,
+		socMinKwh: 0, socMaxKwh: 100, rte: 1.0,
+	}
+	// One cheap hour where buying is only "profitable" if the energy is
+	// kept (never sold). End ≥ start forbids ending above the start SOC
+	// without having sold, so the monthly optimum is 0.
+	hours := make([]optimumHour, 6)
+	hours[0] = optimumHour{tradable: true, importPrice: 1, exportPrice: 1, displaceableKwh: 100}
+	if got := optimizeMonth(hours, 0, p, modeFull); got > 1e-6 {
+		t.Fatalf("optimizeMonth banking-only = %v, want ~0", got)
+	}
+	// With a later expensive hour, the round trip is allowed and profitable.
+	hours[3] = optimumHour{tradable: true, importPrice: 20, exportPrice: 20, displaceableKwh: 100}
+	if got := optimizeMonth(hours, 0, p, modeFull); got < 100 {
+		t.Fatalf("optimizeMonth round-trip = %v, want a healthy profit", got)
 	}
 }
 

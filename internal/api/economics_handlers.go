@@ -227,8 +227,35 @@ type EconomicsMonthlyTotals struct {
 	EssReservePvUah     float64 `json:"ess_reserve_pv_uah"`
 	EssPvMissedKwh      float64 `json:"ess_pv_missed_kwh"`
 
+	EssDataQuality EconomicsDataQuality `json:"ess_data_quality"`
+
 	BestDay      EconomicsMonthExtreme `json:"best_day"`
 	MinEffectDay EconomicsMonthExtreme `json:"min_effect_day"`
+}
+
+// EconomicsDataQuality reports the ESS (УЗЕ) anomaly filter outcome:
+// anomalous days (physically impossible charge/discharge readings) are
+// excluded from the fact/optimum/reserve above.
+type EconomicsDataQuality struct {
+	DataOk                     bool     `json:"data_ok"`
+	TotalDays                  int      `json:"total_days"`
+	AnomalousDays              int      `json:"anomalous_days"`
+	AnomalousDates             []string `json:"anomalous_dates"`
+	MaxChargeKwhPerInterval    float64  `json:"max_charge_kwh_per_interval"`
+	MaxDischargeKwhPerInterval float64  `json:"max_discharge_kwh_per_interval"`
+	PowerLimitKwhPerInterval   float64  `json:"power_limit_kwh_per_interval"`
+}
+
+func dataQualityToJSON(q economics.DataQuality) EconomicsDataQuality {
+	return EconomicsDataQuality{
+		DataOk:                     q.DataOK,
+		TotalDays:                  q.TotalDays,
+		AnomalousDays:              q.AnomalousDays,
+		AnomalousDates:             q.AnomalousDates,
+		MaxChargeKwhPerInterval:    q.MaxChargeKwhPerInterval,
+		MaxDischargeKwhPerInterval: q.MaxDischargeKwhPerInterval,
+		PowerLimitKwhPerInterval:   q.PowerLimitKwhPerInterval,
+	}
 }
 
 // EconomicsMonthlyDay is one day of the month breakdown (daily totals
@@ -338,6 +365,7 @@ func monthlyTotalsToJSON(t economics.MonthlyTotals) EconomicsMonthlyTotals {
 		EssReserveSocUah:            t.EssReserveSoc,
 		EssReservePvUah:             t.EssReservePv,
 		EssPvMissedKwh:              t.EssPvMissedKwh,
+		EssDataQuality:              dataQualityToJSON(t.EssDataQuality),
 		BestDay:                     EconomicsMonthExtreme{Date: t.BestDay.Date, EffectUah: t.BestDay.EffectUah},
 		MinEffectDay:                EconomicsMonthExtreme{Date: t.MinEffectDay.Date, EffectUah: t.MinEffectDay.EffectUah},
 	}

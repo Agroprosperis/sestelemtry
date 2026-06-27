@@ -66,7 +66,7 @@ func AggregateYear(
 	loc *time.Location,
 	days []DailyRecord,
 	hourly []HourlyRecord,
-	resolveTariff func(day time.Time) (capacityKwh, degradationUahPerKwh float64),
+	resolveTariff func(day time.Time) (capacityKwh, degradationUahPerKwh, powerLimitKw float64),
 ) StoredYear {
 	year := parseYear(period)
 	keys := make([]string, 0, 12)
@@ -88,7 +88,7 @@ func AggregatePeriod(
 	loc *time.Location,
 	days []DailyRecord,
 	hourly []HourlyRecord,
-	resolveTariff func(day time.Time) (capacityKwh, degradationUahPerKwh float64),
+	resolveTariff func(day time.Time) (capacityKwh, degradationUahPerKwh, powerLimitKw float64),
 ) StoredYear {
 	// Bucket the daily / hourly records by calendar month so each month
 	// is aggregated against exactly its own slice.
@@ -124,9 +124,9 @@ func AggregatePeriod(
 			continue
 		}
 		firstDay := time.Date(ky, time.Month(km), 1, 0, 0, 0, 0, loc)
-		capacityKwh, degr := resolveTariff(firstDay)
+		capacityKwh, degr, powerLimit := resolveTariff(firstDay)
 
-		sm := AggregateMonth(monthKey, loc, daysByMonth[monthKey], hourlyByMonth[monthKey], capacityKwh, degr)
+		sm := AggregateMonth(monthKey, loc, daysByMonth[monthKey], hourlyByMonth[monthKey], capacityKwh, degr, powerLimit)
 		mt := sm.Totals
 		months = append(months, MonthRollup{Month: monthKey, Totals: mt})
 		monthlyMargin = append(monthlyMargin, MonthMargin{
@@ -184,14 +184,27 @@ func AggregatePeriod(
 		// when the pack size changes mid-year).
 		totals.EquivalentCycles += mt.EquivalentCycles
 
-		// Fact-vs-optimum: each month already summed its per-day ladder,
-		// so the year is the sum of months.
+		// Fact-vs-optimum: each month already produced its continuous
+		// monthly-DP headline, so the year is the sum of months.
 		totals.EssFact += mt.EssFact
 		totals.EssOptimum += mt.EssOptimum
 		totals.EssReserveTiming += mt.EssReserveTiming
 		totals.EssReserveSoc += mt.EssReserveSoc
 		totals.EssReservePv += mt.EssReservePv
 		totals.EssPvMissedKwh += mt.EssPvMissedKwh
+
+		// Data quality: a period is OK only if every month is OK; sum the
+		// excluded days and concatenate their dates.
+		totals.EssDataQuality.TotalDays += mt.EssDataQuality.TotalDays
+		totals.EssDataQuality.AnomalousDays += mt.EssDataQuality.AnomalousDays
+		totals.EssDataQuality.AnomalousDates = append(totals.EssDataQuality.AnomalousDates, mt.EssDataQuality.AnomalousDates...)
+		if mt.EssDataQuality.MaxChargeKwhPerInterval > totals.EssDataQuality.MaxChargeKwhPerInterval {
+			totals.EssDataQuality.MaxChargeKwhPerInterval = mt.EssDataQuality.MaxChargeKwhPerInterval
+		}
+		if mt.EssDataQuality.MaxDischargeKwhPerInterval > totals.EssDataQuality.MaxDischargeKwhPerInterval {
+			totals.EssDataQuality.MaxDischargeKwhPerInterval = mt.EssDataQuality.MaxDischargeKwhPerInterval
+		}
+		totals.EssDataQuality.PowerLimitKwhPerInterval = mt.EssDataQuality.PowerLimitKwhPerInterval
 
 		// kWh-weighted price reconstruction (same scheme AggregateMonth
 		// uses to roll days up — multiply the month's weighted average
@@ -239,6 +252,7 @@ func AggregatePeriod(
 	if totals.EssOptimum > 0 {
 		totals.EssCapturedShare = totals.EssFact / totals.EssOptimum
 	}
+	totals.EssDataQuality.DataOK = totals.EssDataQuality.AnomalousDays == 0
 	// ESS EOD snapshot: the last month with data carries the point-in-time
 	// residual / cost-basis state.
 	if lastMonthWithData != nil {
@@ -328,12 +342,12 @@ func (s *Service) GetYear(ctx context.Context, orgID, period, tz string) (Stored
 	hourly, _ := s.backend.LoadHourlyRange(ctx, orgID, firstDay, nextYear)
 
 	schedule, _ := s.backend.TariffSchedule(ctx, orgID)
-	resolve := func(day time.Time) (float64, float64) {
+	resolve := func(day time.Time) (float64, float64, float64) {
 		t, ok := schedule.ResolveForDay(day)
 		if !ok {
 			t = DefaultTariffs
 		}
-		return t.EssCapacityKwh, t.DegradationUahPerKwh
+		return t.EssCapacityKwh, t.DegradationUahPerKwh, t.EssPowerLimitKw
 	}
 
 	result := AggregateYear(period, loc, daily, hourly, resolve)
@@ -386,12 +400,12 @@ func (s *Service) GetPeriod(ctx context.Context, orgID, from, to, tz string) (St
 	hourly, _ := s.backend.LoadHourlyRange(ctx, orgID, firstDay, nextAfter)
 
 	schedule, _ := s.backend.TariffSchedule(ctx, orgID)
-	resolve := func(day time.Time) (float64, float64) {
+	resolve := func(day time.Time) (float64, float64, float64) {
 		t, ok := schedule.ResolveForDay(day)
 		if !ok {
 			t = DefaultTariffs
 		}
-		return t.EssCapacityKwh, t.DegradationUahPerKwh
+		return t.EssCapacityKwh, t.DegradationUahPerKwh, t.EssPowerLimitKw
 	}
 
 	label := keys[0] + ".." + keys[len(keys)-1]

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"sort"
 	"time"
 )
 
@@ -128,11 +129,12 @@ type MonthlyTotals struct {
 	HoursWithData     int
 	HoursMissingPrice int
 
-	// ESS fact-vs-optimum rollup (PV-free basis). EssFact is the realised
-	// effect, EssOptimum the sum of per-day modelled maxima (each clamped
-	// ≥ that day's fact, so EssReserve ≥ 0). EssCapturedShare =
-	// EssFact / EssOptimum. The reserve is split into three causes that
-	// sum back to EssReserve.
+	// ESS fact-vs-optimum rollup (project_net basis: charging from PV
+	// costs the forgone export). EssFact is the realised EssNet; EssOptimum
+	// the continuous monthly SOC-DP maximum (SOC_end ≥ SOC_start);
+	// EssReserve = max(0, EssOptimum − EssFact); EssCapturedShare =
+	// EssFact / EssOptimum. The reserve is split into three causes
+	// (timing / pre-peak-SOC / missed-PV) sourced from the same monthly DP.
 	EssFact          float64
 	EssOptimum       float64
 	EssReserve       float64
@@ -142,8 +144,65 @@ type MonthlyTotals struct {
 	EssReservePv     float64
 	EssPvMissedKwh   float64
 
+	// EssDataQuality reports the УЗЕ anomaly filter outcome: anomalous days
+	// (physically impossible charge/discharge readings) are excluded from
+	// the fact/optimum/reserve above so corrupt telemetry can't distort it.
+	EssDataQuality DataQuality
+
 	BestDay      MonthExtreme
 	MinEffectDay MonthExtreme
+}
+
+// DataQuality summarises the ESS (УЗЕ) anomaly filter for a period.
+// Anomalous days have an hourly charge or discharge above the unit's power
+// limit × tolerance and are dropped from the fact/optimum/reserve.
+type DataQuality struct {
+	DataOK                     bool
+	TotalDays                  int
+	AnomalousDays              int
+	AnomalousDates             []string
+	MaxChargeKwhPerInterval    float64
+	MaxDischargeKwhPerInterval float64
+	PowerLimitKwhPerInterval   float64
+}
+
+// essAnomalyTolerance is how far above the nominal per-interval power limit
+// a reading may go before the day is treated as corrupt telemetry.
+const essAnomalyTolerance = 1.5
+
+// detectEssAnomalies flags every civil day whose hourly ESS charge or
+// discharge exceeds powerLimitKw · 1h · tol — readings that are physically
+// impossible for the unit and almost always corrupt telemetry. It returns
+// the set of anomalous civil dates plus a DataQuality summary. When
+// powerLimitKw ≤ 0 the filter is disabled (no day is excluded).
+func detectEssAnomalies(hourly []HourlyRecord, loc *time.Location, powerLimitKw, tol float64) (map[string]bool, DataQuality) {
+	bad := make(map[string]bool)
+	dq := DataQuality{DataOK: true, PowerLimitKwhPerInterval: powerLimitKw}
+	for _, h := range hourly {
+		if h.EssCharged > dq.MaxChargeKwhPerInterval {
+			dq.MaxChargeKwhPerInterval = h.EssCharged
+		}
+		if h.EssDischarged > dq.MaxDischargeKwhPerInterval {
+			dq.MaxDischargeKwhPerInterval = h.EssDischarged
+		}
+	}
+	if powerLimitKw <= 0 {
+		return bad, dq
+	}
+	limit := powerLimitKw * tol // hourly granularity → 1h interval
+	for _, h := range hourly {
+		if h.EssCharged > limit || h.EssDischarged > limit {
+			bad[h.HourStart.In(loc).Format("2006-01-02")] = true
+		}
+	}
+	dq.AnomalousDays = len(bad)
+	dq.AnomalousDates = make([]string, 0, len(bad))
+	for k := range bad {
+		dq.AnomalousDates = append(dq.AnomalousDates, k)
+	}
+	sort.Strings(dq.AnomalousDates)
+	dq.DataOK = dq.AnomalousDays == 0
+	return bad, dq
 }
 
 // StoredMonth is the served monthly economics result: the rollup totals,
@@ -160,8 +219,15 @@ type StoredMonth struct {
 
 // AggregateMonth folds the persisted daily + hourly records of one month
 // into a MonthlyTotals + per-day breakdown + ESS marginality heatmap.
-// capacityKwh is the ESS capacity used for the equivalent-cycle metric.
-func AggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly []HourlyRecord, capacityKwh, degradationUahPerKwh float64) StoredMonth {
+// capacityKwh is the ESS capacity used for the equivalent-cycle metric;
+// powerLimitKw is the per-interval power ceiling for the ESS anomaly filter
+// (≤ 0 falls back to capacityKwh ≈ 1C).
+func AggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly []HourlyRecord, capacityKwh, degradationUahPerKwh, powerLimitKw float64) StoredMonth {
+	if powerLimitKw <= 0 {
+		powerLimitKw = capacityKwh
+	}
+	badDays, dq := detectEssAnomalies(hourly, loc, powerLimitKw, essAnomalyTolerance)
+	dq.TotalDays = len(days)
 	// Per-day RDN stats keyed by civil date, derived from the hourly
 	// slice (the daily table stores only the all-in import price).
 	type rdnAcc struct {
@@ -172,13 +238,12 @@ func AggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly
 	// earliest hour (the day's starting SOC), and the accumulators the
 	// fact-vs-optimum decomposition needs.
 	type dayOpt struct {
-		hours       [24]optimumHour
-		startKwh    float64
-		startHour   int
-		haveStart   bool
-		pvChargeOpp float64 // Σ pv_to_ess × export (PV→free basis adjustment)
-		pvSurplus   float64 // Σ available PV surplus
-		actualPv    float64 // Σ actual pv_to_ess
+		hours     [24]optimumHour
+		startKwh  float64
+		startHour int
+		haveStart bool
+		pvSurplus float64 // Σ available PV surplus
+		actualPv  float64 // Σ actual pv_to_ess
 	}
 	dayRdn := make(map[string]*rdnAcc)
 	dayOpts := make(map[string]*dayOpt)
@@ -222,7 +287,6 @@ func AggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly
 				oh.tradable = true
 				oh.importPrice = h.ImportPrice
 				oh.exportPrice = h.ExportPrice
-				do.pvChargeOpp += h.PVToEss * h.ExportPrice
 			}
 			do.hours[hour] = oh
 			do.pvSurplus += pvSurplus
@@ -252,9 +316,12 @@ func AggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly
 
 	// Fact-vs-optimum: derive the battery envelope from this month's
 	// hourly history, then solve each day's optimal dispatch on the
-	// PV-free basis and attribute the reserve to its causes.
+	// project_net basis (PV charge costed at the forgone export) and
+	// attribute the reserve to its causes. The per-day numbers feed the
+	// daily-detail table; the authoritative monthly headline comes from a
+	// single continuous SOC DP across the whole month (below).
 	type optimumResult struct {
-		fact     float64 // realised effect on the PV-free basis
+		fact     float64 // realised EssNet (project_net basis)
 		optimum  float64
 		reserve  float64
 		timing   float64 // discharge not at peak
@@ -262,7 +329,20 @@ func AggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly
 		pv       float64 // missed PV charging
 		pvMissed float64 // available PV surplus that was not stored (kWh)
 	}
-	optParams := deriveOptimumParams(hourly, capacityKwh, degradationUahPerKwh)
+	// Derive the optimizer envelope from the non-anomalous hours only, so a
+	// single corrupt reading can't inflate the demonstrated power / SOC
+	// window the optimum is allowed to use.
+	cleanHourly := hourly
+	if len(badDays) > 0 {
+		cleanHourly = make([]HourlyRecord, 0, len(hourly))
+		for _, h := range hourly {
+			if badDays[h.HourStart.In(loc).Format("2006-01-02")] {
+				continue
+			}
+			cleanHourly = append(cleanHourly, h)
+		}
+	}
+	optParams := deriveOptimumParams(cleanHourly, capacityKwh, degradationUahPerKwh)
 
 	// computeOptimum solves the 3-run ladder for one day: each relaxation
 	// only adds freedom, so the values are monotonic and the three
@@ -303,6 +383,15 @@ func AggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly
 	var importNum, importDen, exportNum, exportDen float64
 	var bestSet, minSet bool
 	outDays := make([]MonthDay, 0, len(days))
+
+	// Chronological hour list for the continuous monthly SOC DP (§3.2),
+	// built over non-anomalous days only. monthStart is the residual at the
+	// first usable hour (the month's opening SOC); monthFact sums the
+	// realised EssNet on the same project_net basis.
+	monthHours := make([]optimumHour, 0, len(days)*24)
+	monthStart := optParams.socMinKwh
+	haveMonthStart := false
+	var monthFact float64
 
 	for _, d := range days {
 		t := d.Totals
@@ -366,21 +455,29 @@ func AggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly
 			cycles = t.EssDischarged / capacityKwh
 		}
 
-		// Fact-vs-optimum on the PV-free basis: realised effect adds back
-		// the export-opportunity of PV that was stored (so charging from
-		// PV counts as free, like the optimum and the example).
+		// Fact-vs-optimum on the project_net basis: the realised fact is
+		// simply EssNet (PV charge is already costed at the forgone export
+		// in HourEconomicsFor). Anomalous days (corrupt УЗЕ telemetry) are
+		// excluded from the per-day reserve and the monthly headline.
 		do := dayOpts[key]
-		factPv0 := t.EssNet
-		if do != nil {
-			factPv0 += do.pvChargeOpp
+		anomalous := badDays[key]
+		var opt optimumResult
+		if anomalous {
+			opt = optimumResult{} // excluded: no fact/optimum/reserve
+		} else {
+			opt = computeOptimum(do, t.EssNet)
+			totals.EssPvMissedKwh += opt.pvMissed
+			monthFact += t.EssNet
+			if do != nil {
+				if !haveMonthStart {
+					if do.haveStart {
+						monthStart = do.startKwh
+					}
+					haveMonthStart = true
+				}
+				monthHours = append(monthHours, do.hours[:]...)
+			}
 		}
-		opt := computeOptimum(do, factPv0)
-		totals.EssFact += opt.fact
-		totals.EssOptimum += opt.optimum
-		totals.EssReserveTiming += opt.timing
-		totals.EssReserveSoc += opt.soc
-		totals.EssReservePv += opt.pv
-		totals.EssPvMissedKwh += opt.pvMissed
 
 		outDays = append(outDays, MonthDay{
 			Date:             key,
@@ -414,10 +511,34 @@ func AggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly
 	if capacityKwh > 0 {
 		totals.EquivalentCycles = totals.EssDischarged / capacityKwh
 	}
+	// Authoritative monthly headline: one continuous SOC DP across all
+	// non-anomalous hours of the month (SOC carried across day boundaries,
+	// SOC_end ≥ SOC_start). The 3-mode ladder attributes the reserve to its
+	// causes; clamp to a monotonic ladder bottomed at the realised fact so
+	// every component stays ≥ 0. The per-day MonthDay rows above remain a
+	// per-day decomposition for the daily-detail table.
+	monthFixed := optimizeMonth(monthHours, monthStart, optParams, modeFixedCharge)
+	monthNoPv := optimizeMonth(monthHours, monthStart, optParams, modeNoPV)
+	monthFull := optimizeMonth(monthHours, monthStart, optParams, modeFull)
+	if monthFixed < monthFact {
+		monthFixed = monthFact
+	}
+	if monthNoPv < monthFixed {
+		monthNoPv = monthFixed
+	}
+	if monthFull < monthNoPv {
+		monthFull = monthNoPv
+	}
+	totals.EssFact = monthFact
+	totals.EssOptimum = monthFull
+	totals.EssReserveTiming = monthFixed - monthFact
+	totals.EssReserveSoc = monthNoPv - monthFixed
+	totals.EssReservePv = monthFull - monthNoPv
 	totals.EssReserve = totals.EssOptimum - totals.EssFact
 	if totals.EssOptimum > 0 {
 		totals.EssCapturedShare = totals.EssFact / totals.EssOptimum
 	}
+	totals.EssDataQuality = dq
 
 	// ESS EOD snapshot: last day with data wins (point-in-time state).
 	for i := len(days) - 1; i >= 0; i-- {
@@ -485,7 +606,7 @@ func (s *Service) GetMonth(ctx context.Context, orgID, month, tz string) (Stored
 		tariffs = DefaultTariffs
 	}
 
-	result := AggregateMonth(month, loc, daily, hourly, tariffs.EssCapacityKwh, tariffs.DegradationUahPerKwh)
+	result := AggregateMonth(month, loc, daily, hourly, tariffs.EssCapacityKwh, tariffs.DegradationUahPerKwh, tariffs.EssPowerLimitKw)
 	result.OrganizationID = orgID
 	return result, nil
 }
