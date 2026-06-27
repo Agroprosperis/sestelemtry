@@ -325,6 +325,13 @@ type EnergyFlowHourlyRow struct {
 	ESSToGridKwh     float64   `json:"ess_to_grid_kwh"`
 	EssChargedKwh    float64   `json:"ess_charged_kwh"`
 	EssDischargedKwh float64   `json:"ess_discharged_kwh"`
+	// EssPeakIntervalKw is the largest sub-hourly (~5-min) implied ESS
+	// charge/discharge power (kW) observed within this hour, captured in
+	// the same per-interval allocator walk that produces the kWh sums.
+	// It lets the economics anomaly filter catch sub-hourly spikes the
+	// hourly sums average away, without re-reading raw telemetry on the
+	// (wide-window) monthly/annual read path.
+	EssPeakIntervalKw float64 `json:"ess_peak_interval_kw"`
 	// SkippedIntervals counts how many sub-buckets within this
 	// hour the allocator dropped (negative deltas, missing
 	// accumulators, etc). > 0 means the four flow values for

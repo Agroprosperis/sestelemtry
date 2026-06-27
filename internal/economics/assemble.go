@@ -57,6 +57,11 @@ type FlowRow struct {
 	GridToEss     float64
 	EssToLoad     float64
 	EssToGrid     float64
+	// EssPeakIntervalKw is the largest sub-hourly (~5-min) implied ESS
+	// charge/discharge power (kW) seen within the hour, carried verbatim
+	// from the allocator's per-interval walk so the anomaly filter can
+	// catch spikes the hourly sums hide. 0 when no sub-hourly signal.
+	EssPeakIntervalKw float64
 }
 
 // DAMHour mirrors a /dam-prices row (delivery date, hour 1..24, zone,
@@ -86,6 +91,13 @@ type HourRow struct {
 	EssCostBasisUahEnd     *float64
 	EssAvgCostUahPerKwhEnd *float64
 	EssResidualKwhEnd      *float64
+
+	// EssPeakIntervalKw is the sub-hourly (~5-min) implied ESS power peak
+	// (kW) for the hour, carried through from the flow row unscaled (it is
+	// a diagnostic power reading, not a flow subject to reconciliation).
+	// Persisted so the wide-window monthly/annual anomaly filter can read
+	// it without re-running the raw allocator.
+	EssPeakIntervalKw float64
 }
 
 // DayInput carries everything AssembleDay needs for one target day. The
@@ -132,11 +144,13 @@ func AssembleDay(in DayInput) ([]*HourRow, ReconcileResult) {
 	flows := make([]*HourFlows, 24)
 	rdns := make([]*float64, 24)
 	starts := make([]time.Time, 24)
+	peaks := make([]float64, 24)
 	for h := 0; h < 24; h++ {
 		if h >= len(in.TodayFlows) {
 			continue
 		}
 		flowRow := in.TodayFlows[h]
+		peaks[h] = flowRow.EssPeakIntervalKw
 		f := HourFlows{
 			PV:            pvByHour[h],
 			GridImport:    importByHour[h],
@@ -172,11 +186,12 @@ func AssembleDay(in DayInput) ([]*HourRow, ReconcileResult) {
 			econ = HourEconomicsFor(*rdn, flow, in.Tariffs)
 		}
 		out[h] = &HourRow{
-			Hour:      h,
-			HourStart: starts[h],
-			Rdn:       rdn,
-			Flow:      flow,
-			Econ:      econ,
+			Hour:              h,
+			HourStart:         starts[h],
+			Rdn:               rdn,
+			Flow:              flow,
+			Econ:              econ,
+			EssPeakIntervalKw: peaks[h],
 		}
 	}
 

@@ -138,6 +138,14 @@ func (h *Handlers) computeEnergyFlowHourly(
 
 	rawSamples := buildRawSamples(rows, cfg)
 	var stats energyflow.RecomputeResult
+	// prevByHour tracks the previous non-skipped interval's end time per
+	// hour bucket so we can convert each interval's charge/discharge kWh
+	// into an implied power (kW = kWh / Δh) and keep the largest seen in
+	// the hour. This is the sub-hourly peak the economics anomaly filter
+	// needs; computing it here (once, in the per-day allocator walk that
+	// already runs) avoids re-reading raw telemetry on the wide-window
+	// monthly/annual read path.
+	var lastIntervalEnd time.Time
 	energyflow.IterateIntervals(
 		rawSamples,
 		energyflow.Options{
@@ -162,6 +170,18 @@ func (h *Handlers) computeEnergyFlowHourly(
 			// than poisoning the dashboard's hourly load math.
 			row.EssChargedKwh += r.EssChargedKwh
 			row.EssDischargedKwh += r.EssDischargedKwh
+			if !lastIntervalEnd.IsZero() {
+				if dtH := curr.Sub(lastIntervalEnd).Hours(); dtH > 0 {
+					kw := r.EssChargedKwh / dtH
+					if d := r.EssDischargedKwh / dtH; d > kw {
+						kw = d
+					}
+					if kw > row.EssPeakIntervalKw {
+						row.EssPeakIntervalKw = kw
+					}
+				}
+			}
+			lastIntervalEnd = curr
 		},
 		&stats,
 	)

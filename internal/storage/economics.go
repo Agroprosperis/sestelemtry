@@ -120,6 +120,13 @@ func InitEconomicsSchema(ctx context.Context, pool *pgxpool.Pool) error {
 		`ALTER TABLE economics_daily ADD COLUMN IF NOT EXISTS reconciled boolean NOT NULL DEFAULT false`,
 		`ALTER TABLE economics_daily ADD COLUMN IF NOT EXISTS quality_flags text[]`,
 		`ALTER TABLE economics_daily ADD COLUMN IF NOT EXISTS reconciliation jsonb`,
+		// ess_peak_interval_kw is the per-hour sub-hourly (~5-min) implied
+		// ESS power peak (kW), captured during the per-day energy-flow
+		// recompute. Persisted so the wide-window monthly/annual anomaly
+		// filter reads it cheaply instead of re-running the raw allocator.
+		// Defaults to 0 for rows written before this column existed (they
+		// fall back to the hourly-sum anomaly check until recomputed).
+		`ALTER TABLE economics_hourly ADD COLUMN IF NOT EXISTS ess_peak_interval_kw double precision NOT NULL DEFAULT 0`,
 	}
 	for _, s := range stmts {
 		if _, err := pool.Exec(ctx, s); err != nil {
@@ -251,6 +258,11 @@ type EconomicsHourlyRow struct {
 	EssAvgCostEnd        *float64
 	EssCostBasisEnd      *float64
 	EssResidualEnd       *float64
+
+	// EssPeakIntervalKw is the sub-hourly (~5-min) implied ESS power peak
+	// (kW) for the hour, captured during recompute. 0 means no sub-hourly
+	// signal (or a legacy row written before the column existed).
+	EssPeakIntervalKw float64
 }
 
 // UpsertEconomicsHourly replaces the persisted per-hour rows by
@@ -277,10 +289,11 @@ func UpsertEconomicsHourly(ctx context.Context, pool *pgxpool.Pool, rows []Econo
 			ess_remaining_kwh_start, ess_avg_cost_uah_per_kwh_start, ess_cost_basis_uah_start,
 			ess_withdrawn_cost_uah, ess_realized_profit_uah,
 			ess_avg_cost_uah_per_kwh_end, ess_cost_basis_uah_end, ess_residual_kwh_end,
+			ess_peak_interval_kw,
 			computed_at
 		) VALUES (
 			$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,
-			$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30, now()
+			$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31, now()
 		)
 		ON CONFLICT (organization_id, hour_start) DO UPDATE SET
 			rdn_uah_per_kwh = EXCLUDED.rdn_uah_per_kwh,
@@ -311,6 +324,7 @@ func UpsertEconomicsHourly(ctx context.Context, pool *pgxpool.Pool, rows []Econo
 			ess_avg_cost_uah_per_kwh_end = EXCLUDED.ess_avg_cost_uah_per_kwh_end,
 			ess_cost_basis_uah_end = EXCLUDED.ess_cost_basis_uah_end,
 			ess_residual_kwh_end = EXCLUDED.ess_residual_kwh_end,
+			ess_peak_interval_kw = EXCLUDED.ess_peak_interval_kw,
 			computed_at = now()
 	`
 	for _, r := range rows {
@@ -325,6 +339,7 @@ func UpsertEconomicsHourly(ctx context.Context, pool *pgxpool.Pool, rows []Econo
 			r.EssRemainingKwhStart, r.EssAvgCostStart, r.EssCostBasisStart,
 			r.EssWithdrawnCost, r.EssRealizedProfit,
 			r.EssAvgCostEnd, r.EssCostBasisEnd, r.EssResidualEnd,
+			r.EssPeakIntervalKw,
 		)
 	}
 	br := pool.SendBatch(ctx, batch)
@@ -354,7 +369,8 @@ func GetEconomicsHourly(ctx context.Context, pool *pgxpool.Pool, organizationID 
 			baseline_cost_uah, actual_cost_uah, effect_uah, ess_net_uah,
 			ess_remaining_kwh_start, ess_avg_cost_uah_per_kwh_start, ess_cost_basis_uah_start,
 			ess_withdrawn_cost_uah, ess_realized_profit_uah,
-			ess_avg_cost_uah_per_kwh_end, ess_cost_basis_uah_end, ess_residual_kwh_end
+			ess_avg_cost_uah_per_kwh_end, ess_cost_basis_uah_end, ess_residual_kwh_end,
+			ess_peak_interval_kw
 		FROM economics_hourly
 		WHERE organization_id = $1 AND hour_start >= $2 AND hour_start < $3
 		ORDER BY hour_start ASC
@@ -377,6 +393,7 @@ func GetEconomicsHourly(ctx context.Context, pool *pgxpool.Pool, organizationID 
 			&r.EssRemainingKwhStart, &r.EssAvgCostStart, &r.EssCostBasisStart,
 			&r.EssWithdrawnCost, &r.EssRealizedProfit,
 			&r.EssAvgCostEnd, &r.EssCostBasisEnd, &r.EssResidualEnd,
+			&r.EssPeakIntervalKw,
 		); err != nil {
 			return nil, fmt.Errorf("storage: scan economics hourly: %w", err)
 		}
