@@ -2831,13 +2831,22 @@ button.economics-optimum-row.open {
 .uze-wf-row {
   display: flex;
   justify-content: space-between;
+  align-items: baseline;
   gap: 10px;
   font-size: 11.5px;
   padding: 3px 0;
   color: #475569;
 }
 
+.uze-wf-row span {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .uze-wf-row strong {
+  flex: 0 0 auto;
+  text-align: right;
+  white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
 
