@@ -111,6 +111,17 @@ func deriveOptimumParams(hourly []HourlyRecord, capacityKwh, degradationUahPerKw
 // generation and load are fixed (we can't change weather or consumption);
 // only the battery's charge source and discharge timing/destination are
 // decision variables.
+//
+// Granularity is HOURLY by deliberate design, not an unfinished port of
+// the 5-minute reference (§3.2): the day-ahead market (РДН) clears on an
+// hourly grid, so import/export prices are constant within the hour and
+// the price arbitrage the reserve measures is fully captured at hourly
+// resolution. A finer (e.g. 5-minute) DP would only refine intra-hour SOC
+// and power tracking — it cannot change the optimal value when the price
+// signal itself is hourly — while multiplying the DP step count ~12× per
+// day. We therefore lock the optimizer to hourly buckets; the per-object
+// power ceiling that finer steps would enforce is handled separately by
+// the УЗЕ anomaly filter (EssPowerLimitKw).
 type optimumHour struct {
 	tradable        bool    // prices known → the battery may act this hour
 	importPrice     float64 // all-in import price (UAH/kWh)
