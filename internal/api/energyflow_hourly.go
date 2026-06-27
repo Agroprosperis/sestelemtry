@@ -138,14 +138,6 @@ func (h *Handlers) computeEnergyFlowHourly(
 
 	rawSamples := buildRawSamples(rows, cfg)
 	var stats energyflow.RecomputeResult
-	// prevByHour tracks the previous non-skipped interval's end time per
-	// hour bucket so we can convert each interval's charge/discharge kWh
-	// into an implied power (kW = kWh / Δh) and keep the largest seen in
-	// the hour. This is the sub-hourly peak the economics anomaly filter
-	// needs; computing it here (once, in the per-day allocator walk that
-	// already runs) avoids re-reading raw telemetry on the wide-window
-	// monthly/annual read path.
-	var lastIntervalEnd time.Time
 	energyflow.IterateIntervals(
 		rawSamples,
 		energyflow.Options{
@@ -170,21 +162,19 @@ func (h *Handlers) computeEnergyFlowHourly(
 			// than poisoning the dashboard's hourly load math.
 			row.EssChargedKwh += r.EssChargedKwh
 			row.EssDischargedKwh += r.EssDischargedKwh
-			if !lastIntervalEnd.IsZero() {
-				if dtH := curr.Sub(lastIntervalEnd).Hours(); dtH > 0 {
-					kw := r.EssChargedKwh / dtH
-					if d := r.EssDischargedKwh / dtH; d > kw {
-						kw = d
-					}
-					if kw > row.EssPeakIntervalKw {
-						row.EssPeakIntervalKw = kw
-					}
-				}
-			}
-			lastIntervalEnd = curr
 		},
 		&stats,
 	)
+
+	// Sub-hourly ESS power peak: a SEPARATE walk with the counter-step
+	// guard OFF (MaxEssPowerKw = 0). The economics УЗЕ anomaly filter must
+	// SEE the physically-impossible spikes (reference detect_ess_anomalies
+	// runs on raw 5-min flows with no power guard), whereas the flow walk
+	// above keeps the guard ON so corrupt counter steps don't poison the
+	// dashboard's clean kWh sums. We therefore can't reuse that walk's
+	// callback (it never fires for skipped spike intervals). The implied
+	// power is kWh / Δh per interval; we keep the largest per hour.
+	fillEssPeakKwPerHour(out.Hours, rawSamples, cfg, loc)
 
 	// Skipped-interval / warning attribution: the iterate loop
 	// doesn't tell us which hour an Allocate call was skipped for
@@ -201,4 +191,49 @@ func (h *Handlers) computeEnergyFlowHourly(
 		out.Hours[0].Warnings = append(out.Hours[0].Warnings, stats.Warnings...)
 	}
 	return out, nil
+}
+
+// fillEssPeakKwPerHour populates EssPeakIntervalKw on each hour row with
+// the largest sub-hourly (~5-min) implied ESS charge/discharge power (kW)
+// seen in that hour. It runs the allocator with the counter-step guard
+// OFF (MaxEssPowerKw = 0) so spikes above the unit's power ceiling stay
+// visible — that is exactly the signal the УЗЕ anomaly filter needs and
+// matches the reference detect_ess_anomalies, which inspects raw 5-min
+// flows with no power guard. Other validations (negative deltas, gaps)
+// still apply, so counter rollbacks don't create phantom peaks.
+func fillEssPeakKwPerHour(hours []EnergyFlowHourlyRow, rawSamples []energyflow.RawSample, cfg EnergyFlowOrg, loc *time.Location) {
+	if len(rawSamples) < 2 {
+		return
+	}
+	var last time.Time
+	var stats energyflow.RecomputeResult
+	energyflow.IterateIntervals(
+		rawSamples,
+		energyflow.Options{
+			EssDischargeSign:        cfg.EssDischargeSign,
+			AllocationWindowSeconds: 60,
+			MaxGapSeconds:           0,
+			MaxEssPowerKw:           0, // guard OFF: spikes must stay visible
+		},
+		func(curr time.Time, r energyflow.Result) {
+			h := curr.In(loc).Hour()
+			if h < 0 || h >= len(hours) {
+				last = curr
+				return
+			}
+			if !last.IsZero() {
+				if dtH := curr.Sub(last).Hours(); dtH > 0 {
+					kw := r.EssChargedKwh / dtH
+					if d := r.EssDischargedKwh / dtH; d > kw {
+						kw = d
+					}
+					if kw > hours[h].EssPeakIntervalKw {
+						hours[h].EssPeakIntervalKw = kw
+					}
+				}
+			}
+			last = curr
+		},
+		&stats,
+	)
 }
