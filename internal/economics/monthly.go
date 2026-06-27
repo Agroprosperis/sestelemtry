@@ -378,7 +378,7 @@ func AggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly
 			cleanHourly = append(cleanHourly, h)
 		}
 	}
-	optParams := deriveOptimumParams(cleanHourly, capacityKwh, degradationUahPerKwh, roundtripEff)
+	optParams := deriveOptimumParams(cleanHourly, capacityKwh, degradationUahPerKwh, powerLimitKw, roundtripEff)
 
 	// computeOptimum solves the 3-run ladder for one day: each relaxation
 	// only adds freedom, so the values are monotonic and the three

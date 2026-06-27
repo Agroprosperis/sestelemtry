@@ -321,7 +321,7 @@ func TestDeriveOptimumParams(t *testing.T) {
 		{HourStart: base.Add(time.Hour), EssCharged: 45, EssDischarged: 0, EssRemainingKwhStart: floatPtr(60)},
 		{HourStart: base.Add(2 * time.Hour), EssCharged: 0, EssDischarged: 40, EssRemainingKwhStart: floatPtr(95)},
 	}
-	p := deriveOptimumParams(hourly, 200, 0.6, 0)
+	p := deriveOptimumParams(hourly, 200, 0.6, 0, 0)
 	if p.maxChargeKwh != 45 {
 		t.Fatalf("maxChargeKwh = %v, want 45", p.maxChargeKwh)
 	}

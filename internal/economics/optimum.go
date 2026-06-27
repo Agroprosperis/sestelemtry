@@ -43,7 +43,7 @@ func clampFloat(v, lo, hi float64) float64 {
 // roundtripEff lets a per-object config pin the round-trip efficiency: a
 // value > 0 overrides the empirical estimate (clamped to the sane band),
 // while 0 keeps the demonstrated-throughput estimate (§2.4).
-func deriveOptimumParams(hourly []HourlyRecord, capacityKwh, degradationUahPerKwh, roundtripEff float64) optimumParams {
+func deriveOptimumParams(hourly []HourlyRecord, capacityKwh, degradationUahPerKwh, powerLimitKw, roundtripEff float64) optimumParams {
 	p := optimumParams{
 		capacityKwh:          capacityKwh,
 		degradationUahPerKwh: degradationUahPerKwh,
@@ -77,8 +77,16 @@ func deriveOptimumParams(hourly []HourlyRecord, capacityKwh, degradationUahPerKw
 		}
 	}
 
-	// SOC window: observed residual range, clamped to [0, capacity].
-	if haveResidual {
+	// SOC window. With a per-object config (powerLimitKw > 0) the optimum is
+	// the perfect-foresight dispatch within the unit's PHYSICAL envelope, so
+	// the pack may swing across its full usable capacity [0, capacityKwh] —
+	// matching the reference optimize_dp, whose states span 0..capacity_kwh.
+	// Without config we fall back to the observed residual range so an
+	// unconfigured object can't claim headroom its telemetry never showed.
+	if powerLimitKw > 0 {
+		p.socMinKwh = 0
+		p.socMaxKwh = capacityKwh
+	} else if haveResidual {
 		p.socMinKwh = math.Max(0, minRes)
 		p.socMaxKwh = math.Min(capacityKwh, maxRes)
 	}
@@ -96,8 +104,18 @@ func deriveOptimumParams(hourly []HourlyRecord, capacityKwh, degradationUahPerKw
 		p.rte = clampFloat(sumDischarged/sumCharged, minRoundTripEff, maxRoundTripEff)
 	}
 
-	// Power fallbacks: if the battery never moved, allow filling the pack
-	// in an hour (the SOC window still bounds the schedule).
+	// Per-hour charge/discharge ceiling. A per-object config (powerLimitKw)
+	// pins it to the unit's nameplate power — the buckets are hourly, so the
+	// kW rating equals the kWh movable in one hour. This matches the
+	// reference optimize_dp (power_per_step = power_kw / 12 over 5-min steps,
+	// i.e. power_kw kWh per hour) and lets the optimum arbitrage the full
+	// physical throughput rather than only what the battery actually moved.
+	if powerLimitKw > 0 {
+		p.maxChargeKwh = powerLimitKw
+		p.maxDischargeKwh = powerLimitKw
+	}
+	// Power fallbacks: if the battery never moved (and no config), allow
+	// filling the pack in an hour (the SOC window still bounds the schedule).
 	if p.maxChargeKwh <= 0 {
 		p.maxChargeKwh = capacityKwh
 	}
