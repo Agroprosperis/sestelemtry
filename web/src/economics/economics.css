@@ -2665,3 +2665,284 @@ button.economics-optimum-row.open {
   background: #eef2f7;
 }
 
+/* --- УЗЕ cycle chart (expandable per-day optimum-vs-fact) --- */
+.uze-acc-group {
+  margin-top: 14px;
+  border-top: 1px solid #eef1f6;
+  padding-top: 12px;
+}
+
+.uze-acc-group-head {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 650;
+  color: #64748b;
+}
+
+.uze-acc-group-head::before {
+  content: '▸ ';
+  color: #94a3b8;
+}
+
+.uze-acc-group.open .uze-acc-group-head::before {
+  content: '▾ ';
+}
+
+.uze-acc-group-body {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.uze-acc-item {
+  border: 1px solid #e9edf3;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.uze-acc-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  border: 0;
+  background: #f8fafc;
+  padding: 9px 12px;
+  cursor: pointer;
+  font-size: 12.5px;
+  color: #0f172a;
+}
+
+.uze-acc-item.open .uze-acc-head {
+  background: #eef2f8;
+}
+
+.uze-acc-caret {
+  color: #94a3b8;
+  width: 12px;
+}
+
+.uze-acc-label {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.uze-acc-metrics {
+  margin-left: auto;
+  display: flex;
+  gap: 14px;
+  font-variant-numeric: tabular-nums;
+  color: #475569;
+}
+
+.uze-acc-metrics .good {
+  color: #166534;
+}
+
+.uze-acc-metrics .bad {
+  color: #b45309;
+}
+
+.uze-acc-body {
+  padding: 12px;
+  border-top: 1px solid #eef1f6;
+}
+
+.uze-layout {
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .uze-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.uze-waterfall {
+  border: 1px solid #eef1f6;
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.uze-wf-title {
+  font-size: 11px;
+  font-weight: 650;
+  color: #475569;
+  margin-bottom: 8px;
+}
+
+.uze-wf-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 11.5px;
+  padding: 3px 0;
+  color: #475569;
+}
+
+.uze-wf-row strong {
+  font-variant-numeric: tabular-nums;
+}
+
+.uze-wf-row.pos strong {
+  color: #166534;
+}
+
+.uze-wf-row.neg strong {
+  color: #b91c1c;
+}
+
+.uze-wf-row.total {
+  margin-top: 6px;
+  border-top: 1px solid #eef1f6;
+  padding-top: 6px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.uze-compare-box {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+
+.uze-compare-box > div {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #eef1f6;
+  border-radius: 8px;
+  padding: 6px 8px;
+}
+
+.uze-compare-box .lbl {
+  font-size: 10.5px;
+  color: #94a3b8;
+}
+
+.uze-compare-box strong {
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  color: #0f172a;
+}
+
+.uze-compare-box .fact {
+  color: #7c3aed;
+}
+
+.uze-compare-box .opt {
+  color: #0f172a;
+}
+
+.uze-compare-box .bad {
+  color: #b45309;
+}
+
+.uze-chart-foot {
+  margin: 10px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #667085;
+}
+
+.uze-chart-canvas {
+  position: relative;
+}
+
+.uze-chart-canvas svg {
+  width: 100%;
+  height: auto;
+}
+
+.uze-tip {
+  position: absolute;
+  z-index: 60;
+  pointer-events: none;
+  min-width: 170px;
+  max-width: 220px;
+  padding: 8px 10px;
+  border: 1px solid #e4e9f0;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 8px 24px rgba(16, 24, 40, 0.14);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.uze-tip .t-head {
+  font-weight: 700;
+  font-size: 12px;
+  color: #0f172a;
+  margin-bottom: 4px;
+}
+
+.uze-tip .t-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: #667085;
+}
+
+.uze-tip .t-row b {
+  color: #0f172a;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.uze-tip .t-row.total {
+  margin-top: 3px;
+  border-top: 1px solid #eef1f6;
+  padding-top: 3px;
+  color: #0f172a;
+}
+
+.uze-tip .t-row i {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  margin-right: 5px;
+  vertical-align: middle;
+}
+
+.uze-chart-legend {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+}
+
+.uze-chart-legend li {
+  cursor: pointer;
+  font-size: 11px;
+  color: #475569;
+  user-select: none;
+}
+
+.uze-chart-legend li.off {
+  opacity: 0.4;
+  text-decoration: line-through;
+}
+
+.uze-chart-legend li i {
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  border-radius: 2px;
+  margin-right: 5px;
+  vertical-align: middle;
+}
+

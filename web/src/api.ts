@@ -600,6 +600,56 @@ export type EconomicsMonthlyDayMargin = {
   hours: Array<number | null>
 }
 
+// EconomicsUzeCycle is one significant УЗЕ day (reserve ≥ 1000 ₴) with the
+// full hourly optimal-vs-fact schedule the cycle chart renders.
+export type EconomicsUzeCycle = {
+  start_date: string
+  end_date: string
+  label: string
+  actual_effect_uah: number
+  opt_effect_uah: number
+  reserve_uah: number
+  capture_pct: number
+  chart: EconomicsUzeCycleChart
+}
+
+export type EconomicsUzeCycleChart = {
+  labels: string[]
+  capacity_kwh: number
+  power_kw: number
+  optimal: {
+    to_load_kwh: number[]
+    to_grid_kwh: number[]
+    chg_pv_kwh: number[]
+    chg_grid_kwh: number[]
+    soc_pct: Array<number | null>
+    soc_start: number
+    export_uah: number[]
+    load_uah: number[]
+    grid_cost_uah: number[]
+  }
+  fact: {
+    ess_kw: number[]
+    soc_pct: Array<number | null>
+    soc_start: number | null
+    rdn: number[]
+  }
+  summary: {
+    optimal: {
+      effect: number
+      export_val: number
+      load_val: number
+      charge_pv_cost: number
+      grid_cost: number
+      degradation: number
+      charge_pv_kwh: number
+      charge_grid_kwh: number
+      discharge_kwh: number
+    }
+    fact: { effect: number }
+  }
+}
+
 export type EconomicsMonthlyResponse = {
   organization_id: string
   month: string
@@ -608,6 +658,7 @@ export type EconomicsMonthlyResponse = {
   totals: EconomicsMonthlyTotals
   days: EconomicsMonthlyDay[]
   hourly_margin: EconomicsMonthlyDayMargin[]
+  uze_cycles: EconomicsUzeCycle[]
 }
 
 // fetchEconomicsMonthly reads the server-computed month rollup. The

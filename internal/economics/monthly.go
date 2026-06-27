@@ -215,6 +215,11 @@ type StoredMonth struct {
 	Days           []MonthDay
 	HourlyMargin   []DayMargin
 	DaysInMonth    int
+
+	// Cycles is the list of significant УЗЕ days (reserve ≥
+	// cycleReserveThresholdUah), sorted by reserve desc, each carrying the
+	// full hourly optimal-vs-fact schedule the cycle chart renders (§1.3).
+	Cycles []UzeCycle
 }
 
 // AggregateMonth folds the persisted daily + hourly records of one month
@@ -239,6 +244,8 @@ func AggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly
 	// fact-vs-optimum decomposition needs.
 	type dayOpt struct {
 		hours     [24]optimumHour
+		raw       [24]HourlyRecord // raw hourly slice for the cycle chart's fact series
+		hasRaw    [24]bool
 		startKwh  float64
 		startHour int
 		haveStart bool
@@ -289,6 +296,8 @@ func AggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly
 				oh.exportPrice = h.ExportPrice
 			}
 			do.hours[hour] = oh
+			do.raw[hour] = h
+			do.hasRaw[hour] = true
 			do.pvSurplus += pvSurplus
 			do.actualPv += h.PVToEss
 			if h.EssRemainingKwhStart != nil && (!do.haveStart || hour < do.startHour) {
@@ -379,10 +388,128 @@ func AggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly
 		}
 	}
 
+	// buildCycle reconstructs one day's optimal dispatch (modeFull) by
+	// backtracking the SOC DP and packages it with the realised fact series
+	// into a UzeCycle for the expandable cycle chart (§1.3 / §3.6). Returns
+	// ok=false when the day's SOC window is degenerate.
+	socPctOf := func(kwh float64) float64 {
+		if capacityKwh <= 0 {
+			return 0
+		}
+		return clampFloat(kwh/capacityKwh*100, 0, 100)
+	}
+	buildCycle := func(key string, do *dayOpt, fact float64) (UzeCycle, bool) {
+		if do == nil {
+			return UzeCycle{}, false
+		}
+		start := optParams.socMinKwh
+		if do.haveStart {
+			start = do.startKwh
+		}
+		steps, socStartKwh, optEffect, ok := optimizeDaySchedule(do.hours[:], start, optParams, modeFull)
+		if !ok {
+			return UzeCycle{}, false
+		}
+		const n = 24
+		opt := CycleOptimal{
+			ToLoadKwh:   make([]float64, n),
+			ToGridKwh:   make([]float64, n),
+			ChgPvKwh:    make([]float64, n),
+			ChgGridKwh:  make([]float64, n),
+			SocPct:      make([]*float64, n),
+			ExportUah:   make([]float64, n),
+			LoadUah:     make([]float64, n),
+			GridCostUah: make([]float64, n),
+			SocStart:    socPctOf(socStartKwh),
+		}
+		fc := CycleFact{
+			EssKw:  make([]float64, n),
+			SocPct: make([]*float64, n),
+			Rdn:    make([]float64, n),
+		}
+		labels := make([]string, n)
+		dm := key
+		if dt, err := time.ParseInLocation("2006-01-02", key, loc); err == nil {
+			dm = dt.Format("02.01")
+		}
+		var sum CycleSummaryOptimal
+		for i := 0; i < n; i++ {
+			labels[i] = fmt.Sprintf("%s %02d", dm, i)
+			oh := do.hours[i]
+			s := steps[i]
+			opt.ToLoadKwh[i] = s.toLoadKwh
+			opt.ToGridKwh[i] = s.toGridKwh
+			opt.ChgPvKwh[i] = s.chgPvKwh
+			opt.ChgGridKwh[i] = s.chgGridKwh
+			soc := socPctOf(s.endResidualKwh)
+			opt.SocPct[i] = &soc
+			opt.ExportUah[i] = s.toGridKwh * oh.exportPrice
+			opt.LoadUah[i] = s.toLoadKwh * oh.importPrice
+			opt.GridCostUah[i] = s.chgGridKwh * oh.importPrice
+			dischargeAC := s.toLoadKwh + s.toGridKwh
+			sum.ExportVal += opt.ExportUah[i]
+			sum.LoadVal += opt.LoadUah[i]
+			sum.GridCost += opt.GridCostUah[i]
+			sum.ChargePvCost += s.chgPvKwh * pvChargePriceFor(oh)
+			sum.Degradation += dischargeAC * optParams.degradationUahPerKwh
+			sum.ChargePvKwh += s.chgPvKwh
+			sum.ChargeGridKwh += s.chgGridKwh
+			sum.DischargeKwh += dischargeAC
+			if do.hasRaw[i] {
+				r := do.raw[i]
+				fc.EssKw[i] = r.EssDischarged - r.EssCharged
+				if r.Rdn != nil {
+					fc.Rdn[i] = *r.Rdn
+				}
+			}
+		}
+		sum.EffectUah = optEffect
+
+		// Fact SOC is drawn at hour boundaries: soc_start before hour 0,
+		// then end-of-hour i == start-of-hour i+1.
+		for i := 0; i < n; i++ {
+			if do.hasRaw[i] && do.raw[i].EssRemainingKwhStart != nil {
+				v := socPctOf(*do.raw[i].EssRemainingKwhStart)
+				fc.SocStart = &v
+				break
+			}
+		}
+		for i := 0; i+1 < n; i++ {
+			if do.hasRaw[i+1] && do.raw[i+1].EssRemainingKwhStart != nil {
+				v := socPctOf(*do.raw[i+1].EssRemainingKwhStart)
+				fc.SocPct[i] = &v
+			}
+		}
+
+		reserve := math.Max(0, optEffect-fact)
+		capture := 0.0
+		if optEffect != 0 {
+			capture = fact / optEffect * 100
+		}
+		return UzeCycle{
+			StartDate:       key,
+			EndDate:         key,
+			Label:           dm,
+			ActualEffectUah: fact,
+			OptEffectUah:    optEffect,
+			ReserveUah:      reserve,
+			CapturePct:      capture,
+			Chart: CycleChart{
+				Labels:      labels,
+				CapacityKwh: capacityKwh,
+				PowerKw:     powerLimitKw,
+				Optimal:     opt,
+				Fact:        fc,
+				Summary:     CycleSummary{Optimal: sum, Fact: CycleSummaryFact{EffectUah: fact}},
+			},
+		}, true
+	}
+
 	var totals MonthlyTotals
 	var importNum, importDen, exportNum, exportDen float64
 	var bestSet, minSet bool
 	outDays := make([]MonthDay, 0, len(days))
+	var uzeCycles []UzeCycle
 
 	// Chronological hour list for the continuous monthly SOC DP (§3.2),
 	// built over non-anomalous days only. monthStart is the residual at the
@@ -468,6 +595,11 @@ func AggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly
 			opt = computeOptimum(do, t.EssNet)
 			totals.EssPvMissedKwh += opt.pvMissed
 			monthFact += t.EssNet
+			if opt.reserve >= cycleReserveThresholdUah {
+				if cyc, ok := buildCycle(key, do, t.EssNet); ok {
+					uzeCycles = append(uzeCycles, cyc)
+				}
+			}
 			if do != nil {
 				if !haveMonthStart {
 					if do.haveStart {
@@ -561,6 +693,10 @@ func AggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly
 		hm = append(hm, DayMargin{Date: d.Date, Hours: grid})
 	}
 
+	sort.SliceStable(uzeCycles, func(i, j int) bool {
+		return uzeCycles[i].ReserveUah > uzeCycles[j].ReserveUah
+	})
+
 	return StoredMonth{
 		Month:        month,
 		Tz:           loc.String(),
@@ -568,6 +704,7 @@ func AggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly
 		Days:         outDays,
 		HourlyMargin: hm,
 		DaysInMonth:  len(outDays),
+		Cycles:       uzeCycles,
 	}
 }
 

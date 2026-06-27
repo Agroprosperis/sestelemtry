@@ -196,6 +196,94 @@ func TestOptimizeMonthEndGeStart(t *testing.T) {
 	}
 }
 
+// TestOptimizeDayScheduleMatchesOptimizeDay verifies that the backtracked
+// schedule's total effect equals optimizeDay, that the recovered actions
+// reconstruct the arbitrage (charge cheap, discharge into load expensive),
+// and that the per-hour revenue/cost figures are self-consistent.
+func TestOptimizeDayScheduleMatchesOptimizeDay(t *testing.T) {
+	p := optimumParams{
+		capacityKwh: 100, degradationUahPerKwh: 0,
+		maxChargeKwh: 50, maxDischargeKwh: 50,
+		socMinKwh: 0, socMaxKwh: 100, rte: 1.0,
+	}
+	hours := make([]optimumHour, 24)
+	hours[0] = optimumHour{tradable: true, importPrice: 1, exportPrice: 1, displaceableKwh: 100}
+	hours[1] = optimumHour{tradable: true, importPrice: 10, exportPrice: 10, displaceableKwh: 100}
+
+	want := optimizeDay(hours, 0, p, modeFull)
+	steps, start, effect, ok := optimizeDaySchedule(hours, 0, p, modeFull)
+	if !ok {
+		t.Fatal("optimizeDaySchedule not ok")
+	}
+	if math.Abs(effect-want) > 1e-6 {
+		t.Fatalf("schedule effect = %v, optimizeDay = %v", effect, want)
+	}
+	if start != 0 {
+		t.Fatalf("start residual = %v, want 0", start)
+	}
+	if len(steps) != 24 {
+		t.Fatalf("len(steps) = %d, want 24", len(steps))
+	}
+	if steps[0].chgGridKwh < 49 {
+		t.Fatalf("hour0 grid charge = %v, want ~50", steps[0].chgGridKwh)
+	}
+	if steps[1].toLoadKwh < 49 {
+		t.Fatalf("hour1 to-load discharge = %v, want ~50", steps[1].toLoadKwh)
+	}
+	// Reconstructed effect from the per-hour legs must equal the DP value
+	// (degradation is 0 here; PV charge price snaps from exportPrice).
+	var recon float64
+	for i, s := range steps {
+		recon += s.toLoadKwh*hours[i].importPrice + s.toGridKwh*hours[i].exportPrice
+		recon -= s.chgPvKwh*pvChargePriceFor(hours[i]) + s.chgGridKwh*hours[i].importPrice
+	}
+	if math.Abs(recon-effect) > 1e-6 {
+		t.Fatalf("reconstructed legs %v != DP effect %v", recon, effect)
+	}
+}
+
+// TestAggregateMonthCycles checks the significant-cycle list: a day with a
+// big timing reserve appears as a cycle whose chart summary reconciles
+// (optimal effect ≈ schedule, reserve = max(0, opt − fact)).
+func TestAggregateMonthCycles(t *testing.T) {
+	loc := time.UTC
+	day := time.Date(2026, 6, 1, 0, 0, 0, 0, loc)
+	days := []DailyRecord{{
+		Day: day, IsFinal: true,
+		Totals: DailyTotals{EssNet: 10, EssDischarged: 40, HoursWithData: 24},
+	}}
+	hourly := make([]HourlyRecord, 24)
+	for h := 0; h < 24; h++ {
+		hourly[h] = HourlyRecord{HourStart: day.Add(time.Duration(h) * time.Hour)}
+	}
+	hourly[3] = HourlyRecord{
+		HourStart: day.Add(3 * time.Hour), Rdn: floatPtr(1), ImportPrice: 1, ExportPrice: 1,
+		GridToEss: 40, EssCharged: 40, EssRemainingKwhStart: floatPtr(0),
+	}
+	hourly[19] = HourlyRecord{
+		HourStart: day.Add(19 * time.Hour), Rdn: floatPtr(40), ImportPrice: 40, ExportPrice: 38,
+		GridToLoad: 100, EssDischarged: 40, EssNet: 10, EssRemainingKwhStart: floatPtr(40),
+	}
+
+	got := AggregateMonth("2026-06", loc, days, hourly, 100, 0, 0)
+	if len(got.Cycles) != 1 {
+		t.Fatalf("len(Cycles) = %d, want 1", len(got.Cycles))
+	}
+	c := got.Cycles[0]
+	if c.ReserveUah < cycleReserveThresholdUah {
+		t.Fatalf("cycle reserve %v below threshold", c.ReserveUah)
+	}
+	if len(c.Chart.Labels) != 24 || len(c.Chart.Optimal.ToLoadKwh) != 24 {
+		t.Fatalf("chart arrays not length 24: %+v", c.Chart.Labels)
+	}
+	if math.Abs(c.ReserveUah-math.Max(0, c.OptEffectUah-c.ActualEffectUah)) > 1e-6 {
+		t.Fatalf("reserve %v != max(0, opt %v − fact %v)", c.ReserveUah, c.OptEffectUah, c.ActualEffectUah)
+	}
+	if math.Abs(c.Chart.Summary.Optimal.EffectUah-c.OptEffectUah) > 1e-6 {
+		t.Fatalf("summary effect %v != opt %v", c.Chart.Summary.Optimal.EffectUah, c.OptEffectUah)
+	}
+}
+
 // TestDeriveOptimumParams checks the empirical envelope: peak hourly
 // charge/discharge as power, observed residual range as the SOC window,
 // and discharged/charged as round-trip efficiency.

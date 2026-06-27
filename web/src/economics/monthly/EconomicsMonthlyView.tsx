@@ -16,7 +16,9 @@ import type {
   EconomicsMonthlyDayMargin,
   EconomicsMonthlyResponse,
   EconomicsMonthlyTotals,
+  EconomicsUzeCycle,
 } from '../../api'
+import { UzeCyclesAccordion } from './UzeCycleChart'
 import { formatOrganizationLabel } from '../../dashboard/config'
 import {
   formatCycles,
@@ -53,7 +55,7 @@ export function EconomicsMonthlyView({ data, organizationID }: Props) {
   return (
     <>
       <MonthlyKpis totals={t} />
-      <MonthlyAiAnalysis totals={t} days={data.days} organizationID={organizationID} month={data.month} />
+      <MonthlyAiAnalysis totals={t} days={data.days} cycles={data.uze_cycles} organizationID={organizationID} month={data.month} />
       <div className="economics-month-grid2">
         <MonthlyFinance totals={t} />
         <MonthlyWaterfall totals={t} />
@@ -553,11 +555,13 @@ export function EssDataQualityNote({ dq }: { dq?: EconomicsDataQuality }) {
 function MonthlyAiAnalysis({
   totals,
   days,
+  cycles,
   organizationID,
   month,
 }: {
   totals: EconomicsMonthlyTotals
   days: EconomicsMonthlyDay[]
+  cycles: EconomicsUzeCycle[]
   organizationID: string
   month: string
 }) {
@@ -650,6 +654,7 @@ function MonthlyAiAnalysis({
             Оптимум — найкращий диспетчинг у межах фактично продемонстрованих
             можливостей УЗЕ (потужність, діапазон SOC, ККД виведені з даних місяця).
           </p>
+          <UzeCyclesAccordion cycles={cycles} />
           </div>
         </details>
       ) : (

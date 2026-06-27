@@ -305,6 +305,123 @@ type EconomicsMonthlyDayMargin struct {
 	Hours []*float64 `json:"hours"`
 }
 
+// EconomicsUzeCycle is one significant УЗЕ day (reserve ≥ 1000 ₴) with the
+// full hourly optimal-vs-fact schedule the cycle chart renders (§1.3).
+type EconomicsUzeCycle struct {
+	StartDate       string                 `json:"start_date"`
+	EndDate         string                 `json:"end_date"`
+	Label           string                 `json:"label"`
+	ActualEffectUah float64                `json:"actual_effect_uah"`
+	OptEffectUah    float64                `json:"opt_effect_uah"`
+	ReserveUah      float64                `json:"reserve_uah"`
+	CapturePct      float64                `json:"capture_pct"`
+	Chart           EconomicsUzeCycleChart `json:"chart"`
+}
+
+// EconomicsUzeCycleChart is the per-hour data behind one cycle's chart.
+type EconomicsUzeCycleChart struct {
+	Labels      []string                 `json:"labels"`
+	CapacityKwh float64                  `json:"capacity_kwh"`
+	PowerKw     float64                  `json:"power_kw"`
+	Optimal     EconomicsUzeCycleOptimal `json:"optimal"`
+	Fact        EconomicsUzeCycleFact    `json:"fact"`
+	Summary     EconomicsUzeCycleSummary `json:"summary"`
+}
+
+// EconomicsUzeCycleOptimal is the optimal dispatch per hour.
+type EconomicsUzeCycleOptimal struct {
+	ToLoadKwh   []float64  `json:"to_load_kwh"`
+	ToGridKwh   []float64  `json:"to_grid_kwh"`
+	ChgPvKwh    []float64  `json:"chg_pv_kwh"`
+	ChgGridKwh  []float64  `json:"chg_grid_kwh"`
+	SocPct      []*float64 `json:"soc_pct"`
+	SocStart    float64    `json:"soc_start"`
+	ExportUah   []float64  `json:"export_uah"`
+	LoadUah     []float64  `json:"load_uah"`
+	GridCostUah []float64  `json:"grid_cost_uah"`
+}
+
+// EconomicsUzeCycleFact is the realised УЗЕ behaviour per hour.
+type EconomicsUzeCycleFact struct {
+	EssKw    []float64  `json:"ess_kw"`
+	SocPct   []*float64 `json:"soc_pct"`
+	SocStart *float64   `json:"soc_start"`
+	Rdn      []float64  `json:"rdn"`
+}
+
+// EconomicsUzeCycleSummary aggregates optimal-vs-fact totals for a cycle.
+type EconomicsUzeCycleSummary struct {
+	Optimal EconomicsUzeCycleSummaryOptimal `json:"optimal"`
+	Fact    EconomicsUzeCycleSummaryFact    `json:"fact"`
+}
+
+// EconomicsUzeCycleSummaryOptimal is the optimal-cycle waterfall.
+type EconomicsUzeCycleSummaryOptimal struct {
+	Effect        float64 `json:"effect"`
+	ExportVal     float64 `json:"export_val"`
+	LoadVal       float64 `json:"load_val"`
+	ChargePvCost  float64 `json:"charge_pv_cost"`
+	GridCost      float64 `json:"grid_cost"`
+	Degradation   float64 `json:"degradation"`
+	ChargePvKwh   float64 `json:"charge_pv_kwh"`
+	ChargeGridKwh float64 `json:"charge_grid_kwh"`
+	DischargeKwh  float64 `json:"discharge_kwh"`
+}
+
+// EconomicsUzeCycleSummaryFact is the realised cycle effect.
+type EconomicsUzeCycleSummaryFact struct {
+	Effect float64 `json:"effect"`
+}
+
+func uzeCycleToJSON(c economics.UzeCycle) EconomicsUzeCycle {
+	ch := c.Chart
+	return EconomicsUzeCycle{
+		StartDate:       c.StartDate,
+		EndDate:         c.EndDate,
+		Label:           c.Label,
+		ActualEffectUah: c.ActualEffectUah,
+		OptEffectUah:    c.OptEffectUah,
+		ReserveUah:      c.ReserveUah,
+		CapturePct:      c.CapturePct,
+		Chart: EconomicsUzeCycleChart{
+			Labels:      ch.Labels,
+			CapacityKwh: ch.CapacityKwh,
+			PowerKw:     ch.PowerKw,
+			Optimal: EconomicsUzeCycleOptimal{
+				ToLoadKwh:   ch.Optimal.ToLoadKwh,
+				ToGridKwh:   ch.Optimal.ToGridKwh,
+				ChgPvKwh:    ch.Optimal.ChgPvKwh,
+				ChgGridKwh:  ch.Optimal.ChgGridKwh,
+				SocPct:      ch.Optimal.SocPct,
+				SocStart:    ch.Optimal.SocStart,
+				ExportUah:   ch.Optimal.ExportUah,
+				LoadUah:     ch.Optimal.LoadUah,
+				GridCostUah: ch.Optimal.GridCostUah,
+			},
+			Fact: EconomicsUzeCycleFact{
+				EssKw:    ch.Fact.EssKw,
+				SocPct:   ch.Fact.SocPct,
+				SocStart: ch.Fact.SocStart,
+				Rdn:      ch.Fact.Rdn,
+			},
+			Summary: EconomicsUzeCycleSummary{
+				Optimal: EconomicsUzeCycleSummaryOptimal{
+					Effect:        ch.Summary.Optimal.EffectUah,
+					ExportVal:     ch.Summary.Optimal.ExportVal,
+					LoadVal:       ch.Summary.Optimal.LoadVal,
+					ChargePvCost:  ch.Summary.Optimal.ChargePvCost,
+					GridCost:      ch.Summary.Optimal.GridCost,
+					Degradation:   ch.Summary.Optimal.Degradation,
+					ChargePvKwh:   ch.Summary.Optimal.ChargePvKwh,
+					ChargeGridKwh: ch.Summary.Optimal.ChargeGridKwh,
+					DischargeKwh:  ch.Summary.Optimal.DischargeKwh,
+				},
+				Fact: EconomicsUzeCycleSummaryFact{Effect: ch.Summary.Fact.EffectUah},
+			},
+		},
+	}
+}
+
 // EconomicsMonthlyResponse is the body of GET /api/v1/economics/monthly.
 type EconomicsMonthlyResponse struct {
 	OrganizationID string                      `json:"organization_id"`
@@ -314,6 +431,7 @@ type EconomicsMonthlyResponse struct {
 	Totals         EconomicsMonthlyTotals      `json:"totals"`
 	Days           []EconomicsMonthlyDay       `json:"days"`
 	HourlyMargin   []EconomicsMonthlyDayMargin `json:"hourly_margin"`
+	UzeCycles      []EconomicsUzeCycle         `json:"uze_cycles"`
 }
 
 func monthlyTotalsToJSON(t economics.MonthlyTotals) EconomicsMonthlyTotals {
@@ -457,12 +575,16 @@ func (h *Handlers) economicsMonthly(w http.ResponseWriter, r *http.Request) {
 		Totals:         monthlyTotalsToJSON(month.Totals),
 		Days:           make([]EconomicsMonthlyDay, 0, len(month.Days)),
 		HourlyMargin:   make([]EconomicsMonthlyDayMargin, 0, len(month.HourlyMargin)),
+		UzeCycles:      make([]EconomicsUzeCycle, 0, len(month.Cycles)),
 	}
 	for _, d := range month.Days {
 		resp.Days = append(resp.Days, monthlyDayToJSON(d))
 	}
 	for _, m := range month.HourlyMargin {
 		resp.HourlyMargin = append(resp.HourlyMargin, EconomicsMonthlyDayMargin{Date: m.Date, Hours: m.Hours})
+	}
+	for _, c := range month.Cycles {
+		resp.UzeCycles = append(resp.UzeCycles, uzeCycleToJSON(c))
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
