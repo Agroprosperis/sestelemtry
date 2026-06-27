@@ -11,6 +11,11 @@ import (
 	"github.com/nesh/sestelemetry/internal/economics"
 )
 
+// demoOrgID is the synthetic demo organization shipped in the example
+// config. It is excluded from cross-site rollups (e.g. the portfolio
+// dashboard) because it is not a real site.
+const demoOrgID = "demo-org"
+
 // EconomicsHour is one hour of the served economics result (flat JSON,
 // snake_case). nil entries in the response array render as null.
 type EconomicsHour struct {
@@ -880,6 +885,11 @@ func (h *Handlers) economicsPortfolio(w http.ResponseWriter, r *http.Request) {
 	var trendOrder []string
 
 	for _, org := range h.organizations {
+		// The demo organization carries synthetic data and is not a real
+		// site, so it must never appear in the portfolio rollup.
+		if org.ID == demoOrgID {
+			continue
+		}
 		var t economics.MonthlyTotals
 		hasData := false
 		if scope == "month" {
