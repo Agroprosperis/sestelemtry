@@ -76,7 +76,7 @@ func TestAggregateMonthOptimum(t *testing.T) {
 		GridToLoad: 100, EssDischarged: 40, EssNet: 10, EssRemainingKwhStart: floatPtr(40),
 	}
 
-	got := AggregateMonth("2026-06", loc, days, hourly, 100, 0, 0)
+	got := AggregateMonth("2026-06", loc, days, hourly, 100, 0, 0, 0)
 
 	// Optimum ≈ charge 40 @1 (−40) then discharge 40 to load @20 (+800) = 760.
 	if got.Totals.EssOptimum < 700 {
@@ -155,7 +155,7 @@ func TestAggregateMonthExcludesAnomalousDays(t *testing.T) {
 	}
 	hourly := append(mk(day1, 40), mk(day2, 1000)...) // day2 charge 1000 ≫ 150 limit
 
-	got := AggregateMonth("2026-06", loc, days, hourly, 100, 0, 100)
+	got := AggregateMonth("2026-06", loc, days, hourly, 100, 0, 100, 0)
 
 	if got.Totals.EssDataQuality.AnomalousDays != 1 || got.Totals.EssDataQuality.DataOK {
 		t.Fatalf("data quality = %+v, want 1 anomalous day, not ok", got.Totals.EssDataQuality)
@@ -265,7 +265,7 @@ func TestAggregateMonthCycles(t *testing.T) {
 		GridToLoad: 100, EssDischarged: 40, EssNet: 10, EssRemainingKwhStart: floatPtr(40),
 	}
 
-	got := AggregateMonth("2026-06", loc, days, hourly, 100, 0, 0)
+	got := AggregateMonth("2026-06", loc, days, hourly, 100, 0, 0, 0)
 	if len(got.Cycles) != 1 {
 		t.Fatalf("len(Cycles) = %d, want 1", len(got.Cycles))
 	}
@@ -294,7 +294,7 @@ func TestDeriveOptimumParams(t *testing.T) {
 		{HourStart: base.Add(time.Hour), EssCharged: 45, EssDischarged: 0, EssRemainingKwhStart: floatPtr(60)},
 		{HourStart: base.Add(2 * time.Hour), EssCharged: 0, EssDischarged: 40, EssRemainingKwhStart: floatPtr(95)},
 	}
-	p := deriveOptimumParams(hourly, 200, 0.6)
+	p := deriveOptimumParams(hourly, 200, 0.6, 0)
 	if p.maxChargeKwh != 45 {
 		t.Fatalf("maxChargeKwh = %v, want 45", p.maxChargeKwh)
 	}

@@ -227,7 +227,7 @@ type StoredMonth struct {
 // capacityKwh is the ESS capacity used for the equivalent-cycle metric;
 // powerLimitKw is the per-interval power ceiling for the ESS anomaly filter
 // (≤ 0 falls back to capacityKwh ≈ 1C).
-func AggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly []HourlyRecord, capacityKwh, degradationUahPerKwh, powerLimitKw float64) StoredMonth {
+func AggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly []HourlyRecord, capacityKwh, degradationUahPerKwh, powerLimitKw, roundtripEff float64) StoredMonth {
 	if powerLimitKw <= 0 {
 		powerLimitKw = capacityKwh
 	}
@@ -351,7 +351,7 @@ func AggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly
 			cleanHourly = append(cleanHourly, h)
 		}
 	}
-	optParams := deriveOptimumParams(cleanHourly, capacityKwh, degradationUahPerKwh)
+	optParams := deriveOptimumParams(cleanHourly, capacityKwh, degradationUahPerKwh, roundtripEff)
 
 	// computeOptimum solves the 3-run ladder for one day: each relaxation
 	// only adds freedom, so the values are monotonic and the three
@@ -746,7 +746,7 @@ func (s *Service) GetMonth(ctx context.Context, orgID, month, tz string) (Stored
 		tariffs = DefaultTariffs
 	}
 
-	result := AggregateMonth(month, loc, daily, hourly, tariffs.EssCapacityKwh, tariffs.DegradationUahPerKwh, tariffs.EssPowerLimitKw)
+	result := AggregateMonth(month, loc, daily, hourly, tariffs.EssCapacityKwh, tariffs.DegradationUahPerKwh, tariffs.EssPowerLimitKw, tariffs.RoundtripEfficiency)
 	result.OrganizationID = orgID
 	return result, nil
 }

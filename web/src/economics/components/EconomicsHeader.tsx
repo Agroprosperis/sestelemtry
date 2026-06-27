@@ -420,6 +420,25 @@ export function EconomicsHeader({
             hint="Корисна ємність УЗЕ — енергоємність робочого вікна SOC 10–90%. Для пакету 645 кВт·год вводьте 516. SOC 10% = порожньо, 90% = повна корисна. Використовується для залишку УЗЕ і еквівалентних циклів."
             onChange={(essCapacityKwh) => update({ essCapacityKwh })}
           />
+          <NumericField
+            label="Потужність УЗЕ"
+            value={tariffs.essPowerLimitKw}
+            step={1}
+            min={0}
+            suffix="кВт"
+            hint="Номінальна потужність заряду/розряду УЗЕ (кВт) для фільтра аномалій телеметрії. 0 = автоматичний запас ≈ 1C від ємності."
+            onChange={(essPowerLimitKw) => update({ essPowerLimitKw })}
+          />
+          <NumericField
+            label="ККД циклу УЗЕ"
+            value={tariffs.roundtripEfficiency}
+            step={0.01}
+            min={0}
+            max={1}
+            suffix="(0..1)"
+            hint="Round-trip ККД батареї (0..1). 0 = оцінити емпірично з фактичного обороту місяця. Типово 0.85–0.92."
+            onChange={(roundtripEfficiency) => update({ roundtripEfficiency })}
+          />
           <label className="economics-field economics-field-checkbox">
             <input
               type="checkbox"

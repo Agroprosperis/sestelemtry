@@ -7,10 +7,10 @@ import (
 	"time"
 )
 
-// constTariff returns a fixed (capacity, degradation, power-limit) resolver
-// for the annual aggregator tests.
-func constTariff(capacityKwh, degr float64) func(time.Time) (float64, float64, float64) {
-	return func(time.Time) (float64, float64, float64) { return capacityKwh, degr, 0 }
+// constTariff returns a fixed (capacity, degradation, power-limit, rte)
+// resolver for the annual aggregator tests.
+func constTariff(capacityKwh, degr float64) func(time.Time) (float64, float64, float64, float64) {
+	return func(time.Time) (float64, float64, float64, float64) { return capacityKwh, degr, 0, 0 }
 }
 
 // TestAggregateYearSumsMonthsAndQuarters checks that the year totals are

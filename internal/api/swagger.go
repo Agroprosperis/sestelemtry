@@ -967,6 +967,21 @@ components:
           type: number
           format: double
           exclusiveMinimum: 0
+        ess_power_limit_kw:
+          type: number
+          format: double
+          minimum: 0
+          description: >
+            Per-object nominal charge/discharge power ceiling (kW) for the
+            УЗЕ anomaly filter. 0 (or omitted) derives a ~1C fallback.
+        roundtrip_efficiency:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+          description: >
+            Per-object ESS round-trip efficiency (0..1). 0 (or omitted)
+            keeps the empirical throughput-derived estimate.
       required:
         - distribution_uah_per_kwh
         - transmission_uah_per_kwh

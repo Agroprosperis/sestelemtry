@@ -213,6 +213,8 @@ func orgTariffsToEconomics(t OrgTariffs) economics.Tariffs {
 		IncludeVat:              t.IncludeVat,
 		VatRate:                 t.VatRate,
 		EssCapacityKwh:          t.EssCapacityKwh,
+		EssPowerLimitKw:         t.EssPowerLimitKw,
+		RoundtripEfficiency:     t.RoundtripEfficiency,
 	}
 }
 

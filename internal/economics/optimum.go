@@ -39,7 +39,11 @@ func clampFloat(v, lo, hi float64) float64 {
 // limits, the observed residual-kWh range as the usable SOC window, and
 // discharged/charged as the round-trip efficiency. Fallbacks keep the
 // optimizer well-defined when ESS activity in the month is sparse.
-func deriveOptimumParams(hourly []HourlyRecord, capacityKwh, degradationUahPerKwh float64) optimumParams {
+//
+// roundtripEff lets a per-object config pin the round-trip efficiency: a
+// value > 0 overrides the empirical estimate (clamped to the sane band),
+// while 0 keeps the demonstrated-throughput estimate (§2.4).
+func deriveOptimumParams(hourly []HourlyRecord, capacityKwh, degradationUahPerKwh, roundtripEff float64) optimumParams {
 	p := optimumParams{
 		capacityKwh:          capacityKwh,
 		degradationUahPerKwh: degradationUahPerKwh,
@@ -84,8 +88,11 @@ func deriveOptimumParams(hourly []HourlyRecord, capacityKwh, degradationUahPerKw
 		p.socMaxKwh = capacityKwh
 	}
 
-	// Round-trip efficiency from gross throughput, clamped to a sane band.
-	if sumCharged > 0 && sumDischarged > 0 {
+	// Round-trip efficiency: a configured value (per-object) wins;
+	// otherwise estimate from gross throughput, clamped to a sane band.
+	if roundtripEff > 0 {
+		p.rte = clampFloat(roundtripEff, minRoundTripEff, maxRoundTripEff)
+	} else if sumCharged > 0 && sumDischarged > 0 {
 		p.rte = clampFloat(sumDischarged/sumCharged, minRoundTripEff, maxRoundTripEff)
 	}
 

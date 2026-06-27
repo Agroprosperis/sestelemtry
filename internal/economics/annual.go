@@ -66,7 +66,7 @@ func AggregateYear(
 	loc *time.Location,
 	days []DailyRecord,
 	hourly []HourlyRecord,
-	resolveTariff func(day time.Time) (capacityKwh, degradationUahPerKwh, powerLimitKw float64),
+	resolveTariff func(day time.Time) (capacityKwh, degradationUahPerKwh, powerLimitKw, roundtripEff float64),
 ) StoredYear {
 	year := parseYear(period)
 	keys := make([]string, 0, 12)
@@ -88,7 +88,7 @@ func AggregatePeriod(
 	loc *time.Location,
 	days []DailyRecord,
 	hourly []HourlyRecord,
-	resolveTariff func(day time.Time) (capacityKwh, degradationUahPerKwh, powerLimitKw float64),
+	resolveTariff func(day time.Time) (capacityKwh, degradationUahPerKwh, powerLimitKw, roundtripEff float64),
 ) StoredYear {
 	// Bucket the daily / hourly records by calendar month so each month
 	// is aggregated against exactly its own slice.
@@ -124,9 +124,9 @@ func AggregatePeriod(
 			continue
 		}
 		firstDay := time.Date(ky, time.Month(km), 1, 0, 0, 0, 0, loc)
-		capacityKwh, degr, powerLimit := resolveTariff(firstDay)
+		capacityKwh, degr, powerLimit, rte := resolveTariff(firstDay)
 
-		sm := AggregateMonth(monthKey, loc, daysByMonth[monthKey], hourlyByMonth[monthKey], capacityKwh, degr, powerLimit)
+		sm := AggregateMonth(monthKey, loc, daysByMonth[monthKey], hourlyByMonth[monthKey], capacityKwh, degr, powerLimit, rte)
 		mt := sm.Totals
 		months = append(months, MonthRollup{Month: monthKey, Totals: mt})
 		monthlyMargin = append(monthlyMargin, MonthMargin{
@@ -342,12 +342,12 @@ func (s *Service) GetYear(ctx context.Context, orgID, period, tz string) (Stored
 	hourly, _ := s.backend.LoadHourlyRange(ctx, orgID, firstDay, nextYear)
 
 	schedule, _ := s.backend.TariffSchedule(ctx, orgID)
-	resolve := func(day time.Time) (float64, float64, float64) {
+	resolve := func(day time.Time) (float64, float64, float64, float64) {
 		t, ok := schedule.ResolveForDay(day)
 		if !ok {
 			t = DefaultTariffs
 		}
-		return t.EssCapacityKwh, t.DegradationUahPerKwh, t.EssPowerLimitKw
+		return t.EssCapacityKwh, t.DegradationUahPerKwh, t.EssPowerLimitKw, t.RoundtripEfficiency
 	}
 
 	result := AggregateYear(period, loc, daily, hourly, resolve)
@@ -400,12 +400,12 @@ func (s *Service) GetPeriod(ctx context.Context, orgID, from, to, tz string) (St
 	hourly, _ := s.backend.LoadHourlyRange(ctx, orgID, firstDay, nextAfter)
 
 	schedule, _ := s.backend.TariffSchedule(ctx, orgID)
-	resolve := func(day time.Time) (float64, float64, float64) {
+	resolve := func(day time.Time) (float64, float64, float64, float64) {
 		t, ok := schedule.ResolveForDay(day)
 		if !ok {
 			t = DefaultTariffs
 		}
-		return t.EssCapacityKwh, t.DegradationUahPerKwh, t.EssPowerLimitKw
+		return t.EssCapacityKwh, t.DegradationUahPerKwh, t.EssPowerLimitKw, t.RoundtripEfficiency
 	}
 
 	label := keys[0] + ".." + keys[len(keys)-1]

@@ -1504,6 +1504,18 @@ func validateOrgTariffs(t OrgTariffs) error {
 		t.EssCapacityKwh <= 0 {
 		return fmt.Errorf("ess_capacity_kwh must be > 0")
 	}
+	// ess_power_limit_kw is optional (0 = derive ≈ 1C) but must be a
+	// finite, non-negative number when supplied.
+	if math.IsNaN(t.EssPowerLimitKw) || math.IsInf(t.EssPowerLimitKw, 0) ||
+		t.EssPowerLimitKw < 0 {
+		return fmt.Errorf("ess_power_limit_kw must be >= 0")
+	}
+	// roundtrip_efficiency is optional (0 = empirical) but, when set,
+	// must be a fraction in (0, 1].
+	if math.IsNaN(t.RoundtripEfficiency) || math.IsInf(t.RoundtripEfficiency, 0) ||
+		t.RoundtripEfficiency < 0 || t.RoundtripEfficiency > 1 {
+		return fmt.Errorf("roundtrip_efficiency must be in [0, 1]")
+	}
 	return nil
 }
 

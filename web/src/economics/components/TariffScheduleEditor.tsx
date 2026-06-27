@@ -203,6 +203,14 @@ export function TariffScheduleEditor({ organizationID, tariffs, defaultEffective
                   </span>
                   <small>кВт·год</small>
                 </th>
+                <th scope="col" className="num">
+                  Потужність
+                  <small>кВт</small>
+                </th>
+                <th scope="col" className="num">
+                  ККД
+                  <small>0..1</small>
+                </th>
                 <th scope="col" className="actions" aria-label="Дії" />
               </tr>
             </thead>
@@ -232,6 +240,12 @@ export function TariffScheduleEditor({ organizationID, tariffs, defaultEffective
                     <td className="num">{formatNumber(v.tariffs.transmissionUahPerKwh)}</td>
                     <td className="num">{formatNumber(v.tariffs.degradationUahPerKwh)}</td>
                     <td className="num">{formatNumber(v.tariffs.essCapacityKwh)}</td>
+                    <td className="num">
+                      {v.tariffs.essPowerLimitKw > 0 ? formatNumber(v.tariffs.essPowerLimitKw) : 'авто'}
+                    </td>
+                    <td className="num">
+                      {v.tariffs.roundtripEfficiency > 0 ? formatNumber(v.tariffs.roundtripEfficiency) : 'емпір.'}
+                    </td>
                     <td className="actions">
                       <button
                         type="button"

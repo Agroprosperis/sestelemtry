@@ -385,4 +385,10 @@ type OrgTariffs struct {
 	IncludeVat              bool    `json:"include_vat"`
 	VatRate                 float64 `json:"vat_rate"`
 	EssCapacityKwh          float64 `json:"ess_capacity_kwh"`
+	// EssPowerLimitKw is the per-object nominal charge/discharge power
+	// ceiling (kW) for the УЗЕ anomaly filter. 0 falls back to ≈ 1C.
+	EssPowerLimitKw float64 `json:"ess_power_limit_kw,omitempty"`
+	// RoundtripEfficiency pins the per-object ESS round-trip efficiency
+	// (0..1). 0 keeps the empirical (throughput-derived) estimate.
+	RoundtripEfficiency float64 `json:"roundtrip_efficiency,omitempty"`
 }

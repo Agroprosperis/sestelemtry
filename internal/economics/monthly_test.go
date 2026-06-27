@@ -58,7 +58,7 @@ func TestAggregateMonthSumsAndWeightedPrices(t *testing.T) {
 		{HourStart: day2.Add(19 * time.Hour), Rdn: floatPtr(15), GridImport: 300, EssNet: 90, EssDischarged: 30},
 	}
 
-	got := AggregateMonth("2026-06", loc, days, hourly, 100, 0.6, 0)
+	got := AggregateMonth("2026-06", loc, days, hourly, 100, 0.6, 0, 0)
 
 	if got.Totals.Effect != 1700 {
 		t.Fatalf("Effect sum = %v, want 1700", got.Totals.Effect)

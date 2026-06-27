@@ -29,6 +29,11 @@ type Tariffs struct {
 	// (kW) used by the УЗЕ anomaly filter. 0 falls back to EssCapacityKwh
 	// (≈ 1C) inside AggregateMonth.
 	EssPowerLimitKw float64
+	// RoundtripEfficiency is the configured ESS round-trip efficiency
+	// (0..1). When > 0 it overrides the value the optimizer would
+	// otherwise derive empirically from the month's throughput; 0 keeps
+	// the empirical estimate (see deriveOptimumParams).
+	RoundtripEfficiency float64
 }
 
 // ScheduleEntry is one effective-dated tariff version. EffectiveFrom is

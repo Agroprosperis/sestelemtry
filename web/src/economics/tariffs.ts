@@ -36,6 +36,12 @@ export type Tariffs = {
   includeVat: boolean
   vatRate: number
   essCapacityKwh: number
+  // essPowerLimitKw is the per-object nominal charge/discharge power
+  // ceiling (kW) for the УЗЕ anomaly filter. 0 derives a ~1C fallback.
+  essPowerLimitKw: number
+  // roundtripEfficiency pins the per-object ESS round-trip efficiency
+  // (0..1). 0 keeps the empirical throughput-derived estimate.
+  roundtripEfficiency: number
 }
 
 export const DEFAULT_TARIFFS: Tariffs = {
@@ -48,4 +54,6 @@ export const DEFAULT_TARIFFS: Tariffs = {
   includeVat: false,
   vatRate: 0.2,
   essCapacityKwh: 215,
+  essPowerLimitKw: 0,
+  roundtripEfficiency: 0,
 }
