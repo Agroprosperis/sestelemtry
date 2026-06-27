@@ -44,6 +44,10 @@ type Props = {
   // Default effective-from (the day being viewed) so the common case
   // ("these tariffs apply from the day I'm looking at") is one click.
   defaultEffectiveFrom: string
+  // onLoadVersion pushes a saved version's values back into the form
+  // above so the operator can edit and re-save it (upsert on the same
+  // effective date overwrites the version).
+  onLoadVersion: (tariffs: Tariffs) => void
 }
 
 type Status = 'idle' | 'loading' | 'saving' | 'error'
@@ -53,11 +57,14 @@ type Status = 'idle' | 'loading' | 'saving' | 'error'
 // effective from a civil date; a historical day uses the latest version
 // on or before it. Saving a version takes effect on the next recompute
 // (run it from the import page) or the next read of a non-final day.
-export function TariffScheduleEditor({ organizationID, tariffs, defaultEffectiveFrom }: Props) {
+export function TariffScheduleEditor({ organizationID, tariffs, defaultEffectiveFrom, onLoadVersion }: Props) {
   const [versions, setVersions] = useState<TariffScheduleVersion[]>([])
   const [effectiveFrom, setEffectiveFrom] = useState<string>(defaultEffectiveFrom)
   const [status, setStatus] = useState<Status>('loading')
   const [error, setError] = useState<string | null>(null)
+  // Tracks which saved version is currently loaded into the form above
+  // (for the edit-and-resave flow), so the row can show it's being edited.
+  const [editingFrom, setEditingFrom] = useState<string | null>(null)
 
   useEffect(() => {
     setEffectiveFrom(defaultEffectiveFrom)
@@ -98,12 +105,23 @@ export function TariffScheduleEditor({ organizationID, tariffs, defaultEffective
     setError(null)
     try {
       await saveTariffScheduleVersion(organizationID, effectiveFrom, tariffs)
+      setEditingFrom(null)
       await reload()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
       setStatus('error')
     }
   }, [organizationID, effectiveFrom, tariffs, reload])
+
+  const onEdit = useCallback(
+    (v: TariffScheduleVersion) => {
+      onLoadVersion(v.tariffs)
+      setEffectiveFrom(v.effectiveFrom)
+      setEditingFrom(v.effectiveFrom)
+      setError(null)
+    },
+    [onLoadVersion],
+  )
 
   const onDelete = useCallback(
     async (eff: string) => {
@@ -159,7 +177,9 @@ export function TariffScheduleEditor({ organizationID, tariffs, defaultEffective
           {status === 'saving' ? 'Зберігаємо…' : 'Зберегти версію'}
         </button>
         <span className="economics-tariff-schedule-add-hint">
-          Зберігаються поточні значення з форми вище.
+          {editingFrom
+            ? `Редагування версії від ${formatEffectiveFrom(editingFrom).primary} — збереження перезапише її значеннями з форми вище.`
+            : 'Зберігаються поточні значення з форми вище.'}
         </span>
       </form>
 
@@ -218,8 +238,9 @@ export function TariffScheduleEditor({ organizationID, tariffs, defaultEffective
               {sortedVersions.map((v) => {
                 const eff = formatEffectiveFrom(v.effectiveFrom)
                 const isEpoch = v.effectiveFrom === EPOCH_EFFECTIVE_FROM
+                const isEditing = editingFrom === v.effectiveFrom
                 return (
-                  <tr key={v.effectiveFrom}>
+                  <tr key={v.effectiveFrom} className={isEditing ? 'is-editing' : undefined}>
                     <td>
                       <span
                         className={
@@ -247,6 +268,16 @@ export function TariffScheduleEditor({ organizationID, tariffs, defaultEffective
                       {v.tariffs.roundtripEfficiency > 0 ? formatNumber(v.tariffs.roundtripEfficiency) : 'емпір.'}
                     </td>
                     <td className="actions">
+                      <button
+                        type="button"
+                        className="economics-tariff-schedule-edit"
+                        onClick={() => onEdit(v)}
+                        disabled={status === 'saving'}
+                        title="Завантажити значення цієї версії у форму вище для редагування"
+                        aria-label={`Редагувати версію, що діє з ${eff.primary}`}
+                      >
+                        {isEditing ? 'Редагується' : 'Редагувати'}
+                      </button>
                       <button
                         type="button"
                         className="economics-tariff-schedule-del"

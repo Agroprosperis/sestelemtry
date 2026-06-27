@@ -494,6 +494,35 @@
   color: #94a3b8;
 }
 
+.economics-tariff-schedule-edit {
+  background: transparent;
+  border: 1px solid #c7d2fe;
+  border-radius: 6px;
+  padding: 4px 10px;
+  margin-right: 6px;
+  cursor: pointer;
+  color: #4338ca;
+  font-size: 12px;
+  font-weight: 500;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.economics-tariff-schedule-edit:hover:not(:disabled) {
+  background: #eef2ff;
+  border-color: #a5b4fc;
+}
+
+.economics-tariff-schedule-edit:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.economics-tariff-schedule-table tr.is-editing td {
+  background: #eef2ff;
+}
+
 .economics-tariff-schedule-del {
   background: transparent;
   border: 1px solid #fecaca;

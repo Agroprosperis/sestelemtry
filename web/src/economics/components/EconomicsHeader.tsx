@@ -460,6 +460,7 @@ export function EconomicsHeader({
           organizationID={organizationID}
           tariffs={tariffs}
           defaultEffectiveFrom={date}
+          onLoadVersion={onTariffsChange}
         />
       </details>
     </header>
