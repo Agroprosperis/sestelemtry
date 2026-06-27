@@ -2946,3 +2946,121 @@ button.economics-optimum-row.open {
   vertical-align: middle;
 }
 
+/* --- Portfolio (зведений) dashboard --- */
+.economics-portfolio {
+  background: #fff;
+  border: 1px solid #e9edf3;
+  border-radius: 14px;
+  padding: 18px 20px;
+}
+
+.economics-portfolio-scope {
+  flex: 0 0 auto;
+}
+
+.economics-portfolio-cards {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin: 14px 0 6px;
+}
+
+@media (max-width: 900px) {
+  .economics-portfolio-cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.economics-portfolio-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin: 12px 0 6px;
+  font-size: 11.5px;
+  color: #475569;
+}
+
+.economics-portfolio-legend i {
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  border-radius: 2px;
+  margin-right: 5px;
+  vertical-align: middle;
+}
+
+.economics-portfolio-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin: 8px 0 16px;
+}
+
+.economics-portfolio-row {
+  display: grid;
+  grid-template-columns: minmax(150px, 220px) 1fr minmax(90px, auto);
+  align-items: center;
+  gap: 12px;
+}
+
+.economics-portfolio-name {
+  font-size: 12.5px;
+  color: #0f172a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.economics-portfolio-warn {
+  color: #d97706;
+  cursor: help;
+  white-space: nowrap;
+}
+
+.economics-portfolio-track {
+  background: #f1f5f9;
+  border-radius: 6px;
+  height: 18px;
+  overflow: hidden;
+}
+
+.economics-portfolio-stack {
+  display: flex;
+  height: 100%;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.economics-portfolio-fill {
+  height: 100%;
+}
+
+.economics-portfolio-fill.effect {
+  background: #7c3aed;
+}
+
+.economics-portfolio-fill.schedule {
+  background: #f59e0b;
+}
+
+.economics-portfolio-fill.bess {
+  background: #0ea5e9;
+}
+
+.economics-portfolio-fill.nodata {
+  background: #cbd5e1;
+}
+
+.economics-portfolio-value {
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  color: #0f172a;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.economics-portfolio-empty td,
+.economics-portfolio-empty-cell {
+  color: #94a3b8;
+}
+

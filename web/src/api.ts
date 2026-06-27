@@ -745,6 +745,59 @@ export async function fetchEconomicsAnnual(
   return res.json()
 }
 
+// EconomicsPortfolioSite is one object's row in the portfolio rollup:
+// project effect + the two reserve levers (work-schedule + УЗЕ optimum,
+// project_net) + УЗЕ data-quality flags + key energy totals.
+export type EconomicsPortfolioSite = {
+  id: string
+  name: string
+  has_data: boolean
+  effect_uah: number
+  ebitda_uah: number
+  schedule_reserve_uah: number
+  bess_reserve_uah: number
+  action_reserve_uah: number
+  bess_data_ok: boolean
+  bess_anomalous_days: number
+  pv_kwh: number
+  load_kwh: number
+  grid_import_kwh: number
+  grid_export_kwh: number
+  ess_net_uah: number
+}
+
+export type EconomicsPortfolioResponse = {
+  scope: 'month' | 'year'
+  label: string
+  tz: string
+  months_with_data: number
+  sites: EconomicsPortfolioSite[]
+  totals: EconomicsPortfolioSite
+}
+
+// fetchEconomicsPortfolio reads the all-objects rollup. Pass `month`
+// (YYYY-MM) for a month, `period` (YYYY) for a calendar year, or
+// `from`/`to` (both YYYY-MM) for a sliding window.
+export async function fetchEconomicsPortfolio(
+  input: { month?: string; period?: string; from?: string; to?: string; tz?: string },
+  signal?: AbortSignal,
+): Promise<EconomicsPortfolioResponse> {
+  const url = buildURL('/api/v1/economics/portfolio', {
+    month: input.month || undefined,
+    period: input.from && input.to ? undefined : input.period || undefined,
+    from: input.from || undefined,
+    to: input.to || undefined,
+    tz: input.tz || undefined,
+  })
+  const res = await fetch(url, { signal })
+  if (!res.ok) {
+    const body = await res.text().catch(() => '')
+    const suffix = body ? ` — ${body.trim()}` : ''
+    throw new Error(`economics/portfolio request failed: ${res.status}${suffix}`)
+  }
+  return res.json()
+}
+
 // EconomicsRecomputeResult mirrors internal/economics.RangeResult.
 export type EconomicsRecomputeResult = {
   from: string

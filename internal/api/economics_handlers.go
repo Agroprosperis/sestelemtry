@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -718,6 +719,228 @@ func (h *Handlers) economicsAnnual(w http.ResponseWriter, r *http.Request) {
 	for _, m := range year.MonthlyMargin {
 		resp.MonthlyMargin = append(resp.MonthlyMargin, EconomicsAnnualMonthMargin{Month: m.Month, Hours: m.Hours})
 	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// EconomicsPortfolioSite is one object's contribution to the portfolio
+// (zведений) rollup: the headline project effect plus the two reserve
+// levers (work-schedule + УЗЕ optimum) and the УЗЕ data-quality flags.
+type EconomicsPortfolioSite struct {
+	ID                 string  `json:"id"`
+	Name               string  `json:"name"`
+	HasData            bool    `json:"has_data"`
+	EffectUah          float64 `json:"effect_uah"`
+	EbitdaUah          float64 `json:"ebitda_uah"`
+	ScheduleReserveUah float64 `json:"schedule_reserve_uah"`
+	BessReserveUah     float64 `json:"bess_reserve_uah"`
+	ActionReserveUah   float64 `json:"action_reserve_uah"`
+	BessDataOk         bool    `json:"bess_data_ok"`
+	BessAnomalousDays  int     `json:"bess_anomalous_days"`
+	PvKwh              float64 `json:"pv_kwh"`
+	LoadKwh            float64 `json:"load_kwh"`
+	GridImportKwh      float64 `json:"grid_import_kwh"`
+	GridExportKwh      float64 `json:"grid_export_kwh"`
+	EssNetUah          float64 `json:"ess_net_uah"`
+}
+
+// EconomicsPortfolioResponse is the body of GET /api/v1/economics/portfolio:
+// the per-object rows plus a portfolio total, for a month or a year/window.
+type EconomicsPortfolioResponse struct {
+	Scope          string                   `json:"scope"` // "month" | "year"
+	Label          string                   `json:"label"`
+	Tz             string                   `json:"tz"`
+	MonthsWithData int                      `json:"months_with_data"`
+	Sites          []EconomicsPortfolioSite `json:"sites"`
+	Totals         EconomicsPortfolioSite   `json:"totals"`
+}
+
+// scheduleReserveUah is the work-schedule (elevator) reserve: shifting
+// flexible daytime load to consume PV that is currently exported, valued
+// at the import–export price gap. Mirrors the frontend reserveSplit so the
+// portfolio bars and the per-object AI panel agree.
+func scheduleReserveUah(t economics.MonthlyTotals) float64 {
+	gap := t.AvgImportPrice - t.AvgExportPrice
+	if gap < 0 {
+		gap = 0
+	}
+	shiftable := t.PVToGrid
+	if t.GridToLoad < shiftable {
+		shiftable = t.GridToLoad
+	}
+	return shiftable * gap
+}
+
+// portfolioSiteFromTotals builds one site row from a period's totals.
+func portfolioSiteFromTotals(id, name string, t economics.MonthlyTotals, hasData bool) EconomicsPortfolioSite {
+	sched := scheduleReserveUah(t)
+	bess := t.EssReserve
+	if bess < 0 {
+		bess = 0
+	}
+	return EconomicsPortfolioSite{
+		ID:                 id,
+		Name:               name,
+		HasData:            hasData,
+		EffectUah:          t.Effect,
+		EbitdaUah:          t.Ebitda,
+		ScheduleReserveUah: sched,
+		BessReserveUah:     bess,
+		ActionReserveUah:   sched + bess,
+		BessDataOk:         t.EssDataQuality.DataOK,
+		BessAnomalousDays:  t.EssDataQuality.AnomalousDays,
+		PvKwh:              t.PV,
+		LoadKwh:            t.Load,
+		GridImportKwh:      t.GridImport,
+		GridExportKwh:      t.GridExport,
+		EssNetUah:          t.EssNet,
+	}
+}
+
+// economicsPortfolio serves a portfolio (all-objects) rollup for a month
+// or a year/window: per-object project effect + work-schedule and УЗЕ
+// reserves (project_net) + УЗЕ data-quality flags, plus a portfolio total.
+//
+//	GET /api/v1/economics/portfolio?month=YYYY-MM&tz=
+//	GET /api/v1/economics/portfolio?period=YYYY&tz=
+//	GET /api/v1/economics/portfolio?from=YYYY-MM&to=YYYY-MM&tz=
+func (h *Handlers) economicsPortfolio(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if h.economics == nil {
+		http.Error(w, "economics service not configured", http.StatusServiceUnavailable)
+		return
+	}
+	tzStr := strings.TrimSpace(r.URL.Query().Get("tz"))
+	loc, err := loadLocation(tzStr)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	monthStr := strings.TrimSpace(r.URL.Query().Get("month"))
+	fromStr := strings.TrimSpace(r.URL.Query().Get("from"))
+	toStr := strings.TrimSpace(r.URL.Query().Get("to"))
+	periodStr := strings.TrimSpace(r.URL.Query().Get("period"))
+
+	scope := "year"
+	label := periodStr
+	if monthStr != "" {
+		if _, err := time.ParseInLocation("2006-01", monthStr, loc); err != nil {
+			http.Error(w, "month must be YYYY-MM", http.StatusBadRequest)
+			return
+		}
+		scope = "month"
+		label = monthStr
+	} else if fromStr != "" || toStr != "" {
+		if _, err := time.ParseInLocation("2006-01", fromStr, loc); err != nil {
+			http.Error(w, "from must be YYYY-MM", http.StatusBadRequest)
+			return
+		}
+		if _, err := time.ParseInLocation("2006-01", toStr, loc); err != nil {
+			http.Error(w, "to must be YYYY-MM", http.StatusBadRequest)
+			return
+		}
+		label = fromStr + ".." + toStr
+	} else {
+		if periodStr == "" {
+			http.Error(w, "one of month / period / from+to is required", http.StatusBadRequest)
+			return
+		}
+		if _, perr := time.ParseInLocation("2006", periodStr, loc); perr != nil {
+			http.Error(w, "period must be YYYY", http.StatusBadRequest)
+			return
+		}
+	}
+
+	resp := EconomicsPortfolioResponse{
+		Scope: scope,
+		Label: label,
+		Tz:    loc.String(),
+		Sites: make([]EconomicsPortfolioSite, 0, len(h.organizations)),
+	}
+	var totals economics.MonthlyTotals
+	var maxMonthsWithData int
+
+	for _, org := range h.organizations {
+		var t economics.MonthlyTotals
+		hasData := false
+		if scope == "month" {
+			m, err := h.economics.GetMonth(r.Context(), org.ID, monthStr, loc.String())
+			if err != nil {
+				h.log.Warn("api_economics_portfolio_org", "organization_id", org.ID, "month", monthStr, "err", err)
+			} else {
+				t = m.Totals
+				hasData = t.DaysWithData > 0
+			}
+		} else {
+			var y economics.StoredYear
+			if fromStr != "" || toStr != "" {
+				y, err = h.economics.GetPeriod(r.Context(), org.ID, fromStr, toStr, loc.String())
+			} else {
+				y, err = h.economics.GetYear(r.Context(), org.ID, periodStr, loc.String())
+			}
+			if err != nil {
+				h.log.Warn("api_economics_portfolio_org", "organization_id", org.ID, "period", periodStr, "err", err)
+			} else {
+				t = y.Totals
+				hasData = y.MonthsWithData > 0
+				if y.MonthsWithData > maxMonthsWithData {
+					maxMonthsWithData = y.MonthsWithData
+				}
+			}
+		}
+
+		resp.Sites = append(resp.Sites, portfolioSiteFromTotals(org.ID, org.Name, t, hasData))
+		if hasData {
+			totals.Effect += t.Effect
+			totals.Ebitda += t.Ebitda
+			totals.EssNet += t.EssNet
+			totals.PV += t.PV
+			totals.Load += t.Load
+			totals.GridImport += t.GridImport
+			totals.GridExport += t.GridExport
+			if t.EssReserve > 0 {
+				totals.EssReserve += t.EssReserve
+			}
+			totals.EssDataQuality.AnomalousDays += t.EssDataQuality.AnomalousDays
+		}
+	}
+
+	// Sort sites by action reserve desc (biggest opportunity first), keeping
+	// empty objects at the bottom.
+	sort.SliceStable(resp.Sites, func(i, j int) bool {
+		if resp.Sites[i].HasData != resp.Sites[j].HasData {
+			return resp.Sites[i].HasData
+		}
+		return resp.Sites[i].ActionReserveUah > resp.Sites[j].ActionReserveUah
+	})
+
+	// Portfolio total row: effect/energy summed above; reserves summed from
+	// the per-site rows so the schedule reserve matches the visible bars.
+	total := EconomicsPortfolioSite{
+		ID:                "__total__",
+		Name:              "Портфель",
+		HasData:           true,
+		EffectUah:         totals.Effect,
+		EbitdaUah:         totals.Ebitda,
+		BessReserveUah:    totals.EssReserve,
+		BessDataOk:        totals.EssDataQuality.AnomalousDays == 0,
+		BessAnomalousDays: totals.EssDataQuality.AnomalousDays,
+		PvKwh:             totals.PV,
+		LoadKwh:           totals.Load,
+		GridImportKwh:     totals.GridImport,
+		GridExportKwh:     totals.GridExport,
+		EssNetUah:         totals.EssNet,
+	}
+	for _, s := range resp.Sites {
+		total.ScheduleReserveUah += s.ScheduleReserveUah
+	}
+	total.ActionReserveUah = total.ScheduleReserveUah + total.BessReserveUah
+	resp.Totals = total
+	resp.MonthsWithData = maxMonthsWithData
+
 	writeJSON(w, http.StatusOK, resp)
 }
 

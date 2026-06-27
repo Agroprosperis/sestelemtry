@@ -9,6 +9,7 @@ import { EconomicsRecomputeModal } from './components/EconomicsRecomputeModal'
 import { EconomicsTable } from './components/EconomicsTable'
 import { EconomicsMonthlyView } from './monthly/EconomicsMonthlyView'
 import { EconomicsAnnualView } from './annual/EconomicsAnnualView'
+import { EconomicsPortfolioView } from './portfolio/EconomicsPortfolioView'
 import './economics.css'
 import { useEconomicsData } from './useEconomicsData'
 import { useEconomicsMonthlyData } from './useEconomicsMonthlyData'
@@ -92,6 +93,7 @@ function readRangeFromUrl(): EconomicsRange {
   const raw = params.get('range')
   if (raw === 'month') return 'month'
   if (raw === 'year') return 'year'
+  if (raw === 'portfolio') return 'portfolio'
   return 'day'
 }
 
@@ -112,7 +114,7 @@ function updateUrl(date: string, range: EconomicsRange, windowFrom: string, wind
   const url = new URL(window.location.href)
   url.searchParams.set('view', 'economics')
   url.searchParams.set('anchor', date)
-  if (range === 'month' || range === 'year') {
+  if (range === 'month' || range === 'year' || range === 'portfolio') {
     url.searchParams.set('range', range)
   } else {
     url.searchParams.delete('range')
@@ -275,7 +277,9 @@ export function EconomicsPage() {
         />
       )}
 
-      {range === 'year' ? (
+      {range === 'portfolio' ? (
+        <EconomicsPortfolioView month={month} period={period} refreshKey={refreshKey} />
+      ) : range === 'year' ? (
         <>
           {annual.error && (
             <section className="economics-banner economics-banner-error" role="alert">

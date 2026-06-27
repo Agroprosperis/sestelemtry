@@ -34,13 +34,15 @@ function formatDateString(d: Date): string {
 export type DamRefreshState = 'idle' | 'loading' | 'error'
 
 // EconomicsRange is the period granularity toggle: a single day, a whole
-// calendar month, or a calendar year.
-export type EconomicsRange = 'day' | 'month' | 'year'
+// calendar month, a calendar year, or the all-objects portfolio rollup.
+export type EconomicsRange = 'day' | 'month' | 'year' | 'portfolio'
 
 // rangeTitle / rangeSubtitle pick the header copy for the active period
-// granularity so the day/month/year views read consistently.
+// granularity so the day/month/year/portfolio views read consistently.
 function rangeTitle(range: EconomicsRange): string {
   switch (range) {
+    case 'portfolio':
+      return 'Зведений дашборд СЕС + УЗЕ'
     case 'year':
       return 'Річний дашборд СЕС + УЗЕ'
     case 'month':
@@ -52,6 +54,8 @@ function rangeTitle(range: EconomicsRange): string {
 
 function rangeSubtitle(range: EconomicsRange, monthsWithData?: number): string {
   switch (range) {
+    case 'portfolio':
+      return 'порівняння резерву по всіх об\'єктах на базі цін РДН і тарифів.'
     case 'year':
       return monthsWithData && monthsWithData > 0
         ? `управлінський звіт за рік · ${monthsWithData} міс. телеметрії`
@@ -236,16 +240,20 @@ export function EconomicsHeader({
           <div className="economics-header-titles">
             <h1>{rangeTitle(range)}</h1>
             <p>
-              {formatOrganizationLabel(organizationID)} · {rangeSubtitle(range, monthsWithData)}
+              {range === 'portfolio'
+                ? rangeSubtitle(range, monthsWithData)
+                : `${formatOrganizationLabel(organizationID)} · ${rangeSubtitle(range, monthsWithData)}`}
             </p>
           </div>
         </div>
         <div className="economics-header-controls">
-          <OrganizationSelect
-            value={organizationID}
-            options={organizationOptions}
-            onChange={onOrganizationChange}
-          />
+          {range !== 'portfolio' && (
+            <OrganizationSelect
+              value={organizationID}
+              options={organizationOptions}
+              onChange={onOrganizationChange}
+            />
+          )}
           <div className="economics-range-switch" role="group" aria-label="Гранулярність періоду">
             <button
               type="button"
@@ -271,12 +279,20 @@ export function EconomicsHeader({
             >
               Рік
             </button>
+            <button
+              type="button"
+              className={range === 'portfolio' ? 'active' : ''}
+              aria-pressed={range === 'portfolio'}
+              onClick={() => onRangeChange('portfolio')}
+            >
+              Портфель
+            </button>
           </div>
           {range === 'year' ? (
             <EconomicsPeriodPicker from={windowFrom} to={windowTo} onChange={onWindowChange} />
           ) : (
             <PeriodPicker
-              preset={range}
+              preset={range === 'portfolio' ? 'month' : range}
               anchor={parseDateString(date)}
               onChange={(next) => onDateChange(formatDateString(next))}
             />
