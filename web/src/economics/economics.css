@@ -1036,6 +1036,23 @@
   background: #e2e8f0;
 }
 
+/* Detail-record tables (monthly / annual / portfolio) share the
+ * `.economics-month-table` layout. Emphasise their summary row
+ * ("Разом" / "Портфель") with a bold tint and a heavier top divider
+ * so it reads as the rollup line rather than just another record. */
+.economics-month-table tbody tr.economics-table-summary-row td,
+.economics-month-table tbody tr.economics-table-summary-row th {
+  font-weight: 700;
+  color: #0f172a;
+  background: #eef2f7;
+  border-top: 2px solid #94a3b8;
+}
+
+.economics-month-table tbody tr.economics-table-summary-row:hover td,
+.economics-month-table tbody tr.economics-table-summary-row:hover th {
+  background: #e2e8f0;
+}
+
 /* РДН price tiers: each hour cell on the РДН row gets a pale tint
  * keyed to the day-ahead price band (cool/warm/hot/peak). Both
  * `.economics-table` and `.economics-table-pivot` are present on
@@ -3062,5 +3079,64 @@ button.economics-optimum-row.open {
 .economics-portfolio-empty td,
 .economics-portfolio-empty-cell {
   color: #94a3b8;
+}
+
+.economics-portfolio-trend {
+  display: grid;
+  gap: 10px;
+}
+
+.economics-portfolio-trend-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  font-size: 12px;
+  color: #475569;
+}
+
+.economics-portfolio-trend-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.economics-portfolio-trend-legend i {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+}
+
+.economics-portfolio-trend-plot {
+  display: grid;
+  gap: 6px;
+  align-items: end;
+  padding: 8px 4px 0;
+  border-top: 1px solid #e2e8f0;
+}
+
+.economics-portfolio-trend-col {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+}
+
+.economics-portfolio-trend-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 84px;
+}
+
+.economics-portfolio-trend-bars i {
+  width: 6px;
+  border-radius: 2px 2px 0 0;
+  min-height: 0;
+}
+
+.economics-portfolio-trend-col em {
+  font-size: 11px;
+  font-style: normal;
+  color: #64748b;
+  white-space: nowrap;
 }
 

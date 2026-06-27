@@ -766,6 +766,17 @@ export type EconomicsPortfolioSite = {
   ess_net_uah: number
 }
 
+// EconomicsPortfolioTrendMonth is one month of the portfolio energy trend
+// (year scope): the YYYY-MM key plus the sum across all objects.
+export type EconomicsPortfolioTrendMonth = {
+  month: string
+  pv_kwh: number
+  load_kwh: number
+  grid_import_kwh: number
+  grid_export_kwh: number
+  effect_uah: number
+}
+
 export type EconomicsPortfolioResponse = {
   scope: 'month' | 'year'
   label: string
@@ -773,6 +784,7 @@ export type EconomicsPortfolioResponse = {
   months_with_data: number
   sites: EconomicsPortfolioSite[]
   totals: EconomicsPortfolioSite
+  trend: EconomicsPortfolioTrendMonth[]
 }
 
 // fetchEconomicsPortfolio reads the all-objects rollup. Pass `month`

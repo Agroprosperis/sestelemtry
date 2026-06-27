@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import type { ReactNode } from 'react'
-import type { EconomicsPortfolioSite } from '../../api'
+import type { EconomicsPortfolioResponse, EconomicsPortfolioSite, EconomicsPortfolioTrendMonth } from '../../api'
 import { formatOrganizationLabel } from '../../dashboard/config'
-import { formatMonthTitle, formatMwh, formatPercent, formatUah, formatYearTitle } from '../monthly/format'
+import { formatMonthTitle, formatMwh, formatMwhNumber, formatPercent, formatUah, formatYearTitle } from '../monthly/format'
 import { useEconomicsPortfolioData } from '../useEconomicsPortfolioData'
 
 type Scope = 'month' | 'year'
@@ -65,7 +65,7 @@ export function EconomicsPortfolioView({ month, period, refreshKey }: Props) {
   )
 }
 
-function PortfolioBody({ portfolio }: { portfolio: { sites: EconomicsPortfolioSite[]; totals: EconomicsPortfolioSite } }) {
+function PortfolioBody({ portfolio }: { portfolio: EconomicsPortfolioResponse }) {
   const sites = portfolio.sites
   const totals = portfolio.totals
   const withData = sites.filter((s) => s.has_data)
@@ -190,7 +190,67 @@ function PortfolioBody({ portfolio }: { portfolio: { sites: EconomicsPortfolioSi
           </tbody>
         </table>
       </div>
+
+      {portfolio.trend.length > 0 ? <PortfolioTrend months={portfolio.trend} /> : null}
     </>
+  )
+}
+
+// shortMonth turns "YYYY-MM" into "MM.YY" for compact axis labels.
+function shortMonth(ym: string): string {
+  return `${ym.slice(5, 7)}.${ym.slice(2, 4)}`
+}
+
+const TREND_SERIES = [
+  { key: 'pv_kwh', name: 'СЕС', color: '#12b76a' },
+  { key: 'grid_import_kwh', name: 'імпорт', color: '#3b82f6' },
+  { key: 'grid_export_kwh', name: 'експорт', color: '#f97316' },
+  { key: 'load_kwh', name: 'споживання', color: '#fdba74' },
+] as const
+
+// PortfolioTrend is the per-month portfolio energy trend (year scope): a
+// grouped mini-bar column per month, scaled to the axis max across all
+// series, with a native tooltip carrying the MWh figures + project effect.
+function PortfolioTrend({ months }: { months: EconomicsPortfolioTrendMonth[] }) {
+  const axisMax = Math.max(
+    ...months.flatMap((m) => [m.pv_kwh, m.grid_import_kwh, m.grid_export_kwh, m.load_kwh]),
+    1,
+  )
+  return (
+    <div className="economics-portfolio-trend">
+      <div className="economics-month-section-head">
+        <h4 className="economics-month-section-title">Енергетичний тренд по місяцях (портфель)</h4>
+        <span className="economics-month-muted">МВт·год/міс</span>
+      </div>
+      <div className="economics-portfolio-trend-legend">
+        {TREND_SERIES.map((s) => (
+          <span key={s.key}>
+            <i style={{ background: s.color }} />
+            {s.name}
+          </span>
+        ))}
+      </div>
+      <div className="economics-portfolio-trend-plot" style={{ gridTemplateColumns: `repeat(${months.length}, minmax(0, 1fr))` }}>
+        {months.map((m) => {
+          const tip = `${m.month}\nСЕС ${formatMwhNumber(m.pv_kwh)} · спож. ${formatMwhNumber(m.load_kwh)} · імпорт ${formatMwhNumber(
+            m.grid_import_kwh,
+          )} · експорт ${formatMwhNumber(m.grid_export_kwh)}\nЕфект ${formatUah(m.effect_uah)}`
+          return (
+            <div className="economics-portfolio-trend-col" key={m.month} title={tip}>
+              <div className="economics-portfolio-trend-bars">
+                {TREND_SERIES.map((s) => (
+                  <i
+                    key={s.key}
+                    style={{ height: `${Math.max((m[s.key] / axisMax) * 80, m[s.key] > 0 ? 2 : 0)}px`, background: s.color }}
+                  />
+                ))}
+              </div>
+              <em>{shortMonth(m.month)}</em>
+            </div>
+          )
+        })}
+      </div>
+    </div>
   )
 }
 

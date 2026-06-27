@@ -396,7 +396,10 @@ func AggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly
 		if capacityKwh <= 0 {
 			return 0
 		}
-		return clampFloat(kwh/capacityKwh*100, 0, 100)
+		// Map the usable window onto the pack's 10–90% operating band:
+		// empty usable → 10%, full usable → 90%, i.e. capacity/80 kWh per
+		// pack-percent (6.45 kWh/1% for a 516 kWh usable pack, §3.7).
+		return clampFloat(10+kwh/capacityKwh*80, 0, 100)
 	}
 	buildCycle := func(key string, do *dayOpt, fact float64) (UzeCycle, bool) {
 		if do == nil {

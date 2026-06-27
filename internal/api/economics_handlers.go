@@ -743,15 +743,27 @@ type EconomicsPortfolioSite struct {
 	EssNetUah          float64 `json:"ess_net_uah"`
 }
 
+// EconomicsPortfolioTrendMonth is one month of the portfolio energy trend
+// (year scope): the YYYY-MM key plus the sum across all objects.
+type EconomicsPortfolioTrendMonth struct {
+	Month         string  `json:"month"`
+	PvKwh         float64 `json:"pv_kwh"`
+	LoadKwh       float64 `json:"load_kwh"`
+	GridImportKwh float64 `json:"grid_import_kwh"`
+	GridExportKwh float64 `json:"grid_export_kwh"`
+	EffectUah     float64 `json:"effect_uah"`
+}
+
 // EconomicsPortfolioResponse is the body of GET /api/v1/economics/portfolio:
 // the per-object rows plus a portfolio total, for a month or a year/window.
 type EconomicsPortfolioResponse struct {
-	Scope          string                   `json:"scope"` // "month" | "year"
-	Label          string                   `json:"label"`
-	Tz             string                   `json:"tz"`
-	MonthsWithData int                      `json:"months_with_data"`
-	Sites          []EconomicsPortfolioSite `json:"sites"`
-	Totals         EconomicsPortfolioSite   `json:"totals"`
+	Scope          string                         `json:"scope"` // "month" | "year"
+	Label          string                         `json:"label"`
+	Tz             string                         `json:"tz"`
+	MonthsWithData int                            `json:"months_with_data"`
+	Sites          []EconomicsPortfolioSite       `json:"sites"`
+	Totals         EconomicsPortfolioSite         `json:"totals"`
+	Trend          []EconomicsPortfolioTrendMonth `json:"trend"`
 }
 
 // scheduleReserveUah is the work-schedule (elevator) reserve: shifting
@@ -862,6 +874,8 @@ func (h *Handlers) economicsPortfolio(w http.ResponseWriter, r *http.Request) {
 	}
 	var totals economics.MonthlyTotals
 	var maxMonthsWithData int
+	trendAcc := make(map[string]*EconomicsPortfolioTrendMonth)
+	var trendOrder []string
 
 	for _, org := range h.organizations {
 		var t economics.MonthlyTotals
@@ -888,6 +902,19 @@ func (h *Handlers) economicsPortfolio(w http.ResponseWriter, r *http.Request) {
 				hasData = y.MonthsWithData > 0
 				if y.MonthsWithData > maxMonthsWithData {
 					maxMonthsWithData = y.MonthsWithData
+				}
+				for _, mr := range y.Months {
+					row := trendAcc[mr.Month]
+					if row == nil {
+						row = &EconomicsPortfolioTrendMonth{Month: mr.Month}
+						trendAcc[mr.Month] = row
+						trendOrder = append(trendOrder, mr.Month)
+					}
+					row.PvKwh += mr.Totals.PV
+					row.LoadKwh += mr.Totals.Load
+					row.GridImportKwh += mr.Totals.GridImport
+					row.GridExportKwh += mr.Totals.GridExport
+					row.EffectUah += mr.Totals.Effect
 				}
 			}
 		}
@@ -940,6 +967,11 @@ func (h *Handlers) economicsPortfolio(w http.ResponseWriter, r *http.Request) {
 	total.ActionReserveUah = total.ScheduleReserveUah + total.BessReserveUah
 	resp.Totals = total
 	resp.MonthsWithData = maxMonthsWithData
+
+	resp.Trend = make([]EconomicsPortfolioTrendMonth, 0, len(trendOrder))
+	for _, ym := range trendOrder {
+		resp.Trend = append(resp.Trend, *trendAcc[ym])
+	}
 
 	writeJSON(w, http.StatusOK, resp)
 }
