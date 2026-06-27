@@ -127,6 +127,33 @@ func TestDetectEssAnomalies(t *testing.T) {
 	}
 }
 
+// TestDetectEssAnomaliesPeakInterval verifies the sub-hourly path: a day
+// whose hourly charge/discharge sums stay UNDER the limit but whose
+// per-interval peak power (EssPeakIntervalKw) exceeds it is still flagged
+// (the 5-minute spike the hourly sum averages away). When the peak is
+// present and within range, the day stays clean even though the fallback
+// hourly-sum check is skipped.
+func TestDetectEssAnomaliesPeakInterval(t *testing.T) {
+	loc := time.UTC
+	base := time.Date(2026, 6, 1, 0, 0, 0, 0, loc)
+	hourly := []HourlyRecord{
+		// Day 1: modest hourly sum (40 < 150) but a 200 kW 5-min spike.
+		{HourStart: base.Add(10 * time.Hour), EssCharged: 40, EssPeakIntervalKw: 200},
+		// Day 2: modest hourly sum and a peak within the limit → clean.
+		{HourStart: base.Add(24*time.Hour + 10*time.Hour), EssDischarged: 40, EssPeakIntervalKw: 100},
+	}
+	bad, dq := detectEssAnomalies(hourly, loc, 100, essAnomalyTolerance) // limit 150
+	if len(bad) != 1 || !bad["2026-06-01"] {
+		t.Fatalf("bad = %v, want {2026-06-01}", bad)
+	}
+	if dq.DataOK || dq.AnomalousDays != 1 {
+		t.Fatalf("dq = %+v, want 1 anomalous day, not ok", dq)
+	}
+	if dq.MaxIntervalPowerKw != 200 {
+		t.Fatalf("MaxIntervalPowerKw = %v, want 200", dq.MaxIntervalPowerKw)
+	}
+}
+
 // TestAggregateMonthExcludesAnomalousDays verifies that an anomalous day is
 // dropped from the fact/optimum and its per-day reserve row is zeroed,
 // while the DataQuality summary reports the exclusion.

@@ -489,6 +489,7 @@ export type EconomicsDataQuality = {
   max_charge_kwh_per_interval: number
   max_discharge_kwh_per_interval: number
   power_limit_kwh_per_interval: number
+  max_interval_power_kw: number
 }
 
 // EconomicsMonthlyTotals mirrors internal/api.EconomicsMonthlyTotals —

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/nesh/sestelemetry/internal/economics"
+	"github.com/nesh/sestelemetry/internal/energyflow"
 	"github.com/nesh/sestelemetry/internal/storage"
 )
 
@@ -177,9 +178,14 @@ func (b *economicsBackend) LoadHourlyRange(ctx context.Context, orgID string, fr
 	if err != nil {
 		return nil, err
 	}
+	// Compute-on-read: derive the per-hour sub-hourly ESS power peaks from
+	// raw telemetry so the anomaly filter sees 5-minute spikes the cached
+	// hourly sums hide. Best-effort — a failure just leaves peaks unset and
+	// the filter falls back to the hourly-sum check.
+	peak := b.essPeakKwByHour(ctx, orgID, from, to)
 	out := make([]economics.HourlyRecord, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, economics.HourlyRecord{
+		rec := economics.HourlyRecord{
 			HourStart:            row.HourStart,
 			Rdn:                  row.Rdn,
 			ImportPrice:          row.ImportPrice,
@@ -195,9 +201,61 @@ func (b *economicsBackend) LoadHourlyRange(ctx context.Context, orgID string, fr
 			EssDischarged:        row.EssDischarged,
 			EssNet:               row.EssNet,
 			EssRemainingKwhStart: row.EssRemainingKwhStart,
-		})
+		}
+		if peak != nil {
+			rec.EssPeakIntervalKw = peak[row.HourStart.Unix()/3600]
+		}
+		out = append(out, rec)
 	}
 	return out, nil
+}
+
+// essPeakKwByHour derives, per hour bucket in [from,to), the peak sub-hourly
+// (~5-min) implied ESS charge/discharge power (kW) from raw telemetry, so
+// the economics anomaly filter can flag days with sub-hourly spikes the
+// hourly sums average away (§3.4). The counter-step guard is OFF
+// (MaxEssPowerKw = 0) so the very spikes we want to detect stay visible.
+// The map is keyed by the Unix hour bucket (t.Unix()/3600) to align with
+// HourlyRecord.HourStart independent of timezone. Returns nil on any load
+// error or when there is too little data to form an interval.
+func (b *economicsBackend) essPeakKwByHour(ctx context.Context, orgID string, from, to time.Time) map[int64]float64 {
+	rows, err := b.store.EnergyFlowSources(ctx, orgID, from, to, energyFlowSourceLookback)
+	if err != nil || len(rows) < 2 {
+		return nil
+	}
+	cfg := b.h.energyFlowOrgs[orgID]
+	samples := buildRawSamples(rows, cfg)
+	peak := make(map[int64]float64)
+	var last time.Time
+	var stats energyflow.RecomputeResult
+	energyflow.IterateIntervals(
+		samples,
+		energyflow.Options{
+			EssDischargeSign:        cfg.EssDischargeSign,
+			AllocationWindowSeconds: 60,
+			MaxGapSeconds:           0,
+			MaxEssPowerKw:           0,
+		},
+		func(curr time.Time, r energyflow.Result) {
+			if r.Skipped {
+				return
+			}
+			if !last.IsZero() {
+				if dtH := curr.Sub(last).Hours(); dtH > 0 {
+					kw := r.EssChargedKwh / dtH
+					if d := r.EssDischargedKwh / dtH; d > kw {
+						kw = d
+					}
+					if key := curr.Unix() / 3600; kw > peak[key] {
+						peak[key] = kw
+					}
+				}
+			}
+			last = curr
+		},
+		&stats,
+	)
+	return peak
 }
 
 // --- conversions ---

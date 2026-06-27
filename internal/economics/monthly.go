@@ -40,6 +40,14 @@ type HourlyRecord struct {
 	EssNet        float64
 
 	EssRemainingKwhStart *float64
+
+	// EssPeakIntervalKw is the peak per-interval (sub-hourly, ~5-min)
+	// implied ESS charge/discharge power (kW) observed within this hour,
+	// derived from raw telemetry. It lets the anomaly filter catch
+	// sub-hourly spikes that the hourly sum averages away (§3.4). 0 means
+	// no raw sub-hourly signal was available (filter falls back to the
+	// hourly-sum check).
+	EssPeakIntervalKw float64
 }
 
 // MonthDay is one day's contribution to the month — the full daily
@@ -164,16 +172,23 @@ type DataQuality struct {
 	MaxChargeKwhPerInterval    float64
 	MaxDischargeKwhPerInterval float64
 	PowerLimitKwhPerInterval   float64
+	// MaxIntervalPowerKw is the largest sub-hourly (~5-min) implied ESS
+	// power (kW) seen in the period, from raw telemetry. It is the signal
+	// the per-interval anomaly check compares against powerLimitKw · tol.
+	MaxIntervalPowerKw float64
 }
 
 // essAnomalyTolerance is how far above the nominal per-interval power limit
 // a reading may go before the day is treated as corrupt telemetry.
 const essAnomalyTolerance = 1.5
 
-// detectEssAnomalies flags every civil day whose hourly ESS charge or
-// discharge exceeds powerLimitKw · 1h · tol — readings that are physically
-// impossible for the unit and almost always corrupt telemetry. It returns
-// the set of anomalous civil dates plus a DataQuality summary. When
+// detectEssAnomalies flags every civil day with corrupt ESS telemetry —
+// readings physically impossible for the unit. Two signals trigger the
+// flag: (1) the sub-hourly peak power (EssPeakIntervalKw, from raw ~5-min
+// telemetry) exceeding powerLimitKw · tol, which catches spikes the hourly
+// sum averages away; and (2), as a fallback when no raw signal is present,
+// an hourly charge/discharge above powerLimitKw · 1h · tol. It returns the
+// set of anomalous civil dates plus a DataQuality summary. When
 // powerLimitKw ≤ 0 the filter is disabled (no day is excluded).
 func detectEssAnomalies(hourly []HourlyRecord, loc *time.Location, powerLimitKw, tol float64) (map[string]bool, DataQuality) {
 	bad := make(map[string]bool)
@@ -185,12 +200,24 @@ func detectEssAnomalies(hourly []HourlyRecord, loc *time.Location, powerLimitKw,
 		if h.EssDischarged > dq.MaxDischargeKwhPerInterval {
 			dq.MaxDischargeKwhPerInterval = h.EssDischarged
 		}
+		if h.EssPeakIntervalKw > dq.MaxIntervalPowerKw {
+			dq.MaxIntervalPowerKw = h.EssPeakIntervalKw
+		}
 	}
 	if powerLimitKw <= 0 {
 		return bad, dq
 	}
 	limit := powerLimitKw * tol // hourly granularity → 1h interval
 	for _, h := range hourly {
+		// Prefer the sub-hourly peak (kW): a single ~5-min spike above
+		// the power ceiling marks the whole day corrupt. Fall back to the
+		// hourly-sum check only when no raw peak is available.
+		if h.EssPeakIntervalKw > 0 {
+			if h.EssPeakIntervalKw > limit {
+				bad[h.HourStart.In(loc).Format("2006-01-02")] = true
+			}
+			continue
+		}
 		if h.EssCharged > limit || h.EssDischarged > limit {
 			bad[h.HourStart.In(loc).Format("2006-01-02")] = true
 		}

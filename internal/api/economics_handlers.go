@@ -245,6 +245,7 @@ type EconomicsDataQuality struct {
 	MaxChargeKwhPerInterval    float64  `json:"max_charge_kwh_per_interval"`
 	MaxDischargeKwhPerInterval float64  `json:"max_discharge_kwh_per_interval"`
 	PowerLimitKwhPerInterval   float64  `json:"power_limit_kwh_per_interval"`
+	MaxIntervalPowerKw         float64  `json:"max_interval_power_kw"`
 }
 
 func dataQualityToJSON(q economics.DataQuality) EconomicsDataQuality {
@@ -256,6 +257,7 @@ func dataQualityToJSON(q economics.DataQuality) EconomicsDataQuality {
 		MaxChargeKwhPerInterval:    q.MaxChargeKwhPerInterval,
 		MaxDischargeKwhPerInterval: q.MaxDischargeKwhPerInterval,
 		PowerLimitKwhPerInterval:   q.PowerLimitKwhPerInterval,
+		MaxIntervalPowerKw:         q.MaxIntervalPowerKw,
 	}
 }
 
