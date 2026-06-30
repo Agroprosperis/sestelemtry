@@ -1,17 +1,20 @@
-import { useState } from 'react'
 import type { ReactNode } from 'react'
 import type { EconomicsPortfolioResponse, EconomicsPortfolioSite, EconomicsPortfolioTrendMonth } from '../../api'
 import { formatOrganizationLabel } from '../../dashboard/config'
 import { formatMonthTitle, formatMwh, formatMwhNumber, formatPercent, formatUah, formatYearTitle } from '../monthly/format'
 import { useEconomicsPortfolioData } from '../useEconomicsPortfolioData'
 
-type Scope = 'month' | 'year'
+export type PortfolioScope = 'month' | 'year'
 
 type Props = {
   // YYYY-MM derived from the page anchor (used when scope=month).
   month: string
   // YYYY derived from the page anchor (used when scope=year).
   period: string
+  // scope is owned by the page so the header period picker (month vs year)
+  // stays in sync with the portfolio's own granularity toggle.
+  scope: PortfolioScope
+  onScopeChange: (next: PortfolioScope) => void
   refreshKey?: number
 }
 
@@ -24,8 +27,7 @@ function compareTotal(s: EconomicsPortfolioSite): number {
 // object comparison of project effect + work-schedule reserve + УЗЕ
 // optimum reserve (project_net), with ⚠ flags for objects whose УЗЕ
 // telemetry had anomalous days excluded (§2).
-export function EconomicsPortfolioView({ month, period, refreshKey }: Props) {
-  const [scope, setScope] = useState<Scope>('month')
+export function EconomicsPortfolioView({ month, period, scope, onScopeChange, refreshKey }: Props) {
   const { portfolio, loading, error } = useEconomicsPortfolioData({
     active: true,
     scope,
@@ -41,10 +43,10 @@ export function EconomicsPortfolioView({ month, period, refreshKey }: Props) {
       <div className="economics-month-section-head">
         <h3 className="economics-month-section-title">Зведений резерв по об'єктах · {label}</h3>
         <div className="economics-range-switch economics-portfolio-scope" role="group" aria-label="Період портфеля">
-          <button type="button" className={scope === 'month' ? 'active' : ''} aria-pressed={scope === 'month'} onClick={() => setScope('month')}>
+          <button type="button" className={scope === 'month' ? 'active' : ''} aria-pressed={scope === 'month'} onClick={() => onScopeChange('month')}>
             Місяць
           </button>
-          <button type="button" className={scope === 'year' ? 'active' : ''} aria-pressed={scope === 'year'} onClick={() => setScope('year')}>
+          <button type="button" className={scope === 'year' ? 'active' : ''} aria-pressed={scope === 'year'} onClick={() => onScopeChange('year')}>
             Рік
           </button>
         </div>

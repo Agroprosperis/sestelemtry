@@ -9,7 +9,7 @@ import { EconomicsRecomputeModal } from './components/EconomicsRecomputeModal'
 import { EconomicsTable } from './components/EconomicsTable'
 import { EconomicsMonthlyView } from './monthly/EconomicsMonthlyView'
 import { EconomicsAnnualView } from './annual/EconomicsAnnualView'
-import { EconomicsPortfolioView } from './portfolio/EconomicsPortfolioView'
+import { EconomicsPortfolioView, type PortfolioScope } from './portfolio/EconomicsPortfolioView'
 import './economics.css'
 import { useEconomicsData } from './useEconomicsData'
 import { useEconomicsMonthlyData } from './useEconomicsMonthlyData'
@@ -137,6 +137,9 @@ export function EconomicsPage() {
   const initialWindow = readWindowFromUrl()
   const [windowFrom, setWindowFrom] = useState<string>(initialWindow.from)
   const [windowTo, setWindowTo] = useState<string>(initialWindow.to)
+  // Portfolio granularity (month/year) lives here so the header period
+  // picker can follow the portfolio's own Місяць/Рік toggle.
+  const [portfolioScope, setPortfolioScope] = useState<PortfolioScope>('month')
   const {
     tariffs,
     status: tariffsStatus,
@@ -240,6 +243,7 @@ export function EconomicsPage() {
         onOrganizationChange={onOrganizationChange}
         range={range}
         onRangeChange={setRange}
+        portfolioScope={portfolioScope}
         monthsWithData={range === 'year' ? annual.year?.months_with_data : undefined}
         windowFrom={windowFrom || (range === 'year' ? `${period}-01` : '')}
         windowTo={windowTo || (range === 'year' ? `${period}-12` : '')}
@@ -278,7 +282,13 @@ export function EconomicsPage() {
       )}
 
       {range === 'portfolio' ? (
-        <EconomicsPortfolioView month={month} period={period} refreshKey={refreshKey} />
+        <EconomicsPortfolioView
+          month={month}
+          period={period}
+          scope={portfolioScope}
+          onScopeChange={setPortfolioScope}
+          refreshKey={refreshKey}
+        />
       ) : range === 'year' ? (
         <>
           {annual.error && (

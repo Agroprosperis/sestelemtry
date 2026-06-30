@@ -73,6 +73,10 @@ type Props = {
   onOrganizationChange: (next: string) => void
   range: EconomicsRange
   onRangeChange: (next: EconomicsRange) => void
+  // Portfolio granularity (month/year). Only meaningful when range is
+  // 'portfolio'; it drives whether the period picker is a month or a
+  // year picker so it tracks the portfolio's own Місяць/Рік toggle.
+  portfolioScope?: 'month' | 'year'
   // Months of telemetry in the active year (year view only), surfaced
   // in the subtitle per SPEC §3.1.
   monthsWithData?: number
@@ -204,6 +208,7 @@ export function EconomicsHeader({
   onOrganizationChange,
   range,
   onRangeChange,
+  portfolioScope = 'month',
   monthsWithData,
   windowFrom,
   windowTo,
@@ -292,7 +297,7 @@ export function EconomicsHeader({
             <EconomicsPeriodPicker from={windowFrom} to={windowTo} onChange={onWindowChange} />
           ) : (
             <PeriodPicker
-              preset={range === 'portfolio' ? 'month' : range}
+              preset={range === 'portfolio' ? portfolioScope : range}
               anchor={parseDateString(date)}
               onChange={(next) => onDateChange(formatDateString(next))}
             />
