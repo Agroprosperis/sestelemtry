@@ -69,6 +69,16 @@ function emptyTotals(): EconomicsMonthlyResponse['totals'] {
     ess_pv_missed_kwh: 0,
     best_day: { date: '', effect_uah: 0 },
     min_effect_day: { date: '', effect_uah: 0 },
+    ess_data_quality: {
+      data_ok: true,
+      total_days: 0,
+      anomalous_days: 0,
+      anomalous_dates: null,
+      max_charge_kwh_per_interval: 0,
+      max_discharge_kwh_per_interval: 0,
+      power_limit_kwh_per_interval: 0,
+      max_interval_power_kw: 0,
+    },
   }
 }
 
@@ -82,6 +92,7 @@ describe('useEconomicsMonthlyData', () => {
       totals: { ...emptyTotals(), effect_uah: 1234, equivalent_cycles: 1.5 },
       days: [],
       hourly_margin: [],
+      uze_cycles: [],
     }
     mockedFetch.mockResolvedValue(resp)
 

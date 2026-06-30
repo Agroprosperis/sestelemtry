@@ -2426,38 +2426,6 @@ button.economics-optimum-row.open {
   color: #94a3b8;
 }
 
-/* --- Reserve detail (month) collapsible --- */
-.economics-ai-reserve-details {
-  margin-top: 16px;
-  border-top: 1px solid #eef1f6;
-  padding-top: 12px;
-}
-
-.economics-ai-reserve-details > summary {
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 650;
-  color: #64748b;
-  list-style: none;
-}
-
-.economics-ai-reserve-details > summary::-webkit-details-marker {
-  display: none;
-}
-
-.economics-ai-reserve-details > summary::before {
-  content: '▸ ';
-  color: #94a3b8;
-}
-
-.economics-ai-reserve-details[open] > summary::before {
-  content: '▾ ';
-}
-
-.economics-ai-reserve-details .economics-ai-reserve {
-  margin-top: 12px;
-}
-
 /* --- Quarter cards (year) --- */
 .economics-quarter-grid {
   display: grid;
@@ -2714,34 +2682,70 @@ button.economics-optimum-row.open {
 /* --- УЗЕ cycle chart (expandable per-day optimum-vs-fact) --- */
 .uze-acc-group {
   margin-top: 14px;
-  border-top: 1px solid #eef1f6;
-  padding-top: 12px;
 }
 
 .uze-acc-group-head {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 12px;
   width: 100%;
   text-align: left;
-  border: 0;
-  background: none;
-  padding: 0;
+  border: 1px solid #e3e8f0;
+  border-radius: 10px;
+  background: #f7f9fc;
+  padding: 11px 14px;
   cursor: pointer;
-  font-size: 12px;
-  font-weight: 650;
+  transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.uze-acc-group-head:hover {
+  background: #eef2f8;
+  border-color: #cdd6e4;
+}
+
+.uze-acc-group.open .uze-acc-group-head {
+  background: #eef2fb;
+  border-color: #c7d2ec;
+  box-shadow: 0 1px 3px rgba(30, 64, 175, 0.08);
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.uze-acc-group-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.uze-acc-group-meta {
+  margin-left: auto;
+  font-size: 11.5px;
+  font-weight: 500;
   color: #64748b;
+  font-variant-numeric: tabular-nums;
 }
 
-.uze-acc-group-head::before {
-  content: '▸ ';
+.uze-acc-group-arrow {
+  flex: 0 0 auto;
   color: #94a3b8;
+  font-size: 12px;
+  transform: rotate(-90deg);
+  transition: transform 0.15s ease;
 }
 
-.uze-acc-group.open .uze-acc-group-head::before {
-  content: '▾ ';
+.uze-acc-group.open .uze-acc-group-arrow {
+  transform: rotate(0deg);
+  color: #4f63b0;
 }
 
 .uze-acc-group-body {
-  margin-top: 10px;
+  margin-top: 0;
+  padding: 12px;
+  border: 1px solid #c7d2ec;
+  border-top: 0;
+  border-bottom-left-radius: 10px;
+  border-bottom-right-radius: 10px;
+  background: #fbfcfe;
   display: flex;
   flex-direction: column;
   gap: 8px;

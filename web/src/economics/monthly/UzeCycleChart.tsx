@@ -390,6 +390,12 @@ export function UzeCyclesAccordion({ cycles }: { cycles: EconomicsUzeCycle[] }) 
   const [open, setOpen] = useState<number | null>(null)
   if (!cycles.length) return null
   const n = cycles.length
+  const reserves = cycles.map((c) => c.reserve_uah)
+  const minReserve = Math.min(...reserves)
+  const maxReserve = Math.max(...reserves)
+  const meta = groupOpen
+    ? `${n} циклів · натисніть, щоб згорнути`
+    : `резерв від ${fmtUah(minReserve)} до ${fmtUah(maxReserve)} · натисніть, щоб розгорнути`
   return (
     <div className={`uze-acc-group${groupOpen ? ' open' : ''}`}>
       <button
@@ -401,6 +407,8 @@ export function UzeCyclesAccordion({ cycles }: { cycles: EconomicsUzeCycle[] }) 
         <span className="uze-acc-group-title">
           {groupOpen ? `Деталізація по днях — ${n} циклів` : `Показати деталізацію по днях — ${n} циклів`}
         </span>
+        <span className="uze-acc-group-meta">{meta}</span>
+        <span className="uze-acc-group-arrow" aria-hidden="true">▾</span>
       </button>
       {groupOpen ? (
         <div className="uze-acc-group-body">
