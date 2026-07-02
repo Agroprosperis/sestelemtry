@@ -1516,6 +1516,11 @@ func validateOrgTariffs(t OrgTariffs) error {
 		t.RoundtripEfficiency < 0 || t.RoundtripEfficiency > 1 {
 		return fmt.Errorf("roundtrip_efficiency must be in [0, 1]")
 	}
+	// capex_uah is optional (0 = no payback panel) but must be a finite,
+	// non-negative number when supplied.
+	if math.IsNaN(t.CapexUah) || math.IsInf(t.CapexUah, 0) || t.CapexUah < 0 {
+		return fmt.Errorf("capex_uah must be >= 0")
+	}
 	return nil
 }
 

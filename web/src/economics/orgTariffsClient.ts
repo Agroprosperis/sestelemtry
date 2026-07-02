@@ -24,6 +24,7 @@ type OrgTariffsApi = {
   ess_capacity_kwh: number
   ess_power_limit_kw?: number
   roundtrip_efficiency?: number
+  capex_uah?: number
   // seed_ess_cost_uah_per_kwh is the legacy fallback cost-basis
   // tariff. Kept here as a tolerated optional field so legacy DB
   // rows still hydrate without DisallowUnknownFields complaints,
@@ -47,6 +48,7 @@ function tariffsToApi(t: Tariffs): OrgTariffsApi {
     ess_capacity_kwh: t.essCapacityKwh,
     ess_power_limit_kw: t.essPowerLimitKw,
     roundtrip_efficiency: t.roundtripEfficiency,
+    capex_uah: t.capexUah,
   }
 }
 
@@ -63,6 +65,7 @@ function tariffsFromApi(api: OrgTariffsApi): Tariffs {
     essCapacityKwh: api.ess_capacity_kwh,
     essPowerLimitKw: api.ess_power_limit_kw ?? 0,
     roundtripEfficiency: api.roundtrip_efficiency ?? 0,
+    capexUah: api.capex_uah ?? 0,
   }
 }
 

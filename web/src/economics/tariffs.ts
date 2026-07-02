@@ -42,6 +42,10 @@ export type Tariffs = {
   // roundtripEfficiency pins the per-object ESS round-trip efficiency
   // (0..1). 0 keeps the empirical throughput-derived estimate.
   roundtripEfficiency: number
+  // capexUah is the one-time project capital expenditure (UAH). It is
+  // display-only (never feeds the economics math) and powers the annual
+  // payback/ROI panel; 0 hides that panel.
+  capexUah: number
 }
 
 export const DEFAULT_TARIFFS: Tariffs = {
@@ -56,4 +60,5 @@ export const DEFAULT_TARIFFS: Tariffs = {
   essCapacityKwh: 215,
   essPowerLimitKw: 0,
   roundtripEfficiency: 0,
+  capexUah: 0,
 }

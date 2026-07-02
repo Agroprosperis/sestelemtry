@@ -982,6 +982,13 @@ components:
           description: >
             Per-object ESS round-trip efficiency (0..1). 0 (or omitted)
             keeps the empirical throughput-derived estimate.
+        capex_uah:
+          type: number
+          format: double
+          minimum: 0
+          description: >
+            One-time project capital expenditure (UAH). Display-only
+            metadata for the payback/ROI panel; 0 (or omitted) hides it.
       required:
         - distribution_uah_per_kwh
         - transmission_uah_per_kwh

@@ -444,6 +444,15 @@ export function EconomicsHeader({
             hint="Round-trip ККД батареї (0..1). 0 = оцінити емпірично з фактичного обороту місяця. Типово 0.85–0.92."
             onChange={(roundtripEfficiency) => update({ roundtripEfficiency })}
           />
+          <NumericField
+            label="CAPEX проєкту"
+            value={tariffs.capexUah}
+            step={1000}
+            min={0}
+            suffix="грн"
+            hint="Разові капітальні інвестиції в проєкт (СЕС+УЗЕ), грн. Використовується лише для розрахунку окупності та ROI у річному дашборді. 0 = не показувати панель окупності."
+            onChange={(capexUah) => update({ capexUah })}
+          />
           <label className="economics-field economics-field-checkbox">
             <input
               type="checkbox"

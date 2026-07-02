@@ -3,6 +3,8 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
+  Line,
+  LineChart,
   ReferenceLine,
   ResponsiveContainer,
   Tooltip,
@@ -53,11 +55,14 @@ import {
 type Props = {
   data: EconomicsAnnualResponse
   organizationID: string
+  // capexUah is the one-time project capital expenditure (UAH) from the
+  // org tariff config. 0 hides the payback/ROI panel.
+  capexUah: number
   // onSelectMonth drills down to the month view of the clicked YYYY-MM.
   onSelectMonth: (month: string) => void
 }
 
-export function EconomicsAnnualView({ data, organizationID, onSelectMonth }: Props) {
+export function EconomicsAnnualView({ data, organizationID, capexUah, onSelectMonth }: Props) {
   const t = data.totals
   const withData = useMemo(
     () => data.months.filter((m) => m.totals.hours_with_data > 0),
@@ -76,6 +81,7 @@ export function EconomicsAnnualView({ data, organizationID, onSelectMonth }: Pro
     <>
       <MonthlyKpis totals={t} scope={scope} />
       <QuarterCards quarters={data.quarters} />
+      <AnnualCapex capexUah={capexUah} months={data.months} ebitda={t.ebitda_uah} scope={scope} />
       <div className="economics-month-grid2">
         <MonthlyFinance totals={t} scope={scope} />
         <MonthlyWaterfall totals={t} scope={scope} />
@@ -126,6 +132,138 @@ function QuarterCards({ quarters }: { quarters: EconomicsAnnualQuarter[] }) {
           </article>
         )
       })}
+    </section>
+  )
+}
+
+// --- CAPEX / payback / ROI ---
+//
+// A display-only panel driven by the per-object CAPEX from the tariff
+// config plus the period EBITDA. Payback annualises the period EBITDA
+// (× 12 / months-with-data) so a partial window still yields a sane
+// years-to-payback estimate. The cumulative line shows accumulated
+// EBITDA across the period against the CAPEX reference line.
+
+// paybackLabel formats fractional years as "N р. M міс." (or just
+// months under a year). Non-positive / non-finite input reads "—".
+function paybackLabel(years: number): string {
+  if (!Number.isFinite(years) || years <= 0) return '—'
+  let whole = Math.floor(years)
+  let months = Math.round((years - whole) * 12)
+  if (months === 12) {
+    whole += 1
+    months = 0
+  }
+  if (whole === 0) return `${months} міс.`
+  return months > 0 ? `${whole} р. ${months} міс.` : `${whole} р.`
+}
+
+type CapexCumRow = { label: string; cum: number }
+
+function AnnualCapex({
+  capexUah,
+  months,
+  ebitda,
+  scope,
+}: {
+  capexUah: number
+  months: EconomicsAnnualMonthRollup[]
+  ebitda: number
+  scope: PeriodScope
+}) {
+  const cum = useMemo<CapexCumRow[]>(() => {
+    let acc = 0
+    return months
+      .filter((m) => m.totals.hours_with_data > 0)
+      .map((m) => {
+        acc += m.totals.ebitda_uah
+        return { label: formatMonthShort(m.month), cum: acc }
+      })
+  }, [months])
+
+  if (!(capexUah > 0)) return null
+
+  const monthsWithData = cum.length
+  const annualEbitda = monthsWithData > 0 ? (ebitda * 12) / monthsWithData : 0
+  const paybackYears = annualEbitda > 0 ? capexUah / annualEbitda : Infinity
+  const roi = ebitda / capexUah
+  const coveredShare = Math.max(0, Math.min(roi, 1))
+  const remaining = Math.max(capexUah - ebitda, 0)
+  const periodWord = scope === 'year' ? 'за рік' : 'за період'
+
+  return (
+    <section className="economics-card economics-month-section economics-capex" aria-label="Окупність та ROI">
+      <div className="economics-month-section-head">
+        <h3 className="economics-month-section-title">
+          Окупність проєкту
+          <OptimumInfo tip="CAPEX — разові капітальні інвестиції з налаштувань об'єкта. Окупність = CAPEX / річний EBITDA (EBITDA періоду приведено до року). ROI = EBITDA періоду / CAPEX." />
+        </h3>
+        <span className="economics-month-muted">CAPEX із налаштувань об'єкта</span>
+      </div>
+
+      <div className="economics-capex-cards">
+        <div className="economics-month-mini">
+          <span className="economics-month-mini-label">CAPEX проєкту</span>
+          <span className="economics-month-mini-value">{formatUah(capexUah)}</span>
+          <span className="economics-month-mini-note">разові інвестиції</span>
+        </div>
+        <div className="economics-month-mini">
+          <span className="economics-month-mini-label">EBITDA {periodWord}</span>
+          <span className={`economics-month-mini-value ${ebitda >= 0 ? 'good' : ''}`}>{formatUah(ebitda)}</span>
+          <span className="economics-month-mini-note">{monthsWithData} міс. даних</span>
+        </div>
+        <div className="economics-month-mini">
+          <span className="economics-month-mini-label">Окупність</span>
+          <span className="economics-month-mini-value">{paybackLabel(paybackYears)}</span>
+          <span className="economics-month-mini-note">за темпом EBITDA</span>
+        </div>
+        <div className="economics-month-mini">
+          <span className="economics-month-mini-label">ROI {periodWord}</span>
+          <span className={`economics-month-mini-value ${roi >= 0 ? 'good' : ''}`}>{formatPercent(roi)}</span>
+          <span className="economics-month-mini-note">EBITDA / CAPEX</span>
+        </div>
+      </div>
+
+      <div className="economics-capex-progress">
+        <div className="economics-capex-progress-head">
+          <span>Накопичений EBITDA покрив {formatPercent(coveredShare)} капексу</span>
+          <span className="economics-month-muted">
+            {remaining > 0 ? `залишок ${formatUah(remaining)}` : 'капекс окуплено'}
+          </span>
+        </div>
+        <div className="economics-capex-bar">
+          <span className="economics-capex-bar-fill" style={{ width: `${coveredShare * 100}%` }} />
+        </div>
+      </div>
+
+      {cum.length > 1 ? (
+        <div className="economics-month-chart economics-capex-chart">
+          <ResponsiveContainer width="100%" height={180}>
+            <LineChart data={cum} margin={{ top: 8, right: 12, bottom: 0, left: 0 }}>
+              <CartesianGrid strokeDasharray="2 5" stroke="#e7ecf2" vertical={false} />
+              <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#8a94a6' }} tickLine={false} axisLine={false} />
+              <YAxis
+                tick={{ fontSize: 11, fill: '#98a2b3' }}
+                width={48}
+                tickLine={false}
+                axisLine={false}
+                tickFormatter={(v: number) => uahShort(v)}
+              />
+              <Tooltip
+                formatter={(value) => [formatUah(Number(value)), 'Накопичений EBITDA']}
+                cursor={{ stroke: '#cbd5e1' }}
+              />
+              <ReferenceLine
+                y={capexUah}
+                stroke="#dc2626"
+                strokeDasharray="5 4"
+                label={{ value: `CAPEX ${uahShort(capexUah)}`, position: 'insideTopRight', fontSize: 11, fill: '#dc2626' }}
+              />
+              <Line type="monotone" dataKey="cum" stroke="#2f6fed" strokeWidth={2.2} dot={false} />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      ) : null}
     </section>
   )
 }

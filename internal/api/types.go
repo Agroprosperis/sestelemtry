@@ -398,4 +398,8 @@ type OrgTariffs struct {
 	// RoundtripEfficiency pins the per-object ESS round-trip efficiency
 	// (0..1). 0 keeps the empirical (throughput-derived) estimate.
 	RoundtripEfficiency float64 `json:"roundtrip_efficiency,omitempty"`
+	// CapexUah is the one-time project capital expenditure (UAH). It is
+	// display-only metadata (never used by the economics engine) that
+	// drives the payback / ROI panel; 0 (or omitted) hides that panel.
+	CapexUah float64 `json:"capex_uah,omitempty"`
 }
