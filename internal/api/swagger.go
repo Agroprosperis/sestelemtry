@@ -943,8 +943,20 @@ components:
           type: number
           format: double
           description: >
-            Supplier per-kWh margin added to the import price. May be
-            negative when the supplier grants a per-kWh discount.
+            Supplier per-kWh margin added to the import price (used when
+            supplier_margin_mode is "abs"). May be negative (discount).
+        supplier_margin_mode:
+          type: string
+          enum: ["abs", "pct"]
+          description: >
+            How the supplier margin is applied: "abs" (flat UAH/kWh, the
+            default) or "pct" (percent of the RDN market price).
+        supplier_margin_pct:
+          type: number
+          format: double
+          description: >
+            Supplier margin as a percent of the RDN price (used when
+            supplier_margin_mode is "pct"). May be negative (discount).
         other_fees_uah_per_kwh:
           type: number
           format: double

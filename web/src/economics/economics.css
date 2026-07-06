@@ -301,6 +301,34 @@
   white-space: nowrap;
 }
 
+.economics-margin-mode {
+  display: inline-flex;
+  flex: 0 0 auto;
+  margin-left: 6px;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid #e2e8f0;
+}
+
+.economics-margin-mode button {
+  border: 0;
+  background: #fff;
+  color: #64748b;
+  font-size: 11px;
+  line-height: 1;
+  padding: 4px 7px;
+  cursor: pointer;
+}
+
+.economics-margin-mode button + button {
+  border-left: 1px solid #e2e8f0;
+}
+
+.economics-margin-mode button.active {
+  background: #2f6fed;
+  color: #fff;
+}
+
 .economics-field-checkbox {
   flex-direction: row;
   align-items: center;

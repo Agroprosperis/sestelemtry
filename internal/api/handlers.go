@@ -1497,6 +1497,15 @@ func validateOrgTariffs(t OrgTariffs) error {
 	if math.IsNaN(t.SupplierMarginUahPerKwh) || math.IsInf(t.SupplierMarginUahPerKwh, 0) {
 		return fmt.Errorf("supplier_margin_uah_per_kwh must be a finite number")
 	}
+	// supplier_margin_mode is "" (abs), "abs", or "pct". supplier_margin_pct
+	// is a percent of the RDN price and may be negative (discount); only
+	// NaN / ±Inf are rejected.
+	if t.SupplierMarginMode != "" && t.SupplierMarginMode != "abs" && t.SupplierMarginMode != "pct" {
+		return fmt.Errorf("supplier_margin_mode must be \"abs\" or \"pct\"")
+	}
+	if math.IsNaN(t.SupplierMarginPct) || math.IsInf(t.SupplierMarginPct, 0) {
+		return fmt.Errorf("supplier_margin_pct must be a finite number")
+	}
 	if math.IsNaN(t.ExportDiscount) || math.IsInf(t.ExportDiscount, 0) ||
 		t.ExportDiscount < 0 || t.ExportDiscount > 1 {
 		return fmt.Errorf("export_discount must be in [0, 1]")

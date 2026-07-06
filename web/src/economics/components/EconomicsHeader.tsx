@@ -187,6 +187,71 @@ function NumericField({
   )
 }
 
+// SupplierMarginField is the supplier-margin input with a грн/кВт·год ⇄ %
+// mode toggle. In 'abs' mode it edits the flat UAH/kWh adder; in 'pct'
+// mode it edits a percent of the RDN price. Both values are kept in the
+// tariffs so switching modes never loses the other entry. Either may be
+// negative (a supplier discount).
+function SupplierMarginField({
+  mode,
+  abs,
+  pct,
+  onChange,
+}: {
+  mode: 'abs' | 'pct'
+  abs: number
+  pct: number
+  onChange: (patch: Partial<Tariffs>) => void
+}) {
+  const id = useId()
+  const isPct = mode === 'pct'
+  const value = isPct ? pct : abs
+  const hint = isPct
+    ? 'Маржа постачальника як % від ціни РДН (застосовується щогодини). Відʼємне значення = знижка постачальника, що зменшує ціну імпорту.'
+    : 'Надбавка постачальника до ціни імпорту (грн/кВт·год). Може бути відʼємною, якщо постачальник дає знижку.'
+  return (
+    <label className="economics-field" htmlFor={id}>
+      <span>
+        Маржа постачальника
+        <span className="economics-info" data-tip={hint} role="img" aria-label={hint}>
+          i
+        </span>
+      </span>
+      <span className="economics-field-input">
+        <input
+          id={id}
+          type="number"
+          step={isPct ? 0.1 : 0.0001}
+          value={value}
+          onChange={(e) => {
+            const next = Number(e.target.value)
+            if (!Number.isFinite(next)) return
+            onChange(isPct ? { supplierMarginPct: next } : { supplierMarginUahPerKwh: next })
+          }}
+        />
+        <span className="economics-margin-mode" role="group" aria-label="Одиниця маржі постачальника">
+          <button
+            type="button"
+            className={!isPct ? 'active' : ''}
+            aria-pressed={!isPct}
+            onClick={() => onChange({ supplierMarginMode: 'abs' })}
+          >
+            грн
+          </button>
+          <button
+            type="button"
+            className={isPct ? 'active' : ''}
+            aria-pressed={isPct}
+            onClick={() => onChange({ supplierMarginMode: 'pct' })}
+          >
+            %
+          </button>
+        </span>
+      </span>
+    </label>
+  )
+}
+
 // damRefreshLabel maps the small state machine to the button's
 // visible text. Kept stable across renders so the operator can scan
 // the button without it flickering label-to-label on every state
@@ -376,13 +441,11 @@ export function EconomicsHeader({
             suffix="грн/кВт·год"
             onChange={(transmissionUahPerKwh) => update({ transmissionUahPerKwh })}
           />
-          <NumericField
-            label="Маржа постачальника"
-            value={tariffs.supplierMarginUahPerKwh}
-            step={0.0001}
-            suffix="грн/кВт·год"
-            hint="Надбавка постачальника до ціни імпорту (грн/кВт·год). Може бути відʼємною, якщо постачальник дає знижку — тоді ціна імпорту зменшується."
-            onChange={(supplierMarginUahPerKwh) => update({ supplierMarginUahPerKwh })}
+          <SupplierMarginField
+            mode={tariffs.supplierMarginMode}
+            abs={tariffs.supplierMarginUahPerKwh}
+            pct={tariffs.supplierMarginPct}
+            onChange={update}
           />
           <NumericField
             label="Інші збори"

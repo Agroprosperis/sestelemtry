@@ -56,7 +56,7 @@ func HourEconomicsFor(rdnUahPerKwh float64, flow HourFlows, t Tariffs) HourEcono
 	importPrice := (rdnUahPerKwh +
 		t.DistributionUahPerKwh +
 		t.TransmissionUahPerKwh +
-		t.SupplierMarginUahPerKwh +
+		t.SupplierMarginFor(rdnUahPerKwh) +
 		t.OtherFeesUahPerKwh) * vatMultiplier
 	exportPrice := rdnUahPerKwh * (1 - t.ExportDiscount) * vatMultiplier
 

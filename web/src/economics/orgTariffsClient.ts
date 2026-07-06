@@ -16,6 +16,8 @@ type OrgTariffsApi = {
   distribution_uah_per_kwh: number
   transmission_uah_per_kwh: number
   supplier_margin_uah_per_kwh: number
+  supplier_margin_mode?: 'abs' | 'pct'
+  supplier_margin_pct?: number
   other_fees_uah_per_kwh: number
   export_discount: number
   degradation_uah_per_kwh: number
@@ -40,6 +42,8 @@ function tariffsToApi(t: Tariffs): OrgTariffsApi {
     distribution_uah_per_kwh: t.distributionUahPerKwh,
     transmission_uah_per_kwh: t.transmissionUahPerKwh,
     supplier_margin_uah_per_kwh: t.supplierMarginUahPerKwh,
+    supplier_margin_mode: t.supplierMarginMode,
+    supplier_margin_pct: t.supplierMarginPct,
     other_fees_uah_per_kwh: t.otherFeesUahPerKwh,
     export_discount: t.exportDiscount,
     degradation_uah_per_kwh: t.degradationUahPerKwh,
@@ -57,6 +61,8 @@ function tariffsFromApi(api: OrgTariffsApi): Tariffs {
     distributionUahPerKwh: api.distribution_uah_per_kwh,
     transmissionUahPerKwh: api.transmission_uah_per_kwh,
     supplierMarginUahPerKwh: api.supplier_margin_uah_per_kwh,
+    supplierMarginMode: api.supplier_margin_mode === 'pct' ? 'pct' : 'abs',
+    supplierMarginPct: api.supplier_margin_pct ?? 0,
     otherFeesUahPerKwh: api.other_fees_uah_per_kwh,
     exportDiscount: api.export_discount,
     degradationUahPerKwh: api.degradation_uah_per_kwh,

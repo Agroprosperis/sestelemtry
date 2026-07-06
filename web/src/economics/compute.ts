@@ -82,13 +82,19 @@ export function hourEconomics(
   tariffs: Tariffs,
 ): HourEconomics {
   const vatMultiplier = tariffs.includeVat ? 1 + tariffs.vatRate : 1
+  // Supplier margin: a flat UAH/kWh adder, or (in 'pct' mode) a percent
+  // of the RDN market price. Either may be negative (a supplier discount).
+  const supplierMargin =
+    tariffs.supplierMarginMode === 'pct'
+      ? (tariffs.supplierMarginPct / 100) * rdnUahPerKwh
+      : tariffs.supplierMarginUahPerKwh
   // Import price stack: market + distribution + transmission +
   // supplier margin + other fees, then VAT (matching ТЗ §3).
   const importPriceUahPerKwh =
     (rdnUahPerKwh +
       tariffs.distributionUahPerKwh +
       tariffs.transmissionUahPerKwh +
-      tariffs.supplierMarginUahPerKwh +
+      supplierMargin +
       tariffs.otherFeesUahPerKwh) *
     vatMultiplier
   // Export price: market price after the export discount, then VAT.

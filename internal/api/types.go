@@ -386,12 +386,17 @@ type OrgTariffs struct {
 	DistributionUahPerKwh   float64 `json:"distribution_uah_per_kwh"`
 	TransmissionUahPerKwh   float64 `json:"transmission_uah_per_kwh"`
 	SupplierMarginUahPerKwh float64 `json:"supplier_margin_uah_per_kwh"`
-	OtherFeesUahPerKwh      float64 `json:"other_fees_uah_per_kwh"`
-	ExportDiscount          float64 `json:"export_discount"`
-	DegradationUahPerKwh    float64 `json:"degradation_uah_per_kwh"`
-	IncludeVat              bool    `json:"include_vat"`
-	VatRate                 float64 `json:"vat_rate"`
-	EssCapacityKwh          float64 `json:"ess_capacity_kwh"`
+	// SupplierMarginMode is "" / "abs" (flat UAH/kWh, the default) or
+	// "pct" (percent of the RDN market price). SupplierMarginPct is the
+	// percent value used in "pct" mode. Both may be negative (discount).
+	SupplierMarginMode   string  `json:"supplier_margin_mode,omitempty"`
+	SupplierMarginPct    float64 `json:"supplier_margin_pct,omitempty"`
+	OtherFeesUahPerKwh   float64 `json:"other_fees_uah_per_kwh"`
+	ExportDiscount       float64 `json:"export_discount"`
+	DegradationUahPerKwh float64 `json:"degradation_uah_per_kwh"`
+	IncludeVat           bool    `json:"include_vat"`
+	VatRate              float64 `json:"vat_rate"`
+	EssCapacityKwh       float64 `json:"ess_capacity_kwh"`
 	// EssPowerLimitKw is the per-object nominal charge/discharge power
 	// ceiling (kW) for the УЗЕ anomaly filter. 0 falls back to ≈ 1C.
 	EssPowerLimitKw float64 `json:"ess_power_limit_kw,omitempty"`

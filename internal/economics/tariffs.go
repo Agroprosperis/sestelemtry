@@ -19,12 +19,21 @@ type Tariffs struct {
 	DistributionUahPerKwh   float64
 	TransmissionUahPerKwh   float64
 	SupplierMarginUahPerKwh float64
-	OtherFeesUahPerKwh      float64
-	ExportDiscount          float64
-	DegradationUahPerKwh    float64
-	IncludeVat              bool
-	VatRate                 float64
-	EssCapacityKwh          float64
+	// SupplierMarginMode selects how the supplier margin is applied:
+	// "" / "abs" uses SupplierMarginUahPerKwh (a flat UAH/kWh adder);
+	// "pct" uses SupplierMarginPct as a percentage of the hourly RDN
+	// (market) price. Either may be negative (a supplier discount).
+	SupplierMarginMode string
+	// SupplierMarginPct is the supplier margin as a percent of the RDN
+	// price (e.g. 5 = +5%, -5 = −5% discount). Used only when
+	// SupplierMarginMode == "pct".
+	SupplierMarginPct    float64
+	OtherFeesUahPerKwh   float64
+	ExportDiscount       float64
+	DegradationUahPerKwh float64
+	IncludeVat           bool
+	VatRate              float64
+	EssCapacityKwh       float64
 	// EssPowerLimitKw is the nominal ESS charge/discharge power ceiling
 	// (kW) used by the УЗЕ anomaly filter. 0 falls back to EssCapacityKwh
 	// (≈ 1C) inside AggregateMonth.
@@ -34,6 +43,16 @@ type Tariffs struct {
 	// otherwise derive empirically from the month's throughput; 0 keeps
 	// the empirical estimate (see deriveOptimumParams).
 	RoundtripEfficiency float64
+}
+
+// SupplierMarginFor returns the supplier margin (UAH/kWh) for an hour
+// whose RDN (market) price is rdn. In percent mode the margin scales
+// with the market price; otherwise the flat UAH/kWh value is used.
+func (t Tariffs) SupplierMarginFor(rdn float64) float64 {
+	if t.SupplierMarginMode == "pct" {
+		return t.SupplierMarginPct / 100 * rdn
+	}
+	return t.SupplierMarginUahPerKwh
 }
 
 // ScheduleEntry is one effective-dated tariff version. EffectiveFrom is

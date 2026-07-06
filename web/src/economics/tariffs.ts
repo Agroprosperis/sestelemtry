@@ -30,6 +30,12 @@ export type Tariffs = {
   distributionUahPerKwh: number
   transmissionUahPerKwh: number
   supplierMarginUahPerKwh: number
+  // supplierMarginMode selects how the supplier margin is applied: 'abs'
+  // (flat UAH/kWh, the default) or 'pct' (percent of the RDN market
+  // price). supplierMarginPct is the percent used in 'pct' mode. Both
+  // the abs value and the pct value may be negative (a supplier discount).
+  supplierMarginMode: 'abs' | 'pct'
+  supplierMarginPct: number
   otherFeesUahPerKwh: number
   exportDiscount: number
   degradationUahPerKwh: number
@@ -52,6 +58,8 @@ export const DEFAULT_TARIFFS: Tariffs = {
   distributionUahPerKwh: 2.75218,
   transmissionUahPerKwh: 0.74291,
   supplierMarginUahPerKwh: 0,
+  supplierMarginMode: 'abs',
+  supplierMarginPct: 0,
   otherFeesUahPerKwh: 0,
   exportDiscount: 0.05,
   degradationUahPerKwh: 0.6,

@@ -212,6 +212,8 @@ func orgTariffsToEconomics(t OrgTariffs) economics.Tariffs {
 		DistributionUahPerKwh:   t.DistributionUahPerKwh,
 		TransmissionUahPerKwh:   t.TransmissionUahPerKwh,
 		SupplierMarginUahPerKwh: t.SupplierMarginUahPerKwh,
+		SupplierMarginMode:      t.SupplierMarginMode,
+		SupplierMarginPct:       t.SupplierMarginPct,
 		OtherFeesUahPerKwh:      t.OtherFeesUahPerKwh,
 		ExportDiscount:          t.ExportDiscount,
 		DegradationUahPerKwh:    t.DegradationUahPerKwh,
