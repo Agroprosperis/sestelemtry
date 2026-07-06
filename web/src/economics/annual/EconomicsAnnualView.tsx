@@ -242,6 +242,11 @@ function AnnualCapex({
           <span className="economics-month-mini-note">{monthsWithData} міс. даних</span>
         </div>
         <div className="economics-month-mini">
+          <span className="economics-month-mini-label">EBITDA всього</span>
+          <span className={`economics-month-mini-value ${allTimeEbitda >= 0 ? 'good' : ''}`}>{formatUah(allTimeEbitda)}</span>
+          <span className="economics-month-mini-note">з початку експлуатації</span>
+        </div>
+        <div className="economics-month-mini">
           <span className="economics-month-mini-label">Окупність</span>
           <span className="economics-month-mini-value">{paybackLabel(paybackYears)}</span>
           <span className="economics-month-mini-note">за темпом EBITDA</span>
