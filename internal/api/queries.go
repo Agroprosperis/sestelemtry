@@ -24,6 +24,19 @@ import (
 // sits far above any real site (elevator BESS/PV are well under 2 MW).
 const maxCounterDeltaPowerKw = 10000
 
+// counterResetZeroTolKwh treats a lifetime accumulator reading at/below this
+// value as a "transient zero". A monotonic (never-decreasing) counter that
+// drops to ~0 and then recovers to its prior level is a data-source glitch —
+// e.g. the FusionSolar import occasionally returns a lone 0 for a cumulative
+// register. The delta pipeline would otherwise read the recovery (0 -> peak)
+// as a full period's worth of phantom energy in a single bucket. When the
+// previous bucket ended at/below this tolerance while a higher plateau
+// existed before it, we rebase the delta on the pre-drop running max so only
+// genuine new energy above that peak is counted. The daily-resetting
+// *_day_kwh counters are never fed through the delta path (they use the
+// "last" aggregation), so this is safe for the accumulators that do.
+const counterResetZeroTolKwh = 1.0
+
 type Store struct {
 	pool        *pgxpool.Pool
 	useDailyCAG bool
@@ -261,6 +274,18 @@ func (s *Store) timeseriesDelta(ctx context.Context, organizationID string, metr
 				AND time <= $5
 			GROUP BY bucket_time, metric_key
 		),
+		runmax AS (
+			SELECT
+				bucket_time,
+				metric_key,
+				first_value,
+				last_value,
+				max(last_value) OVER (
+					PARTITION BY metric_key ORDER BY bucket_time
+					ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+				) AS run_max
+			FROM bucketed
+		),
 		deltas AS (
 			SELECT
 				bucket_time,
@@ -268,14 +293,19 @@ func (s *Store) timeseriesDelta(ctx context.Context, organizationID string, metr
 				first_value,
 				last_value,
 				lag(last_value)  OVER w AS prev_last,
+				lag(run_max)     OVER w AS prev_run_max,
 				lag(bucket_time) OVER w AS prev_bucket
-			FROM bucketed
+			FROM runmax
 			WINDOW w AS (PARTITION BY metric_key ORDER BY bucket_time)
 		)
 		SELECT
 			bucket_time,
 			metric_key,
 			CASE
+				WHEN prev_last IS NOT NULL
+					AND prev_last <= $8::float8
+					AND prev_run_max > $8::float8
+				THEN GREATEST(last_value - prev_run_max, 0)
 				WHEN prev_last IS NOT NULL
 					AND (last_value - prev_last) > $7::float8
 						* EXTRACT(epoch FROM (bucket_time - prev_bucket)) / 3600.0
@@ -288,7 +318,7 @@ func (s *Store) timeseriesDelta(ctx context.Context, organizationID string, metr
 		FROM deltas
 		WHERE bucket_time >= $4
 		ORDER BY bucket_time ASC, metric_key ASC
-	`, bucket, organizationID, metricKeys, from.UTC(), to.UTC(), tz, float64(maxCounterDeltaPowerKw))
+	`, bucket, organizationID, metricKeys, from.UTC(), to.UTC(), tz, float64(maxCounterDeltaPowerKw), float64(counterResetZeroTolKwh))
 	if err != nil {
 		return TimeseriesResponse{}, err
 	}
@@ -349,6 +379,18 @@ func (s *Store) timeseriesDeltaFromDaily(ctx context.Context, organizationID str
 				AND day <= $5
 			GROUP BY bucket_time, metric_key
 		),
+		runmax AS (
+			SELECT
+				bucket_time,
+				metric_key,
+				first_value,
+				last_value,
+				max(last_value) OVER (
+					PARTITION BY metric_key ORDER BY bucket_time
+					ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+				) AS run_max
+			FROM bucketed
+		),
 		deltas AS (
 			SELECT
 				bucket_time,
@@ -356,14 +398,19 @@ func (s *Store) timeseriesDeltaFromDaily(ctx context.Context, organizationID str
 				first_value,
 				last_value,
 				lag(last_value)  OVER w AS prev_last,
+				lag(run_max)     OVER w AS prev_run_max,
 				lag(bucket_time) OVER w AS prev_bucket
-			FROM bucketed
+			FROM runmax
 			WINDOW w AS (PARTITION BY metric_key ORDER BY bucket_time)
 		)
 		SELECT
 			bucket_time,
 			metric_key,
 			CASE
+				WHEN prev_last IS NOT NULL
+					AND prev_last <= $8::float8
+					AND prev_run_max > $8::float8
+				THEN GREATEST(last_value - prev_run_max, 0)
 				WHEN prev_last IS NOT NULL
 					AND (last_value - prev_last) > $7::float8
 						* EXTRACT(epoch FROM (bucket_time - prev_bucket)) / 3600.0
@@ -376,7 +423,7 @@ func (s *Store) timeseriesDeltaFromDaily(ctx context.Context, organizationID str
 		FROM deltas
 		WHERE bucket_time >= $4
 		ORDER BY bucket_time ASC, metric_key ASC
-	`, bucket, organizationID, metricKeys, from.UTC(), to.UTC(), tz, float64(maxCounterDeltaPowerKw))
+	`, bucket, organizationID, metricKeys, from.UTC(), to.UTC(), tz, float64(maxCounterDeltaPowerKw), float64(counterResetZeroTolKwh))
 	if err != nil {
 		return TimeseriesResponse{}, err
 	}
