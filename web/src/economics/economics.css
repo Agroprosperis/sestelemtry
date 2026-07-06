@@ -2499,6 +2499,11 @@ button.economics-optimum-row.open {
   transition: width 0.2s ease;
 }
 
+.economics-capex-progress-note {
+  margin-top: 6px;
+  font-size: 12px;
+}
+
 .economics-capex-chart {
   margin-top: 14px;
 }

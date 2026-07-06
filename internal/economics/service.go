@@ -77,6 +77,10 @@ type Backend interface {
 	// LoadHourlyRange returns the slim per-hour records for the half-open
 	// window [from, to) — the RDN stats and ESS marginality heatmap.
 	LoadHourlyRange(ctx context.Context, orgID string, from, to time.Time) ([]HourlyRecord, error)
+	// SumEbitdaBefore returns the cumulative EBITDA of every stored day
+	// strictly before `before` plus whether any such day exists. It backs
+	// the annual ROI opening balance ("залишок з початку експлуатації").
+	SumEbitdaBefore(ctx context.Context, orgID string, before time.Time) (sum float64, hasData bool, err error)
 }
 
 // Service computes and persists economics, and serves them read-through

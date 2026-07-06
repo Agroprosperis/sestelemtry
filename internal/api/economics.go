@@ -173,6 +173,10 @@ func (b *economicsBackend) LoadDailyRange(ctx context.Context, orgID string, fro
 	return out, nil
 }
 
+func (b *economicsBackend) SumEbitdaBefore(ctx context.Context, orgID string, before time.Time) (float64, bool, error) {
+	return b.store.SumEconomicsEbitdaBefore(ctx, orgID, before)
+}
+
 func (b *economicsBackend) LoadHourlyRange(ctx context.Context, orgID string, from, to time.Time) ([]economics.HourlyRecord, error) {
 	rows, err := b.store.GetEconomicsHourly(ctx, orgID, from, to)
 	if err != nil {

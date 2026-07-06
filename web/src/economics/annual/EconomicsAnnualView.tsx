@@ -3,8 +3,9 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
+  ComposedChart,
+  Legend,
   Line,
-  LineChart,
   ReferenceLine,
   ResponsiveContainer,
   Tooltip,
@@ -81,7 +82,13 @@ export function EconomicsAnnualView({ data, organizationID, capexUah, onSelectMo
     <>
       <MonthlyKpis totals={t} scope={scope} />
       <QuarterCards quarters={data.quarters} />
-      <AnnualCapex capexUah={capexUah} months={data.months} ebitda={t.ebitda_uah} scope={scope} />
+      <AnnualCapex
+        capexUah={capexUah}
+        months={data.months}
+        ebitda={t.ebitda_uah}
+        priorEbitda={data.prior_ebitda_uah}
+        scope={scope}
+      />
       <div className="economics-month-grid2">
         <MonthlyFinance totals={t} scope={scope} />
         <MonthlyWaterfall totals={t} scope={scope} />
@@ -158,37 +165,55 @@ function paybackLabel(years: number): string {
   return months > 0 ? `${whole} р. ${months} міс.` : `${whole} р.`
 }
 
-type CapexCumRow = { label: string; cum: number }
+// CapexCumRow carries both series the ROI chart draws: the running
+// all-time cumulative EBITDA (cum, from the operation-start opening
+// balance) and that single month's standalone EBITDA (month). The
+// optional opening-balance point has month = null so the monthly series
+// leaves a gap there.
+type CapexCumRow = { label: string; cum: number; month: number | null }
 
 function AnnualCapex({
   capexUah,
   months,
   ebitda,
+  priorEbitda,
   scope,
 }: {
   capexUah: number
   months: EconomicsAnnualMonthRollup[]
   ebitda: number
+  // priorEbitda is the cumulative EBITDA earned before the window start
+  // (the ROI opening balance since the start of operation).
+  priorEbitda: number
   scope: PeriodScope
 }) {
-  const cum = useMemo<CapexCumRow[]>(() => {
-    let acc = 0
-    return months
-      .filter((m) => m.totals.hours_with_data > 0)
-      .map((m) => {
-        acc += m.totals.ebitda_uah
-        return { label: formatMonthShort(m.month), cum: acc }
-      })
-  }, [months])
+  const hasPrior = Math.abs(priorEbitda) > 0.5
+  const rows = useMemo<CapexCumRow[]>(() => {
+    const out: CapexCumRow[] = []
+    let acc = priorEbitda
+    // Seed the cumulative line at the opening balance so the trajectory
+    // continues from where prior operation left off (SPEC: залишок з
+    // початку експлуатації).
+    if (hasPrior) out.push({ label: 'старт', cum: acc, month: null })
+    for (const m of months) {
+      if (m.totals.hours_with_data <= 0) continue
+      acc += m.totals.ebitda_uah
+      out.push({ label: formatMonthShort(m.month), cum: acc, month: m.totals.ebitda_uah })
+    }
+    return out
+  }, [months, priorEbitda, hasPrior])
 
   if (!(capexUah > 0)) return null
 
-  const monthsWithData = cum.length
+  const monthsWithData = rows.filter((r) => r.month !== null).length
   const annualEbitda = monthsWithData > 0 ? (ebitda * 12) / monthsWithData : 0
   const paybackYears = annualEbitda > 0 ? capexUah / annualEbitda : Infinity
-  const roi = ebitda / capexUah
+  // All-time EBITDA since the start of operation drives ROI / залишок so
+  // a single-year view reflects capex recouped across prior years too.
+  const allTimeEbitda = priorEbitda + ebitda
+  const roi = allTimeEbitda / capexUah
   const coveredShare = Math.max(0, Math.min(roi, 1))
-  const remaining = Math.max(capexUah - ebitda, 0)
+  const remaining = Math.max(capexUah - allTimeEbitda, 0)
   const periodWord = scope === 'year' ? 'за рік' : 'за період'
 
   return (
@@ -228,39 +253,83 @@ function AnnualCapex({
         <div className="economics-capex-progress-head">
           <span>Накопичений EBITDA покрив {formatPercent(coveredShare)} капексу</span>
           <span className="economics-month-muted">
-            {remaining > 0 ? `залишок ${formatUah(remaining)}` : 'капекс окуплено'}
+            {remaining > 0 ? `залишок з початку експл. ${formatUah(remaining)}` : 'капекс окуплено'}
           </span>
         </div>
         <div className="economics-capex-bar">
           <span className="economics-capex-bar-fill" style={{ width: `${coveredShare * 100}%` }} />
         </div>
+        {hasPrior ? (
+          <div className="economics-capex-progress-note economics-month-muted">
+            у т.ч. до початку періоду: {formatUah(priorEbitda)}
+          </div>
+        ) : null}
       </div>
 
-      {cum.length > 1 ? (
+      {rows.length > 1 ? (
         <div className="economics-month-chart economics-capex-chart">
-          <ResponsiveContainer width="100%" height={180}>
-            <LineChart data={cum} margin={{ top: 8, right: 12, bottom: 0, left: 0 }}>
+          <ResponsiveContainer width="100%" height={200}>
+            <ComposedChart data={rows} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
               <CartesianGrid strokeDasharray="2 5" stroke="#e7ecf2" vertical={false} />
               <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#8a94a6' }} tickLine={false} axisLine={false} />
               <YAxis
+                yAxisId="cum"
                 tick={{ fontSize: 11, fill: '#98a2b3' }}
                 width={48}
                 tickLine={false}
                 axisLine={false}
                 tickFormatter={(v: number) => uahShort(v)}
               />
+              <YAxis
+                yAxisId="month"
+                orientation="right"
+                tick={{ fontSize: 11, fill: '#12b76a' }}
+                width={48}
+                tickLine={false}
+                axisLine={false}
+                tickFormatter={(v: number) => uahShort(v)}
+              />
               <Tooltip
-                formatter={(value) => [formatUah(Number(value)), 'Накопичений EBITDA']}
+                formatter={(value, name) => [
+                  formatUah(Number(value)),
+                  name === 'month' ? 'EBITDA за місяць' : 'Накопичений EBITDA',
+                ]}
                 cursor={{ stroke: '#cbd5e1' }}
               />
+              <Legend
+                verticalAlign="top"
+                height={24}
+                iconType="plainline"
+                formatter={(value) => (value === 'month' ? 'EBITDA за місяць' : 'Накопичений EBITDA')}
+              />
               <ReferenceLine
+                yAxisId="cum"
                 y={capexUah}
                 stroke="#dc2626"
                 strokeDasharray="5 4"
                 label={{ value: `CAPEX ${uahShort(capexUah)}`, position: 'insideTopRight', fontSize: 11, fill: '#dc2626' }}
               />
-              <Line type="monotone" dataKey="cum" stroke="#2f6fed" strokeWidth={2.2} dot={false} />
-            </LineChart>
+              <Line
+                yAxisId="month"
+                type="monotone"
+                dataKey="month"
+                name="month"
+                stroke="#12b76a"
+                strokeWidth={2}
+                strokeDasharray="4 3"
+                dot={{ r: 2.5, fill: '#12b76a' }}
+                connectNulls={false}
+              />
+              <Line
+                yAxisId="cum"
+                type="monotone"
+                dataKey="cum"
+                name="cum"
+                stroke="#2f6fed"
+                strokeWidth={2.2}
+                dot={false}
+              />
+            </ComposedChart>
           </ResponsiveContainer>
         </div>
       ) : null}

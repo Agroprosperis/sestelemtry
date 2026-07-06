@@ -115,6 +115,18 @@ func (b *fakeBackend) LoadHourlyRange(_ context.Context, _ string, from, to time
 	return out, nil
 }
 
+func (b *fakeBackend) SumEbitdaBefore(_ context.Context, _ string, before time.Time) (float64, bool, error) {
+	var sum float64
+	var days int
+	for _, d := range b.saved {
+		if d.Day.Before(before) {
+			sum += d.Totals.Ebitda
+			days++
+		}
+	}
+	return sum, days > 0, nil
+}
+
 func newKyivBackend(t *testing.T) (*fakeBackend, *time.Location) {
 	t.Helper()
 	loc, err := time.LoadLocation("Europe/Kyiv")

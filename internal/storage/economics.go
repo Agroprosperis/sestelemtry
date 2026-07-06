@@ -658,3 +658,32 @@ func GetEconomicsDailyRange(ctx context.Context, pool *pgxpool.Pool, organizatio
 	}
 	return out, nil
 }
+
+// SumEconomicsEbitdaBefore returns the cumulative EBITDA of every stored
+// day strictly before `before` (a civil date) for the org, plus whether
+// any such day exists. It backs the annual ROI panel's "залишок з
+// початку експлуатації": when the operator views a single year, the
+// opening balance is the EBITDA accrued since the first day of operation
+// up to (but excluding) that year. Days with no telemetry are ignored so
+// the flag reflects real coverage.
+func SumEconomicsEbitdaBefore(ctx context.Context, pool *pgxpool.Pool, organizationID string, before time.Time) (float64, bool, error) {
+	if pool == nil {
+		return 0, false, fmt.Errorf("storage: nil pool")
+	}
+	if organizationID == "" {
+		return 0, false, fmt.Errorf("storage: empty organization_id")
+	}
+	var sum float64
+	var days int64
+	err := pool.QueryRow(ctx, `
+		SELECT
+			COALESCE(SUM(ebitda_uah) FILTER (WHERE hours_with_data > 0), 0),
+			COUNT(*) FILTER (WHERE hours_with_data > 0)
+		FROM economics_daily
+		WHERE organization_id = $1 AND day < $2::date
+	`, organizationID, before).Scan(&sum, &days)
+	if err != nil {
+		return 0, false, fmt.Errorf("storage: sum economics ebitda before: %w", err)
+	}
+	return sum, days > 0, nil
+}

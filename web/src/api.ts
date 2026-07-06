@@ -716,6 +716,10 @@ export type EconomicsAnnualResponse = {
   to: string
   tz: string
   months_with_data: number
+  // Cumulative EBITDA of stored days before the window start — the ROI
+  // opening balance so a single-year view shows CAPEX remaining since the
+  // start of operation.
+  prior_ebitda_uah: number
   totals: EconomicsMonthlyTotals
   months: EconomicsAnnualMonthRollup[]
   quarters: EconomicsAnnualQuarter[]

@@ -1085,6 +1085,13 @@ func (s *Store) GetEconomicsDailyRange(ctx context.Context, organizationID strin
 	return storage.GetEconomicsDailyRange(ctx, s.pool, organizationID, from, to)
 }
 
+// SumEconomicsEbitdaBefore returns the cumulative EBITDA of stored days
+// before `before` and whether any such day exists (the ROI opening
+// balance for a single-year view).
+func (s *Store) SumEconomicsEbitdaBefore(ctx context.Context, organizationID string, before time.Time) (float64, bool, error) {
+	return storage.SumEconomicsEbitdaBefore(ctx, s.pool, organizationID, before)
+}
+
 // GetFusionDailyKpi returns the canonical FusionSolar daily KPI for
 // (org, day), used to reconcile computed economics.
 func (s *Store) GetFusionDailyKpi(ctx context.Context, organizationID string, day time.Time) (storage.FusionDailyKpiRow, bool, error) {

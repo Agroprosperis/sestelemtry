@@ -630,6 +630,9 @@ type EconomicsAnnualResponse struct {
 	To             string                       `json:"to"`
 	Tz             string                       `json:"tz"`
 	MonthsWithData int                          `json:"months_with_data"`
+	// PriorEbitdaUah is the cumulative EBITDA of stored days before the
+	// window start — the ROI opening balance for a single-year view.
+	PriorEbitdaUah float64                      `json:"prior_ebitda_uah"`
 	Totals         EconomicsMonthlyTotals       `json:"totals"`
 	Months         []EconomicsAnnualMonthRollup `json:"months"`
 	Quarters       []EconomicsAnnualQuarter     `json:"quarters"`
@@ -703,6 +706,7 @@ func (h *Handlers) economicsAnnual(w http.ResponseWriter, r *http.Request) {
 		To:             year.To,
 		Tz:             loc.String(),
 		MonthsWithData: year.MonthsWithData,
+		PriorEbitdaUah: year.PriorEbitda,
 		Totals:         monthlyTotalsToJSON(year.Totals),
 		Months:         make([]EconomicsAnnualMonthRollup, 0, len(year.Months)),
 		Quarters:       make([]EconomicsAnnualQuarter, 0, len(year.Quarters)),

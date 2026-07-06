@@ -41,6 +41,9 @@ func (stubEconomicsBackend) LoadDailyRange(context.Context, string, time.Time, t
 func (stubEconomicsBackend) LoadHourlyRange(context.Context, string, time.Time, time.Time) ([]economics.HourlyRecord, error) {
 	return nil, nil
 }
+func (stubEconomicsBackend) SumEbitdaBefore(context.Context, string, time.Time) (float64, bool, error) {
+	return 0, false, nil
+}
 
 func TestEconomicsDailyUnconfigured(t *testing.T) {
 	h := NewHandlers(&mockStore{}, "*")

@@ -50,6 +50,10 @@ type StoredYear struct {
 	Quarters       []QuarterSummary
 	MonthlyMargin  []MonthMargin
 	MonthsWithData int
+	// PriorEbitda is the cumulative EBITDA of every stored day before the
+	// window's first day — the ROI opening balance so a single-year view
+	// still shows the CAPEX remaining since the start of operation.
+	PriorEbitda float64
 }
 
 // AggregateYear folds a calendar year of persisted daily + hourly
@@ -352,6 +356,9 @@ func (s *Service) GetYear(ctx context.Context, orgID, period, tz string) (Stored
 
 	result := AggregateYear(period, loc, daily, hourly, resolve)
 	result.OrganizationID = orgID
+	if prior, _, perr := s.backend.SumEbitdaBefore(ctx, orgID, firstDay); perr == nil {
+		result.PriorEbitda = prior
+	}
 	return result, nil
 }
 
@@ -411,5 +418,8 @@ func (s *Service) GetPeriod(ctx context.Context, orgID, from, to, tz string) (St
 	label := keys[0] + ".." + keys[len(keys)-1]
 	result := AggregatePeriod(label, keys, loc, daily, hourly, resolve)
 	result.OrganizationID = orgID
+	if prior, _, perr := s.backend.SumEbitdaBefore(ctx, orgID, firstDay); perr == nil {
+		result.PriorEbitda = prior
+	}
 	return result, nil
 }
