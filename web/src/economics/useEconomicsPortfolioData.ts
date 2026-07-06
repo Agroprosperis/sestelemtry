@@ -14,10 +14,13 @@ export type EconomicsPortfolioData = {
 type Input = {
   // active is false while another range is shown, keeping this hook idle.
   active: boolean
-  scope: 'month' | 'year'
-  // month is YYYY-MM (scope=month); period is YYYY (scope=year).
+  scope: 'month' | 'year' | 'period'
+  // month is YYYY-MM (scope=month); period is YYYY (scope=year); from/to
+  // are both YYYY-MM (scope=period, a sliding window).
   month: string
   period: string
+  from: string
+  to: string
   refreshKey?: number
 }
 
@@ -32,7 +35,12 @@ export function useEconomicsPortfolioData(input: Input): EconomicsPortfolioData 
   }))
 
   useEffect(() => {
-    const sel = input.scope === 'month' ? input.month : input.period
+    const sel =
+      input.scope === 'month'
+        ? input.month
+        : input.scope === 'period'
+          ? input.from && input.to
+          : input.period
     if (!input.active || !sel) {
       // Reset to idle when this view isn't active / has no period selected
       // (mirrors the sibling month/year hooks; this is deliberate state
@@ -48,6 +56,8 @@ export function useEconomicsPortfolioData(input: Input): EconomicsPortfolioData 
       {
         month: input.scope === 'month' ? input.month : undefined,
         period: input.scope === 'year' ? input.period : undefined,
+        from: input.scope === 'period' ? input.from : undefined,
+        to: input.scope === 'period' ? input.to : undefined,
         tz: LOCAL_TZ,
       },
       controller.signal,
@@ -67,7 +77,7 @@ export function useEconomicsPortfolioData(input: Input): EconomicsPortfolioData 
       })
 
     return () => controller.abort()
-  }, [input.active, input.scope, input.month, input.period, input.refreshKey])
+  }, [input.active, input.scope, input.month, input.period, input.from, input.to, input.refreshKey])
 
   return data
 }

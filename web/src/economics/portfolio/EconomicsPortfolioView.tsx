@@ -1,18 +1,21 @@
 import type { ReactNode } from 'react'
 import type { EconomicsPortfolioResponse, EconomicsPortfolioSite, EconomicsPortfolioTrendMonth } from '../../api'
 import { formatOrganizationLabel } from '../../dashboard/config'
-import { formatMonthTitle, formatMwh, formatMwhNumber, formatPercent, formatUah, formatYearTitle } from '../monthly/format'
+import { formatMonthTitle, formatMwh, formatMwhNumber, formatPercent, formatPeriodTitle, formatUah, formatYearTitle } from '../monthly/format'
 import { useEconomicsPortfolioData } from '../useEconomicsPortfolioData'
 
-export type PortfolioScope = 'month' | 'year'
+export type PortfolioScope = 'month' | 'year' | 'period'
 
 type Props = {
   // YYYY-MM derived from the page anchor (used when scope=month).
   month: string
   // YYYY derived from the page anchor (used when scope=year).
   period: string
-  // scope is owned by the page so the header period picker (month vs year)
-  // stays in sync with the portfolio's own granularity toggle.
+  // from/to are both YYYY-MM, the sliding-window bounds (scope=period).
+  from: string
+  to: string
+  // scope is owned by the page so the header period picker (month / year /
+  // custom window) stays in sync with the portfolio's own granularity toggle.
   scope: PortfolioScope
   onScopeChange: (next: PortfolioScope) => void
   refreshKey?: number
@@ -27,16 +30,23 @@ function compareTotal(s: EconomicsPortfolioSite): number {
 // object comparison of project effect + work-schedule reserve + УЗЕ
 // optimum reserve (project_net), with ⚠ flags for objects whose УЗЕ
 // telemetry had anomalous days excluded (§2).
-export function EconomicsPortfolioView({ month, period, scope, onScopeChange, refreshKey }: Props) {
+export function EconomicsPortfolioView({ month, period, from, to, scope, onScopeChange, refreshKey }: Props) {
   const { portfolio, loading, error } = useEconomicsPortfolioData({
     active: true,
     scope,
     month,
     period,
+    from,
+    to,
     refreshKey,
   })
 
-  const label = scope === 'month' ? formatMonthTitle(month) : formatYearTitle(period)
+  const label =
+    scope === 'month'
+      ? formatMonthTitle(month)
+      : scope === 'period'
+        ? formatPeriodTitle(from, to) || 'обраний період'
+        : formatYearTitle(period)
 
   return (
     <section className="economics-portfolio" aria-label="Портфельний дашборд">
@@ -48,6 +58,9 @@ export function EconomicsPortfolioView({ month, period, scope, onScopeChange, re
           </button>
           <button type="button" className={scope === 'year' ? 'active' : ''} aria-pressed={scope === 'year'} onClick={() => onScopeChange('year')}>
             Рік
+          </button>
+          <button type="button" className={scope === 'period' ? 'active' : ''} aria-pressed={scope === 'period'} onClick={() => onScopeChange('period')}>
+            Період
           </button>
         </div>
       </div>

@@ -1480,7 +1480,6 @@ func validateOrgTariffs(t OrgTariffs) error {
 	}{
 		{"distribution_uah_per_kwh", t.DistributionUahPerKwh},
 		{"transmission_uah_per_kwh", t.TransmissionUahPerKwh},
-		{"supplier_margin_uah_per_kwh", t.SupplierMarginUahPerKwh},
 		{"other_fees_uah_per_kwh", t.OtherFeesUahPerKwh},
 		{"degradation_uah_per_kwh", t.DegradationUahPerKwh},
 	}
@@ -1491,6 +1490,12 @@ func validateOrgTariffs(t OrgTariffs) error {
 		if p.val < 0 {
 			return fmt.Errorf("%s must be >= 0", p.name)
 		}
+	}
+	// supplier_margin_uah_per_kwh may be negative: some suppliers grant a
+	// per-kWh discount off the pool price, which lowers the import price.
+	// Only NaN / ±Inf are rejected.
+	if math.IsNaN(t.SupplierMarginUahPerKwh) || math.IsInf(t.SupplierMarginUahPerKwh, 0) {
+		return fmt.Errorf("supplier_margin_uah_per_kwh must be a finite number")
 	}
 	if math.IsNaN(t.ExportDiscount) || math.IsInf(t.ExportDiscount, 0) ||
 		t.ExportDiscount < 0 || t.ExportDiscount > 1 {

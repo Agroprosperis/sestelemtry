@@ -119,7 +119,7 @@ function updateUrl(date: string, range: EconomicsRange, windowFrom: string, wind
   } else {
     url.searchParams.delete('range')
   }
-  if (range === 'year' && windowFrom && windowTo) {
+  if ((range === 'year' || range === 'portfolio') && windowFrom && windowTo) {
     url.searchParams.set('from', windowFrom)
     url.searchParams.set('to', windowTo)
   } else {
@@ -245,8 +245,8 @@ export function EconomicsPage() {
         onRangeChange={setRange}
         portfolioScope={portfolioScope}
         monthsWithData={range === 'year' ? annual.year?.months_with_data : undefined}
-        windowFrom={windowFrom || (range === 'year' ? `${period}-01` : '')}
-        windowTo={windowTo || (range === 'year' ? `${period}-12` : '')}
+        windowFrom={windowFrom || (range === 'year' || range === 'portfolio' ? `${period}-01` : '')}
+        windowTo={windowTo || (range === 'year' || range === 'portfolio' ? `${period}-12` : '')}
         onWindowChange={(nextFrom, nextTo) => {
           setWindowFrom(nextFrom)
           setWindowTo(nextTo)
@@ -285,6 +285,8 @@ export function EconomicsPage() {
         <EconomicsPortfolioView
           month={month}
           period={period}
+          from={windowFrom || `${period}-01`}
+          to={windowTo || `${period}-12`}
           scope={portfolioScope}
           onScopeChange={setPortfolioScope}
           refreshKey={refreshKey}

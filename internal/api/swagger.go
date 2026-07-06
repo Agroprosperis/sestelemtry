@@ -942,7 +942,9 @@ components:
         supplier_margin_uah_per_kwh:
           type: number
           format: double
-          minimum: 0
+          description: >
+            Supplier per-kWh margin added to the import price. May be
+            negative when the supplier grants a per-kWh discount.
         other_fees_uah_per_kwh:
           type: number
           format: double

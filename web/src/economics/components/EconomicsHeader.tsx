@@ -73,10 +73,11 @@ type Props = {
   onOrganizationChange: (next: string) => void
   range: EconomicsRange
   onRangeChange: (next: EconomicsRange) => void
-  // Portfolio granularity (month/year). Only meaningful when range is
-  // 'portfolio'; it drives whether the period picker is a month or a
-  // year picker so it tracks the portfolio's own Місяць/Рік toggle.
-  portfolioScope?: 'month' | 'year'
+  // Portfolio granularity (month / year / custom window). Only meaningful
+  // when range is 'portfolio'; it drives whether the period picker is a
+  // month picker, a year picker, or the sliding-window picker so it tracks
+  // the portfolio's own Місяць/Рік/Період toggle.
+  portfolioScope?: 'month' | 'year' | 'period'
   // Months of telemetry in the active year (year view only), surfaced
   // in the subtitle per SPEC §3.1.
   monthsWithData?: number
@@ -293,11 +294,11 @@ export function EconomicsHeader({
               Портфель
             </button>
           </div>
-          {range === 'year' ? (
+          {range === 'year' || (range === 'portfolio' && portfolioScope === 'period') ? (
             <EconomicsPeriodPicker from={windowFrom} to={windowTo} onChange={onWindowChange} />
           ) : (
             <PeriodPicker
-              preset={range === 'portfolio' ? portfolioScope : range}
+              preset={range === 'portfolio' ? (portfolioScope === 'year' ? 'year' : 'month') : range}
               anchor={parseDateString(date)}
               onChange={(next) => onDateChange(formatDateString(next))}
             />
@@ -380,6 +381,7 @@ export function EconomicsHeader({
             value={tariffs.supplierMarginUahPerKwh}
             step={0.0001}
             suffix="грн/кВт·год"
+            hint="Надбавка постачальника до ціни імпорту (грн/кВт·год). Може бути відʼємною, якщо постачальник дає знижку — тоді ціна імпорту зменшується."
             onChange={(supplierMarginUahPerKwh) => update({ supplierMarginUahPerKwh })}
           />
           <NumericField
