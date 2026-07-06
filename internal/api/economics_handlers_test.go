@@ -83,6 +83,50 @@ func TestEconomicsRecomputeUnconfigured(t *testing.T) {
 	}
 }
 
+func TestEconomicsDataRangeHasData(t *testing.T) {
+	store := &mockStore{
+		dataRangeOK:  true,
+		dataRangeMin: time.Date(2026, 1, 15, 10, 0, 0, 0, time.UTC),
+		dataRangeMax: time.Date(2026, 7, 5, 10, 0, 0, 0, time.UTC),
+	}
+	h := NewHandlers(store, "*")
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/economics/data-range?organization_id=org-a&tz=Europe/Kyiv", nil)
+	rec := httptest.NewRecorder()
+	h.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, want := range []string{`"from":"2026-01-15"`, `"to":"2026-07-05"`, `"has_data":true`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("expected body to contain %s, got %s", want, body)
+		}
+	}
+}
+
+func TestEconomicsDataRangeNoData(t *testing.T) {
+	h := NewHandlers(&mockStore{dataRangeOK: false}, "*")
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/economics/data-range?organization_id=org-a", nil)
+	rec := httptest.NewRecorder()
+	h.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"has_data":false`) {
+		t.Errorf("expected has_data:false, got %s", rec.Body.String())
+	}
+}
+
+func TestEconomicsDataRangeMissingOrg(t *testing.T) {
+	h := NewHandlers(&mockStore{}, "*")
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/economics/data-range", nil)
+	rec := httptest.NewRecorder()
+	h.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for missing organization_id, got %d", rec.Code)
+	}
+}
+
 func TestTariffScheduleGetEmpty(t *testing.T) {
 	h := NewHandlers(&mockStore{}, "*")
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/organization-tariff-schedule?organization_id=org-a", nil)

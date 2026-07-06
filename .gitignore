@@ -17,3 +17,7 @@ temp/
 
 # Local working/reference material (not part of the app)
 economic/
+solar_fusion_archive/
+docs/external-agent-api-guide.md
+scripts/data_gaps.sql
+.cursor/rules/elevator-start-dates.mdc
