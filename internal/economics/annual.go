@@ -54,6 +54,10 @@ type StoredYear struct {
 	// window's first day — the ROI opening balance so a single-year view
 	// still shows the CAPEX remaining since the start of operation.
 	PriorEbitda float64
+	// PriorMonthsWithData is the number of distinct months with data before
+	// the window, so the frontend can annualise the all-time EBITDA over
+	// the full operating span (window + prior) for the payback estimate.
+	PriorMonthsWithData int
 }
 
 // AggregateYear folds a calendar year of persisted daily + hourly
@@ -356,8 +360,9 @@ func (s *Service) GetYear(ctx context.Context, orgID, period, tz string) (Stored
 
 	result := AggregateYear(period, loc, daily, hourly, resolve)
 	result.OrganizationID = orgID
-	if prior, _, perr := s.backend.SumEbitdaBefore(ctx, orgID, firstDay); perr == nil {
+	if prior, priorMonths, perr := s.backend.SumEbitdaBefore(ctx, orgID, firstDay); perr == nil {
 		result.PriorEbitda = prior
+		result.PriorMonthsWithData = priorMonths
 	}
 	return result, nil
 }
@@ -418,8 +423,9 @@ func (s *Service) GetPeriod(ctx context.Context, orgID, from, to, tz string) (St
 	label := keys[0] + ".." + keys[len(keys)-1]
 	result := AggregatePeriod(label, keys, loc, daily, hourly, resolve)
 	result.OrganizationID = orgID
-	if prior, _, perr := s.backend.SumEbitdaBefore(ctx, orgID, firstDay); perr == nil {
+	if prior, priorMonths, perr := s.backend.SumEbitdaBefore(ctx, orgID, firstDay); perr == nil {
 		result.PriorEbitda = prior
+		result.PriorMonthsWithData = priorMonths
 	}
 	return result, nil
 }

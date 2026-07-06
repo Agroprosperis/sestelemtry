@@ -1086,9 +1086,9 @@ func (s *Store) GetEconomicsDailyRange(ctx context.Context, organizationID strin
 }
 
 // SumEconomicsEbitdaBefore returns the cumulative EBITDA of stored days
-// before `before` and whether any such day exists (the ROI opening
-// balance for a single-year view).
-func (s *Store) SumEconomicsEbitdaBefore(ctx context.Context, organizationID string, before time.Time) (float64, bool, error) {
+// before `before` and the number of distinct months with data (the ROI
+// opening balance and all-time payback rate for a single-year view).
+func (s *Store) SumEconomicsEbitdaBefore(ctx context.Context, organizationID string, before time.Time) (float64, int, error) {
 	return storage.SumEconomicsEbitdaBefore(ctx, s.pool, organizationID, before)
 }
 

@@ -87,6 +87,7 @@ export function EconomicsAnnualView({ data, organizationID, capexUah, onSelectMo
         months={data.months}
         ebitda={t.ebitda_uah}
         priorEbitda={data.prior_ebitda_uah}
+        priorMonthsWithData={data.prior_months_with_data}
         scope={scope}
       />
       <div className="economics-month-grid2">
@@ -177,6 +178,7 @@ function AnnualCapex({
   months,
   ebitda,
   priorEbitda,
+  priorMonthsWithData,
   scope,
 }: {
   capexUah: number
@@ -185,6 +187,9 @@ function AnnualCapex({
   // priorEbitda is the cumulative EBITDA earned before the window start
   // (the ROI opening balance since the start of operation).
   priorEbitda: number
+  // priorMonthsWithData is how many months with data precede the window,
+  // used to annualise all-time EBITDA for the payback estimate.
+  priorMonthsWithData: number
   scope: PeriodScope
 }) {
   // Guard against a backend that hasn't shipped prior_ebitda_uah yet
@@ -210,11 +215,16 @@ function AnnualCapex({
   if (!(capexUah > 0)) return null
 
   const monthsWithData = rows.filter((r) => r.month !== null).length
-  const annualEbitda = monthsWithData > 0 ? (ebitda * 12) / monthsWithData : 0
-  const paybackYears = annualEbitda > 0 ? capexUah / annualEbitda : Infinity
   // All-time EBITDA since the start of operation drives ROI / залишок so
   // a single-year view reflects capex recouped across prior years too.
   const allTimeEbitda = prior + ebitda
+  // Payback is estimated from the operation-start run-rate: all-time
+  // EBITDA annualised over every month with data (window + prior), not
+  // just the selected year's pace.
+  const priorMonths = Number.isFinite(priorMonthsWithData) ? priorMonthsWithData : 0
+  const totalMonthsWithData = monthsWithData + priorMonths
+  const annualEbitda = totalMonthsWithData > 0 ? (allTimeEbitda * 12) / totalMonthsWithData : 0
+  const paybackYears = annualEbitda > 0 ? capexUah / annualEbitda : Infinity
   const roi = allTimeEbitda / capexUah
   const coveredShare = Math.max(0, Math.min(roi, 1))
   const remaining = Math.max(capexUah - allTimeEbitda, 0)
@@ -225,7 +235,7 @@ function AnnualCapex({
       <div className="economics-month-section-head">
         <h3 className="economics-month-section-title">
           Окупність проєкту
-          <OptimumInfo tip="CAPEX — разові капітальні інвестиції з налаштувань об'єкта. Окупність = CAPEX / річний EBITDA (EBITDA періоду приведено до року). ROI = EBITDA періоду / CAPEX." />
+          <OptimumInfo tip="CAPEX — разові капітальні інвестиції з налаштувань об'єкта. Окупність і ROI рахуються від початку експлуатації: EBITDA всього (усі збережені дні) приведено до року за фактичною кількістю місяців з даними. Окупність = CAPEX / річний темп EBITDA. ROI = EBITDA всього / CAPEX." />
         </h3>
         <span className="economics-month-muted">CAPEX із налаштувань об'єкта</span>
       </div>
@@ -249,12 +259,12 @@ function AnnualCapex({
         <div className="economics-month-mini">
           <span className="economics-month-mini-label">Окупність</span>
           <span className="economics-month-mini-value">{paybackLabel(paybackYears)}</span>
-          <span className="economics-month-mini-note">за темпом EBITDA</span>
+          <span className="economics-month-mini-note">від початку експлуатації</span>
         </div>
         <div className="economics-month-mini">
-          <span className="economics-month-mini-label">ROI {periodWord}</span>
+          <span className="economics-month-mini-label">ROI</span>
           <span className={`economics-month-mini-value ${roi >= 0 ? 'good' : ''}`}>{formatPercent(roi)}</span>
-          <span className="economics-month-mini-note">EBITDA / CAPEX</span>
+          <span className="economics-month-mini-note">EBITDA всього / CAPEX</span>
         </div>
       </div>
 

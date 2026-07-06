@@ -660,30 +660,29 @@ func GetEconomicsDailyRange(ctx context.Context, pool *pgxpool.Pool, organizatio
 }
 
 // SumEconomicsEbitdaBefore returns the cumulative EBITDA of every stored
-// day strictly before `before` (a civil date) for the org, plus whether
-// any such day exists. It backs the annual ROI panel's "залишок з
-// початку експлуатації": when the operator views a single year, the
-// opening balance is the EBITDA accrued since the first day of operation
-// up to (but excluding) that year. Days with no telemetry are ignored so
-// the flag reflects real coverage.
-func SumEconomicsEbitdaBefore(ctx context.Context, pool *pgxpool.Pool, organizationID string, before time.Time) (float64, bool, error) {
+// day strictly before `before` (a civil date) for the org, plus the
+// number of distinct calendar months with data in that span. It backs
+// the annual ROI panel's "залишок з початку експлуатації" (opening
+// balance) and the operation-start payback rate (the month count feeds
+// the all-time annualisation). Days with no telemetry are ignored so the
+// counts reflect real coverage.
+func SumEconomicsEbitdaBefore(ctx context.Context, pool *pgxpool.Pool, organizationID string, before time.Time) (sum float64, monthsWithData int, err error) {
 	if pool == nil {
-		return 0, false, fmt.Errorf("storage: nil pool")
+		return 0, 0, fmt.Errorf("storage: nil pool")
 	}
 	if organizationID == "" {
-		return 0, false, fmt.Errorf("storage: empty organization_id")
+		return 0, 0, fmt.Errorf("storage: empty organization_id")
 	}
-	var sum float64
-	var days int64
-	err := pool.QueryRow(ctx, `
+	var months int64
+	err = pool.QueryRow(ctx, `
 		SELECT
 			COALESCE(SUM(ebitda_uah) FILTER (WHERE hours_with_data > 0), 0),
-			COUNT(*) FILTER (WHERE hours_with_data > 0)
+			COUNT(DISTINCT date_trunc('month', day)) FILTER (WHERE hours_with_data > 0)
 		FROM economics_daily
 		WHERE organization_id = $1 AND day < $2::date
-	`, organizationID, before).Scan(&sum, &days)
+	`, organizationID, before).Scan(&sum, &months)
 	if err != nil {
-		return 0, false, fmt.Errorf("storage: sum economics ebitda before: %w", err)
+		return 0, 0, fmt.Errorf("storage: sum economics ebitda before: %w", err)
 	}
-	return sum, days > 0, nil
+	return sum, int(months), nil
 }

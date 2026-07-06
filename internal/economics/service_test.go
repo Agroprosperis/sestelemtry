@@ -115,16 +115,16 @@ func (b *fakeBackend) LoadHourlyRange(_ context.Context, _ string, from, to time
 	return out, nil
 }
 
-func (b *fakeBackend) SumEbitdaBefore(_ context.Context, _ string, before time.Time) (float64, bool, error) {
+func (b *fakeBackend) SumEbitdaBefore(_ context.Context, _ string, before time.Time) (float64, int, error) {
 	var sum float64
-	var days int
+	months := map[string]struct{}{}
 	for _, d := range b.saved {
 		if d.Day.Before(before) {
 			sum += d.Totals.Ebitda
-			days++
+			months[d.Day.Format("2006-01")] = struct{}{}
 		}
 	}
-	return sum, days > 0, nil
+	return sum, len(months), nil
 }
 
 func newKyivBackend(t *testing.T) (*fakeBackend, *time.Location) {

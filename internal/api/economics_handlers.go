@@ -624,19 +624,23 @@ type EconomicsAnnualMonthMargin struct {
 
 // EconomicsAnnualResponse is the body of GET /api/v1/economics/annual.
 type EconomicsAnnualResponse struct {
-	OrganizationID string                       `json:"organization_id"`
-	Period         string                       `json:"period"`
-	From           string                       `json:"from"`
-	To             string                       `json:"to"`
-	Tz             string                       `json:"tz"`
-	MonthsWithData int                          `json:"months_with_data"`
+	OrganizationID string `json:"organization_id"`
+	Period         string `json:"period"`
+	From           string `json:"from"`
+	To             string `json:"to"`
+	Tz             string `json:"tz"`
+	MonthsWithData int    `json:"months_with_data"`
 	// PriorEbitdaUah is the cumulative EBITDA of stored days before the
 	// window start — the ROI opening balance for a single-year view.
-	PriorEbitdaUah float64                      `json:"prior_ebitda_uah"`
-	Totals         EconomicsMonthlyTotals       `json:"totals"`
-	Months         []EconomicsAnnualMonthRollup `json:"months"`
-	Quarters       []EconomicsAnnualQuarter     `json:"quarters"`
-	MonthlyMargin  []EconomicsAnnualMonthMargin `json:"monthly_margin"`
+	PriorEbitdaUah float64 `json:"prior_ebitda_uah"`
+	// PriorMonthsWithData is the number of distinct months with data before
+	// the window, so the ROI payback can annualise all-time EBITDA over the
+	// full operating span.
+	PriorMonthsWithData int                          `json:"prior_months_with_data"`
+	Totals              EconomicsMonthlyTotals       `json:"totals"`
+	Months              []EconomicsAnnualMonthRollup `json:"months"`
+	Quarters            []EconomicsAnnualQuarter     `json:"quarters"`
+	MonthlyMargin       []EconomicsAnnualMonthMargin `json:"monthly_margin"`
 }
 
 // economicsAnnual serves a calendar-year rollup of the per-month
@@ -700,17 +704,18 @@ func (h *Handlers) economicsAnnual(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := EconomicsAnnualResponse{
-		OrganizationID: orgID,
-		Period:         year.Period,
-		From:           year.From,
-		To:             year.To,
-		Tz:             loc.String(),
-		MonthsWithData: year.MonthsWithData,
-		PriorEbitdaUah: year.PriorEbitda,
-		Totals:         monthlyTotalsToJSON(year.Totals),
-		Months:         make([]EconomicsAnnualMonthRollup, 0, len(year.Months)),
-		Quarters:       make([]EconomicsAnnualQuarter, 0, len(year.Quarters)),
-		MonthlyMargin:  make([]EconomicsAnnualMonthMargin, 0, len(year.MonthlyMargin)),
+		OrganizationID:      orgID,
+		Period:              year.Period,
+		From:                year.From,
+		To:                  year.To,
+		Tz:                  loc.String(),
+		MonthsWithData:      year.MonthsWithData,
+		PriorEbitdaUah:      year.PriorEbitda,
+		PriorMonthsWithData: year.PriorMonthsWithData,
+		Totals:              monthlyTotalsToJSON(year.Totals),
+		Months:              make([]EconomicsAnnualMonthRollup, 0, len(year.Months)),
+		Quarters:            make([]EconomicsAnnualQuarter, 0, len(year.Quarters)),
+		MonthlyMargin:       make([]EconomicsAnnualMonthMargin, 0, len(year.MonthlyMargin)),
 	}
 	for _, m := range year.Months {
 		resp.Months = append(resp.Months, EconomicsAnnualMonthRollup{

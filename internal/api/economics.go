@@ -173,7 +173,7 @@ func (b *economicsBackend) LoadDailyRange(ctx context.Context, orgID string, fro
 	return out, nil
 }
 
-func (b *economicsBackend) SumEbitdaBefore(ctx context.Context, orgID string, before time.Time) (float64, bool, error) {
+func (b *economicsBackend) SumEbitdaBefore(ctx context.Context, orgID string, before time.Time) (float64, int, error) {
 	return b.store.SumEconomicsEbitdaBefore(ctx, orgID, before)
 }
 

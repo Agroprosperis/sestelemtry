@@ -720,6 +720,9 @@ export type EconomicsAnnualResponse = {
   // opening balance so a single-year view shows CAPEX remaining since the
   // start of operation.
   prior_ebitda_uah: number
+  // Distinct months with data before the window, so the ROI payback can
+  // annualise all-time EBITDA over the full operating span.
+  prior_months_with_data: number
   totals: EconomicsMonthlyTotals
   months: EconomicsAnnualMonthRollup[]
   quarters: EconomicsAnnualQuarter[]

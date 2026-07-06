@@ -78,9 +78,10 @@ type Backend interface {
 	// window [from, to) — the RDN stats and ESS marginality heatmap.
 	LoadHourlyRange(ctx context.Context, orgID string, from, to time.Time) ([]HourlyRecord, error)
 	// SumEbitdaBefore returns the cumulative EBITDA of every stored day
-	// strictly before `before` plus whether any such day exists. It backs
-	// the annual ROI opening balance ("залишок з початку експлуатації").
-	SumEbitdaBefore(ctx context.Context, orgID string, before time.Time) (sum float64, hasData bool, err error)
+	// strictly before `before` plus the number of distinct months with
+	// data in that span. It backs the annual ROI opening balance ("залишок
+	// з початку експлуатації") and the operation-start payback rate.
+	SumEbitdaBefore(ctx context.Context, orgID string, before time.Time) (sum float64, monthsWithData int, err error)
 }
 
 // Service computes and persists economics, and serves them read-through
