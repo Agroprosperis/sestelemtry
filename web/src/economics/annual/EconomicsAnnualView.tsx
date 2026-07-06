@@ -187,10 +187,14 @@ function AnnualCapex({
   priorEbitda: number
   scope: PeriodScope
 }) {
-  const hasPrior = Math.abs(priorEbitda) > 0.5
+  // Guard against a backend that hasn't shipped prior_ebitda_uah yet
+  // (undefined) — otherwise the running sum would become NaN and the
+  // whole chart would vanish.
+  const prior = Number.isFinite(priorEbitda) ? priorEbitda : 0
+  const hasPrior = Math.abs(prior) > 0.5
   const rows = useMemo<CapexCumRow[]>(() => {
     const out: CapexCumRow[] = []
-    let acc = priorEbitda
+    let acc = prior
     // Seed the cumulative line at the opening balance so the trajectory
     // continues from where prior operation left off (SPEC: залишок з
     // початку експлуатації).
@@ -201,7 +205,7 @@ function AnnualCapex({
       out.push({ label: formatMonthShort(m.month), cum: acc, month: m.totals.ebitda_uah })
     }
     return out
-  }, [months, priorEbitda, hasPrior])
+  }, [months, prior, hasPrior])
 
   if (!(capexUah > 0)) return null
 
@@ -210,7 +214,7 @@ function AnnualCapex({
   const paybackYears = annualEbitda > 0 ? capexUah / annualEbitda : Infinity
   // All-time EBITDA since the start of operation drives ROI / залишок so
   // a single-year view reflects capex recouped across prior years too.
-  const allTimeEbitda = priorEbitda + ebitda
+  const allTimeEbitda = prior + ebitda
   const roi = allTimeEbitda / capexUah
   const coveredShare = Math.max(0, Math.min(roi, 1))
   const remaining = Math.max(capexUah - allTimeEbitda, 0)
@@ -261,7 +265,7 @@ function AnnualCapex({
         </div>
         {hasPrior ? (
           <div className="economics-capex-progress-note economics-month-muted">
-            у т.ч. до початку періоду: {formatUah(priorEbitda)}
+            у т.ч. до початку періоду: {formatUah(prior)}
           </div>
         ) : null}
       </div>
