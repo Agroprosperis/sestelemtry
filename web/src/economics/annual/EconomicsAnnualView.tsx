@@ -299,7 +299,6 @@ function AnnualCapex({
               <Legend
                 verticalAlign="top"
                 height={24}
-                iconType="plainline"
                 formatter={(value) => (value === 'month' ? 'EBITDA за місяць' : 'Накопичений EBITDA')}
               />
               <ReferenceLine
@@ -309,16 +308,16 @@ function AnnualCapex({
                 strokeDasharray="5 4"
                 label={{ value: `CAPEX ${uahShort(capexUah)}`, position: 'insideTopRight', fontSize: 11, fill: '#dc2626' }}
               />
-              <Line
+              <Bar
                 yAxisId="month"
-                type="monotone"
                 dataKey="month"
                 name="month"
+                fill="#12b76a"
+                fillOpacity={0.35}
                 stroke="#12b76a"
-                strokeWidth={2}
-                strokeDasharray="4 3"
-                dot={{ r: 2.5, fill: '#12b76a' }}
-                connectNulls={false}
+                strokeWidth={1}
+                maxBarSize={28}
+                radius={[3, 3, 0, 0]}
               />
               <Line
                 yAxisId="cum"
