@@ -841,6 +841,32 @@ func (s *Store) DAMPrices(ctx context.Context, zone int, from, to time.Time) (DA
 	return out, nil
 }
 
+// TelemetryDataRange returns the earliest and latest telemetry sample
+// instants stored for an organization. `ok` is false when the org has
+// no samples at all (min/max come back NULL). The instants are UTC; the
+// caller converts them to civil dates in the desired tz. This backs the
+// "recompute the whole available history" flow, where the operator
+// wants the date span filled in automatically from the raw data that
+// feeds economics.
+func (s *Store) TelemetryDataRange(ctx context.Context, organizationID string) (min, max time.Time, ok bool, err error) {
+	if organizationID == "" {
+		return time.Time{}, time.Time{}, false, fmt.Errorf("storage: organization_id is required")
+	}
+	var minTS, maxTS *time.Time
+	row := s.pool.QueryRow(ctx, `
+		SELECT min(time), max(time)
+		FROM telemetry_samples
+		WHERE organization_id = $1
+	`, organizationID)
+	if err := row.Scan(&minTS, &maxTS); err != nil {
+		return time.Time{}, time.Time{}, false, err
+	}
+	if minTS == nil || maxTS == nil {
+		return time.Time{}, time.Time{}, false, nil
+	}
+	return minTS.UTC(), maxTS.UTC(), true, nil
+}
+
 // Samples streams raw `telemetry_samples` rows in chronological order
 // for one organization, restricted to the requested metric keys and
 // the half-open interval [from, to]. The caller's `emit` decides how

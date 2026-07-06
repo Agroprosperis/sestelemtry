@@ -988,6 +988,14 @@ func (h *Handlers) economicsPortfolio(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// maxRecomputeRange caps the recompute span. Unlike the on-read
+// endpoints, a recompute iterates day-by-day with progress reporting and
+// honors cancellation between days, so a multi-year full-history backfill
+// is safe — the cap only guards against absurd inputs. It is wider than
+// maxDAMRange because "recompute the whole available history" for a site
+// can legitimately exceed a single year.
+const maxRecomputeRange = 5 * 366 * 24 * time.Hour
+
 // economicsRecompute recomputes (and persists) economics over a date
 // range, streaming NDJSON progress (one line per day, then "done").
 //
@@ -1026,8 +1034,8 @@ func (h *Handlers) economicsRecompute(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "to must be on or after from", http.StatusBadRequest)
 		return
 	}
-	if to.Sub(from) > maxDAMRange {
-		http.Error(w, fmt.Sprintf("range must be <= %s", maxDAMRange), http.StatusBadRequest)
+	if to.Sub(from) > maxRecomputeRange {
+		http.Error(w, fmt.Sprintf("range must be <= %s", maxRecomputeRange), http.StatusBadRequest)
 		return
 	}
 	tzStr := strings.TrimSpace(r.URL.Query().Get("tz"))
@@ -1077,6 +1085,53 @@ func (h *Handlers) economicsRecompute(w http.ResponseWriter, r *http.Request) {
 		"duration_ms", time.Since(start).Milliseconds(),
 	)
 	emit(progressEvent{Type: "done", Result: result})
+}
+
+// economicsDataRangeResponse reports the civil-date span (YYYY-MM-DD in
+// the requested tz) covered by an organization's raw telemetry, backing
+// the "recompute the whole available history" flow. HasData is false —
+// and the dates empty — when the org has no samples yet.
+type economicsDataRangeResponse struct {
+	From    string `json:"from"`
+	To      string `json:"to"`
+	HasData bool   `json:"has_data"`
+}
+
+// economicsDataRange reports the earliest/latest telemetry dates for an
+// organization so the recompute UI can auto-fill the full period.
+//
+//	GET /api/v1/economics/data-range?organization_id=&tz=
+func (h *Handlers) economicsDataRange(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", "GET")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	orgID := strings.TrimSpace(r.URL.Query().Get("organization_id"))
+	if orgID == "" {
+		http.Error(w, "organization_id is required", http.StatusBadRequest)
+		return
+	}
+	loc, err := loadLocation(strings.TrimSpace(r.URL.Query().Get("tz")))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	minTS, maxTS, ok, err := h.store.TelemetryDataRange(r.Context(), orgID)
+	if err != nil {
+		h.log.Error("api_economics_data_range", "organization_id", orgID, "err", err)
+		http.Error(w, "failed to read telemetry data range", http.StatusInternalServerError)
+		return
+	}
+	if !ok {
+		writeJSON(w, http.StatusOK, economicsDataRangeResponse{HasData: false})
+		return
+	}
+	writeJSON(w, http.StatusOK, economicsDataRangeResponse{
+		From:    minTS.In(loc).Format("2006-01-02"),
+		To:      maxTS.In(loc).Format("2006-01-02"),
+		HasData: true,
+	})
 }
 
 // tariffScheduleEntryReq is the PUT body for one effective-dated tariff

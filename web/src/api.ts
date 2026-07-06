@@ -844,6 +844,32 @@ export async function recomputeEconomics(
   }
 }
 
+// EconomicsDataRange is the civil-date span (YYYY-MM-DD) covered by an
+// organization's raw telemetry — the input economics is computed from.
+// has_data is false (and the dates empty) when the org has no samples.
+export type EconomicsDataRange = {
+  from: string
+  to: string
+  has_data: boolean
+}
+
+// fetchEconomicsDataRange returns the earliest/latest telemetry dates for
+// an organization so the recompute UI can auto-fill the full period.
+export async function fetchEconomicsDataRange(
+  input: { organizationID: string; tz?: string },
+  signal?: AbortSignal,
+): Promise<EconomicsDataRange> {
+  const url = buildURL('/api/v1/economics/data-range', {
+    organization_id: input.organizationID,
+    tz: input.tz || undefined,
+  })
+  const res = await fetch(url, { signal })
+  if (!res.ok) {
+    throw new Error(`economics data-range request failed: ${res.status}`)
+  }
+  return res.json()
+}
+
 export async function fetchDAMPrices(
   input: { from: string; to: string; zone?: number },
   signal?: AbortSignal,

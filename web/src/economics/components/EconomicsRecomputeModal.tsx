@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
+  fetchEconomicsDataRange,
   recomputeEconomics,
   type EconomicsRecomputeResult,
   type ImportProgress,
@@ -57,6 +58,15 @@ export function EconomicsRecomputeModal({
   const [organizationID, setOrganizationID] = useState(initialOrganizationID)
   const [fromDate, setFromDate] = useState<string>(() => kyivDate(-30))
   const [toDate, setToDate] = useState<string>(() => kyivDate(-1))
+  // fullPeriod (default on) recomputes the whole available history for the
+  // selected station; the range is auto-detected from telemetry. Turning
+  // it off re-enables manual date entry.
+  const [fullPeriod, setFullPeriod] = useState(true)
+  const [detected, setDetected] = useState<{ from: string; to: string; hasData: boolean } | null>(
+    null,
+  )
+  const [rangeLoading, setRangeLoading] = useState(false)
+  const [rangeError, setRangeError] = useState<string | null>(null)
   const [state, setState] = useState<RunState>('idle')
   const [error, setError] = useState<string | null>(null)
   const [cancelled, setCancelled] = useState(false)
@@ -65,6 +75,10 @@ export function EconomicsRecomputeModal({
   const abortRef = useRef<AbortController | null>(null)
   const stateRef = useRef(state)
   stateRef.current = state
+  // fullPeriodRef lets the async range fetch decide whether to apply the
+  // detected span without re-subscribing the effect on every toggle.
+  const fullPeriodRef = useRef(fullPeriod)
+  fullPeriodRef.current = fullPeriod
 
   // Close on Escape, unless a recompute is in flight (mirrors the
   // disabled overlay/close button during loading). Abort any in-flight
@@ -79,6 +93,45 @@ export function EconomicsRecomputeModal({
       abortRef.current?.abort()
     }
   }, [onClose])
+
+  // Auto-detect the station's full telemetry span on open and whenever the
+  // operator switches organizations. When "весь період" is on, the detected
+  // range fills the date inputs. An AbortController guards against a fast
+  // org switch applying a stale range.
+  useEffect(() => {
+    const controller = new AbortController()
+    setRangeLoading(true)
+    setRangeError(null)
+    fetchEconomicsDataRange({ organizationID, tz: ECON_LOCAL_TZ }, controller.signal)
+      .then((range) => {
+        setDetected({ from: range.from, to: range.to, hasData: range.has_data })
+        if (fullPeriodRef.current && range.has_data) {
+          setFromDate(range.from)
+          setToDate(range.to)
+        }
+      })
+      .catch((err) => {
+        if (isAbortError(err)) return
+        setDetected(null)
+        setRangeError(err instanceof Error ? err.message : String(err))
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setRangeLoading(false)
+      })
+    return () => controller.abort()
+  }, [organizationID])
+
+  // Applying the detected span when the operator re-enables "весь період".
+  const onToggleFullPeriod = useCallback(
+    (next: boolean) => {
+      setFullPeriod(next)
+      if (next && detected?.hasData) {
+        setFromDate(detected.from)
+        setToDate(detected.to)
+      }
+    },
+    [detected],
+  )
 
   const onCancel = useCallback(() => {
     abortRef.current?.abort()
@@ -160,6 +213,28 @@ export function EconomicsRecomputeModal({
           збережені дані.
         </p>
 
+        <label className="import-checkbox">
+          <input
+            type="checkbox"
+            checked={fullPeriod}
+            disabled={state === 'loading'}
+            onChange={(e) => onToggleFullPeriod(e.target.checked)}
+          />
+          <span>Весь період (визначити автоматично)</span>
+        </label>
+
+        {fullPeriod && (
+          <p className="import-section-sub">
+            {rangeLoading
+              ? 'Визначаємо доступний період…'
+              : rangeError
+                ? `Не вдалося визначити період: ${rangeError}`
+                : detected?.hasData
+                  ? `Автовизначений період: ${detected.from} → ${detected.to}`
+                  : 'Немає телеметрії для цього об’єкта.'}
+          </p>
+        )}
+
         <div className="import-controls">
           <OrganizationSelect
             value={organizationID}
@@ -172,6 +247,7 @@ export function EconomicsRecomputeModal({
               type="date"
               value={fromDate}
               max={toDate || undefined}
+              disabled={fullPeriod}
               onChange={(e) => setFromDate(e.target.value)}
             />
           </label>
@@ -181,6 +257,7 @@ export function EconomicsRecomputeModal({
               type="date"
               value={toDate}
               min={fromDate || undefined}
+              disabled={fullPeriod}
               onChange={(e) => setToDate(e.target.value)}
             />
           </label>
@@ -194,7 +271,10 @@ export function EconomicsRecomputeModal({
               type="button"
               className="import-run"
               onClick={onRun}
-              disabled={state === 'loading'}
+              disabled={
+                state === 'loading' ||
+                (fullPeriod && (rangeLoading || !detected?.hasData))
+              }
             >
               {state === 'loading' ? (
                 <>

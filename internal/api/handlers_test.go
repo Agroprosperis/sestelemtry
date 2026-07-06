@@ -61,6 +61,15 @@ type mockStore struct {
 	tariffsPutErr    error
 	tariffsLastOrg   string
 	tariffsLastWrite OrgTariffs
+
+	dataRangeMin time.Time
+	dataRangeMax time.Time
+	dataRangeOK  bool
+	dataRangeErr error
+}
+
+func (m *mockStore) TelemetryDataRange(_ context.Context, _ string) (time.Time, time.Time, bool, error) {
+	return m.dataRangeMin, m.dataRangeMax, m.dataRangeOK, m.dataRangeErr
 }
 
 func (m *mockStore) Current(_ context.Context, _ string, _ []string, at time.Time) (CurrentResponse, error) {

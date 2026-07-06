@@ -108,6 +108,10 @@ type storeReader interface {
 	WeatherForecast(ctx context.Context, organizationID string, from, to time.Time) (WeatherForecastResponse, error)
 	Samples(ctx context.Context, organizationID string, metricKeys []string, from, to time.Time, limit int, emit func(SampleRow) error) (int, bool, error)
 	EnergyFlowSources(ctx context.Context, organizationID string, from, to time.Time, lookback time.Duration) ([]EnergyFlowRawRow, error)
+	// TelemetryDataRange reports the earliest/latest telemetry sample
+	// instants for an organization (UTC). ok is false when the org has
+	// no samples. Backs the recompute UI's full-period auto-detection.
+	TelemetryDataRange(ctx context.Context, organizationID string) (min, max time.Time, ok bool, err error)
 	// GetOrgTariffs reports the persisted economics tariff bundle for
 	// `organizationID`. The bool is false when the org has never saved
 	// tariffs (the handler maps that to 404 so the frontend can fall
@@ -298,6 +302,7 @@ func (h *Handlers) Router() http.Handler {
 	mux.HandleFunc("/api/v1/economics/annual", h.economicsAnnual)
 	mux.HandleFunc("/api/v1/economics/portfolio", h.economicsPortfolio)
 	mux.HandleFunc("/api/v1/economics/recompute", h.economicsRecompute)
+	mux.HandleFunc("/api/v1/economics/data-range", h.economicsDataRange)
 	mux.HandleFunc("/swagger", h.swaggerUI)
 	mux.HandleFunc("/swagger/", h.swaggerUI)
 	mux.HandleFunc("/swagger/openapi.yaml", h.swaggerSpec)

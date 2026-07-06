@@ -94,6 +94,27 @@
   color: #0f172a;
 }
 
+.import-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 10px;
+  font-size: 0.85rem;
+  color: #0f172a;
+  cursor: pointer;
+  user-select: none;
+}
+
+.import-checkbox input {
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+}
+
+.import-checkbox input:disabled {
+  cursor: default;
+}
+
 .import-pill {
   display: inline-flex;
   align-items: center;
