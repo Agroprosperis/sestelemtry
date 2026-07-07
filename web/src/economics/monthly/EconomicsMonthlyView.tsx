@@ -10,6 +10,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
+import { makeTrendCap, TREND_NEG_ORDER, TREND_POS_ORDER } from '../trendBarCap'
 import type {
   EconomicsDataQuality,
   EconomicsMonthlyDay,
@@ -429,12 +430,12 @@ function MonthlyTrend({ days, totals }: { days: EconomicsMonthlyDay[]; totals: E
             <YAxis tick={{ fontSize: 11, fill: '#98a2b3' }} width={40} tickLine={false} axisLine={false} />
             <Tooltip content={<TrendTooltip />} cursor={{ fill: 'rgba(148, 163, 184, 0.12)' }} />
             <ReferenceLine y={0} stroke="#98a2b3" />
-            <Bar dataKey="pv" name="виробіток СЕС" stackId="pos" fill="#91d9aa" maxBarSize={28} />
-            <Bar dataKey="essDischarge" name="розряд УЗЕ" stackId="pos" fill="#5fc993" maxBarSize={28} />
-            <Bar dataKey="gridImport" name="з мережі" stackId="pos" fill="#12b76a" maxBarSize={28} radius={[3, 3, 0, 0]} />
-            <Bar dataKey="load" name="споживання" stackId="neg" fill="#fdba74" maxBarSize={28} />
-            <Bar dataKey="essCharge" name="заряд УЗЕ" stackId="neg" fill="#fb923c" maxBarSize={28} />
-            <Bar dataKey="gridExport" name="експорт у мережу" stackId="neg" fill="#f97316" maxBarSize={28} radius={[0, 0, 3, 3]} />
+            <Bar dataKey="pv" name="виробіток СЕС" stackId="pos" fill="#91d9aa" maxBarSize={28} shape={makeTrendCap('top', 'pv', TREND_POS_ORDER)} />
+            <Bar dataKey="essDischarge" name="розряд УЗЕ" stackId="pos" fill="#5fc993" maxBarSize={28} shape={makeTrendCap('top', 'essDischarge', TREND_POS_ORDER)} />
+            <Bar dataKey="gridImport" name="з мережі" stackId="pos" fill="#12b76a" maxBarSize={28} shape={makeTrendCap('top', 'gridImport', TREND_POS_ORDER)} />
+            <Bar dataKey="load" name="споживання" stackId="neg" fill="#fdba74" maxBarSize={28} shape={makeTrendCap('bottom', 'load', TREND_NEG_ORDER)} />
+            <Bar dataKey="essCharge" name="заряд УЗЕ" stackId="neg" fill="#fb923c" maxBarSize={28} shape={makeTrendCap('bottom', 'essCharge', TREND_NEG_ORDER)} />
+            <Bar dataKey="gridExport" name="експорт у мережу" stackId="neg" fill="#f97316" maxBarSize={28} shape={makeTrendCap('bottom', 'gridExport', TREND_NEG_ORDER)} />
           </BarChart>
         </ResponsiveContainer>
       </div>
