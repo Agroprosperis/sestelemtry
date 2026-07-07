@@ -6,14 +6,25 @@ import (
 	"time"
 )
 
-// pvGridMetricKeys are the accumulator deltas the assembly needs for
-// pv / grid-import / grid-export (the four ESS directional flows come
-// from HourlyFlows instead).
-var pvGridMetricKeys = []string{
+// deltaMetricKeys are the accumulator deltas the assembly needs. PV /
+// grid-import / grid-export set the base envelope; the ESS charge /
+// discharge counters give the physical charge/discharge magnitudes so
+// they share the same hourly bucketing as the base counters (see
+// essFlowsFromCounters). The four ESS *directional* flows still come
+// from HourlyFlows (the allocator decides direction; the counters
+// decide magnitude).
+var deltaMetricKeys = []string{
 	"accumulated_pv_energy_yield_kwh",
 	"accumulated_electricity_purchased_kwh",
 	"accumulated_electricity_sold_kwh",
+	essChargedCounterKey,
+	essDischargedCounterKey,
 }
+
+const (
+	essChargedCounterKey    = "total_energy_charged_kwh"
+	essDischargedCounterKey = "total_energy_discharged_kwh"
+)
 
 const socMetricKey = "soc_percent"
 
@@ -144,12 +155,12 @@ func (s *Service) ComputeDay(ctx context.Context, orgID, date, tz string) (Store
 	yesterdayFlows, _ := s.backend.HourlyFlows(ctx, orgID, dayStart.AddDate(0, 0, -1))
 	dayBeforeFlows, _ := s.backend.HourlyFlows(ctx, orgID, dayStart.AddDate(0, 0, -2))
 
-	deltaPoints, err := s.backend.Timeseries(ctx, orgID, pvGridMetricKeys, dayStart, dayEnd, "1 hour", tz, "delta")
+	deltaPoints, err := s.backend.Timeseries(ctx, orgID, deltaMetricKeys, dayStart, dayEnd, "1 hour", tz, "delta")
 	if err != nil {
 		return StoredDay{}, fmt.Errorf("today deltas: %w", err)
 	}
 	historyStart := dayStart.Add(-historyHours * time.Hour)
-	historyDeltaPoints, _ := s.backend.Timeseries(ctx, orgID, pvGridMetricKeys, historyStart, dayStart, "1 hour", tz, "delta")
+	historyDeltaPoints, _ := s.backend.Timeseries(ctx, orgID, deltaMetricKeys, historyStart, dayStart, "1 hour", tz, "delta")
 
 	socStart := dayStart.Add(-(historyHours + 1) * time.Hour)
 	socEnd := dayEnd.Add(-time.Hour)

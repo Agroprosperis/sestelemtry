@@ -3,10 +3,11 @@ package economics
 import "math"
 
 // HourFlows is the per-hour energy state the economics formulas need.
-// Port of the TS `HourFlows` type. The four `*To*` directional flows
-// come from the energy-flow allocator; pv / gridImport / gridExport are
-// SmartLogger accumulator deltas; essCharged / essDischarged come from
-// the same allocator so the per-hour balance identity holds.
+// Port of the TS `HourFlows` type. pv / gridImport / gridExport and
+// essCharged / essDischarged are SmartLogger accumulator deltas; the
+// four `*To*` directional flows come from the energy-flow allocator
+// (direction only — magnitudes for ESS charge/discharge come from the
+// counters when present, see essFlowsFromCounters).
 type HourFlows struct {
 	PV            float64
 	GridImport    float64
@@ -44,6 +45,100 @@ func DeriveDerivedFlows(in HourFlows) (load, pvToLoad, pvToGrid, gridToLoad floa
 	pvToLoad = math.Max(in.PV-pvToGrid-in.PVToEss, 0)
 	gridToLoad = math.Max(in.GridImport-in.GridToEss, 0)
 	return load, pvToLoad, pvToGrid, gridToLoad
+}
+
+// essFlowsFromCounters builds one hour's HourFlows using metered ESS
+// charge/discharge counters for magnitudes while keeping the energy-flow
+// allocator's split for direction. See assemble.go call sites.
+func essFlowsFromCounters(
+	a FlowRow,
+	hasChg bool, chargeCounter float64,
+	hasDis bool, dischargeCounter float64,
+	pv, gridImport, gridExport float64,
+) HourFlows {
+	const eps = 1e-9
+	charged := a.EssCharged
+	if hasChg {
+		charged = math.Max(chargeCounter, 0)
+	}
+	discharged := a.EssDischarged
+	if hasDis {
+		discharged = math.Max(dischargeCounter, 0)
+	}
+
+	f := HourFlows{
+		PV:            pv,
+		GridImport:    gridImport,
+		GridExport:    gridExport,
+		EssCharged:    charged,
+		EssDischarged: discharged,
+	}
+
+	switch {
+	case a.EssCharged > eps:
+		k := charged / a.EssCharged
+		f.PVToEss = a.PVToEss * k
+		f.GridToEss = a.GridToEss * k
+	case charged > 0:
+		g := math.Min(charged, math.Max(gridImport, 0))
+		f.GridToEss = g
+		f.PVToEss = charged - g
+	}
+
+	switch {
+	case a.EssDischarged > eps:
+		k := discharged / a.EssDischarged
+		f.EssToLoad = a.EssToLoad * k
+		f.EssToGrid = a.EssToGrid * k
+	case discharged > 0:
+		g := math.Min(discharged, math.Max(gridExport, 0))
+		f.EssToGrid = g
+		f.EssToLoad = discharged - g
+	}
+
+	return f
+}
+
+// loadRebalanceEpsilonKwh is the daily phantom-load slack below which we
+// leave hourly clamp sums untouched.
+const loadRebalanceEpsilonKwh = 0.5
+
+// rebalanceDailyLoad scales hourly load-derived economics down when the
+// sum of per-hour clamped loads exceeds the day's energy-balance load.
+// Coarse (5-min FusionSolar) archive data often shifts charge/import
+// counters by ~1h between buckets; DeriveDerivedFlows clamps negative
+// hourly loads to zero, inflating the daily total and the baseline cost.
+// Flow counters are untouched; only load / baseline / effect (and the
+// load-serving split fields used in revenue rollups) are scaled so the
+// daily totals match pv + import + discharge − export − charge.
+func rebalanceDailyLoad(rows []*HourRow) bool {
+	var sumPV, sumImp, sumDis, sumExp, sumChg, reportedLoad float64
+	priced := make([]*HourRow, 0, 24)
+	for _, row := range rows {
+		if row == nil || row.Rdn == nil {
+			continue
+		}
+		priced = append(priced, row)
+		sumPV += row.Flow.PV
+		sumImp += row.Flow.GridImport
+		sumDis += row.Flow.EssDischarged
+		sumExp += row.Flow.GridExport
+		sumChg += row.Flow.EssCharged
+		reportedLoad += row.Econ.Load
+	}
+	balancedLoad := math.Max(sumPV+sumImp+sumDis-sumExp-sumChg, 0)
+	if reportedLoad <= balancedLoad+loadRebalanceEpsilonKwh || reportedLoad <= 0 {
+		return false
+	}
+	factor := balancedLoad / reportedLoad
+	for _, row := range priced {
+		row.Econ.Load *= factor
+		row.Econ.PVToLoad *= factor
+		row.Econ.GridToLoad *= factor
+		row.Econ.BaselineCost *= factor
+		row.Econ.Effect = row.Econ.BaselineCost - row.Econ.ActualCost
+	}
+	return true
 }
 
 // HourEconomicsFor turns one hour's energy flows + the RDN price for the

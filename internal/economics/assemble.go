@@ -134,6 +134,10 @@ func AssembleDay(in DayInput) ([]*HourRow, ReconcileResult) {
 	pvByHour := bucketByHourOfDay(filterMetric(in.DeltaPoints, "accumulated_pv_energy_yield_kwh"), dayStart)
 	importByHour := bucketByHourOfDay(filterMetric(in.DeltaPoints, "accumulated_electricity_purchased_kwh"), dayStart)
 	exportByHour := bucketByHourOfDay(filterMetric(in.DeltaPoints, "accumulated_electricity_sold_kwh"), dayStart)
+	chargeByHour := bucketByHourOfDay(filterMetric(in.DeltaPoints, essChargedCounterKey), dayStart)
+	dischargeByHour := bucketByHourOfDay(filterMetric(in.DeltaPoints, essDischargedCounterKey), dayStart)
+	hasChargeCounter := len(filterMetric(in.DeltaPoints, essChargedCounterKey)) > 0
+	hasDischargeCounter := len(filterMetric(in.DeltaPoints, essDischargedCounterKey)) > 0
 	socByOffset := bucketSocByOffset(filterMetric(in.SocPoints, "soc_percent"), dayStart)
 
 	priceMap := buildPriceMap(in.DamToday)
@@ -151,17 +155,10 @@ func AssembleDay(in DayInput) ([]*HourRow, ReconcileResult) {
 		}
 		flowRow := in.TodayFlows[h]
 		peaks[h] = flowRow.EssPeakIntervalKw
-		f := HourFlows{
-			PV:            pvByHour[h],
-			GridImport:    importByHour[h],
-			GridExport:    exportByHour[h],
-			EssCharged:    flowRow.EssCharged,
-			EssDischarged: flowRow.EssDischarged,
-			PVToEss:       flowRow.PVToEss,
-			GridToEss:     flowRow.GridToEss,
-			EssToLoad:     flowRow.EssToLoad,
-			EssToGrid:     flowRow.EssToGrid,
-		}
+		f := essFlowsFromCounters(flowRow,
+			hasChargeCounter, chargeByHour[h],
+			hasDischargeCounter, dischargeByHour[h],
+			pvByHour[h], importByHour[h], exportByHour[h])
 		flows[h] = &f
 		starts[h] = flowRow.From
 		if p, ok := priceMap[h]; ok {
@@ -258,6 +255,9 @@ func AssembleDay(in DayInput) ([]*HourRow, ReconcileResult) {
 		cur.EssResidualKwhEnd = &endKwh
 		state = result.Next
 	}
+	if rebalanceDailyLoad(out) {
+		recon.Flags = append(recon.Flags, "load_rebalanced")
+	}
 	return out, recon
 }
 
@@ -279,6 +279,10 @@ func buildHistoryRecords(in DayInput, socByOffset map[int]float64) []hourHistory
 	pvByOffset := bucketByOffsetFromStart(filterMetric(in.HistoryDeltaPoints, "accumulated_pv_energy_yield_kwh"), historyStart, historyHours)
 	importByOffset := bucketByOffsetFromStart(filterMetric(in.HistoryDeltaPoints, "accumulated_electricity_purchased_kwh"), historyStart, historyHours)
 	exportByOffset := bucketByOffsetFromStart(filterMetric(in.HistoryDeltaPoints, "accumulated_electricity_sold_kwh"), historyStart, historyHours)
+	chargeByOffset := bucketByOffsetFromStart(filterMetric(in.HistoryDeltaPoints, essChargedCounterKey), historyStart, historyHours)
+	dischargeByOffset := bucketByOffsetFromStart(filterMetric(in.HistoryDeltaPoints, essDischargedCounterKey), historyStart, historyHours)
+	hasChargeCounter := len(filterMetric(in.HistoryDeltaPoints, essChargedCounterKey)) > 0
+	hasDischargeCounter := len(filterMetric(in.HistoryDeltaPoints, essDischargedCounterKey)) > 0
 
 	loc := dayStart.Location()
 	yesterdayDate := dayStart.AddDate(0, 0, -1).In(loc).Format("2006-01-02")
@@ -322,17 +326,10 @@ func buildHistoryRecords(in DayInput, socByOffset map[int]float64) []hourHistory
 		}
 		var flow HourFlows
 		if flowRow != nil {
-			flow = HourFlows{
-				PV:            pvByOffset[i],
-				GridImport:    importByOffset[i],
-				GridExport:    exportByOffset[i],
-				EssCharged:    flowRow.EssCharged,
-				EssDischarged: flowRow.EssDischarged,
-				PVToEss:       flowRow.PVToEss,
-				GridToEss:     flowRow.GridToEss,
-				EssToLoad:     flowRow.EssToLoad,
-				EssToGrid:     flowRow.EssToGrid,
-			}
+			flow = essFlowsFromCounters(*flowRow,
+				hasChargeCounter, chargeByOffset[i],
+				hasDischargeCounter, dischargeByOffset[i],
+				pvByOffset[i], importByOffset[i], exportByOffset[i])
 		}
 		var soc *float64
 		socOffset := i - historyHours

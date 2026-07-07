@@ -292,3 +292,55 @@ func TestResolveForDayCivilDate(t *testing.T) {
 		t.Errorf("2026-06-01: got %v, want 3", got.DistributionUahPerKwh)
 	}
 }
+
+func TestEssFlowsFromCountersUsesMeteredMagnitudes(t *testing.T) {
+	flow := essFlowsFromCounters(
+		FlowRow{EssCharged: 200, EssDischarged: 100, PVToEss: 50, GridToEss: 150, EssToLoad: 80, EssToGrid: 20},
+		true, 148,
+		true, 95,
+		10, 5, 0,
+	)
+	near(t, "essCharged", flow.EssCharged, 148)
+	near(t, "essDischarged", flow.EssDischarged, 95)
+	near(t, "pvToEss", flow.PVToEss, 50*(148.0/200.0))
+	near(t, "gridToEss", flow.GridToEss, 150*(148.0/200.0))
+}
+
+func TestRebalanceDailyLoadRemovesPhantomLoad(t *testing.T) {
+	rdn := 10.0
+	rows := []*HourRow{
+		{
+			Rdn: &rdn,
+			Flow: HourFlows{EssCharged: 132},
+			Econ: HourEconomics{Load: 0, BaselineCost: 0, ActualCost: 0, Effect: 0},
+		},
+		{
+			Rdn: &rdn,
+			Flow: HourFlows{PV: 100, GridImport: 50, EssDischarged: 50},
+			Econ: HourEconomics{Load: 200, PVToLoad: 120, GridToLoad: 80, BaselineCost: 2000, ActualCost: 500, Effect: 1500},
+		},
+	}
+	if !rebalanceDailyLoad(rows) {
+		t.Fatal("expected load rebalance to apply")
+	}
+	// balanced load = 100+50+50 - 132 = 68
+	var totalLoad float64
+	for _, row := range rows {
+		totalLoad += row.Econ.Load
+	}
+	near(t, "dailyLoad", totalLoad, 68)
+	near(t, "hour1Load", rows[1].Econ.Load, 68)
+	near(t, "hour1Effect", rows[1].Econ.Effect, 680-500)
+}
+
+func TestRebalanceDailyLoadNoOpWhenBalanced(t *testing.T) {
+	rdn := 5.0
+	rows := []*HourRow{{
+		Rdn:  &rdn,
+		Flow: HourFlows{PV: 10, GridImport: 5},
+		Econ: HourEconomics{Load: 15, BaselineCost: 75, ActualCost: 25, Effect: 50},
+	}}
+	if rebalanceDailyLoad(rows) {
+		t.Fatal("balanced day should not rebalance")
+	}
+}
