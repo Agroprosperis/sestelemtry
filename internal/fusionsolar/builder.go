@@ -124,11 +124,79 @@ func (a *sampleAccumulator) addEssDevice(samples []HistorySample, windowStart, w
 	}
 }
 
+// adjustPurePVYield rewrites accumulated_pv_energy_yield_kwh on single-
+// SmartLogger hybrid sites. FusionSolar's total_yield counts cumulative
+// inverter AC output (PV + ESS discharge), while live Modbus 40446 and
+// getKpiStationDay's PVYield track pure PV only. Subtracting the co-
+// located total_discharge counter at each timestamp recovers the correct
+// series. Dual-logger sites (EssLogger != nil) skip this — their primary
+// logger's total_yield is already PV-only and ESS discharge lives on the
+// dedicated ESS logger.
+func (a *sampleAccumulator) adjustPurePVYield() {
+	if a.topo.EssLogger != nil {
+		return
+	}
+	const pvKey = "accumulated_pv_energy_yield_kwh"
+	const disKey = "total_energy_discharged_kwh"
+
+	disByMS := map[int64]float64{}
+	disMS := make([]int64, 0)
+	for c, v := range a.values {
+		if c.metric == disKey {
+			disByMS[c.ms] = v
+			disMS = append(disMS, c.ms)
+		}
+	}
+	sort.Slice(disMS, func(i, j int) bool { return disMS[i] < disMS[j] })
+
+	dischargeAt := func(ms int64) float64 {
+		if v, ok := disByMS[ms]; ok {
+			return v
+		}
+		i := sort.Search(len(disMS), func(i int) bool { return disMS[i] > ms }) - 1
+		if i < 0 {
+			return 0
+		}
+		return disByMS[disMS[i]]
+	}
+
+	type pvCell struct {
+		key cellKey
+		ms  int64
+	}
+	pvCells := make([]pvCell, 0)
+	for c := range a.values {
+		if c.metric == pvKey {
+			pvCells = append(pvCells, pvCell{key: c, ms: c.ms})
+		}
+	}
+	sort.Slice(pvCells, func(i, j int) bool { return pvCells[i].ms < pvCells[j].ms })
+
+	var prevPure float64
+	for _, pc := range pvCells {
+		yield := a.values[pc.key]
+		pure := yield - dischargeAt(pc.ms)
+		if pure < 0 {
+			pure = 0
+		}
+		// Both inputs are monotonic lifetime counters; keep the derived
+		// pure-PV series monotonic too so delta aggregation never sees a
+		// backward step from a transient discharge > yield glitch.
+		if pure < prevPure {
+			pure = prevPure
+		}
+		a.values[pc.key] = pure
+		prevPure = pure
+	}
+}
+
 // samples folds the averaged SOC into the value set and returns the
 // final sample slice in stable (time, metric_key) order. Every sample
 // carries the org's device_host label when known so the energy-flow
 // allocator classifies archive rows exactly as live ones.
 func (a *sampleAccumulator) samples() []storage.Sample {
+	a.adjustPurePVYield()
+
 	for ms, count := range a.socCount {
 		if count == 0 {
 			continue

@@ -6,7 +6,14 @@ package fusionsolar
 // (they are already lifetime kWh counters), so the read-side delta /
 // flow logic treats archive and live data identically.
 //
-//	total_yield              -> accumulated_pv_energy_yield_kwh
+// On single-SmartLogger hybrid sites total_yield is the inverter's
+// cumulative AC output (PV generation + ESS discharge), not the pure PV
+// yield that Modbus register 40446 reports. sampleAccumulator adjusts
+// accumulated_pv_energy_yield_kwh to (total_yield − total_discharge) on
+// those sites before samples are emitted; dual-logger sites are left
+// untouched because their primary logger's total_yield is already PV-only.
+//
+//	total_yield              -> accumulated_pv_energy_yield_kwh (adjusted)
 //	total_power_consumption  -> accumulated_power_consumption_kwh
 //	total_supply_from_grid   -> accumulated_electricity_purchased_kwh (grid import)
 //	total_feed_in_to_grid    -> accumulated_electricity_sold_kwh      (grid export)

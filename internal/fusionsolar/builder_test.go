@@ -49,7 +49,7 @@ func TestSingleLoggerMapping(t *testing.T) {
 	out := acc.samples()
 
 	cases := map[string]float64{
-		"accumulated_pv_energy_yield_kwh":       36842.65,
+		"accumulated_pv_energy_yield_kwh":       36842.65 - 6492.31, // pure PV, not inverter AC output
 		"accumulated_power_consumption_kwh":     68193.29,
 		"accumulated_electricity_purchased_kwh": 39323.16,
 		"accumulated_electricity_sold_kwh":      19.78,
@@ -215,6 +215,44 @@ func TestAcChargeFallback(t *testing.T) {
 	out := acc.samples()
 	if v, ok := valueAt(out, "total_energy_charged_kwh", t0); !ok || v != 143348.99 {
 		t.Errorf("ac fallback total_energy_charged_kwh = %v ok=%v, want 143348.99", v, ok)
+	}
+}
+
+// TestSingleLoggerPurePVYield verifies that on a single-SmartLogger hybrid
+// site accumulated_pv_energy_yield_kwh is total_yield minus total_discharge
+// so archive PV deltas match getKpiStationDay's PVYield and live Modbus 40446.
+func TestSingleLoggerPurePVYield(t *testing.T) {
+	acc := newSampleAccumulator("ab", OrgHosts{Default: "10.23.40.251"}, Topology["ab"])
+	start := ts("2025-10-15T00:00:00Z")
+	end := start.Add(maxHistoryWindow)
+	tDay := ts("2025-10-15T12:00:00Z")
+	tNight := ts("2025-10-15T18:00:00Z")
+
+	acc.addLogger([]HistorySample{
+		{Time: tDay, Fields: map[string]float64{
+			"total_yield":     1000,
+			"total_discharge": 200,
+		}},
+		{Time: tNight, Fields: map[string]float64{
+			"total_yield":     1150, // +150 from ESS discharge only
+			"total_discharge": 350,  // +150 discharge
+		}},
+	}, start, end)
+
+	out := acc.samples()
+	dayPV, ok := valueAt(out, "accumulated_pv_energy_yield_kwh", tDay)
+	if !ok {
+		t.Fatal("missing day PV sample")
+	}
+	if dayPV != 800 {
+		t.Errorf("day pure PV = %v, want 800 (1000-200)", dayPV)
+	}
+	nightPV, ok := valueAt(out, "accumulated_pv_energy_yield_kwh", tNight)
+	if !ok {
+		t.Fatal("missing night PV sample")
+	}
+	if nightPV != 800 {
+		t.Errorf("night pure PV = %v, want 800 (1150-350, flat while ESS discharges)", nightPV)
 	}
 }
 
