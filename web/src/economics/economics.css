@@ -3172,28 +3172,25 @@ button.economics-optimum-row.open {
   position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  justify-content: center;
   margin-left: 2px;
-  padding: 1px 6px 1px 4px;
-  border: 1px solid #fcd9b6;
-  border-radius: 999px;
-  background: #fff7ed;
-  color: #9a3412;
+  padding: 0;
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #d97706;
   cursor: pointer;
   white-space: nowrap;
   font: inherit;
-  font-size: 11px;
-  line-height: 1.2;
+  font-size: 13px;
+  line-height: 1;
   flex-shrink: 0;
 }
 
 .economics-portfolio-warn-icon {
-  color: #d97706;
-}
-
-.economics-portfolio-warn-label {
-  color: #9a3412;
-  font-weight: 600;
+  color: inherit;
 }
 
 .economics-portfolio-warn-tip {
@@ -3219,11 +3216,10 @@ button.economics-optimum-row.open {
 
 .economics-portfolio-warn:hover,
 .economics-portfolio-warn:focus-visible {
-  color: #9a3412;
+  color: #b45309;
   text-decoration: none;
   outline: none;
-  border-color: #fdba74;
-  background: #ffedd5;
+  background: #fff7ed;
 }
 
 .economics-portfolio-warn:hover .economics-portfolio-warn-tip,

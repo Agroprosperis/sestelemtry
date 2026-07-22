@@ -92,16 +92,16 @@ export function EconomicsPortfolioView({
   )
 }
 
-const ANOMALY_REASON_SHORT_UA: Record<string, string> = {
-  peak_spike: 'стрибок',
-  hourly_over_limit: 'понад ліміт',
+const ANOMALY_REASON_TIP_UA: Record<string, string> = {
+  peak_spike: 'стрибок потужності',
+  hourly_over_limit: 'заряд/розряд понад ліміт',
   after_gap: 'розрив звʼязку',
 }
 
 function bessWarnTitle(site: EconomicsPortfolioSite): string {
   const hours = site.bess_anomalous_hours || site.bess_anomalous_days
   const reasons = (site.bess_anomaly_reasons ?? [])
-    .map((r) => ANOMALY_REASON_SHORT_UA[r] ?? r)
+    .map((r) => ANOMALY_REASON_TIP_UA[r] ?? r)
     .filter(Boolean)
   const reasonPart = reasons.length > 0 ? ` · ${reasons.join(', ')}` : ''
   const dates = (site.bess_anomalous_dates ?? []).filter(Boolean)
@@ -117,18 +117,12 @@ function BessWarnButton({
   onDiagnoseBess?: (site: EconomicsPortfolioSite) => void
 }) {
   const title = bessWarnTitle(site)
-  const shortReasons = (site.bess_anomaly_reasons ?? [])
-    .map((r) => ANOMALY_REASON_SHORT_UA[r] ?? r)
-    .filter(Boolean)
-    .join(', ')
-  const label = shortReasons || `${site.bess_anomalous_hours || site.bess_anomalous_days} год.`
 
   const body = (
     <>
       <span className="economics-portfolio-warn-icon" aria-hidden="true">
         ⚠
       </span>
-      <span className="economics-portfolio-warn-label">{label}</span>
       <span className="economics-portfolio-warn-tip" role="tooltip">
         {title}
         {onDiagnoseBess ? ' Натисніть, щоб відкрити день.' : ''}
