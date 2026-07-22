@@ -171,6 +171,11 @@ type DataQuality struct {
 	AnomalousHours             int
 	AnomalousDays              int
 	AnomalousDates             []string
+	// Anomalies lists each excluded hour with classified reasons
+	// (peak spike, hourly over-limit, after a telemetry gap).
+	Anomalies                  []AnomalyHour
+	// ReasonCounts rolls up Anomalies[*].Reasons for portfolio / notes.
+	ReasonCounts               map[string]int
 	MaxChargeKwhPerInterval    float64
 	MaxDischargeKwhPerInterval float64
 	PowerLimitKwhPerInterval   float64
@@ -178,6 +183,24 @@ type DataQuality struct {
 	// power (kW) seen in the period, from raw telemetry. It is the signal
 	// the per-interval anomaly check compares against powerLimitKw · tol.
 	MaxIntervalPowerKw float64
+}
+
+// Anomaly reason codes returned in DataQuality (stable API values).
+const (
+	AnomalyReasonPeakSpike       = "peak_spike"        // sub-hourly implied power > limit
+	AnomalyReasonHourlyOverLimit = "hourly_over_limit" // hourly charge/discharge > limit
+	AnomalyReasonAfterGap        = "after_gap"         // hour follows a multi-hour data hole
+)
+
+// AnomalyHour is one excluded УЗЕ hour with the signals that triggered it.
+type AnomalyHour struct {
+	At             string   // RFC3339 hour start in the aggregation tz
+	Date           string   // YYYY-MM-DD civil date
+	Hour           int      // 0..23 local
+	Reasons        []string // AnomalyReason* codes
+	PeakKw         float64
+	ChargedKwh     float64
+	DischargedKwh  float64
 }
 
 // essAnomalyTolerance is how far above the nominal per-interval power limit
@@ -189,9 +212,11 @@ const essAnomalyTolerance = 1.5
 // flag: (1) the sub-hourly peak power (EssPeakIntervalKw, from raw ~5-min
 // telemetry) exceeding powerLimitKw · tol, which catches spikes the hourly
 // sum averages away; and (2), as a fallback when no raw signal is present,
-// an hourly charge/discharge above powerLimitKw · 1h · tol. It returns the
-// set of anomalous hour starts (Unix seconds) plus a DataQuality summary.
-// When powerLimitKw ≤ 0 the filter is disabled (no hour is excluded).
+// an hourly charge/discharge above powerLimitKw · 1h · tol. Hours that
+// immediately follow a multi-hour hole in the series are also tagged
+// after_gap (typical after a connection break). It returns the set of
+// anomalous hour starts (Unix seconds) plus a DataQuality summary. When
+// powerLimitKw ≤ 0 the filter is disabled (no hour is excluded).
 func detectEssAnomalies(hourly []HourlyRecord, loc *time.Location, powerLimitKw, tol float64) (map[int64]bool, DataQuality) {
 	badHours := make(map[int64]bool)
 	dq := DataQuality{DataOK: true, PowerLimitKwhPerInterval: powerLimitKw}
@@ -209,23 +234,68 @@ func detectEssAnomalies(hourly []HourlyRecord, loc *time.Location, powerLimitKw,
 	if powerLimitKw <= 0 {
 		return badHours, dq
 	}
+
+	sorted := append([]HourlyRecord(nil), hourly...)
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i].HourStart.Before(sorted[j].HourStart)
+	})
+
 	limit := powerLimitKw * tol // hourly granularity → 1h interval
 	badDays := make(map[string]bool)
-	for _, h := range hourly {
-		corrupt := false
-		// Prefer the sub-hourly peak (kW): a single ~5-min spike above
-		// the power ceiling marks this hour corrupt. Fall back to the
-		// hourly-sum check only when no raw peak is available.
+	reasonCounts := make(map[string]int)
+	anomalies := make([]AnomalyHour, 0)
+	for i, h := range sorted {
+		peakOver := h.EssPeakIntervalKw > 0 && h.EssPeakIntervalKw > limit
+		hourlyOver := h.EssCharged > limit || h.EssDischarged > limit
+		var reasons []string
 		if h.EssPeakIntervalKw > 0 {
-			corrupt = h.EssPeakIntervalKw > limit
+			if peakOver {
+				reasons = append(reasons, AnomalyReasonPeakSpike)
+			}
+			// Peak path is authoritative for "is this hour corrupt"; still
+			// note hourly over-limit when both fire.
+			if peakOver && hourlyOver {
+				reasons = append(reasons, AnomalyReasonHourlyOverLimit)
+			}
+			if !peakOver {
+				continue
+			}
 		} else {
-			corrupt = h.EssCharged > limit || h.EssDischarged > limit
+			if !hourlyOver {
+				continue
+			}
+			reasons = append(reasons, AnomalyReasonHourlyOverLimit)
 		}
-		if !corrupt {
-			continue
+		local := h.HourStart.In(loc)
+		date := local.Format("2006-01-02")
+		// Tag after_gap when any multi-hour hole earlier the same civil
+		// day (not only the first hour back after reconnect) — spikes
+		// often land a couple of hours after the link returns.
+		for j := i - 1; j >= 0; j-- {
+			prevLocal := sorted[j].HourStart.In(loc)
+			if prevLocal.Format("2006-01-02") != date {
+				break
+			}
+			nextStart := sorted[j+1].HourStart
+			if nextStart.Sub(sorted[j].HourStart) > time.Hour+time.Minute {
+				reasons = append(reasons, AnomalyReasonAfterGap)
+				break
+			}
 		}
 		badHours[h.HourStart.Unix()] = true
-		badDays[h.HourStart.In(loc).Format("2006-01-02")] = true
+		badDays[date] = true
+		for _, r := range reasons {
+			reasonCounts[r]++
+		}
+		anomalies = append(anomalies, AnomalyHour{
+			At:            local.Format(time.RFC3339),
+			Date:          date,
+			Hour:          local.Hour(),
+			Reasons:       reasons,
+			PeakKw:        h.EssPeakIntervalKw,
+			ChargedKwh:    h.EssCharged,
+			DischargedKwh: h.EssDischarged,
+		})
 	}
 	dq.AnomalousHours = len(badHours)
 	dq.AnomalousDays = len(badDays)
@@ -234,6 +304,8 @@ func detectEssAnomalies(hourly []HourlyRecord, loc *time.Location, powerLimitKw,
 		dq.AnomalousDates = append(dq.AnomalousDates, k)
 	}
 	sort.Strings(dq.AnomalousDates)
+	dq.Anomalies = anomalies
+	dq.ReasonCounts = reasonCounts
 	dq.DataOK = dq.AnomalousHours == 0
 	return badHours, dq
 }

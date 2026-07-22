@@ -124,6 +124,12 @@ func TestDetectEssAnomalies(t *testing.T) {
 	if dq.MaxChargeKwhPerInterval != 400 {
 		t.Fatalf("MaxChargeKwhPerInterval = %v, want 400", dq.MaxChargeKwhPerInterval)
 	}
+	if len(dq.Anomalies) != 1 || len(dq.Anomalies[0].Reasons) == 0 {
+		t.Fatalf("Anomalies = %+v, want 1 hour with reasons", dq.Anomalies)
+	}
+	if dq.ReasonCounts[AnomalyReasonHourlyOverLimit] != 1 {
+		t.Fatalf("ReasonCounts = %v, want hourly_over_limit=1", dq.ReasonCounts)
+	}
 	// Disabled filter (limit ≤ 0) excludes nothing.
 	if b2, dq2 := detectEssAnomalies(hourly, loc, 0, essAnomalyTolerance); len(b2) != 0 || !dq2.DataOK {
 		t.Fatalf("disabled filter excluded hours: %v / %+v", b2, dq2)
@@ -156,6 +162,47 @@ func TestDetectEssAnomaliesPeakInterval(t *testing.T) {
 	}
 	if dq.MaxIntervalPowerKw != 200 {
 		t.Fatalf("MaxIntervalPowerKw = %v, want 200", dq.MaxIntervalPowerKw)
+	}
+	if dq.ReasonCounts[AnomalyReasonPeakSpike] != 1 {
+		t.Fatalf("ReasonCounts = %v, want peak_spike=1", dq.ReasonCounts)
+	}
+}
+
+// TestDetectEssAnomaliesAfterGap tags a peak spike later the same day as a
+// multi-hour hole (connection-loss pattern), not only the first hour back.
+func TestDetectEssAnomaliesAfterGap(t *testing.T) {
+	loc := time.UTC
+	base := time.Date(2026, 7, 12, 0, 0, 0, 0, loc)
+	spike := base.Add(14 * time.Hour)
+	hourly := []HourlyRecord{
+		{HourStart: base.Add(8 * time.Hour), EssCharged: 10, EssPeakIntervalKw: 50},
+		// Gap 08→12, then continuous 12→13→14 with spike at 14.
+		{HourStart: base.Add(12 * time.Hour), EssCharged: 20, EssPeakIntervalKw: 80},
+		{HourStart: base.Add(13 * time.Hour), EssCharged: 30, EssPeakIntervalKw: 90},
+		{HourStart: spike, EssCharged: 40, EssPeakIntervalKw: 200},
+	}
+	bad, dq := detectEssAnomalies(hourly, loc, 100, essAnomalyTolerance) // limit 150
+	if len(bad) != 1 || !bad[spike.Unix()] {
+		t.Fatalf("bad = %v, want spike hour", bad)
+	}
+	if dq.ReasonCounts[AnomalyReasonPeakSpike] != 1 || dq.ReasonCounts[AnomalyReasonAfterGap] != 1 {
+		t.Fatalf("ReasonCounts = %v, want peak_spike+after_gap", dq.ReasonCounts)
+	}
+	if len(dq.Anomalies) != 1 {
+		t.Fatalf("Anomalies len = %d", len(dq.Anomalies))
+	}
+	got := dq.Anomalies[0].Reasons
+	hasGap, hasPeak := false, false
+	for _, r := range got {
+		if r == AnomalyReasonAfterGap {
+			hasGap = true
+		}
+		if r == AnomalyReasonPeakSpike {
+			hasPeak = true
+		}
+	}
+	if !hasGap || !hasPeak {
+		t.Fatalf("reasons = %v, want peak_spike and after_gap", got)
 	}
 }
 

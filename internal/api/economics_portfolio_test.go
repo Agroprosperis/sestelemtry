@@ -49,6 +49,7 @@ func TestPortfolioSiteFromTotals(t *testing.T) {
 		EssDataQuality: economics.DataQuality{
 			DataOK: false, AnomalousHours: 3, AnomalousDays: 2,
 			AnomalousDates: []string{"2026-07-03", "2026-07-11"},
+			ReasonCounts:   map[string]int{economics.AnomalyReasonPeakSpike: 2, economics.AnomalyReasonAfterGap: 1},
 		},
 	}
 	s := portfolioSiteFromTotals("ze", "Жмеринський", tot, true)
@@ -66,6 +67,9 @@ func TestPortfolioSiteFromTotals(t *testing.T) {
 	}
 	if len(s.BessAnomalousDates) != 2 || s.BessAnomalousDates[0] != "2026-07-03" {
 		t.Fatalf("BessAnomalousDates = %v, want [2026-07-03 2026-07-11]", s.BessAnomalousDates)
+	}
+	if len(s.BessAnomalyReasons) != 2 || s.BessAnomalyReasons[0] != economics.AnomalyReasonAfterGap {
+		t.Fatalf("BessAnomalyReasons = %v, want [after_gap peak_spike]", s.BessAnomalyReasons)
 	}
 
 	// Negative ESS reserve clamps to zero.

@@ -248,24 +248,55 @@ type EconomicsDataQuality struct {
 	AnomalousHours             int      `json:"anomalous_hours"`
 	AnomalousDays              int      `json:"anomalous_days"`
 	AnomalousDates             []string `json:"anomalous_dates"`
-	MaxChargeKwhPerInterval    float64  `json:"max_charge_kwh_per_interval"`
-	MaxDischargeKwhPerInterval float64  `json:"max_discharge_kwh_per_interval"`
-	PowerLimitKwhPerInterval   float64  `json:"power_limit_kwh_per_interval"`
-	MaxIntervalPowerKw         float64  `json:"max_interval_power_kw"`
+	// Anomalies is the per-hour decode (reasons + peak/charge signals).
+	Anomalies []EconomicsAnomalyHour `json:"anomalies,omitempty"`
+	// ReasonCounts rolls up anomaly reason codes across Anomalies.
+	ReasonCounts map[string]int `json:"reason_counts,omitempty"`
+	MaxChargeKwhPerInterval    float64 `json:"max_charge_kwh_per_interval"`
+	MaxDischargeKwhPerInterval float64 `json:"max_discharge_kwh_per_interval"`
+	PowerLimitKwhPerInterval   float64 `json:"power_limit_kwh_per_interval"`
+	MaxIntervalPowerKw         float64 `json:"max_interval_power_kw"`
+}
+
+// EconomicsAnomalyHour is one excluded УЗЕ hour with classified reasons.
+type EconomicsAnomalyHour struct {
+	At            string   `json:"at"`
+	Date          string   `json:"date"`
+	Hour          int      `json:"hour"`
+	Reasons       []string `json:"reasons"`
+	PeakKw        float64  `json:"peak_kw"`
+	ChargedKwh    float64  `json:"charged_kwh"`
+	DischargedKwh float64  `json:"discharged_kwh"`
 }
 
 func dataQualityToJSON(q economics.DataQuality) EconomicsDataQuality {
-	return EconomicsDataQuality{
+	out := EconomicsDataQuality{
 		DataOk:                     q.DataOK,
 		TotalDays:                  q.TotalDays,
 		AnomalousHours:             q.AnomalousHours,
 		AnomalousDays:              q.AnomalousDays,
 		AnomalousDates:             q.AnomalousDates,
+		ReasonCounts:               q.ReasonCounts,
 		MaxChargeKwhPerInterval:    q.MaxChargeKwhPerInterval,
 		MaxDischargeKwhPerInterval: q.MaxDischargeKwhPerInterval,
 		PowerLimitKwhPerInterval:   q.PowerLimitKwhPerInterval,
 		MaxIntervalPowerKw:         q.MaxIntervalPowerKw,
 	}
+	if len(q.Anomalies) > 0 {
+		out.Anomalies = make([]EconomicsAnomalyHour, len(q.Anomalies))
+		for i, a := range q.Anomalies {
+			out.Anomalies[i] = EconomicsAnomalyHour{
+				At:            a.At,
+				Date:          a.Date,
+				Hour:          a.Hour,
+				Reasons:       append([]string(nil), a.Reasons...),
+				PeakKw:        a.PeakKw,
+				ChargedKwh:    a.ChargedKwh,
+				DischargedKwh: a.DischargedKwh,
+			}
+		}
+	}
+	return out
 }
 
 // EconomicsMonthlyDay is one day of the month breakdown (daily totals
@@ -758,6 +789,9 @@ type EconomicsPortfolioSite struct {
 	// BessAnomalousDates lists civil dates that contain ≥1 excluded УЗЕ
 	// hour; the portfolio ⚠ drills into the first of them.
 	BessAnomalousDates []string `json:"bess_anomalous_dates,omitempty"`
+	// BessAnomalyReasons lists distinct reason codes seen on this site
+	// (peak_spike / hourly_over_limit / after_gap) for the portfolio ⚠ tip.
+	BessAnomalyReasons []string `json:"bess_anomaly_reasons,omitempty"`
 	PvKwh              float64  `json:"pv_kwh"`
 	LoadKwh            float64 `json:"load_kwh"`
 	GridImportKwh      float64 `json:"grid_import_kwh"`
@@ -804,6 +838,21 @@ func scheduleReserveUah(t economics.MonthlyTotals) float64 {
 	return shiftable * gap
 }
 
+// reasonKeys returns sorted distinct reason codes from a ReasonCounts map.
+func reasonKeys(counts map[string]int) []string {
+	if len(counts) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(counts))
+	for k, n := range counts {
+		if n > 0 {
+			out = append(out, k)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
 // portfolioSiteFromTotals builds one site row from a period's totals.
 func portfolioSiteFromTotals(id, name string, t economics.MonthlyTotals, hasData bool) EconomicsPortfolioSite {
 	sched := scheduleReserveUah(t)
@@ -824,6 +873,7 @@ func portfolioSiteFromTotals(id, name string, t economics.MonthlyTotals, hasData
 		BessAnomalousHours: t.EssDataQuality.AnomalousHours,
 		BessAnomalousDays:  t.EssDataQuality.AnomalousDays,
 		BessAnomalousDates: append([]string(nil), t.EssDataQuality.AnomalousDates...),
+		BessAnomalyReasons: reasonKeys(t.EssDataQuality.ReasonCounts),
 		PvKwh:              t.PV,
 		LoadKwh:            t.Load,
 		GridImportKwh:      t.GridImport,
@@ -962,6 +1012,15 @@ func (h *Handlers) economicsPortfolio(w http.ResponseWriter, r *http.Request) {
 			}
 			totals.EssDataQuality.AnomalousHours += t.EssDataQuality.AnomalousHours
 			totals.EssDataQuality.AnomalousDays += t.EssDataQuality.AnomalousDays
+			if len(t.EssDataQuality.ReasonCounts) > 0 {
+				if totals.EssDataQuality.ReasonCounts == nil {
+					totals.EssDataQuality.ReasonCounts = make(map[string]int)
+				}
+				for k, v := range t.EssDataQuality.ReasonCounts {
+					totals.EssDataQuality.ReasonCounts[k] += v
+				}
+			}
+			totals.EssDataQuality.Anomalies = append(totals.EssDataQuality.Anomalies, t.EssDataQuality.Anomalies...)
 		}
 	}
 
@@ -986,6 +1045,7 @@ func (h *Handlers) economicsPortfolio(w http.ResponseWriter, r *http.Request) {
 		BessDataOk:         totals.EssDataQuality.AnomalousHours == 0,
 		BessAnomalousHours: totals.EssDataQuality.AnomalousHours,
 		BessAnomalousDays:  totals.EssDataQuality.AnomalousDays,
+		BessAnomalyReasons: reasonKeys(totals.EssDataQuality.ReasonCounts),
 		PvKwh:              totals.PV,
 		LoadKwh:           totals.Load,
 		GridImportKwh:     totals.GridImport,

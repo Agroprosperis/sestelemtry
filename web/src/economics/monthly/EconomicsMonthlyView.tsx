@@ -534,28 +534,64 @@ export function AiCardGrid({ cards }: { cards: AiCard[] }) {
 }
 
 // EssDataQualityNote renders the ⚠ УЗЕ anomaly-filter note when one or more
-// days were excluded from the fact/optimum/reserve (§3.4). It is shared by
+// hours were excluded from the fact/optimum/reserve (§3.4). It is shared by
 // the monthly and annual reserve sections.
+const ANOMALY_REASON_UA: Record<string, string> = {
+  peak_spike: 'стрибок потужності (пік)',
+  hourly_over_limit: 'годинний заряд/розряд понад ліміт',
+  after_gap: 'після розриву звʼязку / пропуску даних',
+}
+
+function formatAnomalyReasons(reasons: string[] | null | undefined): string {
+  if (!reasons || reasons.length === 0) return ''
+  return reasons
+    .map((r) => ANOMALY_REASON_UA[r] ?? r)
+    .filter(Boolean)
+    .join('; ')
+}
+
+function formatAnomalyHourLabel(a: { date: string; hour: number }): string {
+  const dm = /^\d{4}-\d{2}-\d{2}$/.test(a.date)
+    ? `${a.date.slice(8, 10)}.${a.date.slice(5, 7)}`
+    : a.date
+  return `${dm} ${String(a.hour).padStart(2, '0')}:00`
+}
+
 export function EssDataQualityNote({ dq }: { dq?: EconomicsDataQuality }) {
   if (!dq || dq.data_ok || (dq.anomalous_hours ?? dq.anomalous_days) <= 0) return null
   const hours = dq.anomalous_hours ?? 0
   const days = dq.anomalous_days ?? 0
   const dates = (dq.anomalous_dates ?? []).filter(Boolean)
+  const anomalies = dq.anomalies ?? []
+  const reasonKeys = Object.keys(dq.reason_counts ?? {}).sort()
   const countLabel =
     hours > 0
       ? `${hours} год.${days > 0 ? ` (${days} дн.)` : ''}`
       : `${days} дн.`
+  const reasonSummary = formatAnomalyReasons(reasonKeys)
+  const detailLimit = 8
   return (
-    <p id="ess-data-quality" className="economics-ai-dq-note" role="note" tabIndex={-1}>
-      ⚠ Дані УЗЕ: виключено {countLabel} з аномальними показаннями
-      (заряд/розряд понад ліміт потужності). Факт, оптимум і резерв пораховано без цих годин.
-      {dates.length > 0 ? (
-        <>
-          {' '}
-          Дати: {dates.join(', ')}.
-        </>
+    <div id="ess-data-quality" className="economics-ai-dq-note" role="note" tabIndex={-1}>
+      <p>
+        ⚠ Дані УЗЕ: виключено {countLabel} з аномальними показаннями.
+        Факт, оптимум і резерв пораховано без цих годин.
+        {reasonSummary ? <> Причини: {reasonSummary}.</> : null}
+        {dates.length > 0 && anomalies.length === 0 ? <> Дати: {dates.join(', ')}.</> : null}
+      </p>
+      {anomalies.length > 0 ? (
+        <ul className="economics-ai-dq-list">
+          {anomalies.slice(0, detailLimit).map((a) => (
+            <li key={`${a.date}-${a.hour}-${a.at}`}>
+              {formatAnomalyHourLabel(a)} — {formatAnomalyReasons(a.reasons) || 'аномалія'}
+              {a.peak_kw > 0 ? ` (пік ${Math.round(a.peak_kw)} кВт)` : null}
+            </li>
+          ))}
+          {anomalies.length > detailLimit ? (
+            <li>… ще {anomalies.length - detailLimit} год.</li>
+          ) : null}
+        </ul>
       ) : null}
-    </p>
+    </div>
   )
 }
 

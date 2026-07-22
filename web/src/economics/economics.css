@@ -2269,6 +2269,19 @@ button.economics-optimum-row.open {
   color: #9a3412;
 }
 
+.economics-ai-dq-note > p {
+  margin: 0;
+}
+
+.economics-ai-dq-list {
+  margin: 6px 0 0;
+  padding-left: 1.2em;
+}
+
+.economics-ai-dq-list li {
+  margin: 2px 0;
+}
+
 .economics-ai-result {
   border: 1px solid #eef1f6;
   border-radius: 10px;

@@ -499,8 +499,19 @@ export async function fetchEconomicsDaily(
   return res.json()
 }
 
+// EconomicsAnomalyHour is one excluded УЗЕ hour with classified reasons.
+export type EconomicsAnomalyHour = {
+  at: string
+  date: string
+  hour: number
+  reasons: string[]
+  peak_kw: number
+  charged_kwh: number
+  discharged_kwh: number
+}
+
 // EconomicsDataQuality mirrors internal/api.EconomicsDataQuality — the
-// ESS (УЗЕ) anomaly filter outcome: anomalous days are excluded from the
+// ESS (УЗЕ) anomaly filter outcome: anomalous hours are excluded from the
 // fact/optimum/reserve.
 export type EconomicsDataQuality = {
   data_ok: boolean
@@ -508,6 +519,8 @@ export type EconomicsDataQuality = {
   anomalous_hours: number
   anomalous_days: number
   anomalous_dates: string[] | null
+  anomalies?: EconomicsAnomalyHour[] | null
+  reason_counts?: Record<string, number> | null
   max_charge_kwh_per_interval: number
   max_discharge_kwh_per_interval: number
   power_limit_kwh_per_interval: number
@@ -793,6 +806,8 @@ export type EconomicsPortfolioSite = {
   // Civil dates that contain ≥1 excluded УЗЕ hour; the portfolio ⚠
   // drills into the first of them when present.
   bess_anomalous_dates?: string[] | null
+  // Distinct reason codes (peak_spike / hourly_over_limit / after_gap).
+  bess_anomaly_reasons?: string[] | null
   pv_kwh: number
   load_kwh: number
   grid_import_kwh: number

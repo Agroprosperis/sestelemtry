@@ -207,6 +207,15 @@ func AggregatePeriod(
 		totals.EssDataQuality.AnomalousHours += mt.EssDataQuality.AnomalousHours
 		totals.EssDataQuality.AnomalousDays += mt.EssDataQuality.AnomalousDays
 		totals.EssDataQuality.AnomalousDates = append(totals.EssDataQuality.AnomalousDates, mt.EssDataQuality.AnomalousDates...)
+		totals.EssDataQuality.Anomalies = append(totals.EssDataQuality.Anomalies, mt.EssDataQuality.Anomalies...)
+		if len(mt.EssDataQuality.ReasonCounts) > 0 {
+			if totals.EssDataQuality.ReasonCounts == nil {
+				totals.EssDataQuality.ReasonCounts = make(map[string]int)
+			}
+			for k, v := range mt.EssDataQuality.ReasonCounts {
+				totals.EssDataQuality.ReasonCounts[k] += v
+			}
+		}
 		if mt.EssDataQuality.MaxChargeKwhPerInterval > totals.EssDataQuality.MaxChargeKwhPerInterval {
 			totals.EssDataQuality.MaxChargeKwhPerInterval = mt.EssDataQuality.MaxChargeKwhPerInterval
 		}

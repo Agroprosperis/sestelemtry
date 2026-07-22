@@ -92,15 +92,28 @@ export function EconomicsPortfolioView({
   )
 }
 
+function bessWarnTitle(site: EconomicsPortfolioSite): string {
+  const hours = site.bess_anomalous_hours || site.bess_anomalous_days
+  const reasonUa: Record<string, string> = {
+    peak_spike: 'стрибок потужності',
+    hourly_over_limit: 'заряд/розряд понад ліміт',
+    after_gap: 'після розриву звʼязку',
+  }
+  const reasons = (site.bess_anomaly_reasons ?? [])
+    .map((r) => reasonUa[r] ?? r)
+    .filter(Boolean)
+  const reasonPart = reasons.length > 0 ? ` · ${reasons.join(', ')}` : ''
+  return `Дані УЗЕ биті: виключено ${hours} год.${reasonPart}`
+}
+
 function BessWarnButton({
   site,
-  title,
   onDiagnoseBess,
 }: {
   site: EconomicsPortfolioSite
-  title: string
   onDiagnoseBess?: (site: EconomicsPortfolioSite) => void
 }) {
+  const title = bessWarnTitle(site)
   if (!onDiagnoseBess) {
     return (
       <span className="economics-portfolio-warn" title={title}>
@@ -113,7 +126,7 @@ function BessWarnButton({
     <button
       type="button"
       className="economics-portfolio-warn"
-      title={`${title} Натисніть, щоб відкрити.`}
+      title={`${title}. Натисніть, щоб відкрити.`}
       aria-label={`${formatOrganizationLabel(site.id)}: ${title}`}
       onClick={(e) => {
         e.stopPropagation()
@@ -175,11 +188,7 @@ function PortfolioBody({
               <span className="economics-portfolio-name">
                 {formatOrganizationLabel(s.id)}
                 {!s.bess_data_ok ? (
-                  <BessWarnButton
-                    site={s}
-                    title={`Дані УЗЕ частково некоректні — виключено ${s.bess_anomalous_hours || s.bess_anomalous_days} год.`}
-                    onDiagnoseBess={onDiagnoseBess}
-                  />
+                  <BessWarnButton site={s} onDiagnoseBess={onDiagnoseBess} />
                 ) : null}
               </span>
               <div className="economics-portfolio-track">
@@ -218,11 +227,7 @@ function PortfolioBody({
                   <td className="economics-month-table-left">
                     {formatOrganizationLabel(s.id)}
                     {!s.bess_data_ok && s.has_data ? (
-                      <BessWarnButton
-                        site={s}
-                        title={`Дані УЗЕ биті: виключено ${s.bess_anomalous_hours || s.bess_anomalous_days} год.`}
-                        onDiagnoseBess={onDiagnoseBess}
-                      />
+                      <BessWarnButton site={s} onDiagnoseBess={onDiagnoseBess} />
                     ) : null}
                   </td>
                   {s.has_data ? (
