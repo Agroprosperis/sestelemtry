@@ -1,6 +1,6 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { PlantInventory } from '../types'
+import type { PlantInventory, PlantInventoryHistory } from '../types'
 import { StationPage } from './StationPage'
 
 vi.mock('../dashboard/hooks/useOrganizationParam', () => ({
@@ -15,6 +15,23 @@ vi.mock('../dashboard/config', () => ({
   formatOrganizationLabel: (id: string) => id,
 }))
 
+function stubInventoryApis(inv: PlantInventory | null, hist: PlantInventoryHistory) {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url: string) => {
+      const u = String(url)
+      if (u.includes('plant-inventory/history')) {
+        return new Response(JSON.stringify(hist), { status: 200 })
+      }
+      if (u.includes('plant-inventory')) {
+        if (inv == null) return new Response('missing', { status: 404 })
+        return new Response(JSON.stringify(inv), { status: 200 })
+      }
+      return new Response('{}', { status: 200 })
+    }),
+  )
+}
+
 describe('StationPage', () => {
   beforeEach(() => {
     vi.unstubAllGlobals()
@@ -25,22 +42,12 @@ describe('StationPage', () => {
   })
 
   it('shows empty state when API returns 404', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (url: string) => {
-        if (String(url).includes('plant-inventory')) {
-          return new Response('missing', { status: 404 })
-        }
-        return new Response('{}', { status: 200 })
-      }),
-    )
+    stubInventoryApis(null, { organization_id: 'ab', changes: {} })
     render(<StationPage />)
-    expect(
-      await screen.findByText(/Ще немає знімка/i),
-    ).toBeInTheDocument()
+    expect(await screen.findByText(/Ще немає знімка/i)).toBeInTheDocument()
   })
 
-  it('renders passport values from a snapshot', async () => {
+  it('renders passport cards and expands history', async () => {
     const body: PlantInventory = {
       organization_id: 'ab',
       time: '2026-07-22T10:00:00Z',
@@ -52,21 +59,24 @@ describe('StationPage', () => {
       pcs_count: 8,
       ess_soh_pct: 99.5,
       active_power_control_mode: 4,
-      quality_flags: ['CONTROL_MODE_NOT_REMOTE'],
+      quality_flags: [],
     }
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (url: string) => {
-        if (String(url).includes('plant-inventory')) {
-          return new Response(JSON.stringify(body), { status: 200 })
-        }
-        return new Response('{}', { status: 200 })
-      }),
-    )
+    const hist: PlantInventoryHistory = {
+      organization_id: 'ab',
+      changes: {
+        pv_rated_kw: [
+          { at: '2026-07-20T00:00:00Z', from: 400, to: 450, poll_reason: 'daily' },
+        ],
+      },
+    }
+    stubInventoryApis(body, hist)
     render(<StationPage />)
     expect(await screen.findByText('Номінальна потужність СЕС')).toBeInTheDocument()
     expect(screen.getByText('450')).toBeInTheDocument()
-    expect(screen.getByText(/Remote communication scheduling/)).toBeInTheDocument()
-    expect(screen.getByText(/Режим керування не Remote/)).toBeInTheDocument()
+    expect(screen.getByText('1 змін')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /Номінальна потужність СЕС/i }))
+    expect(await screen.findByText('добовий')).toBeInTheDocument()
+    expect(screen.getByText('400')).toBeInTheDocument()
   })
 })

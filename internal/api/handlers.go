@@ -132,6 +132,9 @@ type storeReader interface {
 	// LatestPlantInventory returns the newest plant-passport snapshot
 	// for an organization. ok is false when none exist yet.
 	LatestPlantInventory(ctx context.Context, organizationID string) (PlantInventoryResponse, bool, error)
+	// PlantInventoryHistory returns per-field change events derived
+	// from recent plant-inventory snapshots.
+	PlantInventoryHistory(ctx context.Context, organizationID string, limit int) (PlantInventoryHistoryResponse, error)
 	Ready(ctx context.Context) error
 }
 
@@ -298,6 +301,7 @@ func (h *Handlers) Router() http.Handler {
 	mux.HandleFunc("/api/v1/fusionsolar/import", h.fusionSolarImport)
 	mux.HandleFunc("/api/v1/fusionsolar/config", h.fusionSolarConfig)
 	mux.HandleFunc("/api/v1/weather-forecast", h.weatherForecast)
+	mux.HandleFunc("/api/v1/plant-inventory/history", h.plantInventoryHistory)
 	mux.HandleFunc("/api/v1/plant-inventory", h.plantInventory)
 	mux.HandleFunc("/api/v1/organization-tariffs", h.organizationTariffs)
 	mux.HandleFunc("/api/v1/organization-tariff-schedule", h.organizationTariffSchedule)

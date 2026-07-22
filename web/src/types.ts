@@ -140,6 +140,18 @@ export type PlantInventory = {
   raw?: Record<string, unknown>
 }
 
+export type PlantInventoryChange = {
+  at: string
+  from: number | null
+  to: number | null
+  poll_reason?: string
+}
+
+export type PlantInventoryHistory = {
+  organization_id: string
+  changes: Record<string, PlantInventoryChange[]>
+}
+
 // OpenMeteoForecast is the subset of the api.open-meteo.com /v1/forecast
 // response that the weather widget consumes. Only the fields we actually
 // read are typed; the upstream payload contains many more keys (radiation

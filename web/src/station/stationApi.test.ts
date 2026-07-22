@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { fetchPlantInventory } from '../api'
-import type { PlantInventory } from '../types'
+import { fetchPlantInventory, fetchPlantInventoryHistory } from '../api'
+import type { PlantInventory, PlantInventoryHistory } from '../types'
 
 describe('fetchPlantInventory', () => {
   beforeEach(() => {
@@ -49,5 +49,32 @@ describe('fetchPlantInventory', () => {
       vi.fn(async () => new Response('boom', { status: 500 })),
     )
     await expect(fetchPlantInventory('ab')).rejects.toThrow(/500/)
+  })
+})
+
+describe('fetchPlantInventoryHistory', () => {
+  beforeEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('returns change events on 200', async () => {
+    const body: PlantInventoryHistory = {
+      organization_id: 'ab',
+      changes: {
+        pv_rated_kw: [
+          { at: '2026-07-22T10:00:00Z', from: 450, to: 600, poll_reason: 'daily' },
+        ],
+      },
+    }
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify(body), { status: 200 })),
+    )
+    const got = await fetchPlantInventoryHistory('ab')
+    expect(got.changes.pv_rated_kw[0].to).toBe(600)
   })
 })

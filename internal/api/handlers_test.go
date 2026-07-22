@@ -26,6 +26,8 @@ type mockStore struct {
 	weatherErr   error
 	inventory    *PlantInventoryResponse
 	inventoryErr error
+	inventoryHistory    *PlantInventoryHistoryResponse
+	inventoryHistoryErr error
 	readyErr     error
 
 	currentAt time.Time
@@ -175,6 +177,21 @@ func (m *mockStore) LatestPlantInventory(_ context.Context, organizationID strin
 	out := *m.inventory
 	out.OrganizationID = organizationID
 	return out, true, nil
+}
+
+func (m *mockStore) PlantInventoryHistory(_ context.Context, organizationID string, _ int) (PlantInventoryHistoryResponse, error) {
+	if m.inventoryHistoryErr != nil {
+		return PlantInventoryHistoryResponse{}, m.inventoryHistoryErr
+	}
+	if m.inventoryHistory == nil {
+		return PlantInventoryHistoryResponse{
+			OrganizationID: organizationID,
+			Changes:        map[string][]PlantInventoryChange{},
+		}, nil
+	}
+	out := *m.inventoryHistory
+	out.OrganizationID = organizationID
+	return out, nil
 }
 
 func TestCurrentRequiresOrganizationID(t *testing.T) {

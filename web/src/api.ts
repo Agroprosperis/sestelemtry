@@ -11,6 +11,7 @@ import type {
   OpenMeteoForecast,
   OrganizationsResponse,
   PlantInventory,
+  PlantInventoryHistory,
   PvForecastPoint,
   RegistersResponse,
   TimeseriesResponse,
@@ -96,6 +97,23 @@ export async function fetchPlantInventory(
     throw new Error(`plant-inventory request failed: ${res.status}`)
   }
   return (await res.json()) as PlantInventory
+}
+
+// fetchPlantInventoryHistory returns per-field change events derived from
+// recent plant-inventory snapshots (identical polls are filtered out).
+export async function fetchPlantInventoryHistory(
+  organizationID: string,
+  opts?: { limit?: number; signal?: AbortSignal },
+): Promise<PlantInventoryHistory> {
+  const url = buildURL('/api/v1/plant-inventory/history', {
+    organization_id: organizationID,
+    limit: opts?.limit != null ? String(opts.limit) : undefined,
+  })
+  const res = await fetch(url, { signal: opts?.signal })
+  if (!res.ok) {
+    throw new Error(`plant-inventory history request failed: ${res.status}`)
+  }
+  return (await res.json()) as PlantInventoryHistory
 }
 
 let registersCache: Promise<RegistersResponse> | null = null

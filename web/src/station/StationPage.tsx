@@ -1,19 +1,24 @@
+import { useState } from 'react'
 import { OrganizationSelect } from '../dashboard/components/OrganizationSelect'
 import { formatOrganizationLabel } from '../dashboard/config'
 import { useOrganizationParam } from '../dashboard/hooks/useOrganizationParam'
-import type { PlantInventory } from '../types'
+import type { PlantInventory, PlantInventoryChange, PlantInventoryHistory } from '../types'
+import { StationIcon } from './StationIcon'
 import './station.css'
 import {
   GROUP_LABELS,
   STATION_PARAMS,
   type StationParamDef,
   type StationParamGroup,
+  type StationParamKey,
+  formatHistoryValue,
   formatParamDisplay,
   formatPollReason,
   formatQualityFlag,
   readParamValue,
 } from './stationParams'
 import { usePlantInventory } from './usePlantInventory'
+import { usePlantInventoryHistory } from './usePlantInventoryHistory'
 
 function backToDashboard() {
   if (typeof window === 'undefined') return
@@ -26,89 +31,173 @@ function backToDashboard() {
 function formatSnapshotTime(iso: string): string {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return iso
-  return d.toLocaleString('uk-UA', {
-    timeZone: 'UTC',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  }) + ' UTC'
-}
-
-function ParamRows({ inv, group }: { inv: PlantInventory; group: StationParamGroup }) {
-  const defs = STATION_PARAMS.filter((d) => d.group === group)
   return (
-    <>
-      {defs.map((def) => (
-        <ParamRow key={def.key} inv={inv} def={def} />
-      ))}
-    </>
+    d.toLocaleString('uk-UA', {
+      timeZone: 'UTC',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    }) + ' UTC'
   )
 }
 
-function ParamRow({ inv, def }: { inv: PlantInventory; def: StationParamDef }) {
+function ParamCard({
+  inv,
+  def,
+  changes,
+}: {
+  inv: PlantInventory
+  def: StationParamDef
+  changes: PlantInventoryChange[]
+}) {
+  const [open, setOpen] = useState(false)
   const value = readParamValue(inv, def.key)
   const display = formatParamDisplay(def, value)
+  const changeCount = changes.length
+
   return (
-    <tr>
-      <th scope="row">{def.label}</th>
-      <td>
-        {display}
-        {def.unit && display !== '—' ? <span className="station-unit">{def.unit}</span> : null}
-      </td>
-    </tr>
+    <article className={`station-card${open ? ' is-open' : ''}`}>
+      <button
+        type="button"
+        className="station-card-main"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+      >
+        <span className="station-card-icon" data-icon={def.icon}>
+          <StationIcon id={def.icon} />
+        </span>
+        <span className="station-card-body">
+          <span className="station-card-label">{def.label}</span>
+          <span className="station-card-value">
+            {display}
+            {def.unit && display !== '—' ? (
+              <span className="station-unit">{def.unit}</span>
+            ) : null}
+          </span>
+        </span>
+        <span className="station-card-meta">
+          <span className="station-card-history-hint">
+            {changeCount > 0 ? `${changeCount} змін` : 'історія'}
+          </span>
+          <span className="station-card-chevron" aria-hidden="true">
+            {open ? '▾' : '▸'}
+          </span>
+        </span>
+      </button>
+      {open ? (
+        <div className="station-card-history">
+          {changeCount === 0 ? (
+            <p className="station-history-empty">Змін поки не зафіксовано.</p>
+          ) : (
+            <ul className="station-history-list">
+              {changes.map((ev) => (
+                <li key={`${ev.at}-${ev.from}-${ev.to}`}>
+                  <time dateTime={ev.at}>{formatSnapshotTime(ev.at)}</time>
+                  <span className="station-history-diff">
+                    <span>{formatHistoryValue(def, ev.from)}</span>
+                    <span className="station-history-arrow">→</span>
+                    <span>{formatHistoryValue(def, ev.to)}</span>
+                    {def.unit ? <span className="station-unit">{def.unit}</span> : null}
+                  </span>
+                  {ev.poll_reason ? (
+                    <span className="station-history-reason">
+                      {formatPollReason(ev.poll_reason)}
+                    </span>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      ) : null}
+    </article>
   )
 }
 
-function InventoryBody({ inv }: { inv: PlantInventory }) {
+function MetaCard({ inv }: { inv: PlantInventory }) {
+  return (
+    <article className="station-card station-card-static">
+      <div className="station-card-main static">
+        <span className="station-card-icon" data-icon="meta">
+          <StationIcon id="meta" />
+        </span>
+        <span className="station-card-body">
+          <span className="station-card-label">Останній знімок</span>
+          <span className="station-card-value station-card-value-sm">
+            {formatSnapshotTime(inv.time)}
+          </span>
+          <dl className="station-meta-dl">
+            <div>
+              <dt>Причина</dt>
+              <dd>{formatPollReason(inv.poll_reason)}</dd>
+            </div>
+            {inv.device_host ? (
+              <div>
+                <dt>SmartLogger</dt>
+                <dd>{inv.device_host}</dd>
+              </div>
+            ) : null}
+            <div>
+              <dt>Прапорці якості</dt>
+              <dd>
+                {inv.quality_flags.length === 0 ? (
+                  'немає'
+                ) : (
+                  <ul className="station-flags">
+                    {inv.quality_flags.map((f) => (
+                      <li key={f}>{formatQualityFlag(f)}</li>
+                    ))}
+                  </ul>
+                )}
+              </dd>
+            </div>
+          </dl>
+        </span>
+      </div>
+    </article>
+  )
+}
+
+function changesFor(
+  history: PlantInventoryHistory | null,
+  key: StationParamKey,
+): PlantInventoryChange[] {
+  return history?.changes?.[key] ?? []
+}
+
+function InventoryBody({
+  inv,
+  history,
+}: {
+  inv: PlantInventory
+  history: PlantInventoryHistory | null
+}) {
   const groups: StationParamGroup[] = ['passport', 'ops']
   return (
     <>
-      {groups.map((group) => (
-        <section key={group} className="station-section">
-          <h2>{GROUP_LABELS[group]}</h2>
-          <table className="station-table">
-            <tbody>
-              <ParamRows inv={inv} group={group} />
-              {group === 'ops' ? (
-                <>
-                  <tr>
-                    <th scope="row">Час знімка</th>
-                    <td>{formatSnapshotTime(inv.time)}</td>
-                  </tr>
-                  <tr>
-                    <th scope="row">Причина опитування</th>
-                    <td>{formatPollReason(inv.poll_reason)}</td>
-                  </tr>
-                  {inv.device_host ? (
-                    <tr>
-                      <th scope="row">SmartLogger</th>
-                      <td>{inv.device_host}</td>
-                    </tr>
-                  ) : null}
-                  <tr>
-                    <th scope="row">Прапорці якості</th>
-                    <td>
-                      {inv.quality_flags.length === 0 ? (
-                        'немає'
-                      ) : (
-                        <ul className="station-flags">
-                          {inv.quality_flags.map((f) => (
-                            <li key={f}>{formatQualityFlag(f)}</li>
-                          ))}
-                        </ul>
-                      )}
-                    </td>
-                  </tr>
-                </>
-              ) : null}
-            </tbody>
-          </table>
-        </section>
-      ))}
+      {groups.map((group) => {
+        const defs = STATION_PARAMS.filter((d) => d.group === group)
+        return (
+          <section key={group} className="station-section">
+            <h2>{GROUP_LABELS[group]}</h2>
+            <div className="station-grid">
+              {defs.map((def: StationParamDef) => (
+                <ParamCard
+                  key={def.key}
+                  inv={inv}
+                  def={def}
+                  changes={changesFor(history, def.key)}
+                />
+              ))}
+              {group === 'ops' ? <MetaCard inv={inv} /> : null}
+            </div>
+          </section>
+        )
+      })}
     </>
   )
 }
@@ -116,6 +205,11 @@ function InventoryBody({ inv }: { inv: PlantInventory }) {
 export function StationPage() {
   const { organizationID, options, change: onOrganizationChange } = useOrganizationParam()
   const { data, loading, error } = usePlantInventory(organizationID)
+  const {
+    data: history,
+    loading: historyLoading,
+    error: historyError,
+  } = usePlantInventoryHistory(organizationID)
 
   return (
     <main className="station-page">
@@ -146,15 +240,25 @@ export function StationPage() {
         </div>
       ) : null}
 
-      {!error && loading ? <div className="station-loading">Завантаження…</div> : null}
+      {historyError ? (
+        <div className="station-error" role="alert">
+          Не вдалося завантажити історію: {historyError}
+        </div>
+      ) : null}
 
-      {!error && !loading && data == null ? (
+      {!error && (loading || historyLoading) ? (
+        <div className="station-loading">Завантаження…</div>
+      ) : null}
+
+      {!error && !loading && !historyLoading && data == null ? (
         <div className="station-empty">
           Ще немає знімка — collector зніме при старті / за розкладом.
         </div>
       ) : null}
 
-      {!error && !loading && data != null ? <InventoryBody inv={data} /> : null}
+      {!error && !loading && !historyLoading && data != null ? (
+        <InventoryBody inv={data} history={history} />
+      ) : null}
     </main>
   )
 }
