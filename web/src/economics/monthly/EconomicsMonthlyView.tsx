@@ -537,12 +537,18 @@ export function AiCardGrid({ cards }: { cards: AiCard[] }) {
 // days were excluded from the fact/optimum/reserve (§3.4). It is shared by
 // the monthly and annual reserve sections.
 export function EssDataQualityNote({ dq }: { dq?: EconomicsDataQuality }) {
-  if (!dq || dq.data_ok || dq.anomalous_days <= 0) return null
+  if (!dq || dq.data_ok || (dq.anomalous_hours ?? dq.anomalous_days) <= 0) return null
+  const hours = dq.anomalous_hours ?? 0
+  const days = dq.anomalous_days ?? 0
   const dates = (dq.anomalous_dates ?? []).filter(Boolean)
+  const countLabel =
+    hours > 0
+      ? `${hours} год.${days > 0 ? ` (${days} дн.)` : ''}`
+      : `${days} дн.`
   return (
     <p id="ess-data-quality" className="economics-ai-dq-note" role="note" tabIndex={-1}>
-      ⚠ Дані УЗЕ: виключено {dq.anomalous_days} дн. з аномальними показаннями
-      (заряд/розряд понад ліміт потужності). Факт, оптимум і резерв пораховано без них.
+      ⚠ Дані УЗЕ: виключено {countLabel} з аномальними показаннями
+      (заряд/розряд понад ліміт потужності). Факт, оптимум і резерв пораховано без цих годин.
       {dates.length > 0 ? (
         <>
           {' '}

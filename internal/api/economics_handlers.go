@@ -240,11 +240,12 @@ type EconomicsMonthlyTotals struct {
 }
 
 // EconomicsDataQuality reports the ESS (УЗЕ) anomaly filter outcome:
-// anomalous days (physically impossible charge/discharge readings) are
-// excluded from the fact/optimum/reserve above.
+// anomalous hours (physically impossible charge/discharge readings) are
+// excluded from the fact/optimum/reserve; the rest of each day stays.
 type EconomicsDataQuality struct {
 	DataOk                     bool     `json:"data_ok"`
 	TotalDays                  int      `json:"total_days"`
+	AnomalousHours             int      `json:"anomalous_hours"`
 	AnomalousDays              int      `json:"anomalous_days"`
 	AnomalousDates             []string `json:"anomalous_dates"`
 	MaxChargeKwhPerInterval    float64  `json:"max_charge_kwh_per_interval"`
@@ -257,6 +258,7 @@ func dataQualityToJSON(q economics.DataQuality) EconomicsDataQuality {
 	return EconomicsDataQuality{
 		DataOk:                     q.DataOK,
 		TotalDays:                  q.TotalDays,
+		AnomalousHours:             q.AnomalousHours,
 		AnomalousDays:              q.AnomalousDays,
 		AnomalousDates:             q.AnomalousDates,
 		MaxChargeKwhPerInterval:    q.MaxChargeKwhPerInterval,
@@ -751,9 +753,10 @@ type EconomicsPortfolioSite struct {
 	BessReserveUah     float64 `json:"bess_reserve_uah"`
 	ActionReserveUah   float64 `json:"action_reserve_uah"`
 	BessDataOk         bool     `json:"bess_data_ok"`
+	BessAnomalousHours int      `json:"bess_anomalous_hours"`
 	BessAnomalousDays  int      `json:"bess_anomalous_days"`
-	// BessAnomalousDates lists civil dates (YYYY-MM-DD) excluded by the
-	// УЗЕ anomaly filter; the portfolio ⚠ drills into the first of them.
+	// BessAnomalousDates lists civil dates that contain ≥1 excluded УЗЕ
+	// hour; the portfolio ⚠ drills into the first of them.
 	BessAnomalousDates []string `json:"bess_anomalous_dates,omitempty"`
 	PvKwh              float64  `json:"pv_kwh"`
 	LoadKwh            float64 `json:"load_kwh"`
@@ -818,6 +821,7 @@ func portfolioSiteFromTotals(id, name string, t economics.MonthlyTotals, hasData
 		BessReserveUah:     bess,
 		ActionReserveUah:   sched + bess,
 		BessDataOk:         t.EssDataQuality.DataOK,
+		BessAnomalousHours: t.EssDataQuality.AnomalousHours,
 		BessAnomalousDays:  t.EssDataQuality.AnomalousDays,
 		BessAnomalousDates: append([]string(nil), t.EssDataQuality.AnomalousDates...),
 		PvKwh:              t.PV,
@@ -956,6 +960,7 @@ func (h *Handlers) economicsPortfolio(w http.ResponseWriter, r *http.Request) {
 			if t.EssReserve > 0 {
 				totals.EssReserve += t.EssReserve
 			}
+			totals.EssDataQuality.AnomalousHours += t.EssDataQuality.AnomalousHours
 			totals.EssDataQuality.AnomalousDays += t.EssDataQuality.AnomalousDays
 		}
 	}
@@ -972,15 +977,16 @@ func (h *Handlers) economicsPortfolio(w http.ResponseWriter, r *http.Request) {
 	// Portfolio total row: effect/energy summed above; reserves summed from
 	// the per-site rows so the schedule reserve matches the visible bars.
 	total := EconomicsPortfolioSite{
-		ID:                "__total__",
-		Name:              "Портфель",
-		HasData:           true,
-		EffectUah:         totals.Effect,
-		EbitdaUah:         totals.Ebitda,
-		BessReserveUah:    totals.EssReserve,
-		BessDataOk:        totals.EssDataQuality.AnomalousDays == 0,
-		BessAnomalousDays: totals.EssDataQuality.AnomalousDays,
-		PvKwh:             totals.PV,
+		ID:                 "__total__",
+		Name:               "Портфель",
+		HasData:            true,
+		EffectUah:          totals.Effect,
+		EbitdaUah:          totals.Ebitda,
+		BessReserveUah:     totals.EssReserve,
+		BessDataOk:         totals.EssDataQuality.AnomalousHours == 0,
+		BessAnomalousHours: totals.EssDataQuality.AnomalousHours,
+		BessAnomalousDays:  totals.EssDataQuality.AnomalousDays,
+		PvKwh:              totals.PV,
 		LoadKwh:           totals.Load,
 		GridImportKwh:     totals.GridImport,
 		GridExportKwh:     totals.GridExport,

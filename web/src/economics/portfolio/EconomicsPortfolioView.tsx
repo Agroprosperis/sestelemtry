@@ -177,7 +177,7 @@ function PortfolioBody({
                 {!s.bess_data_ok ? (
                   <BessWarnButton
                     site={s}
-                    title={`Дані УЗЕ частково некоректні — виключено ${s.bess_anomalous_days} дн.`}
+                    title={`Дані УЗЕ частково некоректні — виключено ${s.bess_anomalous_hours || s.bess_anomalous_days} год.`}
                     onDiagnoseBess={onDiagnoseBess}
                   />
                 ) : null}
@@ -220,7 +220,7 @@ function PortfolioBody({
                     {!s.bess_data_ok && s.has_data ? (
                       <BessWarnButton
                         site={s}
-                        title={`Дані УЗЕ биті: виключено ${s.bess_anomalous_days} дн.`}
+                        title={`Дані УЗЕ биті: виключено ${s.bess_anomalous_hours || s.bess_anomalous_days} год.`}
                         onDiagnoseBess={onDiagnoseBess}
                       />
                     ) : null}

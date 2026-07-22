@@ -505,6 +505,7 @@ export async function fetchEconomicsDaily(
 export type EconomicsDataQuality = {
   data_ok: boolean
   total_days: number
+  anomalous_hours: number
   anomalous_days: number
   anomalous_dates: string[] | null
   max_charge_kwh_per_interval: number
@@ -787,9 +788,10 @@ export type EconomicsPortfolioSite = {
   bess_reserve_uah: number
   action_reserve_uah: number
   bess_data_ok: boolean
+  bess_anomalous_hours: number
   bess_anomalous_days: number
-  // Civil dates (YYYY-MM-DD) excluded by the УЗЕ anomaly filter; the
-  // portfolio ⚠ drills into the first of them when present.
+  // Civil dates that contain ≥1 excluded УЗЕ hour; the portfolio ⚠
+  // drills into the first of them when present.
   bess_anomalous_dates?: string[] | null
   pv_kwh: number
   load_kwh: number

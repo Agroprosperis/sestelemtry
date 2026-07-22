@@ -152,7 +152,7 @@ type MonthlyTotals struct {
 	EssReservePv     float64
 	EssPvMissedKwh   float64
 
-	// EssDataQuality reports the УЗЕ anomaly filter outcome: anomalous days
+	// EssDataQuality reports the УЗЕ anomaly filter outcome: anomalous hours
 	// (physically impossible charge/discharge readings) are excluded from
 	// the fact/optimum/reserve above so corrupt telemetry can't distort it.
 	EssDataQuality DataQuality
@@ -162,11 +162,13 @@ type MonthlyTotals struct {
 }
 
 // DataQuality summarises the ESS (УЗЕ) anomaly filter for a period.
-// Anomalous days have an hourly charge or discharge above the unit's power
-// limit × tolerance and are dropped from the fact/optimum/reserve.
+// Anomalous hours have a sub-hourly peak (or hourly charge/discharge) above
+// the unit's power limit × tolerance and are dropped from the
+// fact/optimum/reserve; the rest of the day stays.
 type DataQuality struct {
 	DataOK                     bool
 	TotalDays                  int
+	AnomalousHours             int
 	AnomalousDays              int
 	AnomalousDates             []string
 	MaxChargeKwhPerInterval    float64
@@ -179,19 +181,19 @@ type DataQuality struct {
 }
 
 // essAnomalyTolerance is how far above the nominal per-interval power limit
-// a reading may go before the day is treated as corrupt telemetry.
+// a reading may go before the hour is treated as corrupt telemetry.
 const essAnomalyTolerance = 1.5
 
-// detectEssAnomalies flags every civil day with corrupt ESS telemetry —
+// detectEssAnomalies flags individual hours with corrupt ESS telemetry —
 // readings physically impossible for the unit. Two signals trigger the
 // flag: (1) the sub-hourly peak power (EssPeakIntervalKw, from raw ~5-min
 // telemetry) exceeding powerLimitKw · tol, which catches spikes the hourly
 // sum averages away; and (2), as a fallback when no raw signal is present,
 // an hourly charge/discharge above powerLimitKw · 1h · tol. It returns the
-// set of anomalous civil dates plus a DataQuality summary. When
-// powerLimitKw ≤ 0 the filter is disabled (no day is excluded).
-func detectEssAnomalies(hourly []HourlyRecord, loc *time.Location, powerLimitKw, tol float64) (map[string]bool, DataQuality) {
-	bad := make(map[string]bool)
+// set of anomalous hour starts (Unix seconds) plus a DataQuality summary.
+// When powerLimitKw ≤ 0 the filter is disabled (no hour is excluded).
+func detectEssAnomalies(hourly []HourlyRecord, loc *time.Location, powerLimitKw, tol float64) (map[int64]bool, DataQuality) {
+	badHours := make(map[int64]bool)
 	dq := DataQuality{DataOK: true, PowerLimitKwhPerInterval: powerLimitKw}
 	for _, h := range hourly {
 		if h.EssCharged > dq.MaxChargeKwhPerInterval {
@@ -205,31 +207,35 @@ func detectEssAnomalies(hourly []HourlyRecord, loc *time.Location, powerLimitKw,
 		}
 	}
 	if powerLimitKw <= 0 {
-		return bad, dq
+		return badHours, dq
 	}
 	limit := powerLimitKw * tol // hourly granularity → 1h interval
+	badDays := make(map[string]bool)
 	for _, h := range hourly {
+		corrupt := false
 		// Prefer the sub-hourly peak (kW): a single ~5-min spike above
-		// the power ceiling marks the whole day corrupt. Fall back to the
+		// the power ceiling marks this hour corrupt. Fall back to the
 		// hourly-sum check only when no raw peak is available.
 		if h.EssPeakIntervalKw > 0 {
-			if h.EssPeakIntervalKw > limit {
-				bad[h.HourStart.In(loc).Format("2006-01-02")] = true
-			}
+			corrupt = h.EssPeakIntervalKw > limit
+		} else {
+			corrupt = h.EssCharged > limit || h.EssDischarged > limit
+		}
+		if !corrupt {
 			continue
 		}
-		if h.EssCharged > limit || h.EssDischarged > limit {
-			bad[h.HourStart.In(loc).Format("2006-01-02")] = true
-		}
+		badHours[h.HourStart.Unix()] = true
+		badDays[h.HourStart.In(loc).Format("2006-01-02")] = true
 	}
-	dq.AnomalousDays = len(bad)
-	dq.AnomalousDates = make([]string, 0, len(bad))
-	for k := range bad {
+	dq.AnomalousHours = len(badHours)
+	dq.AnomalousDays = len(badDays)
+	dq.AnomalousDates = make([]string, 0, len(badDays))
+	for k := range badDays {
 		dq.AnomalousDates = append(dq.AnomalousDates, k)
 	}
 	sort.Strings(dq.AnomalousDates)
-	dq.DataOK = dq.AnomalousDays == 0
-	return bad, dq
+	dq.DataOK = dq.AnomalousHours == 0
+	return badHours, dq
 }
 
 // StoredMonth is the served monthly economics result: the rollup totals,
@@ -258,8 +264,11 @@ func AggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly
 	if powerLimitKw <= 0 {
 		powerLimitKw = capacityKwh
 	}
-	badDays, dq := detectEssAnomalies(hourly, loc, powerLimitKw, essAnomalyTolerance)
+	badHours, dq := detectEssAnomalies(hourly, loc, powerLimitKw, essAnomalyTolerance)
 	dq.TotalDays = len(days)
+	isBadHour := func(h HourlyRecord) bool {
+		return badHours[h.HourStart.Unix()]
+	}
 	// Per-day RDN stats keyed by civil date, derived from the hourly
 	// slice (the daily table stores only the all-in import price).
 	type rdnAcc struct {
@@ -273,11 +282,13 @@ func AggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly
 		hours     [24]optimumHour
 		raw       [24]HourlyRecord // raw hourly slice for the cycle chart's fact series
 		hasRaw    [24]bool
+		badHour   [24]bool // anomalous hours zeroed for ESS optimum / fact
 		startKwh  float64
 		startHour int
 		haveStart bool
 		pvSurplus float64 // Σ available PV surplus
 		actualPv  float64 // Σ actual pv_to_ess
+		essNet    float64 // Σ EssNet excluding anomalous hours
 	}
 	dayRdn := make(map[string]*rdnAcc)
 	dayOpts := make(map[string]*dayOpt)
@@ -294,7 +305,7 @@ func AggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly
 			grid = make([]*float64, 24)
 			margins[key] = grid
 		}
-		if hour >= 0 && hour < 24 && h.EssDischarged > 0 {
+		if hour >= 0 && hour < 24 && h.EssDischarged > 0 && !isBadHour(h) {
 			m := h.EssNet / h.EssDischarged
 			if !math.IsInf(m, 0) && !math.IsNaN(m) {
 				v := m
@@ -307,26 +318,40 @@ func AggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly
 				do = &dayOpt{}
 				dayOpts[key] = do
 			}
-			pvSurplus := h.PVToGrid + h.PVToEss
-			oh := optimumHour{
-				// PV not consumed by load is available to charge (or
-				// export); load not served by PV is the import the
-				// battery can displace at import price.
-				pvSurplusKwh:        pvSurplus,
-				displaceableKwh:     h.GridToLoad + h.EssToLoad,
-				actualPvChargeKwh:   h.PVToEss,
-				actualGridChargeKwh: h.GridToEss,
-			}
-			if h.Rdn != nil {
-				oh.tradable = true
-				oh.importPrice = h.ImportPrice
-				oh.exportPrice = h.ExportPrice
-			}
-			do.hours[hour] = oh
 			do.raw[hour] = h
 			do.hasRaw[hour] = true
-			do.pvSurplus += pvSurplus
-			do.actualPv += h.PVToEss
+			if isBadHour(h) {
+				// Keep the hour slot (prices / SOC continuity) but drop
+				// ESS activity so one corrupt spike can't wipe the day.
+				do.badHour[hour] = true
+				oh := optimumHour{}
+				if h.Rdn != nil {
+					oh.tradable = true
+					oh.importPrice = h.ImportPrice
+					oh.exportPrice = h.ExportPrice
+				}
+				do.hours[hour] = oh
+			} else {
+				pvSurplus := h.PVToGrid + h.PVToEss
+				oh := optimumHour{
+					// PV not consumed by load is available to charge (or
+					// export); load not served by PV is the import the
+					// battery can displace at import price.
+					pvSurplusKwh:        pvSurplus,
+					displaceableKwh:     h.GridToLoad + h.EssToLoad,
+					actualPvChargeKwh:   h.PVToEss,
+					actualGridChargeKwh: h.GridToEss,
+				}
+				if h.Rdn != nil {
+					oh.tradable = true
+					oh.importPrice = h.ImportPrice
+					oh.exportPrice = h.ExportPrice
+				}
+				do.hours[hour] = oh
+				do.pvSurplus += pvSurplus
+				do.actualPv += h.PVToEss
+				do.essNet += h.EssNet
+			}
 			if h.EssRemainingKwhStart != nil && (!do.haveStart || hour < do.startHour) {
 				do.startKwh = *h.EssRemainingKwhStart
 				do.startHour = hour
@@ -369,10 +394,10 @@ func AggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly
 	// single corrupt reading can't inflate the demonstrated power / SOC
 	// window the optimum is allowed to use.
 	cleanHourly := hourly
-	if len(badDays) > 0 {
+	if len(badHours) > 0 {
 		cleanHourly = make([]HourlyRecord, 0, len(hourly))
 		for _, h := range hourly {
-			if badDays[h.HourStart.In(loc).Format("2006-01-02")] {
+			if isBadHour(h) {
 				continue
 			}
 			cleanHourly = append(cleanHourly, h)
@@ -613,32 +638,30 @@ func AggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly
 		}
 
 		// Fact-vs-optimum on the project_net basis: the realised fact is
-		// simply EssNet (PV charge is already costed at the forgone export
-		// in HourEconomicsFor). Anomalous days (corrupt УЗЕ telemetry) are
-		// excluded from the per-day reserve and the monthly headline.
+		// Σ EssNet over non-anomalous hours (PV charge is already costed at
+		// the forgone export in HourEconomicsFor). Only the corrupt hours
+		// are dropped — the rest of the day still feeds reserve / cycles.
 		do := dayOpts[key]
-		anomalous := badDays[key]
-		var opt optimumResult
-		if anomalous {
-			opt = optimumResult{} // excluded: no fact/optimum/reserve
-		} else {
-			opt = computeOptimum(do, t.EssNet)
-			totals.EssPvMissedKwh += opt.pvMissed
-			monthFact += t.EssNet
-			if opt.reserve >= cycleReserveThresholdUah {
-				if cyc, ok := buildCycle(key, do, t.EssNet); ok {
-					uzeCycles = append(uzeCycles, cyc)
-				}
+		factEssNet := t.EssNet
+		if do != nil && dq.AnomalousHours > 0 {
+			factEssNet = do.essNet
+		}
+		opt := computeOptimum(do, factEssNet)
+		totals.EssPvMissedKwh += opt.pvMissed
+		monthFact += factEssNet
+		if opt.reserve >= cycleReserveThresholdUah {
+			if cyc, ok := buildCycle(key, do, factEssNet); ok {
+				uzeCycles = append(uzeCycles, cyc)
 			}
-			if do != nil {
-				if !haveMonthStart {
-					if do.haveStart {
-						monthStart = do.startKwh
-					}
-					haveMonthStart = true
+		}
+		if do != nil {
+			if !haveMonthStart {
+				if do.haveStart {
+					monthStart = do.startKwh
 				}
-				monthHours = append(monthHours, do.hours[:]...)
+				haveMonthStart = true
 			}
+			monthHours = append(monthHours, do.hours[:]...)
 		}
 
 		outDays = append(outDays, MonthDay{

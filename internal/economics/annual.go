@@ -202,8 +202,9 @@ func AggregatePeriod(
 		totals.EssPvMissedKwh += mt.EssPvMissedKwh
 
 		// Data quality: a period is OK only if every month is OK; sum the
-		// excluded days and concatenate their dates.
+		// excluded hours and concatenate civil dates that contained them.
 		totals.EssDataQuality.TotalDays += mt.EssDataQuality.TotalDays
+		totals.EssDataQuality.AnomalousHours += mt.EssDataQuality.AnomalousHours
 		totals.EssDataQuality.AnomalousDays += mt.EssDataQuality.AnomalousDays
 		totals.EssDataQuality.AnomalousDates = append(totals.EssDataQuality.AnomalousDates, mt.EssDataQuality.AnomalousDates...)
 		if mt.EssDataQuality.MaxChargeKwhPerInterval > totals.EssDataQuality.MaxChargeKwhPerInterval {
@@ -211,6 +212,9 @@ func AggregatePeriod(
 		}
 		if mt.EssDataQuality.MaxDischargeKwhPerInterval > totals.EssDataQuality.MaxDischargeKwhPerInterval {
 			totals.EssDataQuality.MaxDischargeKwhPerInterval = mt.EssDataQuality.MaxDischargeKwhPerInterval
+		}
+		if mt.EssDataQuality.MaxIntervalPowerKw > totals.EssDataQuality.MaxIntervalPowerKw {
+			totals.EssDataQuality.MaxIntervalPowerKw = mt.EssDataQuality.MaxIntervalPowerKw
 		}
 		totals.EssDataQuality.PowerLimitKwhPerInterval = mt.EssDataQuality.PowerLimitKwhPerInterval
 
@@ -260,7 +264,7 @@ func AggregatePeriod(
 	if totals.EssOptimum > 0 {
 		totals.EssCapturedShare = totals.EssFact / totals.EssOptimum
 	}
-	totals.EssDataQuality.DataOK = totals.EssDataQuality.AnomalousDays == 0
+	totals.EssDataQuality.DataOK = totals.EssDataQuality.AnomalousHours == 0
 	// ESS EOD snapshot: the last month with data carries the point-in-time
 	// residual / cost-basis state.
 	if lastMonthWithData != nil {

@@ -47,7 +47,7 @@ func TestPortfolioSiteFromTotals(t *testing.T) {
 		AvgImportPrice: 5, AvgExportPrice: 2, PVToGrid: 100, GridToLoad: 40, // sched = 120
 		EssReserve: 800,
 		EssDataQuality: economics.DataQuality{
-			DataOK: false, AnomalousDays: 2,
+			DataOK: false, AnomalousHours: 3, AnomalousDays: 2,
 			AnomalousDates: []string{"2026-07-03", "2026-07-11"},
 		},
 	}
@@ -61,8 +61,8 @@ func TestPortfolioSiteFromTotals(t *testing.T) {
 	if math.Abs(s.ActionReserveUah-920) > 1e-9 {
 		t.Fatalf("ActionReserveUah = %v, want 920", s.ActionReserveUah)
 	}
-	if s.BessDataOk || s.BessAnomalousDays != 2 {
-		t.Fatalf("data quality flags not propagated: ok=%v days=%d", s.BessDataOk, s.BessAnomalousDays)
+	if s.BessDataOk || s.BessAnomalousHours != 3 || s.BessAnomalousDays != 2 {
+		t.Fatalf("data quality flags not propagated: ok=%v hours=%d days=%d", s.BessDataOk, s.BessAnomalousHours, s.BessAnomalousDays)
 	}
 	if len(s.BessAnomalousDates) != 2 || s.BessAnomalousDates[0] != "2026-07-03" {
 		t.Fatalf("BessAnomalousDates = %v, want [2026-07-03 2026-07-11]", s.BessAnomalousDates)

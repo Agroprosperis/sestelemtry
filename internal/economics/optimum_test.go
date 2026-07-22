@@ -102,70 +102,75 @@ func TestAggregateMonthOptimum(t *testing.T) {
 	}
 }
 
-// TestDetectEssAnomalies flags a day whose hourly charge exceeds the
-// power limit × tolerance and reports it in the DataQuality summary.
+// TestDetectEssAnomalies flags an hour whose hourly charge exceeds the
+// power limit × tolerance and reports it in the DataQuality summary
+// without marking sibling hours of the same day.
 func TestDetectEssAnomalies(t *testing.T) {
 	loc := time.UTC
 	base := time.Date(2026, 6, 1, 0, 0, 0, 0, loc)
+	badHour := base.Add(24*time.Hour + 5*time.Hour)
 	hourly := []HourlyRecord{
 		{HourStart: base.Add(3 * time.Hour), EssCharged: 40, EssDischarged: 0},
-		{HourStart: base.Add(24*time.Hour + 5*time.Hour), EssCharged: 400, EssDischarged: 0}, // day 2: impossible
+		{HourStart: badHour, EssCharged: 400, EssDischarged: 0}, // day 2 hour 5: impossible
+		{HourStart: base.Add(24*time.Hour + 6*time.Hour), EssCharged: 40, EssDischarged: 0},
 	}
 	bad, dq := detectEssAnomalies(hourly, loc, 100, essAnomalyTolerance) // limit 150
-	if len(bad) != 1 || !bad["2026-06-02"] {
-		t.Fatalf("bad = %v, want {2026-06-02}", bad)
+	if len(bad) != 1 || !bad[badHour.Unix()] {
+		t.Fatalf("bad = %v, want {%d}", bad, badHour.Unix())
 	}
-	if dq.DataOK || dq.AnomalousDays != 1 {
-		t.Fatalf("dq = %+v, want 1 anomalous day, not ok", dq)
+	if dq.DataOK || dq.AnomalousHours != 1 || dq.AnomalousDays != 1 {
+		t.Fatalf("dq = %+v, want 1 anomalous hour / 1 day, not ok", dq)
 	}
 	if dq.MaxChargeKwhPerInterval != 400 {
 		t.Fatalf("MaxChargeKwhPerInterval = %v, want 400", dq.MaxChargeKwhPerInterval)
 	}
 	// Disabled filter (limit ≤ 0) excludes nothing.
 	if b2, dq2 := detectEssAnomalies(hourly, loc, 0, essAnomalyTolerance); len(b2) != 0 || !dq2.DataOK {
-		t.Fatalf("disabled filter excluded days: %v / %+v", b2, dq2)
+		t.Fatalf("disabled filter excluded hours: %v / %+v", b2, dq2)
 	}
 }
 
-// TestDetectEssAnomaliesPeakInterval verifies the sub-hourly path: a day
+// TestDetectEssAnomaliesPeakInterval verifies the sub-hourly path: an hour
 // whose hourly charge/discharge sums stay UNDER the limit but whose
 // per-interval peak power (EssPeakIntervalKw) exceeds it is still flagged
-// (the 5-minute spike the hourly sum averages away). When the peak is
-// present and within range, the day stays clean even though the fallback
-// hourly-sum check is skipped.
+// (the 5-minute spike the hourly sum averages away). Sibling hours of the
+// same day stay clean.
 func TestDetectEssAnomaliesPeakInterval(t *testing.T) {
 	loc := time.UTC
 	base := time.Date(2026, 6, 1, 0, 0, 0, 0, loc)
+	spikeHour := base.Add(10 * time.Hour)
 	hourly := []HourlyRecord{
-		// Day 1: modest hourly sum (40 < 150) but a 200 kW 5-min spike.
-		{HourStart: base.Add(10 * time.Hour), EssCharged: 40, EssPeakIntervalKw: 200},
-		// Day 2: modest hourly sum and a peak within the limit → clean.
+		// Hour 10: modest hourly sum (40 < 150) but a 200 kW 5-min spike.
+		{HourStart: spikeHour, EssCharged: 40, EssPeakIntervalKw: 200},
+		// Same day, later hour: modest sum and a peak within the limit.
+		{HourStart: base.Add(11 * time.Hour), EssCharged: 40, EssPeakIntervalKw: 100},
+		// Next day: modest hourly sum and a peak within the limit → clean.
 		{HourStart: base.Add(24*time.Hour + 10*time.Hour), EssDischarged: 40, EssPeakIntervalKw: 100},
 	}
 	bad, dq := detectEssAnomalies(hourly, loc, 100, essAnomalyTolerance) // limit 150
-	if len(bad) != 1 || !bad["2026-06-01"] {
-		t.Fatalf("bad = %v, want {2026-06-01}", bad)
+	if len(bad) != 1 || !bad[spikeHour.Unix()] {
+		t.Fatalf("bad = %v, want {%d}", bad, spikeHour.Unix())
 	}
-	if dq.DataOK || dq.AnomalousDays != 1 {
-		t.Fatalf("dq = %+v, want 1 anomalous day, not ok", dq)
+	if dq.DataOK || dq.AnomalousHours != 1 || dq.AnomalousDays != 1 {
+		t.Fatalf("dq = %+v, want 1 anomalous hour / 1 day, not ok", dq)
 	}
 	if dq.MaxIntervalPowerKw != 200 {
 		t.Fatalf("MaxIntervalPowerKw = %v, want 200", dq.MaxIntervalPowerKw)
 	}
 }
 
-// TestAggregateMonthExcludesAnomalousDays verifies that an anomalous day is
-// dropped from the fact/optimum and its per-day reserve row is zeroed,
-// while the DataQuality summary reports the exclusion.
-func TestAggregateMonthExcludesAnomalousDays(t *testing.T) {
+// TestAggregateMonthExcludesAnomalousHours verifies that only the corrupt
+// hour is dropped from the fact/optimum path: the rest of that day still
+// contributes, and DataQuality reports the hour (and its civil day).
+func TestAggregateMonthExcludesAnomalousHours(t *testing.T) {
 	loc := time.UTC
 	day1 := time.Date(2026, 6, 1, 0, 0, 0, 0, loc)
 	day2 := time.Date(2026, 6, 2, 0, 0, 0, 0, loc)
 	days := []DailyRecord{
 		{Day: day1, IsFinal: true, Totals: DailyTotals{EssNet: 10, EssDischarged: 40, HoursWithData: 24}},
-		{Day: day2, IsFinal: true, Totals: DailyTotals{EssNet: 5, EssDischarged: 40, HoursWithData: 24}},
+		{Day: day2, IsFinal: true, Totals: DailyTotals{EssNet: 15, EssDischarged: 40, HoursWithData: 24}},
 	}
-	mk := func(base time.Time, charge float64) []HourlyRecord {
+	mk := func(base time.Time, charge float64, eveningNet float64) []HourlyRecord {
 		hs := make([]HourlyRecord, 24)
 		for h := 0; h < 24; h++ {
 			hs[h] = HourlyRecord{HourStart: base.Add(time.Duration(h) * time.Hour)}
@@ -176,24 +181,25 @@ func TestAggregateMonthExcludesAnomalousDays(t *testing.T) {
 		}
 		hs[19] = HourlyRecord{
 			HourStart: base.Add(19 * time.Hour), Rdn: floatPtr(20), ImportPrice: 20, ExportPrice: 18,
-			GridToLoad: 100, EssDischarged: 40, EssNet: 10, EssRemainingKwhStart: floatPtr(40),
+			GridToLoad: 100, EssDischarged: 40, EssNet: eveningNet, EssRemainingKwhStart: floatPtr(40),
 		}
 		return hs
 	}
-	hourly := append(mk(day1, 40), mk(day2, 1000)...) // day2 charge 1000 ≫ 150 limit
+	// Day2 hour 3 charge 1000 ≫ 150 limit; evening EssNet 10 should still count.
+	hourly := append(mk(day1, 40, 10), mk(day2, 1000, 10)...)
 
 	got := AggregateMonth("2026-06", loc, days, hourly, 100, 0, 100, 0)
 
-	if got.Totals.EssDataQuality.AnomalousDays != 1 || got.Totals.EssDataQuality.DataOK {
-		t.Fatalf("data quality = %+v, want 1 anomalous day, not ok", got.Totals.EssDataQuality)
+	if got.Totals.EssDataQuality.AnomalousHours != 1 || got.Totals.EssDataQuality.AnomalousDays != 1 || got.Totals.EssDataQuality.DataOK {
+		t.Fatalf("data quality = %+v, want 1 anomalous hour / 1 day, not ok", got.Totals.EssDataQuality)
 	}
-	// Fact counts only the clean day's EssNet (10).
-	if math.Abs(got.Totals.EssFact-10) > 1e-9 {
-		t.Fatalf("EssFact = %v, want 10 (anomalous day excluded)", got.Totals.EssFact)
+	// Fact = day1 evening (10) + day2 evening (10); corrupt charge hour contributes 0 EssNet.
+	if math.Abs(got.Totals.EssFact-20) > 1e-9 {
+		t.Fatalf("EssFact = %v, want 20 (only anomalous hour excluded)", got.Totals.EssFact)
 	}
 	for _, d := range got.Days {
-		if d.Date == "2026-06-02" && (d.EssOptimum != 0 || d.EssReserve != 0 || d.EssFact != 0) {
-			t.Fatalf("anomalous day row not zeroed: %+v", d)
+		if d.Date == "2026-06-02" && d.EssFact != 10 {
+			t.Fatalf("day2 EssFact = %v, want 10 (evening hour kept)", d.EssFact)
 		}
 	}
 }

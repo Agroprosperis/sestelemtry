@@ -72,6 +72,7 @@ function emptyTotals(): EconomicsMonthlyResponse['totals'] {
     ess_data_quality: {
       data_ok: true,
       total_days: 0,
+      anomalous_hours: 0,
       anomalous_days: 0,
       anomalous_dates: null,
       max_charge_kwh_per_interval: 0,
