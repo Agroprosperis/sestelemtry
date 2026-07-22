@@ -49,6 +49,17 @@ type Location struct {
 	City string `yaml:"city"`
 }
 
+// InventoryExpected holds the site-config passport values used to
+// compare against SmartLogger plant-inventory Modbus reads. Pointer
+// fields are optional: only non-nil values are checked for
+// INVENTORY_MISMATCH. Leave the whole block unset to skip comparison.
+type InventoryExpected struct {
+	PVRatedKw   *float64 `yaml:"pv_rated_kw"`
+	ESSRatedKw  *float64 `yaml:"ess_rated_kw"`
+	ESSRatedKwh *float64 `yaml:"ess_rated_kwh"`
+	ESSCount    *float64 `yaml:"ess_count"`
+}
+
 type Organization struct {
 	ID            string         `yaml:"id"`
 	Name          string         `yaml:"name"`
@@ -58,6 +69,10 @@ type Organization struct {
 	PollInterval  time.Duration  `yaml:"poll_interval"`
 	Modbus        Modbus         `yaml:"modbus"`
 	ModbusDevices []ModbusDevice `yaml:"modbus_devices"`
+
+	// Inventory is the expected plant passport (rated PV/ESS, cabinet
+	// count) used by the rare inventory poll for mismatch alerts.
+	Inventory *InventoryExpected `yaml:"inventory,omitempty"`
 
 	// EssDischargeSign overrides the convention that
 	// `active_ess_power_kw > 0` means "ESS discharging". Set to -1

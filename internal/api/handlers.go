@@ -129,6 +129,9 @@ type storeReader interface {
 	// DeleteTariffScheduleVersion removes one effective-dated version;
 	// returns rows affected.
 	DeleteTariffScheduleVersion(ctx context.Context, organizationID string, effectiveFrom time.Time) (int64, error)
+	// LatestPlantInventory returns the newest plant-passport snapshot
+	// for an organization. ok is false when none exist yet.
+	LatestPlantInventory(ctx context.Context, organizationID string) (PlantInventoryResponse, bool, error)
 	Ready(ctx context.Context) error
 }
 
@@ -295,6 +298,7 @@ func (h *Handlers) Router() http.Handler {
 	mux.HandleFunc("/api/v1/fusionsolar/import", h.fusionSolarImport)
 	mux.HandleFunc("/api/v1/fusionsolar/config", h.fusionSolarConfig)
 	mux.HandleFunc("/api/v1/weather-forecast", h.weatherForecast)
+	mux.HandleFunc("/api/v1/plant-inventory", h.plantInventory)
 	mux.HandleFunc("/api/v1/organization-tariffs", h.organizationTariffs)
 	mux.HandleFunc("/api/v1/organization-tariff-schedule", h.organizationTariffSchedule)
 	mux.HandleFunc("/api/v1/economics/daily", h.economicsDaily)

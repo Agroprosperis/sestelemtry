@@ -75,6 +75,10 @@ func main() {
 		// degraded but functional deployment.
 		log.Warn("db_compression", "err", err)
 	}
+	if err := storage.InitPlantInventorySchema(ctx, pool); err != nil {
+		log.Error("db_plant_inventory", "err", err)
+		os.Exit(1)
+	}
 
 	log.Info("collector_start", "orgs", len(cfg.Organizations), "metrics", len(resolved))
 
@@ -85,6 +89,11 @@ func main() {
 		go func() {
 			defer wg.Done()
 			runOrg(ctx, log, cfg, org, resolved, pool)
+		}()
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			runOrgInventory(ctx, log, cfg, org, resolved, pool)
 		}()
 	}
 	wg.Wait()
@@ -151,6 +160,11 @@ func runDevice(
 	resolved, err := registers.Subset(resolvedAll, dev.MetricKeys)
 	if err != nil {
 		log.Error("device_subset", "err", err)
+		return
+	}
+	resolved = excludeInventoryKeys(resolved)
+	if len(resolved) == 0 {
+		log.Error("device_subset", "err", "no telemetry metrics after excluding inventory keys")
 		return
 	}
 	chunks := modbusclient.PlanChunks(resolved)
@@ -368,4 +382,3 @@ func max(a, b int) int {
 	}
 	return b
 }
-

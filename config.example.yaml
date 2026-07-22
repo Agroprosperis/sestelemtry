@@ -37,6 +37,13 @@ organizations:
       latitude: 50.4501
       longitude: 30.5234
       city: "Київ"
+    # Expected plant passport for inventory poll mismatch checks
+    # (optional). Values from FusionSolar / site registry.
+    inventory:
+      pv_rated_kw: 450
+      ess_rated_kw: 864
+      ess_rated_kwh: 1720
+      ess_count: 8
     modbus:
       host: 192.168.1.50
       port: 502

@@ -43,6 +43,22 @@ SmartLogger та спосіб використання у фронтенді/б�
 | `electricity_purchased_day_kwh`         | Імпорт з мережі за день               | Electricity purchased on the current day | kWh | 40513         | UINT32 | 0.01  |
 | `soc_percent`                           | Рівень заряду УЗЕ (SOC)               | State of Charge                          | %   | 40515         | UINT16 | 0.1   |
 
+### Паспорт станції (рідкий inventory poll)
+
+Ці регістри **не** пишуться в `telemetry_samples` кожну секунду. Collector
+знімає їх окремим poll (старт / 1× год / 1× добу) у таблицю
+`plant_inventory_snapshots`. API: `GET /api/v1/plant-inventory?organization_id=`.
+
+| `metric_key`                            | UA-переклад                           | EN-переклад                              | Од. | Modbus адреса | Тип    | Gain  |
+| --------------------------------------- | ------------------------------------- | ---------------------------------------- | --- | ------------- | ------ | ----- |
+| `pv_rated_kw`                           | Номінальна потужність СЕС             | Rated PV power                           | kW  | 40396         | UINT32 | 0.001 |
+| `ess_rated_kw`                          | Номінальна потужність УЗЕ             | Rated ESS power                          | kW  | 40398         | UINT32 | 0.001 |
+| `ess_rated_kwh`                         | Номінальна ємність УЗЕ                | Rated ESS capacity                       | kWh | 40484         | UINT32 | 0.001 |
+| `ess_count`                             | Кількість шаф ESS                     | Number of ESSs                           | шт  | 40488         | UINT16 | 1     |
+| `pcs_count`                             | Кількість PCS                         | Number of PCSs                           | шт  | 40489         | UINT16 | 1     |
+| `ess_soh_pct`                           | Стан здоров'я УЗЕ (SOH)               | ESS SOH                                  | %   | 40516         | UINT16 | 0.1   |
+| `active_power_control_mode`             | Режим керування активною потужністю   | Active power control mode                | enum| 40737         | UINT16 | 1     |
+
 
 ## 2. Метрики по групах
 

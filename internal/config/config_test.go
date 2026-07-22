@@ -590,3 +590,39 @@ organizations:
 		t.Fatal("expected duplicate org id error, got nil")
 	}
 }
+
+func TestLoadInventoryExpected(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	content := `register_catalog: registers/huawei_smartlogger.yaml
+organizations:
+  - id: ab
+    inventory:
+      pv_rated_kw: 450
+      ess_rated_kw: 864
+      ess_rated_kwh: 1720
+      ess_count: 8
+    modbus:
+      host: 127.0.0.1
+  - id: bare
+    modbus:
+      host: 127.0.0.2
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	inv := cfg.Organizations[0].Inventory
+	if inv == nil || inv.PVRatedKw == nil || *inv.PVRatedKw != 450 {
+		t.Fatalf("inventory: %+v", inv)
+	}
+	if inv.ESSCount == nil || *inv.ESSCount != 8 {
+		t.Fatalf("ess_count: %+v", inv.ESSCount)
+	}
+	if cfg.Organizations[1].Inventory != nil {
+		t.Fatalf("bare org should have nil inventory")
+	}
+}

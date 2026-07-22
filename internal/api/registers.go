@@ -69,6 +69,13 @@ var ModbusRegisterMetadata = map[string]RegisterMeta{
 	"electricity_sold_day_kwh":              {Address: 40511, DataType: "UINT32", Gain: 0.01},
 	"electricity_purchased_day_kwh":         {Address: 40513, DataType: "UINT32", Gain: 0.01},
 	"soc_percent":                           {Address: 40515, DataType: "UINT16", Gain: 0.1},
+	"pv_rated_kw":                           {Address: 40396, DataType: "UINT32", Gain: 0.001},
+	"ess_rated_kw":                          {Address: 40398, DataType: "UINT32", Gain: 0.001},
+	"ess_rated_kwh":                         {Address: 40484, DataType: "UINT32", Gain: 0.001},
+	"ess_count":                             {Address: 40488, DataType: "UINT16", Gain: 1},
+	"pcs_count":                             {Address: 40489, DataType: "UINT16", Gain: 1},
+	"ess_soh_pct":                           {Address: 40516, DataType: "UINT16", Gain: 0.1},
+	"active_power_control_mode":             {Address: 40737, DataType: "UINT16", Gain: 1},
 }
 
 // RegistersResponse is the body of /api/v1/registers. It carries the

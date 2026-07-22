@@ -14,17 +14,19 @@ import (
 )
 
 type mockStore struct {
-	currentResp CurrentResponse
-	currentErr  error
-	seriesResp  TimeseriesResponse
-	seriesErr   error
-	summaryResp EnergySummaryResponse
-	summaryErr  error
-	damResp     DAMPricesResponse
-	damErr      error
-	weatherResp WeatherForecastResponse
-	weatherErr  error
-	readyErr    error
+	currentResp  CurrentResponse
+	currentErr   error
+	seriesResp   TimeseriesResponse
+	seriesErr    error
+	summaryResp  EnergySummaryResponse
+	summaryErr   error
+	damResp      DAMPricesResponse
+	damErr       error
+	weatherResp  WeatherForecastResponse
+	weatherErr   error
+	inventory    *PlantInventoryResponse
+	inventoryErr error
+	readyErr     error
 
 	currentAt time.Time
 
@@ -161,6 +163,18 @@ func (m *mockStore) UpsertTariffScheduleVersion(_ context.Context, _ string, _ t
 
 func (m *mockStore) DeleteTariffScheduleVersion(_ context.Context, _ string, _ time.Time) (int64, error) {
 	return 0, nil
+}
+
+func (m *mockStore) LatestPlantInventory(_ context.Context, organizationID string) (PlantInventoryResponse, bool, error) {
+	if m.inventoryErr != nil {
+		return PlantInventoryResponse{}, false, m.inventoryErr
+	}
+	if m.inventory == nil {
+		return PlantInventoryResponse{}, false, nil
+	}
+	out := *m.inventory
+	out.OrganizationID = organizationID
+	return out, true, nil
 }
 
 func TestCurrentRequiresOrganizationID(t *testing.T) {
@@ -552,9 +566,9 @@ func TestDAMPricesRefreshSuccessReturnsRereadPrices(t *testing.T) {
 		damResp: DAMPricesResponse{
 			Zone: 2,
 			Prices: []DAMPrice{{
-				DeliveryDate: time.Date(2026, 5, 25, 0, 0, 0, 0, time.UTC),
-				Hour:         3,
-				Zone:         2,
+				DeliveryDate:   time.Date(2026, 5, 25, 0, 0, 0, 0, time.UTC),
+				Hour:           3,
+				Zone:           2,
 				PriceUAHPerMWh: &price,
 			}},
 		},

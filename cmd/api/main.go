@@ -78,6 +78,10 @@ func main() {
 		log.Error("db_init_fusionsolar_kpi", "err", err)
 		os.Exit(1)
 	}
+	if err := storage.InitPlantInventorySchema(ctx, pool); err != nil {
+		log.Error("db_init_plant_inventory", "err", err)
+		os.Exit(1)
+	}
 
 	store := api.NewStore(pool)
 	// Boot-time feature detection: if the collector has run migration 004

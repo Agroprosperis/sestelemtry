@@ -27,6 +27,13 @@ organizations:
       latitude: 49.0191004
       longitude: 28.1260144
       city: "Жмеринка"
+    # Expected plant passport (FusionSolar 2026-07-21); inventory poll
+    # flags INVENTORY_MISMATCH when Modbus differs.
+    inventory:
+      pv_rated_kw: 600
+      ess_rated_kw: 864
+      ess_rated_kwh: 1720
+      ess_count: 8
     modbus_devices:
       - host: 10.28.40.102          # UZE / ESS smartlogger
         port: 502
@@ -71,6 +78,11 @@ organizations:
       latitude: 49.0406538
       longitude: 27.7419296
       city: "Бар"
+    inventory:
+      pv_rated_kw: 450
+      ess_rated_kw: 864
+      ess_rated_kwh: 1720
+      ess_count: 8
     modbus:
       host: 10.23.40.251
       port: 502
@@ -85,6 +97,11 @@ organizations:
       latitude: 51.564077
       longitude: 33.375058
       city: "Кролевець"
+    inventory:
+      pv_rated_kw: 500
+      ess_rated_kw: 324
+      ess_rated_kwh: 645
+      ess_count: 3
     modbus:
       host: 10.24.40.238
       port: 502
@@ -101,6 +118,11 @@ organizations:
       latitude: 49.9993363781658
       longitude: 26.386386689961547
       city: "Поділля"
+    inventory:
+      pv_rated_kw: 250
+      ess_rated_kw: 324
+      ess_rated_kwh: 645
+      ess_count: 3
     modbus:
       host: 10.33.40.241
       port: 502
@@ -115,6 +137,11 @@ organizations:
       latitude: 51.15119965
       longitude: 33.383904
       city: "Дубовʼязівка"
+    inventory:
+      pv_rated_kw: 500
+      ess_rated_kw: 540
+      ess_rated_kwh: 1075
+      ess_count: 5
     modbus:
       host: 10.34.40.241
       port: 502
@@ -129,6 +156,11 @@ organizations:
       latitude: 49.066043
       longitude: 29.3634120
       city: "Сорочани"
+    inventory:
+      pv_rated_kw: 400
+      ess_rated_kw: 324
+      ess_rated_kwh: 645
+      ess_count: 3
     modbus:
       host: 10.36.40.102
       port: 502

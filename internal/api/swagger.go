@@ -179,6 +179,31 @@ paths:
               schema:
                 type: string
                 example: internal server error
+  /api/v1/plant-inventory:
+    get:
+      summary: Latest plant passport / inventory snapshot
+      operationId: getPlantInventory
+      description: |
+        Returns the newest rare Modbus plant-inventory snapshot for an
+        organization (rated PV/ESS, ESS count, SOH, control mode). 404
+        when the collector has not written a snapshot yet.
+      parameters:
+        - name: organization_id
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Latest inventory snapshot
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: Missing organization_id
+        "404":
+          description: No snapshot yet
   /api/v1/weather-forecast:
     get:
       summary: Cached Open-Meteo forecast for an organization
