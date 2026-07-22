@@ -10,6 +10,7 @@ import { EconomicsTable } from './components/EconomicsTable'
 import { EconomicsMonthlyView } from './monthly/EconomicsMonthlyView'
 import { EconomicsAnnualView } from './annual/EconomicsAnnualView'
 import { EconomicsPortfolioView, type PortfolioScope } from './portfolio/EconomicsPortfolioView'
+import type { EconomicsPortfolioSite } from '../api'
 import './economics.css'
 import { useEconomicsData } from './useEconomicsData'
 import { useEconomicsMonthlyData } from './useEconomicsMonthlyData'
@@ -224,6 +225,34 @@ export function EconomicsPage() {
     [setDate, setRange],
   )
 
+  // diagnoseBessFromPortfolio opens the flagged object at the first
+  // anomalous УЗЕ day (day view) so the operator can inspect hourly
+  // charge/discharge. Without concrete dates, fall back to the matching
+  // month/year view and scroll to the УЗЕ data-quality note.
+  const diagnoseBessFromPortfolio = useCallback(
+    (site: EconomicsPortfolioSite) => {
+      onOrganizationChange(site.id)
+      const dates = (site.bess_anomalous_dates ?? []).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d))
+      if (dates.length > 0) {
+        const first = [...dates].sort()[0]
+        setDate(first)
+        setRange('day')
+        return
+      }
+      if (portfolioScope === 'month') {
+        setDate(`${month}-01`)
+        setRange('month')
+      } else {
+        setRange('year')
+      }
+      window.setTimeout(() => {
+        document.getElementById('ess-data-quality')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        document.getElementById('ess-data-quality')?.focus?.()
+      }, 400)
+    },
+    [onOrganizationChange, portfolioScope, month],
+  )
+
   const onBackToDashboard = useCallback(() => {
     if (typeof window === 'undefined') return
     const url = new URL(window.location.href)
@@ -289,6 +318,7 @@ export function EconomicsPage() {
           to={windowTo || `${period}-12`}
           scope={portfolioScope}
           onScopeChange={setPortfolioScope}
+          onDiagnoseBess={diagnoseBessFromPortfolio}
           refreshKey={refreshKey}
         />
       ) : range === 'year' ? (

@@ -46,7 +46,10 @@ func TestPortfolioSiteFromTotals(t *testing.T) {
 		Effect: 1000, Ebitda: 1100,
 		AvgImportPrice: 5, AvgExportPrice: 2, PVToGrid: 100, GridToLoad: 40, // sched = 120
 		EssReserve: 800,
-		EssDataQuality: economics.DataQuality{DataOK: false, AnomalousDays: 2},
+		EssDataQuality: economics.DataQuality{
+			DataOK: false, AnomalousDays: 2,
+			AnomalousDates: []string{"2026-07-03", "2026-07-11"},
+		},
 	}
 	s := portfolioSiteFromTotals("ze", "Жмеринський", tot, true)
 	if math.Abs(s.ScheduleReserveUah-120) > 1e-9 {
@@ -60,6 +63,9 @@ func TestPortfolioSiteFromTotals(t *testing.T) {
 	}
 	if s.BessDataOk || s.BessAnomalousDays != 2 {
 		t.Fatalf("data quality flags not propagated: ok=%v days=%d", s.BessDataOk, s.BessAnomalousDays)
+	}
+	if len(s.BessAnomalousDates) != 2 || s.BessAnomalousDates[0] != "2026-07-03" {
+		t.Fatalf("BessAnomalousDates = %v, want [2026-07-03 2026-07-11]", s.BessAnomalousDates)
 	}
 
 	// Negative ESS reserve clamps to zero.

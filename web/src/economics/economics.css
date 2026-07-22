@@ -3152,9 +3152,23 @@ button.economics-optimum-row.open {
 }
 
 .economics-portfolio-warn {
+  display: inline;
+  margin-left: 4px;
+  padding: 0;
+  border: 0;
+  background: transparent;
   color: #d97706;
-  cursor: help;
+  cursor: pointer;
   white-space: nowrap;
+  font: inherit;
+  line-height: 1;
+}
+
+.economics-portfolio-warn:hover,
+.economics-portfolio-warn:focus-visible {
+  color: #b45309;
+  text-decoration: underline;
+  outline: none;
 }
 
 .economics-portfolio-track {

@@ -18,6 +18,9 @@ type Props = {
   // custom window) stays in sync with the portfolio's own granularity toggle.
   scope: PortfolioScope
   onScopeChange: (next: PortfolioScope) => void
+  // onDiagnoseBess navigates to the flagged object's economics so the
+  // operator can inspect the УЗЕ days the anomaly filter excluded.
+  onDiagnoseBess?: (site: EconomicsPortfolioSite) => void
   refreshKey?: number
 }
 
@@ -30,7 +33,16 @@ function compareTotal(s: EconomicsPortfolioSite): number {
 // object comparison of project effect + work-schedule reserve + УЗЕ
 // optimum reserve (project_net), with ⚠ flags for objects whose УЗЕ
 // telemetry had anomalous days excluded (§2).
-export function EconomicsPortfolioView({ month, period, from, to, scope, onScopeChange, refreshKey }: Props) {
+export function EconomicsPortfolioView({
+  month,
+  period,
+  from,
+  to,
+  scope,
+  onScopeChange,
+  onDiagnoseBess,
+  refreshKey,
+}: Props) {
   const { portfolio, loading, error } = useEconomicsPortfolioData({
     active: true,
     scope,
@@ -72,7 +84,7 @@ export function EconomicsPortfolioView({ month, period, from, to, scope, onScope
       ) : loading ? (
         <p className="economics-loading">Завантаження…</p>
       ) : portfolio ? (
-        <PortfolioBody portfolio={portfolio} />
+        <PortfolioBody portfolio={portfolio} onDiagnoseBess={onDiagnoseBess} />
       ) : (
         <p className="economics-loading">Немає даних.</p>
       )}
@@ -80,7 +92,46 @@ export function EconomicsPortfolioView({ month, period, from, to, scope, onScope
   )
 }
 
-function PortfolioBody({ portfolio }: { portfolio: EconomicsPortfolioResponse }) {
+function BessWarnButton({
+  site,
+  title,
+  onDiagnoseBess,
+}: {
+  site: EconomicsPortfolioSite
+  title: string
+  onDiagnoseBess?: (site: EconomicsPortfolioSite) => void
+}) {
+  if (!onDiagnoseBess) {
+    return (
+      <span className="economics-portfolio-warn" title={title}>
+        {' '}
+        ⚠
+      </span>
+    )
+  }
+  return (
+    <button
+      type="button"
+      className="economics-portfolio-warn"
+      title={`${title} Натисніть, щоб відкрити.`}
+      aria-label={`${formatOrganizationLabel(site.id)}: ${title}`}
+      onClick={(e) => {
+        e.stopPropagation()
+        onDiagnoseBess(site)
+      }}
+    >
+      ⚠
+    </button>
+  )
+}
+
+function PortfolioBody({
+  portfolio,
+  onDiagnoseBess,
+}: {
+  portfolio: EconomicsPortfolioResponse
+  onDiagnoseBess?: (site: EconomicsPortfolioSite) => void
+}) {
   const sites = portfolio.sites
   const totals = portfolio.totals
   const withData = sites.filter((s) => s.has_data)
@@ -124,12 +175,11 @@ function PortfolioBody({ portfolio }: { portfolio: EconomicsPortfolioResponse })
               <span className="economics-portfolio-name">
                 {formatOrganizationLabel(s.id)}
                 {!s.bess_data_ok ? (
-                  <span
-                    className="economics-portfolio-warn"
+                  <BessWarnButton
+                    site={s}
                     title={`Дані УЗЕ частково некоректні — виключено ${s.bess_anomalous_days} дн.`}
-                  >
-                    {' '}⚠
-                  </span>
+                    onDiagnoseBess={onDiagnoseBess}
+                  />
                 ) : null}
               </span>
               <div className="economics-portfolio-track">
@@ -168,12 +218,11 @@ function PortfolioBody({ portfolio }: { portfolio: EconomicsPortfolioResponse })
                   <td className="economics-month-table-left">
                     {formatOrganizationLabel(s.id)}
                     {!s.bess_data_ok && s.has_data ? (
-                      <span
-                        className="economics-portfolio-warn"
+                      <BessWarnButton
+                        site={s}
                         title={`Дані УЗЕ биті: виключено ${s.bess_anomalous_days} дн.`}
-                      >
-                        {' '}⚠
-                      </span>
+                        onDiagnoseBess={onDiagnoseBess}
+                      />
                     ) : null}
                   </td>
                   {s.has_data ? (

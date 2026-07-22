@@ -788,6 +788,9 @@ export type EconomicsPortfolioSite = {
   action_reserve_uah: number
   bess_data_ok: boolean
   bess_anomalous_days: number
+  // Civil dates (YYYY-MM-DD) excluded by the УЗЕ anomaly filter; the
+  // portfolio ⚠ drills into the first of them when present.
+  bess_anomalous_dates?: string[] | null
   pv_kwh: number
   load_kwh: number
   grid_import_kwh: number

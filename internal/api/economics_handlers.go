@@ -750,9 +750,12 @@ type EconomicsPortfolioSite struct {
 	ScheduleReserveUah float64 `json:"schedule_reserve_uah"`
 	BessReserveUah     float64 `json:"bess_reserve_uah"`
 	ActionReserveUah   float64 `json:"action_reserve_uah"`
-	BessDataOk         bool    `json:"bess_data_ok"`
-	BessAnomalousDays  int     `json:"bess_anomalous_days"`
-	PvKwh              float64 `json:"pv_kwh"`
+	BessDataOk         bool     `json:"bess_data_ok"`
+	BessAnomalousDays  int      `json:"bess_anomalous_days"`
+	// BessAnomalousDates lists civil dates (YYYY-MM-DD) excluded by the
+	// УЗЕ anomaly filter; the portfolio ⚠ drills into the first of them.
+	BessAnomalousDates []string `json:"bess_anomalous_dates,omitempty"`
+	PvKwh              float64  `json:"pv_kwh"`
 	LoadKwh            float64 `json:"load_kwh"`
 	GridImportKwh      float64 `json:"grid_import_kwh"`
 	GridExportKwh      float64 `json:"grid_export_kwh"`
@@ -816,6 +819,7 @@ func portfolioSiteFromTotals(id, name string, t economics.MonthlyTotals, hasData
 		ActionReserveUah:   sched + bess,
 		BessDataOk:         t.EssDataQuality.DataOK,
 		BessAnomalousDays:  t.EssDataQuality.AnomalousDays,
+		BessAnomalousDates: append([]string(nil), t.EssDataQuality.AnomalousDates...),
 		PvKwh:              t.PV,
 		LoadKwh:            t.Load,
 		GridImportKwh:      t.GridImport,
