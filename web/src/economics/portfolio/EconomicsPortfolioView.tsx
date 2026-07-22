@@ -92,18 +92,21 @@ export function EconomicsPortfolioView({
   )
 }
 
+const ANOMALY_REASON_SHORT_UA: Record<string, string> = {
+  peak_spike: 'стрибок',
+  hourly_over_limit: 'понад ліміт',
+  after_gap: 'розрив звʼязку',
+}
+
 function bessWarnTitle(site: EconomicsPortfolioSite): string {
   const hours = site.bess_anomalous_hours || site.bess_anomalous_days
-  const reasonUa: Record<string, string> = {
-    peak_spike: 'стрибок потужності',
-    hourly_over_limit: 'заряд/розряд понад ліміт',
-    after_gap: 'після розриву звʼязку',
-  }
   const reasons = (site.bess_anomaly_reasons ?? [])
-    .map((r) => reasonUa[r] ?? r)
+    .map((r) => ANOMALY_REASON_SHORT_UA[r] ?? r)
     .filter(Boolean)
   const reasonPart = reasons.length > 0 ? ` · ${reasons.join(', ')}` : ''
-  return `Дані УЗЕ биті: виключено ${hours} год.${reasonPart}`
+  const dates = (site.bess_anomalous_dates ?? []).filter(Boolean)
+  const datePart = dates.length > 0 ? ` · ${dates.join(', ')}` : ''
+  return `Дані УЗЕ биті: виключено ${hours} год.${reasonPart}${datePart}`
 }
 
 function BessWarnButton({
@@ -114,26 +117,39 @@ function BessWarnButton({
   onDiagnoseBess?: (site: EconomicsPortfolioSite) => void
 }) {
   const title = bessWarnTitle(site)
-  if (!onDiagnoseBess) {
-    return (
-      <span className="economics-portfolio-warn" title={title}>
-        {' '}
+  const shortReasons = (site.bess_anomaly_reasons ?? [])
+    .map((r) => ANOMALY_REASON_SHORT_UA[r] ?? r)
+    .filter(Boolean)
+    .join(', ')
+  const label = shortReasons || `${site.bess_anomalous_hours || site.bess_anomalous_days} год.`
+
+  const body = (
+    <>
+      <span className="economics-portfolio-warn-icon" aria-hidden="true">
         ⚠
       </span>
-    )
+      <span className="economics-portfolio-warn-label">{label}</span>
+      <span className="economics-portfolio-warn-tip" role="tooltip">
+        {title}
+        {onDiagnoseBess ? ' Натисніть, щоб відкрити день.' : ''}
+      </span>
+    </>
+  )
+
+  if (!onDiagnoseBess) {
+    return <span className="economics-portfolio-warn">{body}</span>
   }
   return (
     <button
       type="button"
       className="economics-portfolio-warn"
-      title={`${title}. Натисніть, щоб відкрити.`}
       aria-label={`${formatOrganizationLabel(site.id)}: ${title}`}
       onClick={(e) => {
         e.stopPropagation()
         onDiagnoseBess(site)
       }}
     >
-      ⚠
+      {body}
     </button>
   )
 }

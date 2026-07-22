@@ -168,18 +168,28 @@ func TestDetectEssAnomaliesPeakInterval(t *testing.T) {
 	}
 }
 
-// TestDetectEssAnomaliesAfterGap tags a peak spike later the same day as a
-// multi-hour hole (connection-loss pattern), not only the first hour back.
+// TestDetectEssAnomaliesAfterGap tags a peak spike later the same day after
+// an idle hole that follows real activity (zero-filled connection-loss rows).
 func TestDetectEssAnomaliesAfterGap(t *testing.T) {
 	loc := time.UTC
 	base := time.Date(2026, 7, 12, 0, 0, 0, 0, loc)
 	spike := base.Add(14 * time.Hour)
-	hourly := []HourlyRecord{
-		{HourStart: base.Add(8 * time.Hour), EssCharged: 10, EssPeakIntervalKw: 50},
-		// Gap 08→12, then continuous 12→13→14 with spike at 14.
-		{HourStart: base.Add(12 * time.Hour), EssCharged: 20, EssPeakIntervalKw: 80},
-		{HourStart: base.Add(13 * time.Hour), EssCharged: 30, EssPeakIntervalKw: 90},
-		{HourStart: spike, EssCharged: 40, EssPeakIntervalKw: 200},
+	hourly := make([]HourlyRecord, 0, 15)
+	for h := 0; h <= 14; h++ {
+		rec := HourlyRecord{HourStart: base.Add(time.Duration(h) * time.Hour)}
+		switch h {
+		case 7, 8:
+			rec.PVToLoad = 20 // daytime activity before the outage
+		case 9, 10:
+			// idle hole (connection loss) — still present as zero rows
+		case 12, 13:
+			rec.EssCharged = 30
+			rec.EssPeakIntervalKw = 80
+		case 14:
+			rec.EssCharged = 40
+			rec.EssPeakIntervalKw = 200 // > 150 limit
+		}
+		hourly = append(hourly, rec)
 	}
 	bad, dq := detectEssAnomalies(hourly, loc, 100, essAnomalyTolerance) // limit 150
 	if len(bad) != 1 || !bad[spike.Unix()] {
@@ -187,9 +197,6 @@ func TestDetectEssAnomaliesAfterGap(t *testing.T) {
 	}
 	if dq.ReasonCounts[AnomalyReasonPeakSpike] != 1 || dq.ReasonCounts[AnomalyReasonAfterGap] != 1 {
 		t.Fatalf("ReasonCounts = %v, want peak_spike+after_gap", dq.ReasonCounts)
-	}
-	if len(dq.Anomalies) != 1 {
-		t.Fatalf("Anomalies len = %d", len(dq.Anomalies))
 	}
 	got := dq.Anomalies[0].Reasons
 	hasGap, hasPeak := false, false

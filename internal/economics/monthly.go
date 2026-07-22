@@ -268,18 +268,24 @@ func detectEssAnomalies(hourly []HourlyRecord, loc *time.Location, powerLimitKw,
 		}
 		local := h.HourStart.In(loc)
 		date := local.Format("2006-01-02")
-		// Tag after_gap when any multi-hour hole earlier the same civil
-		// day (not only the first hour back after reconnect) — spikes
-		// often land a couple of hours after the link returns.
-		for j := i - 1; j >= 0; j-- {
-			prevLocal := sorted[j].HourStart.In(loc)
-			if prevLocal.Format("2006-01-02") != date {
-				break
-			}
-			nextStart := sorted[j+1].HourStart
-			if nextStart.Sub(sorted[j].HourStart) > time.Hour+time.Minute {
-				reasons = append(reasons, AnomalyReasonAfterGap)
-				break
+		// Tag after_gap when earlier the same civil day there was real
+		// activity, then a multi-hour idle hole (typical connection loss —
+		// economics still stores zero-filled hours, so HourStart gaps alone
+		// miss this), then this anomalous hour.
+		if hasIdleHoleAfterActivity(sorted, i, loc, date) {
+			reasons = append(reasons, AnomalyReasonAfterGap)
+		} else {
+			// Fallback: multi-hour hole in HourStart sequence same day.
+			for j := i - 1; j >= 0; j-- {
+				prevLocal := sorted[j].HourStart.In(loc)
+				if prevLocal.Format("2006-01-02") != date {
+					break
+				}
+				nextStart := sorted[j+1].HourStart
+				if nextStart.Sub(sorted[j].HourStart) > time.Hour+time.Minute {
+					reasons = append(reasons, AnomalyReasonAfterGap)
+					break
+				}
 			}
 		}
 		badHours[h.HourStart.Unix()] = true
@@ -308,6 +314,41 @@ func detectEssAnomalies(hourly []HourlyRecord, loc *time.Location, powerLimitKw,
 	dq.ReasonCounts = reasonCounts
 	dq.DataOK = dq.AnomalousHours == 0
 	return badHours, dq
+}
+
+// isIdleHour reports a telemetry hour with no energy movement — used to
+// spot connection-loss holes that are still stored as zero-filled rows.
+func isIdleHour(h HourlyRecord) bool {
+	return h.EssCharged == 0 && h.EssDischarged == 0 &&
+		h.PVToEss == 0 && h.PVToGrid == 0 && h.PVToLoad == 0 &&
+		h.GridImport == 0 && h.GridToEss == 0 && h.GridToLoad == 0 &&
+		h.EssToLoad == 0
+}
+
+// hasIdleHoleAfterActivity is true when, earlier the same civil day, there
+// was at least one non-idle hour followed by ≥2 consecutive idle hours
+// before index i (the anomalous hour).
+func hasIdleHoleAfterActivity(sorted []HourlyRecord, i int, loc *time.Location, date string) bool {
+	hadActive := false
+	idleRun := 0
+	for j := 0; j < i; j++ {
+		if sorted[j].HourStart.In(loc).Format("2006-01-02") != date {
+			continue
+		}
+		if !isIdleHour(sorted[j]) {
+			hadActive = true
+			idleRun = 0
+			continue
+		}
+		if !hadActive {
+			continue
+		}
+		idleRun++
+		if idleRun >= 2 {
+			return true
+		}
+	}
+	return false
 }
 
 // StoredMonth is the served monthly economics result: the rollup totals,
