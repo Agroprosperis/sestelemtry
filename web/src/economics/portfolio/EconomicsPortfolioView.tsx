@@ -93,20 +93,14 @@ export function EconomicsPortfolioView({
 }
 
 const ANOMALY_REASON_TIP_UA: Record<string, string> = {
-  peak_spike: 'стрибок потужності',
-  hourly_over_limit: 'заряд/розряд понад ліміт',
-  after_gap: 'розрив звʼязку',
+  peak_spike: 'Стрибок потужності',
+  hourly_over_limit: 'Заряд/розряд понад ліміт',
+  after_gap: 'Розрив звʼязку',
 }
 
-function bessWarnTitle(site: EconomicsPortfolioSite): string {
-  const hours = site.bess_anomalous_hours || site.bess_anomalous_days
-  const reasons = (site.bess_anomaly_reasons ?? [])
-    .map((r) => ANOMALY_REASON_TIP_UA[r] ?? r)
-    .filter(Boolean)
-  const reasonPart = reasons.length > 0 ? ` · ${reasons.join(', ')}` : ''
-  const dates = (site.bess_anomalous_dates ?? []).filter(Boolean)
-  const datePart = dates.length > 0 ? ` · ${dates.join(', ')}` : ''
-  return `Дані УЗЕ биті: виключено ${hours} год.${reasonPart}${datePart}`
+function formatAnomalyDate(isoDate: string): string {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(isoDate)) return isoDate
+  return `${isoDate.slice(8, 10)}.${isoDate.slice(5, 7)}.${isoDate.slice(0, 4)}`
 }
 
 function BessWarnButton({
@@ -116,17 +110,42 @@ function BessWarnButton({
   site: EconomicsPortfolioSite
   onDiagnoseBess?: (site: EconomicsPortfolioSite) => void
 }) {
-  const title = bessWarnTitle(site)
+  const hours = site.bess_anomalous_hours || site.bess_anomalous_days
+  const reasons = (site.bess_anomaly_reasons ?? [])
+    .map((r) => ANOMALY_REASON_TIP_UA[r] ?? r)
+    .filter(Boolean)
+  const dates = (site.bess_anomalous_dates ?? []).filter(Boolean).map(formatAnomalyDate)
+  const ariaTitle = [
+    reasons.length > 0 ? reasons.join(', ') : 'Дані УЗЕ биті',
+    `виключено ${hours} год.`,
+    dates.length > 0 ? dates.join(', ') : '',
+  ]
+    .filter(Boolean)
+    .join(' · ')
+
+  const tip = (
+    <span className="economics-portfolio-warn-tip" role="tooltip">
+      <span className="economics-portfolio-warn-tip-title">
+        {reasons.length > 0 ? reasons.join(' · ') : 'Дані УЗЕ биті'}
+      </span>
+      <span className="economics-portfolio-warn-tip-meta">
+        Виключено {hours} год. з розрахунку УЗЕ
+      </span>
+      {dates.length > 0 ? (
+        <span className="economics-portfolio-warn-tip-dates">{dates.join(', ')}</span>
+      ) : null}
+      {onDiagnoseBess ? (
+        <span className="economics-portfolio-warn-tip-action">Натисніть, щоб відкрити день</span>
+      ) : null}
+    </span>
+  )
 
   const body = (
     <>
       <span className="economics-portfolio-warn-icon" aria-hidden="true">
         ⚠
       </span>
-      <span className="economics-portfolio-warn-tip" role="tooltip">
-        {title}
-        {onDiagnoseBess ? ' Натисніть, щоб відкрити день.' : ''}
-      </span>
+      {tip}
     </>
   )
 
@@ -137,7 +156,7 @@ function BessWarnButton({
     <button
       type="button"
       className="economics-portfolio-warn"
-      aria-label={`${formatOrganizationLabel(site.id)}: ${title}`}
+      aria-label={`${formatOrganizationLabel(site.id)}: ${ariaTitle}`}
       onClick={(e) => {
         e.stopPropagation()
         onDiagnoseBess(site)
