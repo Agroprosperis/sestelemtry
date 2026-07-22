@@ -1,11 +1,8 @@
 package inventory
 
 import (
-	"math"
 	"sort"
 	"time"
-
-	"github.com/nesh/sestelemetry/internal/config"
 )
 
 // Poll reasons recorded on each snapshot row.
@@ -15,10 +12,9 @@ const (
 	PollReasonDaily   = "daily"
 )
 
-// Quality flags (handoff §0 / §3 / §5).
+// Quality flags derived only from controller (Modbus) readings.
 const (
 	FlagControlModeNotRemote = "CONTROL_MODE_NOT_REMOTE"
-	FlagInventoryMismatch    = "INVENTORY_MISMATCH"
 	FlagControlModeDisagree  = "CONTROL_MODE_DISAGREE"
 	FlagModbusError          = "MODBUS_ERROR"
 )
@@ -62,7 +58,7 @@ type DeviceReading struct {
 // Merge combines per-device readings into one site snapshot. PV fields
 // come from the PV (or single) logger; ESS fields from the ESS (or
 // single) logger. Dual-SL mode disagreement is flagged.
-func Merge(orgID, pollReason string, ts time.Time, readings []DeviceReading, expected *config.InventoryExpected) Snapshot {
+func Merge(orgID, pollReason string, ts time.Time, readings []DeviceReading) Snapshot {
 	snap := Snapshot{
 		Time:           ts.UTC(),
 		OrganizationID: orgID,
@@ -121,11 +117,6 @@ func Merge(orgID, pollReason string, ts time.Time, readings []DeviceReading, exp
 		flags[FlagControlModeNotRemote] = struct{}{}
 	}
 
-	if mismatch := CompareExpected(snap, expected); len(mismatch) > 0 {
-		flags[FlagInventoryMismatch] = struct{}{}
-		snap.Raw["mismatch"] = mismatch
-	}
-
 	snap.QualityFlags = sortedKeys(flags)
 	return snap
 }
@@ -136,31 +127,6 @@ func assignIfSet(dst **float64, src *float64) {
 	}
 	v := *src
 	*dst = &v
-}
-
-// CompareExpected returns a map of field → {expected, actual} for every
-// configured passport field that differs from the snapshot.
-func CompareExpected(snap Snapshot, expected *config.InventoryExpected) map[string]map[string]float64 {
-	if expected == nil {
-		return nil
-	}
-	out := map[string]map[string]float64{}
-	check := func(name string, want *float64, got *float64, tol float64) {
-		if want == nil || got == nil {
-			return
-		}
-		if math.Abs(*want-*got) > tol {
-			out[name] = map[string]float64{"expected": *want, "actual": *got}
-		}
-	}
-	check(MetricPVRatedKw, expected.PVRatedKw, snap.PVRatedKw, 0.5)
-	check(MetricESSRatedKw, expected.ESSRatedKw, snap.ESSRatedKw, 0.5)
-	check(MetricESSRatedKwh, expected.ESSRatedKwh, snap.ESSRatedKwh, 0.5)
-	check(MetricESSCount, expected.ESSCount, snap.ESSCount, 0.1)
-	if len(out) == 0 {
-		return nil
-	}
-	return out
 }
 
 func sortedKeys(m map[string]struct{}) []string {

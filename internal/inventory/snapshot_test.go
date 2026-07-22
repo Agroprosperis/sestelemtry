@@ -4,12 +4,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nesh/sestelemetry/internal/config"
 	"github.com/nesh/sestelemetry/internal/energyflow"
 	"github.com/nesh/sestelemetry/internal/inventory"
 )
-
-func f64(v float64) *float64 { return &v }
 
 func TestKeysForRole(t *testing.T) {
 	pv := inventory.KeysForRole(energyflow.RolePV)
@@ -35,7 +32,7 @@ func TestIsInventoryMetricKey(t *testing.T) {
 	}
 }
 
-func TestMergeDualSLAndMismatch(t *testing.T) {
+func TestMergeDualSL(t *testing.T) {
 	pv := inventory.ReadingFromValues("10.0.0.1", map[string]float64{
 		inventory.MetricPVRatedKw:              600,
 		inventory.MetricActivePowerControlMode: 4,
@@ -48,13 +45,7 @@ func TestMergeDualSLAndMismatch(t *testing.T) {
 		inventory.MetricESSSOHPct:              99.5,
 		inventory.MetricActivePowerControlMode: 4,
 	})
-	expected := &config.InventoryExpected{
-		PVRatedKw:   f64(600),
-		ESSRatedKw:  f64(800), // mismatch
-		ESSRatedKwh: f64(1720),
-		ESSCount:    f64(8),
-	}
-	snap := inventory.Merge("ze", inventory.PollReasonStartup, time.Unix(1_700_000_000, 0).UTC(), []inventory.DeviceReading{pv, ess}, expected)
+	snap := inventory.Merge("ze", inventory.PollReasonStartup, time.Unix(1_700_000_000, 0).UTC(), []inventory.DeviceReading{pv, ess})
 	if snap.DeviceHost != "" {
 		t.Fatalf("merged snapshot should have empty device_host, got %q", snap.DeviceHost)
 	}
@@ -64,14 +55,8 @@ func TestMergeDualSLAndMismatch(t *testing.T) {
 	if snap.ESSCount == nil || *snap.ESSCount != 8 {
 		t.Fatalf("ess_count: %#v", snap.ESSCount)
 	}
-	found := false
-	for _, f := range snap.QualityFlags {
-		if f == inventory.FlagInventoryMismatch {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("expected INVENTORY_MISMATCH, flags=%v raw=%v", snap.QualityFlags, snap.Raw)
+	if len(snap.QualityFlags) != 0 {
+		t.Fatalf("unexpected flags: %v", snap.QualityFlags)
 	}
 }
 
@@ -83,7 +68,7 @@ func TestMergeControlModeNotRemote(t *testing.T) {
 		inventory.MetricESSCount:               3,
 		inventory.MetricActivePowerControlMode: 0,
 	})
-	snap := inventory.Merge("ab", inventory.PollReasonHourly, time.Now().UTC(), []inventory.DeviceReading{r}, nil)
+	snap := inventory.Merge("ab", inventory.PollReasonHourly, time.Now().UTC(), []inventory.DeviceReading{r})
 	found := false
 	for _, f := range snap.QualityFlags {
 		if f == inventory.FlagControlModeNotRemote {

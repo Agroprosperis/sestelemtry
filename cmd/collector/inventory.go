@@ -35,8 +35,8 @@ func excludeInventoryKeys(entries []registers.ResolvedEntry) []registers.Resolve
 }
 
 // runOrgInventory polls plant-passport registers on a rare schedule
-// (startup, hourly, daily), merges dual-SmartLogger readings, compares
-// against org.Inventory, and stores one site-level snapshot.
+// (startup, hourly, daily), merges dual-SmartLogger readings, and
+// stores one site-level snapshot from controller data only.
 func runOrgInventory(
 	ctx context.Context,
 	log *slog.Logger,
@@ -98,7 +98,7 @@ func pollOrgInventory(
 		readings = append(readings, r)
 	}
 	ts := time.Now().UTC()
-	snap := inventory.Merge(org.ID, reason, ts, readings, org.Inventory)
+	snap := inventory.Merge(org.ID, reason, ts, readings)
 	if err := insertPlantInventory(ctx, pool, snap); err != nil {
 		return err
 	}
