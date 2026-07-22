@@ -121,6 +121,25 @@ export type OrganizationsResponse = {
   organizations: OrganizationInfo[]
 }
 
+// PlantInventory is the latest rare Modbus plant-passport snapshot from
+// GET /api/v1/plant-inventory. Nullable numeric fields are null when the
+// collector could not read that register (e.g. dual-SL merge missing a side).
+export type PlantInventory = {
+  organization_id: string
+  time: string
+  device_host?: string
+  poll_reason: string
+  pv_rated_kw: number | null
+  ess_rated_kw: number | null
+  ess_rated_kwh: number | null
+  ess_count: number | null
+  pcs_count: number | null
+  ess_soh_pct: number | null
+  active_power_control_mode: number | null
+  quality_flags: string[]
+  raw?: Record<string, unknown>
+}
+
 // OpenMeteoForecast is the subset of the api.open-meteo.com /v1/forecast
 // response that the weather widget consumes. Only the fields we actually
 // read are typed; the upstream payload contains many more keys (radiation

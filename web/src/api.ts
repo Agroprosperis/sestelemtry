@@ -10,6 +10,7 @@ import type {
   EnergyFlowHourlyResponse,
   OpenMeteoForecast,
   OrganizationsResponse,
+  PlantInventory,
   PvForecastPoint,
   RegistersResponse,
   TimeseriesResponse,
@@ -75,6 +76,26 @@ export async function fetchOrganizations(signal?: AbortSignal): Promise<Organiza
 // benefit.
 export function resetOrganizationsCache(): void {
   organizationsCache = null
+}
+
+// fetchPlantInventory returns the newest plant-passport snapshot for an
+// organization. 404 (no snapshot yet) maps to null so the station page can
+// show an empty state without treating it as a hard error.
+export async function fetchPlantInventory(
+  organizationID: string,
+  signal?: AbortSignal,
+): Promise<PlantInventory | null> {
+  const url = buildURL('/api/v1/plant-inventory', {
+    organization_id: organizationID,
+  })
+  const res = await fetch(url, { signal })
+  if (res.status === 404) {
+    return null
+  }
+  if (!res.ok) {
+    throw new Error(`plant-inventory request failed: ${res.status}`)
+  }
+  return (await res.json()) as PlantInventory
 }
 
 let registersCache: Promise<RegistersResponse> | null = null

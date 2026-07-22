@@ -15,6 +15,14 @@ function goToImportView() {
   window.dispatchEvent(new PopStateEvent('popstate'))
 }
 
+function goToStationView() {
+  if (typeof window === 'undefined') return
+  const url = new URL(window.location.href)
+  url.searchParams.set('view', 'station')
+  window.history.pushState({}, '', url.toString())
+  window.dispatchEvent(new PopStateEvent('popstate'))
+}
+
 // DashboardHeader is the page-wide brand strip: logo + product name on
 // the left, and the global actions (archive import, data export) pinned
 // to the right. Range/period/org controls live in `DashboardControls`
@@ -35,6 +43,29 @@ export function DashboardHeader({ organizationID, onExportClick }: Props) {
       </div>
 
       <div className="dashboard-header-actions">
+        <button
+          type="button"
+          className="economics-switch-button"
+          onClick={goToStationView}
+          title="Паспортні параметри станції зі SmartLogger"
+        >
+          <svg
+            aria-hidden="true"
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <rect x="3" y="3" width="18" height="18" rx="2" />
+            <path d="M3 9h18" />
+            <path d="M9 21V9" />
+          </svg>
+          <span>Паспорт станції</span>
+        </button>
         <button
           type="button"
           className="economics-switch-button"
