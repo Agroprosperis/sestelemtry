@@ -121,6 +121,58 @@ func Merge(orgID, pollReason string, ts time.Time, readings []DeviceReading) Sna
 	return snap
 }
 
+// CoalesceLatest builds the "current passport" view from snapshots
+// (newest first, as returned by storage). Metadata comes from the newest
+// snapshot, but each metric holds the most recent REAL value: nils
+// (failed reads) and zeros on nameplate fields (SmartLogger reports 0
+// while devices are offline, e.g. inverters overnight) are skipped and
+// backfilled from older snapshots. ok is false when the list is empty.
+func CoalesceLatest(snapshots []Snapshot) (Snapshot, bool) {
+	if len(snapshots) == 0 {
+		return Snapshot{}, false
+	}
+	// Ensure newest-first ordering regardless of caller.
+	ordered := make([]Snapshot, len(snapshots))
+	copy(ordered, snapshots)
+	if len(ordered) > 1 && ordered[0].Time.Before(ordered[len(ordered)-1].Time) {
+		for i, j := 0, len(ordered)-1; i < j; i, j = i+1, j-1 {
+			ordered[i], ordered[j] = ordered[j], ordered[i]
+		}
+	}
+
+	out := ordered[0]
+	for _, key := range AllMetricKeys {
+		var val *float64
+		for _, s := range ordered {
+			if v := NormalizeFieldValue(key, fieldValue(s, key)); v != nil {
+				val = cloneFloatPtr(v)
+				break
+			}
+		}
+		setFieldValue(&out, key, val)
+	}
+	return out, true
+}
+
+func setFieldValue(s *Snapshot, key string, v *float64) {
+	switch key {
+	case MetricPVRatedKw:
+		s.PVRatedKw = v
+	case MetricESSRatedKw:
+		s.ESSRatedKw = v
+	case MetricESSRatedKwh:
+		s.ESSRatedKwh = v
+	case MetricESSCount:
+		s.ESSCount = v
+	case MetricPCSCount:
+		s.PCSCount = v
+	case MetricESSSOHPct:
+		s.ESSSOHPct = v
+	case MetricActivePowerControlMode:
+		s.ActivePowerControlMode = v
+	}
+}
+
 func assignIfSet(dst **float64, src *float64) {
 	if src == nil {
 		return

@@ -89,9 +89,16 @@ func plantInventoryHistoryResponse(orgID string, diffs map[string][]inventory.Fi
 }
 
 func (s *Store) LatestPlantInventory(ctx context.Context, organizationID string) (PlantInventoryResponse, bool, error) {
-	snap, ok, err := storage.LatestPlantInventorySnapshot(ctx, s.pool, organizationID)
-	if err != nil || !ok {
-		return PlantInventoryResponse{}, ok, err
+	// Coalesce over recent snapshots so night-time zeros / failed reads
+	// don't blank out the passport values: each field shows the most
+	// recent real reading.
+	snaps, err := storage.ListPlantInventorySnapshots(ctx, s.pool, organizationID, 0)
+	if err != nil {
+		return PlantInventoryResponse{}, false, err
+	}
+	snap, ok := inventory.CoalesceLatest(snaps)
+	if !ok {
+		return PlantInventoryResponse{}, false, nil
 	}
 	return plantInventoryResponse(snap), true, nil
 }

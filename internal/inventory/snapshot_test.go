@@ -82,3 +82,36 @@ func TestMergeControlModeNotRemote(t *testing.T) {
 		t.Fatalf("single-device host: %q", snap.DeviceHost)
 	}
 }
+
+func TestCoalesceLatestBackfillsZerosAndNulls(t *testing.T) {
+	t0 := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
+	t1 := t0.Add(10 * time.Hour) // night poll
+	v := func(x float64) *float64 { return &x }
+	// Newest first, as storage returns them.
+	snaps := []inventory.Snapshot{
+		{Time: t1, PollReason: inventory.PollReasonHourly, PVRatedKw: v(0), ESSRatedKwh: nil, ActivePowerControlMode: v(4)},
+		{Time: t0, PollReason: inventory.PollReasonDaily, PVRatedKw: v(550), ESSRatedKwh: v(645), ActivePowerControlMode: v(4)},
+	}
+	out, ok := inventory.CoalesceLatest(snaps)
+	if !ok {
+		t.Fatal("expected ok")
+	}
+	if out.Time != t1 || out.PollReason != inventory.PollReasonHourly {
+		t.Fatalf("meta must come from newest snapshot: %#v", out)
+	}
+	if out.PVRatedKw == nil || *out.PVRatedKw != 550 {
+		t.Fatalf("pv_rated_kw should backfill 550 over night-time 0: %#v", out.PVRatedKw)
+	}
+	if out.ESSRatedKwh == nil || *out.ESSRatedKwh != 645 {
+		t.Fatalf("ess_rated_kwh should backfill over nil: %#v", out.ESSRatedKwh)
+	}
+	if out.ActivePowerControlMode == nil || *out.ActivePowerControlMode != 4 {
+		t.Fatalf("control mode: %#v", out.ActivePowerControlMode)
+	}
+}
+
+func TestCoalesceLatestEmpty(t *testing.T) {
+	if _, ok := inventory.CoalesceLatest(nil); ok {
+		t.Fatal("expected ok=false for empty input")
+	}
+}

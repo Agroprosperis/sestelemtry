@@ -17,7 +17,14 @@ type FieldChange struct {
 // DiffHistory walks snapshots in chronological order (oldest → newest)
 // and emits a change event whenever a tracked field's value differs from
 // the previous snapshot beyond a small tolerance. Identical hourly polls
-// produce no events. Output lists are newest-first for the UI.
+// produce no events.
+//
+// Missing readings never produce events: a nil (failed Modbus read) or a
+// zero on a nameplate field (SmartLogger aggregates rated power / device
+// counts over ONLINE devices only, so overnight it reports 0 while the
+// inverters sleep) is treated as "not reported", and the previous real
+// value is carried forward for comparison. Only real-value → real-value
+// transitions appear in the history. Output lists are newest-first.
 func DiffHistory(snapshots []Snapshot) map[string][]FieldChange {
 	out := make(map[string][]FieldChange, len(AllMetricKeys))
 	for _, k := range AllMetricKeys {
@@ -36,23 +43,31 @@ func DiffHistory(snapshots []Snapshot) map[string][]FieldChange {
 		}
 	}
 
-	prev := ordered[0]
+	// lastReal carries the most recent real (non-missing) value per field
+	// across gaps, so a nil/0 night snapshot between two real readings
+	// doesn't fabricate 550→0→550 style events.
+	lastReal := make(map[string]*float64, len(AllMetricKeys))
+	for _, key := range AllMetricKeys {
+		lastReal[key] = NormalizeFieldValue(key, fieldValue(ordered[0], key))
+	}
 	for i := 1; i < len(ordered); i++ {
 		cur := ordered[i]
 		for _, key := range AllMetricKeys {
-			from := fieldValue(prev, key)
-			to := fieldValue(cur, key)
-			if !fieldChanged(key, from, to) {
-				continue
+			to := NormalizeFieldValue(key, fieldValue(cur, key))
+			if to == nil {
+				continue // missing reading: keep waiting for a real value
 			}
-			out[key] = append(out[key], FieldChange{
-				At:         cur.Time.UTC(),
-				From:       cloneFloatPtr(from),
-				To:         cloneFloatPtr(to),
-				PollReason: cur.PollReason,
-			})
+			from := lastReal[key]
+			if from != nil && math.Abs(*from-*to) > fieldTolerance(key) {
+				out[key] = append(out[key], FieldChange{
+					At:         cur.Time.UTC(),
+					From:       cloneFloatPtr(from),
+					To:         cloneFloatPtr(to),
+					PollReason: cur.PollReason,
+				})
+			}
+			lastReal[key] = to
 		}
-		prev = cur
 	}
 
 	// Newest first for the UI timeline.
@@ -86,14 +101,30 @@ func fieldValue(s Snapshot, key string) *float64 {
 	}
 }
 
-func fieldChanged(key string, from, to *float64) bool {
-	if from == nil && to == nil {
+// NormalizeFieldValue maps "not really reported" readings to nil. Nil
+// stays nil (failed Modbus read); a zero on nameplate fields also becomes
+// nil because the SmartLogger aggregates rated power, capacity, device
+// counts and SOH over online devices only — 0 means "nothing connected
+// right now" (e.g. inverters asleep overnight), never a real passport
+// value. Control mode keeps 0 as-is: it is a valid enum (no restriction).
+func NormalizeFieldValue(key string, v *float64) *float64 {
+	if v == nil {
+		return nil
+	}
+	if *v == 0 && zeroIsMissing(key) {
+		return nil
+	}
+	return v
+}
+
+func zeroIsMissing(key string) bool {
+	switch key {
+	case MetricPVRatedKw, MetricESSRatedKw, MetricESSRatedKwh,
+		MetricESSCount, MetricPCSCount, MetricESSSOHPct:
+		return true
+	default:
 		return false
 	}
-	if from == nil || to == nil {
-		return true
-	}
-	return math.Abs(*from-*to) > fieldTolerance(key)
 }
 
 func fieldTolerance(key string) float64 {
