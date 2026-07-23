@@ -72,11 +72,11 @@ describe('StationPage', () => {
     stubInventoryApis(body, hist)
     render(<StationPage />)
     expect(await screen.findByText('Номінальна потужність СЕС')).toBeInTheDocument()
-    expect(screen.getByText('450')).toBeInTheDocument()
+    expect(screen.getByText('450.00')).toBeInTheDocument()
     expect(screen.getByText('1 змін')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: /Номінальна потужність СЕС/i }))
     expect(await screen.findByText('добовий')).toBeInTheDocument()
-    expect(screen.getByText('400')).toBeInTheDocument()
+    expect(screen.getByText('400.00')).toBeInTheDocument()
   })
 })

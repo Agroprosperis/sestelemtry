@@ -47,22 +47,29 @@ describe('formatParamDisplay', () => {
     expect(formatParamDisplay(countDef, 8.0)).toBe('8')
   })
 
-  it('keeps power ≤1000 kW in kW', () => {
-    expect(formatParamDisplay(pvDef, 550)).toBe('550')
+  it('keeps power ≤1000 kW in kW with hundredths', () => {
+    expect(formatParamDisplay(pvDef, 550)).toBe('550.00')
     expect(formatParamUnit(pvDef, 550)).toBe('кВт')
-    expect(formatParamDisplay(pvDef, 1000)).toBe('1000')
+    expect(formatParamDisplay(pvDef, 1000)).toBe('1000.00')
     expect(formatParamUnit(pvDef, 1000)).toBe('кВт')
   })
 
-  it('shows power >1000 kW in MW', () => {
-    expect(formatParamDisplay(pvDef, 1500)).toBe('1.5')
+  it('shows power >1000 kW in MW with hundredths', () => {
+    expect(formatParamDisplay(pvDef, 1500)).toBe('1.50')
     expect(formatParamUnit(pvDef, 1500)).toBe('МВт')
-    expect(formatParamDisplay(essKwDef, 2200)).toBe('2.2')
-    expect(formatParamUnit(essKwDef, 2200)).toBe('МВт')
+    expect(formatParamDisplay(essKwDef, 1100)).toBe('1.10')
+    expect(formatParamUnit(essKwDef, 1100)).toBe('МВт')
   })
 
-  it('does not convert capacity kWh to MW', () => {
-    expect(formatParamDisplay(essKwhDef, 1500)).toBe('1500')
-    expect(formatParamUnit(essKwhDef, 1500)).toBe('кВт·год')
+  it('shows capacity >1000 kWh in MWh with hundredths', () => {
+    expect(formatParamDisplay(essKwhDef, 1720.3)).toBe('1.72')
+    expect(formatParamUnit(essKwhDef, 1720.3)).toBe('МВт·год')
+    expect(formatParamDisplay(essKwhDef, 645)).toBe('645.00')
+    expect(formatParamUnit(essKwhDef, 645)).toBe('кВт·год')
+  })
+
+  it('rounds SOH to hundredths', () => {
+    const sohDef = STATION_PARAMS.find((d) => d.key === 'ess_soh_pct')!
+    expect(formatParamDisplay(sohDef, 99.6)).toBe('99.60')
   })
 })

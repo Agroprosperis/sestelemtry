@@ -152,19 +152,20 @@ export function readParamValue(inv: PlantInventory, key: StationParamKey): numbe
   }
 }
 
-/** Power fields stored in kW; values above 1000 are shown in MW. */
-function isPowerKw(key: StationParamKey): boolean {
-  return key === 'pv_rated_kw' || key === 'ess_rated_kw'
+/** Power (kW) and energy (kWh) fields; values above 1000 use mega units. */
+function scalesToMega(key: StationParamKey): boolean {
+  return key === 'pv_rated_kw' || key === 'ess_rated_kw' || key === 'ess_rated_kwh'
 }
 
 function formatNumber(value: number): string {
-  const rounded = Math.round(value * 10) / 10
-  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1)
+  return (Math.round(value * 100) / 100).toFixed(2)
 }
 
 export function formatParamUnit(def: StationParamDef, value: number | null): string {
   if (value == null || Number.isNaN(value) || def.enum) return ''
-  if (isPowerKw(def.key) && value > 1000) return 'МВт'
+  if (scalesToMega(def.key) && value > 1000) {
+    return def.key === 'ess_rated_kwh' ? 'МВт·год' : 'МВт'
+  }
   return def.unit
 }
 
@@ -174,7 +175,7 @@ export function formatParamDisplay(def: StationParamDef, value: number | null): 
   if (def.key === 'ess_count' || def.key === 'pcs_count') {
     return String(Math.round(value))
   }
-  if (isPowerKw(def.key) && value > 1000) {
+  if (scalesToMega(def.key) && value > 1000) {
     return formatNumber(value / 1000)
   }
   return formatNumber(value)
