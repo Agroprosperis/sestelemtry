@@ -152,14 +152,32 @@ export function readParamValue(inv: PlantInventory, key: StationParamKey): numbe
   }
 }
 
+/** Power fields stored in kW; values above 1000 are shown in MW. */
+function isPowerKw(key: StationParamKey): boolean {
+  return key === 'pv_rated_kw' || key === 'ess_rated_kw'
+}
+
+function formatNumber(value: number): string {
+  const rounded = Math.round(value * 10) / 10
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1)
+}
+
+export function formatParamUnit(def: StationParamDef, value: number | null): string {
+  if (value == null || Number.isNaN(value) || def.enum) return ''
+  if (isPowerKw(def.key) && value > 1000) return 'МВт'
+  return def.unit
+}
+
 export function formatParamDisplay(def: StationParamDef, value: number | null): string {
   if (value == null || Number.isNaN(value)) return '—'
   if (def.enum) return formatControlMode(value)
   if (def.key === 'ess_count' || def.key === 'pcs_count') {
     return String(Math.round(value))
   }
-  const rounded = Math.round(value * 10) / 10
-  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1)
+  if (isPowerKw(def.key) && value > 1000) {
+    return formatNumber(value / 1000)
+  }
+  return formatNumber(value)
 }
 
 /** Compact display for history from/to cells (no long enum prose). */
@@ -167,8 +185,7 @@ export function formatHistoryValue(def: StationParamDef, value: number | null): 
   if (value == null || Number.isNaN(value)) return '—'
   if (def.enum) {
     const n = Math.round(value)
-    const label = CONTROL_MODE_LABELS[n]
-    return label ? `${n}` : String(n)
+    return String(n)
   }
   return formatParamDisplay(def, value)
 }

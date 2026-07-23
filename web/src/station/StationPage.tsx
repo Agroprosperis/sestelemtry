@@ -13,6 +13,7 @@ import {
   type StationParamKey,
   formatHistoryValue,
   formatParamDisplay,
+  formatParamUnit,
   formatPollReason,
   formatQualityFlag,
   readParamValue,
@@ -57,6 +58,7 @@ function ParamCard({
   const [open, setOpen] = useState(false)
   const value = readParamValue(inv, def.key)
   const display = formatParamDisplay(def, value)
+  const unit = formatParamUnit(def, value)
   const changeCount = changes.length
 
   return (
@@ -74,8 +76,8 @@ function ParamCard({
           <span className="station-card-label">{def.label}</span>
           <span className="station-card-value">
             {display}
-            {def.unit && display !== '—' ? (
-              <span className="station-unit">{def.unit}</span>
+            {unit && display !== '—' ? (
+              <span className="station-unit">{unit}</span>
             ) : null}
           </span>
         </span>
@@ -98,10 +100,19 @@ function ParamCard({
                 <li key={`${ev.at}-${ev.from}-${ev.to}`}>
                   <time dateTime={ev.at}>{formatSnapshotTime(ev.at)}</time>
                   <span className="station-history-diff">
-                    <span>{formatHistoryValue(def, ev.from)}</span>
+                    <span>
+                      {formatHistoryValue(def, ev.from)}
+                      {formatParamUnit(def, ev.from) ? (
+                        <span className="station-unit">{formatParamUnit(def, ev.from)}</span>
+                      ) : null}
+                    </span>
                     <span className="station-history-arrow">→</span>
-                    <span>{formatHistoryValue(def, ev.to)}</span>
-                    {def.unit ? <span className="station-unit">{def.unit}</span> : null}
+                    <span>
+                      {formatHistoryValue(def, ev.to)}
+                      {formatParamUnit(def, ev.to) ? (
+                        <span className="station-unit">{formatParamUnit(def, ev.to)}</span>
+                      ) : null}
+                    </span>
                   </span>
                   {ev.poll_reason ? (
                     <span className="station-history-reason">
