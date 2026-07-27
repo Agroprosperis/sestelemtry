@@ -9,6 +9,7 @@ import { EconomicsRecomputeModal } from './components/EconomicsRecomputeModal'
 import { EconomicsTable } from './components/EconomicsTable'
 import { EconomicsMonthlyView } from './monthly/EconomicsMonthlyView'
 import { EconomicsAnnualView } from './annual/EconomicsAnnualView'
+import { EconomicsPaybackView } from './payback/EconomicsPaybackView'
 import { EconomicsPortfolioView, type PortfolioScope } from './portfolio/EconomicsPortfolioView'
 import type { EconomicsPortfolioSite } from '../api'
 import './economics.css'
@@ -86,6 +87,11 @@ const LEGACY_QUERY_KEYS = [
   'ess_capacity',
 ]
 
+// PAYBACK_WINDOW_FROM anchors the payback page's all-time fetch. The
+// earliest site went live 2025-01 (see .cursor/rules/elevator-start-dates);
+// months before the first data month come back empty and are skipped.
+const PAYBACK_WINDOW_FROM = '2025-01'
+
 // readRangeFromUrl picks the period granularity (day / month / year).
 // Defaults to 'day' so existing links and the common case stay unchanged.
 function readRangeFromUrl(): EconomicsRange {
@@ -94,6 +100,7 @@ function readRangeFromUrl(): EconomicsRange {
   const raw = params.get('range')
   if (raw === 'month') return 'month'
   if (raw === 'year') return 'year'
+  if (raw === 'payback') return 'payback'
   if (raw === 'portfolio') return 'portfolio'
   return 'day'
 }
@@ -115,7 +122,7 @@ function updateUrl(date: string, range: EconomicsRange, windowFrom: string, wind
   const url = new URL(window.location.href)
   url.searchParams.set('view', 'economics')
   url.searchParams.set('anchor', date)
-  if (range === 'month' || range === 'year' || range === 'portfolio') {
+  if (range === 'month' || range === 'year' || range === 'payback' || range === 'portfolio') {
     url.searchParams.set('range', range)
   } else {
     url.searchParams.delete('range')
@@ -213,6 +220,18 @@ export function EconomicsPage() {
     refreshKey,
   })
 
+  // The payback page always looks at the whole operating history: a
+  // fixed window from before the earliest site went live up to the
+  // current month. Anything even earlier still arrives aggregated in
+  // prior_ebitda_uah / prior_months_with_data.
+  const payback = useEconomicsAnnualData({
+    organizationID: range === 'payback' ? organizationID : '',
+    period: '',
+    from: range === 'payback' ? PAYBACK_WINDOW_FROM : '',
+    to: range === 'payback' ? today().slice(0, 7) : '',
+    refreshKey,
+  })
+
   // jumpToMonth switches the page to the month view of the given YYYY-MM
   // (drill-down from an annual trend bar / table row). We keep the day
   // anchor at the first of that month so the month picker lands cleanly.
@@ -273,7 +292,13 @@ export function EconomicsPage() {
         range={range}
         onRangeChange={setRange}
         portfolioScope={portfolioScope}
-        monthsWithData={range === 'year' ? annual.year?.months_with_data : undefined}
+        monthsWithData={
+          range === 'year'
+            ? annual.year?.months_with_data
+            : range === 'payback' && payback.year
+              ? payback.year.months_with_data + payback.year.prior_months_with_data
+              : undefined
+        }
         windowFrom={windowFrom || (range === 'year' || range === 'portfolio' ? `${period}-01` : '')}
         windowTo={windowTo || (range === 'year' || range === 'portfolio' ? `${period}-12` : '')}
         onWindowChange={(nextFrom, nextTo) => {
@@ -321,6 +346,25 @@ export function EconomicsPage() {
           onDiagnoseBess={diagnoseBessFromPortfolio}
           refreshKey={refreshKey}
         />
+      ) : range === 'payback' ? (
+        <>
+          {payback.error && (
+            <section className="economics-banner economics-banner-error" role="alert">
+              Не вдалося завантажити дані: {payback.error}
+            </section>
+          )}
+          {payback.loading ? (
+            <p className="economics-loading">Завантаження…</p>
+          ) : payback.year ? (
+            <EconomicsPaybackView
+              data={payback.year}
+              capexUah={tariffs.capexUah}
+              plannedPaybackMonths={tariffs.plannedPaybackMonths}
+            />
+          ) : (
+            <p className="economics-loading">Немає даних.</p>
+          )}
+        </>
       ) : range === 'year' ? (
         <>
           {annual.error && (

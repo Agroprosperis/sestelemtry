@@ -52,6 +52,10 @@ export type Tariffs = {
   // display-only (never feeds the economics math) and powers the annual
   // payback/ROI panel; 0 hides that panel.
   capexUah: number
+  // plannedPaybackMonths is the business-plan payback period (months)
+  // from the investment case. Display-only: the payback page compares
+  // the live forecast against it. 0 = not set (comparison hidden).
+  plannedPaybackMonths: number
 }
 
 export const DEFAULT_TARIFFS: Tariffs = {
@@ -69,4 +73,5 @@ export const DEFAULT_TARIFFS: Tariffs = {
   essPowerLimitKw: 0,
   roundtripEfficiency: 0,
   capexUah: 0,
+  plannedPaybackMonths: 0,
 }

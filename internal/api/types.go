@@ -407,4 +407,9 @@ type OrgTariffs struct {
 	// display-only metadata (never used by the economics engine) that
 	// drives the payback / ROI panel; 0 (or omitted) hides that panel.
 	CapexUah float64 `json:"capex_uah,omitempty"`
+	// PlannedPaybackMonths is the business-plan payback period (months
+	// from the start of operation). Display-only metadata: the payback
+	// page compares the live forecast against it; 0 (or omitted) hides
+	// that comparison.
+	PlannedPaybackMonths float64 `json:"planned_payback_months,omitempty"`
 }

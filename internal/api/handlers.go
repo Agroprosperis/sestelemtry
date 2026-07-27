@@ -1548,6 +1548,11 @@ func validateOrgTariffs(t OrgTariffs) error {
 	if math.IsNaN(t.CapexUah) || math.IsInf(t.CapexUah, 0) || t.CapexUah < 0 {
 		return fmt.Errorf("capex_uah must be >= 0")
 	}
+	// planned_payback_months is optional (0 = no business-plan
+	// comparison) but must be a finite, non-negative number when supplied.
+	if math.IsNaN(t.PlannedPaybackMonths) || math.IsInf(t.PlannedPaybackMonths, 0) || t.PlannedPaybackMonths < 0 {
+		return fmt.Errorf("planned_payback_months must be >= 0")
+	}
 	return nil
 }
 

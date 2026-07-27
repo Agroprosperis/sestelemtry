@@ -34,8 +34,9 @@ function formatDateString(d: Date): string {
 export type DamRefreshState = 'idle' | 'loading' | 'error'
 
 // EconomicsRange is the period granularity toggle: a single day, a whole
-// calendar month, a calendar year, or the all-objects portfolio rollup.
-export type EconomicsRange = 'day' | 'month' | 'year' | 'portfolio'
+// calendar month, a calendar year, the all-time payback page, or the
+// all-objects portfolio rollup.
+export type EconomicsRange = 'day' | 'month' | 'year' | 'payback' | 'portfolio'
 
 // rangeTitle / rangeSubtitle pick the header copy for the active period
 // granularity so the day/month/year/portfolio views read consistently.
@@ -43,6 +44,8 @@ function rangeTitle(range: EconomicsRange): string {
   switch (range) {
     case 'portfolio':
       return 'Зведений дашборд СЕС + УЗЕ'
+    case 'payback':
+      return 'Окупність проєкту СЕС + УЗЕ'
     case 'year':
       return 'Річний дашборд СЕС + УЗЕ'
     case 'month':
@@ -56,6 +59,10 @@ function rangeSubtitle(range: EconomicsRange, monthsWithData?: number): string {
   switch (range) {
     case 'portfolio':
       return 'порівняння резерву по всіх об\'єктах на базі цін РДН і тарифів.'
+    case 'payback':
+      return monthsWithData && monthsWithData > 0
+        ? `інвестиційний звіт за весь період експлуатації · ${monthsWithData} міс. телеметрії`
+        : 'інвестиційний звіт за весь період експлуатації.'
     case 'year':
       return monthsWithData && monthsWithData > 0
         ? `управлінський звіт за рік · ${monthsWithData} міс. телеметрії`
@@ -352,6 +359,14 @@ export function EconomicsHeader({
             </button>
             <button
               type="button"
+              className={range === 'payback' ? 'active' : ''}
+              aria-pressed={range === 'payback'}
+              onClick={() => onRangeChange('payback')}
+            >
+              Окупність
+            </button>
+            <button
+              type="button"
               className={range === 'portfolio' ? 'active' : ''}
               aria-pressed={range === 'portfolio'}
               onClick={() => onRangeChange('portfolio')}
@@ -359,7 +374,8 @@ export function EconomicsHeader({
               Портфель
             </button>
           </div>
-          {range === 'year' || (range === 'portfolio' && portfolioScope === 'period') ? (
+          {range === 'payback' ? null : range === 'year' ||
+            (range === 'portfolio' && portfolioScope === 'period') ? (
             <EconomicsPeriodPicker from={windowFrom} to={windowTo} onChange={onWindowChange} />
           ) : (
             <PeriodPicker
@@ -517,6 +533,15 @@ export function EconomicsHeader({
             suffix="грн"
             hint="Разові капітальні інвестиції в проєкт (СЕС+УЗЕ), грн. Використовується лише для розрахунку окупності та ROI у річному дашборді. 0 = не показувати панель окупності."
             onChange={(capexUah) => update({ capexUah })}
+          />
+          <NumericField
+            label="Бізнес-план окупності"
+            value={tariffs.plannedPaybackMonths}
+            step={1}
+            min={0}
+            suffix="міс."
+            hint="Плановий термін окупності проєкту з бізнес-плану (місяців від початку експлуатації). Сторінка «Окупність» порівнює фактичний прогноз із цим планом. 0 = не задано."
+            onChange={(plannedPaybackMonths) => update({ plannedPaybackMonths })}
           />
           <label className="economics-field economics-field-checkbox">
             <input

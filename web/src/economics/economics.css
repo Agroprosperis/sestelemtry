@@ -3442,3 +3442,379 @@ button.economics-optimum-row.open {
   white-space: nowrap;
 }
 
+/* --- Standalone payback page (range=payback) --- */
+
+.economics-payback-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: -8px;
+}
+
+.economics-payback-head h2 {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 19px;
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.economics-payback-kpis {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.economics-payback-kpi {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 14px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.economics-payback-kpi-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  flex: none;
+}
+
+.economics-payback-tone-blue {
+  background: #e8effd;
+  color: #2f6fed;
+}
+
+.economics-payback-tone-green {
+  background: #e5f6ee;
+  color: #12b76a;
+}
+
+.economics-payback-tone-orange {
+  background: #fdeee2;
+  color: #f97316;
+}
+
+.economics-payback-tone-violet {
+  background: #f0eafb;
+  color: #7c3aed;
+}
+
+.economics-payback-kpi-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.economics-payback-kpi-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #8a94a6;
+}
+
+.economics-payback-kpi-value {
+  font-size: 17px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: #0f172a;
+  white-space: nowrap;
+}
+
+.economics-payback-kpi-value.good {
+  color: #16a34a;
+}
+
+.economics-payback-kpi-note {
+  font-size: 11px;
+  color: #98a2b3;
+}
+
+.economics-payback-progress {
+  display: flex;
+  align-items: stretch;
+  gap: 18px;
+  padding: 12px 16px;
+}
+
+.economics-payback-progress-line {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.economics-payback-progress-caption {
+  font-size: 13px;
+  color: #334155;
+  white-space: nowrap;
+}
+
+.economics-payback-progress-caption b {
+  font-weight: 700;
+}
+
+.economics-payback-bar {
+  flex: 1 1 auto;
+  min-width: 60px;
+}
+
+.economics-payback-progress-pct {
+  font-size: 13px;
+  font-weight: 700;
+  color: #16a34a;
+  white-space: nowrap;
+}
+
+.economics-payback-progress-rest {
+  font-size: 13px;
+  color: #334155;
+  white-space: nowrap;
+}
+
+.economics-payback-range {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+  padding: 10px 16px;
+  border-radius: 10px;
+  background: #eef4fe;
+  border: 1px solid #dbe7fb;
+  min-width: 220px;
+}
+
+.economics-payback-range-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #64748b;
+}
+
+.economics-payback-range-value {
+  font-size: 15px;
+  font-weight: 800;
+  color: #1d4ed8;
+  font-variant-numeric: tabular-nums;
+}
+
+.economics-payback-range-note {
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+.economics-payback-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 16px;
+  align-items: stretch;
+}
+
+.economics-payback-side {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.economics-payback-side-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.economics-payback-side-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0 0 2px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+
+.economics-payback-side-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.economics-payback-side-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  flex: none;
+}
+
+.economics-payback-side-icon svg {
+  width: 15px;
+  height: 15px;
+}
+
+.economics-payback-side-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.economics-payback-side-label {
+  font-size: 11.5px;
+  color: #8a94a6;
+}
+
+.economics-payback-side-value {
+  font-size: 14px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: #0f172a;
+}
+
+.economics-payback-side-note {
+  font-size: 11px;
+  color: #98a2b3;
+}
+
+.economics-payback-effect-tools {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.economics-payback-grain {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.economics-payback-grain select {
+  padding: 4px 8px;
+  border: 1px solid #d7dee8;
+  border-radius: 8px;
+  background: #fff;
+  font-size: 12px;
+  color: #334155;
+}
+
+.economics-payback-kv-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  font-size: 12.5px;
+  color: #475569;
+}
+
+.economics-payback-kv-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.economics-payback-kv-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  flex: none;
+}
+
+.economics-payback-kv-icon svg {
+  width: 13px;
+  height: 13px;
+}
+
+.economics-payback-kv-row b {
+  font-weight: 700;
+  color: #0f172a;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.economics-payback-deviation {
+  background: #f2fbf6;
+  border-color: #d7f0e1;
+}
+
+.economics-payback-dev-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 12.5px;
+  color: #64748b;
+  padding: 5px 0;
+  border-bottom: 1px dashed #dcefe4;
+}
+
+.economics-payback-dev-row:last-child {
+  border-bottom: none;
+}
+
+.economics-payback-dev-row b {
+  font-weight: 700;
+  color: #0f172a;
+  font-variant-numeric: tabular-nums;
+}
+
+.economics-payback-dev-row b.good {
+  color: #16a34a;
+}
+
+.economics-payback-dev-row b.bad {
+  color: #d97706;
+}
+
+.economics-payback-note {
+  font-size: 12.5px;
+  color: #64748b;
+}
+
+@media (max-width: 1150px) {
+  .economics-payback-kpis {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .economics-payback-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 720px) {
+  .economics-payback-kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .economics-payback-progress {
+    flex-direction: column;
+  }
+
+  .economics-payback-progress-line {
+    flex-wrap: wrap;
+  }
+}
+

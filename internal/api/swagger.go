@@ -1028,6 +1028,14 @@ components:
           description: >
             One-time project capital expenditure (UAH). Display-only
             metadata for the payback/ROI panel; 0 (or omitted) hides it.
+        planned_payback_months:
+          type: number
+          format: double
+          minimum: 0
+          description: >
+            Business-plan payback period (months from the start of
+            operation). Display-only metadata for the payback page's
+            plan-vs-forecast comparison; 0 (or omitted) hides it.
       required:
         - distribution_uah_per_kwh
         - transmission_uah_per_kwh
