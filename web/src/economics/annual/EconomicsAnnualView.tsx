@@ -172,7 +172,25 @@ function paybackLabel(years: number): string {
 // balance) and that single month's standalone EBITDA (month). The
 // optional opening-balance point has month = null so the monthly series
 // leaves a gap there.
-type CapexCumRow = { label: string; cum: number; month: number | null }
+//
+// avgAnnualRoi is the time-weighted average annual ROI as of that month:
+// cumulative EBITDA since the start of operation annualised over every
+// elapsed month with data, divided by CAPEX. monthAnnualRoi is the same
+// metric for that single month alone (EBITDA × 12 / CAPEX), i.e. the
+// pace the month would deliver if repeated for a year.
+type CapexCumRow = {
+  label: string
+  cum: number
+  month: number | null
+  avgAnnualRoi: number | null
+  monthAnnualRoi: number | null
+}
+
+// pctShort renders ROI axis ticks compactly ("18%").
+function pctShort(v: number): string {
+  if (!Number.isFinite(v)) return ''
+  return `${Math.round(v * 100)}%`
+}
 
 function AnnualCapex({
   capexUah,
@@ -198,20 +216,35 @@ function AnnualCapex({
   // whole chart would vanish.
   const prior = Number.isFinite(priorEbitda) ? priorEbitda : 0
   const hasPrior = Math.abs(prior) > 0.5
+  const priorMonths = Number.isFinite(priorMonthsWithData) ? priorMonthsWithData : 0
   const rows = useMemo<CapexCumRow[]>(() => {
     const out: CapexCumRow[] = []
     let acc = prior
+    // elapsed counts every month with data since the start of operation,
+    // including the ones before the window, so the running average is
+    // annualised over the true operating age at each point.
+    let elapsed = priorMonths
+    const avgAt = (cum: number, m: number) => (capexUah > 0 && m > 0 ? (cum * 12) / (m * capexUah) : null)
     // Seed the cumulative line at the opening balance so the trajectory
     // continues from where prior operation left off (SPEC: залишок з
     // початку експлуатації).
-    if (hasPrior) out.push({ label: 'старт', cum: acc, month: null })
+    if (hasPrior) {
+      out.push({ label: 'старт', cum: acc, month: null, avgAnnualRoi: avgAt(acc, elapsed), monthAnnualRoi: null })
+    }
     for (const m of months) {
       if (m.totals.hours_with_data <= 0) continue
       acc += m.totals.ebitda_uah
-      out.push({ label: formatMonthShort(m.month), cum: acc, month: m.totals.ebitda_uah })
+      elapsed += 1
+      out.push({
+        label: formatMonthShort(m.month),
+        cum: acc,
+        month: m.totals.ebitda_uah,
+        avgAnnualRoi: avgAt(acc, elapsed),
+        monthAnnualRoi: capexUah > 0 ? (m.totals.ebitda_uah * 12) / capexUah : null,
+      })
     }
     return out
-  }, [months, prior, hasPrior])
+  }, [months, prior, hasPrior, priorMonths, capexUah])
 
   if (!(capexUah > 0)) return null
 
@@ -222,21 +255,26 @@ function AnnualCapex({
   // Payback is estimated from the operation-start run-rate: all-time
   // EBITDA annualised over every month with data (window + prior), not
   // just the selected year's pace.
-  const priorMonths = Number.isFinite(priorMonthsWithData) ? priorMonthsWithData : 0
   const totalMonthsWithData = monthsWithData + priorMonths
   const annualEbitda = totalMonthsWithData > 0 ? (allTimeEbitda * 12) / totalMonthsWithData : 0
   const paybackYears = annualEbitda > 0 ? capexUah / annualEbitda : Infinity
   const roi = allTimeEbitda / capexUah
+  // Time-weighted average annual ROI: every month contributes its actual
+  // EBITDA and the sum is spread over the real operating age, so partial
+  // years neither inflate nor dilute the yearly return.
+  const avgAnnualRoi = totalMonthsWithData > 0 ? annualEbitda / capexUah : NaN
   const coveredShare = Math.max(0, Math.min(roi, 1))
   const remaining = Math.max(capexUah - allTimeEbitda, 0)
   const periodWord = scope === 'year' ? 'за рік' : 'за період'
+  const operationYears = totalMonthsWithData / 12
+  const roiRows = rows.filter((r) => r.avgAnnualRoi !== null)
 
   return (
     <section className="economics-card economics-month-section economics-capex" aria-label="Окупність та ROI">
       <div className="economics-month-section-head">
         <h3 className="economics-month-section-title">
           Окупність проєкту
-          <OptimumInfo tip="CAPEX — разові капітальні інвестиції з налаштувань об'єкта. Окупність і ROI рахуються від початку експлуатації: EBITDA всього (усі збережені дні) приведено до року за фактичною кількістю місяців з даними. Окупність = CAPEX / річний темп EBITDA. ROI = EBITDA всього / CAPEX." />
+          <OptimumInfo tip="CAPEX — разові капітальні інвестиції з налаштувань об'єкта. Окупність і ROI рахуються від початку експлуатації: EBITDA всього (усі збережені дні) приведено до року за фактичною кількістю місяців з даними. Окупність = CAPEX / річний темп EBITDA. ROI = EBITDA всього / CAPEX. Середньозважений річний ROI = річний темп EBITDA / CAPEX, тобто накопичений ROI, рознесений на фактичний строк експлуатації (кожен місяць входить зі своєю EBITDA)." />
         </h3>
         <span className="economics-month-muted">CAPEX із налаштувань об'єкта</span>
       </div>
@@ -267,6 +305,15 @@ function AnnualCapex({
           <span className={`economics-month-mini-value ${roi >= 0 ? 'good' : ''}`}>{formatPercent(roi)}</span>
           <span className="economics-month-mini-note">EBITDA всього / CAPEX</span>
         </div>
+        <div className="economics-month-mini">
+          <span className="economics-month-mini-label">Середньозважений річний ROI</span>
+          <span className={`economics-month-mini-value ${avgAnnualRoi >= 0 ? 'good' : ''}`}>{formatPercent(avgAnnualRoi)}</span>
+          <span className="economics-month-mini-note">
+            {totalMonthsWithData > 0
+              ? `${formatPercent(roi)} за ${paybackLabel(operationYears)} експлуатації`
+              : 'немає даних'}
+          </span>
+        </div>
       </div>
 
       <div className="economics-capex-progress">
@@ -288,6 +335,7 @@ function AnnualCapex({
 
       {rows.length > 1 ? (
         <div className="economics-month-chart economics-capex-chart">
+          <div className="economics-capex-chart-title">Накопичення EBITDA проти CAPEX</div>
           <ResponsiveContainer width="100%" height={200}>
             <ComposedChart data={rows} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
               <CartesianGrid strokeDasharray="2 5" stroke="#e7ecf2" vertical={false} />
@@ -350,6 +398,66 @@ function AnnualCapex({
               />
             </ComposedChart>
           </ResponsiveContainer>
+        </div>
+      ) : null}
+
+      {roiRows.length > 1 ? (
+        <div className="economics-month-chart economics-capex-chart">
+          <div className="economics-capex-chart-title">
+            Динаміка річного ROI
+            <span className="economics-month-muted"> · середньозважений наростаючим підсумком</span>
+          </div>
+          <ResponsiveContainer width="100%" height={200}>
+            <ComposedChart data={roiRows} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+              <CartesianGrid strokeDasharray="2 5" stroke="#e7ecf2" vertical={false} />
+              <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#8a94a6' }} tickLine={false} axisLine={false} />
+              <YAxis
+                tick={{ fontSize: 11, fill: '#98a2b3' }}
+                width={48}
+                tickLine={false}
+                axisLine={false}
+                tickFormatter={pctShort}
+              />
+              <Tooltip
+                formatter={(value, name) => [
+                  formatPercent(Number(value)),
+                  name === 'monthAnnualRoi' ? 'ROI місяця (× 12)' : 'Середньозважений річний ROI',
+                ]}
+                cursor={{ stroke: '#cbd5e1' }}
+              />
+              <Legend
+                verticalAlign="top"
+                height={24}
+                formatter={(value) =>
+                  value === 'monthAnnualRoi' ? 'ROI місяця (× 12)' : 'Середньозважений річний ROI'
+                }
+              />
+              <ReferenceLine y={0} stroke="#98a2b3" />
+              <Bar
+                dataKey="monthAnnualRoi"
+                name="monthAnnualRoi"
+                fill="#7c3aed"
+                fillOpacity={0.25}
+                stroke="#7c3aed"
+                strokeWidth={1}
+                maxBarSize={28}
+                radius={[3, 3, 0, 0]}
+              />
+              <Line
+                type="monotone"
+                dataKey="avgAnnualRoi"
+                name="avgAnnualRoi"
+                stroke="#2f6fed"
+                strokeWidth={2.2}
+                dot={false}
+              />
+            </ComposedChart>
+          </ResponsiveContainer>
+          <p className="economics-month-explain">
+            Стовпці — річний темп ROI окремого місяця (EBITDA місяця × 12 / CAPEX). Лінія — середньозважений
+            річний ROI від початку експлуатації: накопичена EBITDA, приведена до року за фактичною кількістю
+            місяців з даними.
+          </p>
         </div>
       ) : null}
     </section>
