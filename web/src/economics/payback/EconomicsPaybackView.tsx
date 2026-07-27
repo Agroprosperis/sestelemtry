@@ -421,7 +421,17 @@ export function EconomicsPaybackView({ data, capexUah, plannedPaybackMonths }: P
   const cumAxis = moneyAxis(Math.max(...effectRows.map((r) => Math.abs(r.cum)), 0))
 
   const paybackDurationLabel = paidOff ? 'окуплено' : paybackLabel(paybackYears)
-  const paybackDateNote = paybackMonthKey ? monthTitleLower(paybackMonthKey) : 'недостатньо даних'
+  // A finite forecast without a crossing month means the projection runs
+  // past the drawn horizon — the estimate exists, just no exact date.
+  const paybackDateNote = paybackMonthKey
+    ? monthTitleLower(paybackMonthKey)
+    : Number.isFinite(paybackYears)
+      ? 'за поточним темпом EBITDA'
+      : 'недостатньо даних'
+
+  // Share of the fact window actually covered by telemetry hours; below
+  // ~95% the forecast is built on partial months.
+  const coverageShare = model.totalMonthsWithData > 0 ? model.effectiveMonths / model.totalMonthsWithData : NaN
 
   // Plan-vs-forecast deviation (months); positive = slower than plan.
   const planMonths = Number.isFinite(plannedPaybackMonths) && plannedPaybackMonths > 0 ? plannedPaybackMonths : 0
@@ -651,7 +661,11 @@ export function EconomicsPaybackView({ data, capexUah, plannedPaybackMonths }: P
               tone="green"
               label="Період експлуатації"
               value={paybackLabel(operationYears)}
-              note="з початку експлуатації"
+              note={
+                Number.isFinite(coverageShare)
+                  ? `покриття даними ${formatPercent(coverageShare)}`
+                  : 'з початку експлуатації'
+              }
             />
             <SideRow
               icon="coin"
