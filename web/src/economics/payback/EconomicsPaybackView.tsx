@@ -22,7 +22,6 @@ import {
   formatPrice,
   formatUah,
 } from '../monthly/format'
-import { uahShort } from '../monthly/rollup'
 import {
   addMonths,
   buildPaybackModel,
@@ -190,22 +189,6 @@ function SideRow({
   )
 }
 
-// KvRow is the compact one-line "label … value" row of the
-// "Додаткові показники" panel.
-function KvRow({ icon, tone, label, value }: { icon: IconName; tone: Tone; label: string; value: string }) {
-  return (
-    <div className="economics-payback-kv-row">
-      <span className="economics-payback-kv-label">
-        <span className={`economics-payback-kv-icon economics-payback-tone-${tone}`}>
-          <Icon name={icon} />
-        </span>
-        {label}
-      </span>
-      <b>{value}</b>
-    </div>
-  )
-}
-
 // --- Cumulative payback chart tooltip ---
 
 type CapexPaybackTooltipProps = {
@@ -257,10 +240,9 @@ type EffectRow = {
   label: string
   periodFact: number | null
   periodForecast: number | null
-  // cumFact / cumForecast split the cumulative line so the forecast part
-  // renders in the forecast colour; the bucket at the seam carries both.
-  cumFact: number | null
-  cumForecast: number | null
+  // cum is one continuous fact+forecast cumulative line (per the final
+  // design); the split lives in the bars.
+  cum: number
 }
 
 type EffectTooltipProps = {
@@ -271,8 +253,6 @@ type EffectTooltipProps = {
 function EffectTooltip({ active, payload }: EffectTooltipProps) {
   if (!active || !payload?.length) return null
   const row = payload[0].payload
-  const cum = row.cumForecast ?? row.cumFact
-  const isForecast = row.periodForecast !== null
   return (
     <div className="economics-trend-tip">
       <div className="economics-trend-tip-day">{row.label}</div>
@@ -291,12 +271,24 @@ function EffectTooltip({ active, payload }: EffectTooltipProps) {
         </div>
       ) : null}
       <div className="economics-trend-tip-row">
-        <i style={{ background: isForecast ? '#7c3aed' : '#2f6fed' }} />
+        <i style={{ background: '#2f6fed' }} />
         <span>Накопичено</span>
-        <b>{cum === null ? '—' : formatUah(cum)}</b>
+        <b>{formatUah(row.cum)}</b>
       </div>
     </div>
   )
+}
+
+// uahShortHrn is the design's compact money label ("18,50 млн грн").
+function uahShortHrn(v: number): string {
+  const a = Math.abs(v)
+  if (a >= 1_000_000) {
+    return `${(v / 1_000_000).toLocaleString('uk-UA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} млн грн`
+  }
+  if (a >= 1000) {
+    return `${Math.round(v / 1000).toLocaleString('uk-UA')} тис. грн`
+  }
+  return formatUah(v)
 }
 
 const Q_ROMAN = ['I', 'II', 'III', 'IV']
@@ -336,13 +328,29 @@ export function EconomicsPaybackView({ data, capexUah, plannedPaybackMonths }: P
     timeOffset,
     firstMonthKey,
     lastFactMonthKey,
-    scenario,
   } = model
 
   const { ticks: timeTicks, format: tickLabel } = paybackAxis(tMax, firstMonthKey, timeOffset)
   const yMax = Math.max(capexUah, allTimeEbitda, ...paybackRows.map((r) => r.forecastCum ?? r.factCum ?? 0), 0)
   const axis = moneyAxis(yMax)
+  // Main-chart Y ticks carry the unit right in the label ("15 млн"),
+  // like the final design.
+  const axisUnitWord = axis.unit.split(' ')[0]
+  const mainTick = (v: number) => (v === 0 ? '0' : `${axis.tick(v)} ${axisUnitWord}`)
   const startRow = paybackRows.find((r) => r.kind === 'start') ?? null
+
+  // "Дані оновлено": the last day of the last fact month, capped at
+  // today for the open (partial) month.
+  const updatedLabel = useMemo(() => {
+    if (!lastFactMonthKey) return '—'
+    const [y, m] = lastFactMonthKey.split('-').map(Number)
+    const endOfMonth = new Date(y, m, 0)
+    const today = new Date()
+    const d = endOfMonth < today ? endOfMonth : today
+    return d.toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit', year: 'numeric' })
+  }, [lastFactMonthKey])
+
+  const avgMonthlyFact = model.totalMonthsWithData > 0 ? allTimeEbitda / model.totalMonthsWithData : NaN
 
   // Effect chart entries: every fact month plus a seasonal forecast for
   // the rest of the last fact month's calendar year (like the mockup's
@@ -401,28 +409,15 @@ export function EconomicsPaybackView({ data, capexUah, plannedPaybackMonths }: P
         label: b.label,
         periodFact: b.hasFact ? b.fact : null,
         periodForecast: b.hasForecast ? b.forecast : null,
-        cumFact: !b.hasForecast ? acc : null,
-        cumForecast: b.hasForecast ? acc : null,
+        cum: acc,
       }
     })
   }, [monthsWithData, lastFactMonthKey, paidOff, monthlyPace, seasonalFactors, grain, prior])
 
-  // Seed the forecast cumulative line from the last fact bucket so the
-  // two line segments join without a gap.
-  const effectRowsBridged = useMemo(() => {
-    const rows = effectRows.map((r) => ({ ...r }))
-    const firstForecast = rows.findIndex((r) => r.cumForecast !== null)
-    if (firstForecast > 0) rows[firstForecast - 1].cumForecast = rows[firstForecast - 1].cumFact
-    return rows
-  }, [effectRows])
-
   const effectAxis = moneyAxis(
-    Math.max(
-      ...effectRowsBridged.map((r) => Math.abs(r.periodFact ?? 0) + Math.abs(r.periodForecast ?? 0)),
-      0,
-    ),
+    Math.max(...effectRows.map((r) => Math.abs(r.periodFact ?? 0) + Math.abs(r.periodForecast ?? 0)), 0),
   )
-  const cumAxis = moneyAxis(Math.max(...effectRowsBridged.map((r) => Math.abs(r.cumForecast ?? r.cumFact ?? 0)), 0))
+  const cumAxis = moneyAxis(Math.max(...effectRows.map((r) => Math.abs(r.cum)), 0))
 
   const paybackDurationLabel = paidOff ? 'окуплено' : paybackLabel(paybackYears)
   const paybackDateNote = paybackMonthKey ? monthTitleLower(paybackMonthKey) : 'недостатньо даних'
@@ -452,9 +447,7 @@ export function EconomicsPaybackView({ data, capexUah, plannedPaybackMonths }: P
           Окупність проєкту СЕС
           <OptimumInfo tip="CAPEX — разові капітальні інвестиції з налаштувань об'єкта. Повернуто = накопичений EBITDA з початку експлуатації. Прогноз окупності будується помісячно з урахуванням сезонності виробітку: темп EBITDA оцінюється за фактичними даними з поправкою на сезон, а майбутні місяці отримують свій сезонний коефіцієнт (літо швидше, зима повільніше)." />
         </h2>
-        <span className="economics-month-muted">
-          Дані оновлено: {lastFactMonthKey ? formatMonthTitle(lastFactMonthKey) : '—'}
-        </span>
+        <span className="economics-month-muted">Дані оновлено: {updatedLabel}</span>
       </div>
 
       <section className="economics-payback-kpis" aria-label="Ключові показники окупності">
@@ -497,51 +490,40 @@ export function EconomicsPaybackView({ data, capexUah, plannedPaybackMonths }: P
         />
       </section>
 
-      <section className="economics-card economics-payback-progress" aria-label="Прогрес окупності">
-        <div className="economics-payback-progress-line">
-          <span className="economics-payback-side-icon economics-payback-tone-blue">
-            <Icon name="coin" />
-          </span>
-          <span className="economics-payback-progress-caption">
-            Повернуто <b>{uahShort(allTimeEbitda)}</b> із <b>{uahShort(capexUah)}</b>
-          </span>
-          <div className="economics-capex-bar economics-payback-bar">
-            <span className="economics-capex-bar-fill" style={{ width: `${coveredShare * 100}%` }} />
-          </div>
-          <span className="economics-payback-progress-pct">{formatPercent(coveredShare)}</span>
-          <span className="economics-payback-progress-rest">
-            {paidOff ? 'Капекс окуплено' : `Залишилось повернути ${uahShort(remaining)}`}
-          </span>
-        </div>
-        {scenario ? (
-          <div className="economics-payback-range">
-            <span className="economics-payback-range-label">
-              Прогноз окупності (діапазон)
-              <OptimumInfo tip="Діапазон = сезонно скоригований темп EBITDA ± похибка середнього за відхиленнями фактичних місяців від сезонного очікування. Оптимістичний сценарій — швидший темп, консервативний — повільніший. Діапазон звужується з накопиченням даних." />
-            </span>
-            <span className="economics-payback-range-value">
-              {paybackLabel(scenario.optYears)} – {paybackLabel(scenario.consYears)}
-            </span>
-            <span className="economics-payback-range-note">оптимістичний – консервативний сценарій</span>
-          </div>
-        ) : null}
-      </section>
+      <div className="economics-payback-layout">
+        <div className="economics-payback-main">
+          <section className="economics-card economics-payback-progress" aria-label="Прогрес окупності">
+            <div className="economics-payback-progress-line">
+              <span className="economics-payback-side-icon economics-payback-tone-blue">
+                <Icon name="coin" />
+              </span>
+              <span className="economics-payback-progress-caption">
+                Повернуто <b>{uahShortHrn(allTimeEbitda)}</b> із <b>{uahShortHrn(capexUah)}</b>
+              </span>
+              <div className="economics-capex-bar economics-payback-bar">
+                <span className="economics-capex-bar-fill" style={{ width: `${coveredShare * 100}%` }} />
+              </div>
+              <span className="economics-payback-progress-pct">{formatPercent(coveredShare)}</span>
+              <span className="economics-payback-progress-rest">
+                {paidOff ? 'Капекс окуплено' : `Залишилось повернути ${uahShortHrn(remaining)}`}
+              </span>
+            </div>
+          </section>
 
-      <div className="economics-payback-grid">
-        <section className="economics-card economics-month-section" aria-label="Накопичена окупність проєкту">
-          <div className="economics-capex-chart-head">
-            <span className="economics-capex-chart-title">
-              Накопичена окупність проєкту
-              <span className="economics-capex-chart-unit">{axis.unit}</span>
-              <OptimumInfo tip="Суцільна лінія — фактичний накопичений EBITDA від початку експлуатації. Пунктир — сезонний прогноз: кожен майбутній місяць додає свій очікуваний EBITDA (влітку більше, взимку менше), тому лінія хвиляста, як і факт. Вертикаль «Сьогодні» — остання фактична точка; точка окупності — прогнозований місяць повного повернення інвестицій." />
-            </span>
-            <span className="economics-month-legend">
-              <span><i style={{ background: '#2f6fed' }} />Факт (накопичений EBITDA)</span>
-              <span><i style={{ background: '#60a5fa' }} />Прогноз (накопичений EBITDA)</span>
-              <span><i style={{ background: '#94a3b8' }} />CAPEX ({uahShort(capexUah)})</span>
-              <span><i style={{ background: '#7c3aed' }} />Точка окупності (прогноз)</span>
-            </span>
-          </div>
+          <section className="economics-card economics-month-section" aria-label="Накопичена окупність проєкту">
+            <div className="economics-capex-chart-head">
+              <span className="economics-capex-chart-title">
+                Накопичена окупність проєкту
+                <span className="economics-capex-chart-unit">{axis.unit}</span>
+                <OptimumInfo tip="Суцільна лінія — фактичний накопичений EBITDA від початку експлуатації. Пунктир — сезонний прогноз: кожен майбутній місяць додає свій очікуваний EBITDA (влітку більше, взимку менше), тому лінія хвиляста, як і факт. Вертикаль «Сьогодні» — остання фактична точка; точка окупності — прогнозований місяць повного повернення інвестицій." />
+              </span>
+              <span className="economics-month-legend">
+                <span><i style={{ background: '#2f6fed' }} />Фактичний накопичений EBITDA</span>
+                <span><i style={{ background: '#60a5fa' }} />Прогноз накопиченого EBITDA</span>
+                <span><i style={{ background: '#64748b' }} />CAPEX ({uahShortHrn(capexUah)})</span>
+                <span><i style={{ background: '#7c3aed' }} />Точка окупності (прогноз)</span>
+              </span>
+            </div>
           <ResponsiveContainer width="100%" height={320}>
             <ComposedChart data={paybackRows} margin={{ top: 18, right: 18, bottom: 0, left: 0 }}>
               <CartesianGrid strokeDasharray="2 5" stroke="#e7ecf2" vertical={false} />
@@ -557,10 +539,10 @@ export function EconomicsPaybackView({ data, capexUah, plannedPaybackMonths }: P
               />
               <YAxis
                 tick={{ fontSize: 11, fill: '#98a2b3' }}
-                width={40}
+                width={56}
                 tickLine={false}
                 axisLine={false}
-                tickFormatter={axis.tick}
+                tickFormatter={mainTick}
                 domain={[0, (dataMax: number) => Math.max(dataMax, capexUah) * 1.08]}
               />
               <Tooltip content={<CapexPaybackTooltip />} cursor={{ stroke: '#cbd5e1' }} />
@@ -568,7 +550,7 @@ export function EconomicsPaybackView({ data, capexUah, plannedPaybackMonths }: P
                 y={capexUah}
                 stroke="#64748b"
                 strokeWidth={1.4}
-                label={{ value: `CAPEX ${uahShort(capexUah)}`, position: 'insideTopLeft', fontSize: 11, fill: '#475569' }}
+                label={{ value: `CAPEX ${uahShortHrn(capexUah)}`, position: 'insideTopLeft', fontSize: 11, fill: '#475569' }}
               />
               {todayT !== null && todayT > 0 ? (
                 <ReferenceLine
@@ -578,8 +560,18 @@ export function EconomicsPaybackView({ data, capexUah, plannedPaybackMonths }: P
                   label={{ value: 'Сьогодні', position: 'insideTopRight', fontSize: 11, fill: '#94a3b8' }}
                 />
               ) : null}
+              {paybackT !== null ? (
+                <ReferenceLine x={paybackT} stroke="#7c3aed" strokeDasharray="4 4" />
+              ) : null}
               <Area type="monotone" dataKey="factCum" stroke="none" fill="#2f6fed" fillOpacity={0.09} />
-              <Line type="monotone" dataKey="factCum" stroke="#2f6fed" strokeWidth={2.2} dot={false} connectNulls={false} />
+              <Line
+                type="monotone"
+                dataKey="factCum"
+                stroke="#2f6fed"
+                strokeWidth={2.2}
+                dot={{ r: 2.4, fill: '#2f6fed', strokeWidth: 0 }}
+                connectNulls={false}
+              />
               <Line
                 type="monotone"
                 dataKey="forecastCum"
@@ -608,17 +600,22 @@ export function EconomicsPaybackView({ data, capexUah, plannedPaybackMonths }: P
                   fill="#2f6fed"
                   stroke="#fff"
                   strokeWidth={1.5}
-                  label={{ value: `Повернуто ${uahShort(allTimeEbitda)}`, position: 'top', fontSize: 11, fill: '#2f6fed' }}
+                  label={{ value: `Повернуто ${uahShortHrn(allTimeEbitda)}`, position: 'top', fontSize: 11, fill: '#2f6fed' }}
                 />
               ) : null}
               {paybackT !== null ? (
+                <ReferenceDot x={paybackT} y={capexUah} r={4.5} fill="#7c3aed" stroke="#fff" strokeWidth={1.5} />
+              ) : null}
+              {paybackT !== null ? (
+                // Invisible anchor that hangs the "Точка окупності" caption
+                // at the bottom of the payback line, to its left (the line
+                // usually sits at the right edge of the chart).
                 <ReferenceDot
                   x={paybackT}
-                  y={capexUah}
-                  r={4.5}
-                  fill="#7c3aed"
-                  stroke="#fff"
-                  strokeWidth={1.5}
+                  y={0}
+                  r={0}
+                  fill="none"
+                  stroke="none"
                   label={{
                     value: paybackMonthKey
                       ? `Точка окупності · ${monthTitleLower(paybackMonthKey)}`
@@ -631,52 +628,44 @@ export function EconomicsPaybackView({ data, capexUah, plannedPaybackMonths }: P
               ) : null}
             </ComposedChart>
           </ResponsiveContainer>
-        </section>
 
-        <aside className="economics-card economics-month-section economics-payback-side" aria-label="Ключові показники">
-          <h3 className="economics-payback-side-title">Ключові показники</h3>
-          <SideRow icon="bars" tone="blue" label="Накопичений EBITDA" value={formatUah(allTimeEbitda)} />
-          <SideRow icon="percent" tone="green" label="Окуплено" value={formatPercent(coveredShare)} />
-          <SideRow
-            icon="pie"
-            tone="orange"
-            label="Залишилось повернути"
-            value={paidOff ? '0 грн' : formatUah(remaining)}
-          />
-          <SideRow icon="calendar" tone="blue" label="Прогноз окупності" value={paybackDurationLabel} note={paidOff ? undefined : paybackDateNote} />
-          <SideRow
-            icon="trend"
-            tone="violet"
-            label="Середньорічний фактичний ROI"
-            value={Number.isFinite(avgAnnualRoi) ? formatPercent(avgAnnualRoi) : '—'}
-            note={`за ${paybackLabel(operationYears)} експлуатації`}
-          />
-          {hasPrior ? (
+          <div className="economics-payback-chart-foot">
             <SideRow
               icon="clock"
-              tone="violet"
+              tone="blue"
               label="Накопичений EBITDA до періоду"
               value={formatUah(prior)}
-              note={`у т.ч. до початку помісячних даних (${model.priorMonths} міс.)`}
+              note={hasPrior ? `у т.ч. до початку помісячних даних (${model.priorMonths} міс.)` : 'до початку помісячних даних'}
             />
-          ) : null}
-        </aside>
-      </div>
+            <SideRow
+              icon="calendar"
+              tone="green"
+              label="Період експлуатації"
+              value={paybackLabel(operationYears)}
+              note="з початку експлуатації"
+            />
+            <SideRow
+              icon="coin"
+              tone="orange"
+              label="Середньомісячний EBITDA (факт)"
+              value={Number.isFinite(avgMonthlyFact) ? formatUah(avgMonthlyFact) : '—'}
+              note="за фактичний період"
+            />
+          </div>
+          </section>
 
-      <div className="economics-payback-grid">
-        <section className="economics-card economics-month-section" aria-label="Щомісячний економічний ефект">
+          <section className="economics-card economics-month-section" aria-label="Щомісячний економічний ефект">
           <div className="economics-capex-chart-head">
             <span className="economics-capex-chart-title">
               Щомісячний економічний ефект
               <span className="economics-capex-chart-unit">{effectAxis.unit}</span>
-              <OptimumInfo tip="Стовпці — EBITDA за період: сині — факт, фіолетові — сезонний прогноз до кінця поточного року. Пунктирні лінії — накопичений EBITDA від початку експлуатації (права шкала): синя — факт, фіолетова — прогноз." />
+              <OptimumInfo tip="Стовпці — EBITDA за період: сині — факт, фіолетові — сезонний прогноз до кінця поточного року. Лінія — накопичений EBITDA від початку експлуатації (права шкала), факт + прогноз." />
             </span>
             <div className="economics-payback-effect-tools">
               <span className="economics-month-legend">
                 <span><i style={{ background: '#60a5fa' }} />EBITDA за місяць (факт)</span>
-                <span><i style={{ background: '#2f6fed' }} />накопичено (факт)</span>
                 <span><i style={{ background: '#c4b5fd' }} />EBITDA за місяць (прогноз)</span>
-                <span><i style={{ background: '#7c3aed' }} />накопичено (прогноз)</span>
+                <span><i style={{ background: '#2f6fed' }} />Накопичений EBITDA (факт + прогноз)</span>
               </span>
               <label className="economics-payback-grain">
                 Відображення:
@@ -689,14 +678,14 @@ export function EconomicsPaybackView({ data, capexUah, plannedPaybackMonths }: P
             </div>
           </div>
           <ResponsiveContainer width="100%" height={240}>
-            <ComposedChart data={effectRowsBridged} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+            <ComposedChart data={effectRows} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
               <CartesianGrid strokeDasharray="2 5" stroke="#e7ecf2" vertical={false} />
               <XAxis
                 dataKey="label"
                 tick={{ fontSize: 11, fill: '#8a94a6' }}
                 tickLine={false}
                 axisLine={false}
-                interval={effectRowsBridged.length > 16 ? Math.ceil(effectRowsBridged.length / 16) - 1 : 0}
+                interval={effectRows.length > 16 ? Math.ceil(effectRows.length / 16) - 1 : 0}
               />
               <YAxis
                 yAxisId="period"
@@ -737,67 +726,75 @@ export function EconomicsPaybackView({ data, capexUah, plannedPaybackMonths }: P
               <Line
                 yAxisId="cum"
                 type="monotone"
-                dataKey="cumFact"
+                dataKey="cum"
                 stroke="#2f6fed"
                 strokeWidth={1.8}
-                strokeDasharray="5 4"
                 dot={{ r: 2.4, fill: '#fff', stroke: '#2f6fed', strokeWidth: 1.4 }}
-                connectNulls={false}
-              />
-              <Line
-                yAxisId="cum"
-                type="monotone"
-                dataKey="cumForecast"
-                stroke="#7c3aed"
-                strokeWidth={1.8}
-                strokeDasharray="5 4"
-                dot={{ r: 2.4, fill: '#fff', stroke: '#7c3aed', strokeWidth: 1.4 }}
-                connectNulls={false}
               />
             </ComposedChart>
           </ResponsiveContainer>
-        </section>
+          </section>
+        </div>
 
         <div className="economics-payback-side-stack">
-          <aside className="economics-card economics-month-section economics-payback-side" aria-label="Додаткові показники">
-            <h3 className="economics-payback-side-title">Додаткові показники · вікно даних</h3>
-            <KvRow icon="sun" tone="blue" label="Виробіток за період" value={formatKwh(data.totals.pv_kwh)} />
-            <KvRow
+          <aside className="economics-card economics-month-section economics-payback-side" aria-label="Ефективність проєкту">
+            <h3 className="economics-payback-side-title">Ефективність проєкту</h3>
+            <SideRow
+              icon="trend"
+              tone="green"
+              label="Середньорічний ROI (факт)"
+              value={Number.isFinite(avgAnnualRoi) ? formatPercent(avgAnnualRoi) : '—'}
+              note={`за ${paybackLabel(operationYears)} експлуатації`}
+            />
+            <SideRow icon="sun" tone="blue" label="Виробіток за період" value={formatKwh(data.totals.pv_kwh)} />
+            <SideRow
               icon="tag"
-              tone="violet"
+              tone="orange"
               label="Середній тариф (екв.)"
               value={`${formatPrice(data.totals.avg_import_price_uah_per_kwh)} грн/кВт·год`}
             />
-            <KvRow icon="coin" tone="orange" label="Економія / дохід" value={formatUah(data.totals.revenue_total_uah)} />
-            <KvRow icon="pie" tone="orange" label="Операційні витрати" value={formatUah(data.totals.expense_total_uah)} />
-            <KvRow icon="percent" tone="green" label="Чистий ефект (EBITDA)" value={formatUah(data.totals.ebitda_uah)} />
+            <SideRow
+              icon="wallet"
+              tone="violet"
+              label="Операційні витрати"
+              value={formatUah(data.totals.expense_total_uah)}
+              note="за період"
+            />
+            <SideRow icon="percent" tone="green" label="Чистий ефект (EBITDA)" value={formatUah(allTimeEbitda)} />
           </aside>
 
           <aside
-            className="economics-card economics-month-section economics-payback-side economics-payback-deviation"
-            aria-label="Відхилення прогнозу окупності"
+            className="economics-card economics-month-section economics-payback-side"
+            aria-label="Відхилення від бізнес-плану"
           >
             <h3 className="economics-payback-side-title">
-              Відхилення прогнозу окупності
+              Відхилення від бізнес-плану
               <OptimumInfo tip="Порівняння поточного прогнозу окупності з плановим терміном із бізнес-плану (поле «Бізнес-план окупності» в параметрах тарифів)." />
             </h3>
             {planMonths > 0 && deviationMonths !== null ? (
               <>
                 <div className="economics-payback-dev-row">
-                  <span>Початковий бізнес-план</span>
+                  <span>Початкова окупність (план)</span>
                   <b>{paybackLabel(planMonths / 12)}</b>
                 </div>
                 <div className="economics-payback-dev-row">
-                  <span>Поточний прогноз</span>
+                  <span>Поточний прогноз окупності</span>
                   <b>{paybackDurationLabel}</b>
                 </div>
-                <div className="economics-payback-dev-row">
+                <div
+                  className={`economics-payback-dev-verdict ${deviationMonths > 0 ? 'bad' : deviationMonths < 0 ? 'good' : ''}`}
+                >
                   <span>Відхилення</span>
-                  <b className={deviationMonths > 0 ? 'bad' : 'good'}>
-                    {deviationMonths === 0
-                      ? 'за планом'
-                      : `${deviationMonths > 0 ? '+' : '−'}${Math.abs(deviationMonths)} міс.`}
-                  </b>
+                  <span className="economics-payback-dev-verdict-value">
+                    <b>
+                      {deviationMonths === 0
+                        ? 'за планом'
+                        : `${deviationMonths > 0 ? '+' : '−'}${Math.abs(deviationMonths)} міс.`}
+                    </b>
+                    {deviationMonths !== 0 ? (
+                      <em>{deviationMonths > 0 ? 'погіршення від плану' : 'покращення від плану'}</em>
+                    ) : null}
+                  </span>
                 </div>
               </>
             ) : (
@@ -806,14 +803,20 @@ export function EconomicsPaybackView({ data, capexUah, plannedPaybackMonths }: P
               </p>
             )}
           </aside>
+
+          <aside className="economics-card economics-month-section economics-payback-side" aria-label="Примітка">
+            <h3 className="economics-payback-side-title">
+              <span className="economics-payback-note-icon">i</span>
+              Примітка
+            </h3>
+            <p className="economics-payback-note">
+              Прогноз базується на фактичних даних за {model.totalMonthsWithData} міс. експлуатації з
+              урахуванням сезонності сонячного виробітку та може змінюватися залежно від фактичного виробітку
+              електроенергії, цін РДН, тарифів, операційних витрат та інших факторів.
+            </p>
+          </aside>
         </div>
       </div>
-
-      <section className="economics-banner economics-payback-note" role="note">
-        Прогноз базується на фактичному темпі EBITDA за {model.totalMonthsWithData} міс. експлуатації з
-        урахуванням сезонності сонячного виробітку і може змінюватися залежно від виробітку електроенергії,
-        цін РДН, тарифів та операційних витрат.
-      </section>
     </>
   )
 }

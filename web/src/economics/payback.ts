@@ -27,9 +27,9 @@ const axisIntegerFmt = new Intl.NumberFormat('uk-UA', { maximumFractionDigits: 0
 // named once in the chart caption.
 export function moneyAxis(max: number): { unit: string; tick: (v: number) => string } {
   if (Math.abs(max) >= 1_000_000) {
-    return { unit: 'млн ₴', tick: (v) => axisDecimalFmt.format(v / 1_000_000) }
+    return { unit: 'млн грн', tick: (v) => axisDecimalFmt.format(v / 1_000_000) }
   }
-  return { unit: 'тис. ₴', tick: (v) => axisIntegerFmt.format(v / 1_000) }
+  return { unit: 'тис. грн', tick: (v) => axisIntegerFmt.format(v / 1_000) }
 }
 
 export function addMonths(yyyyMm: string, n: number): string {
