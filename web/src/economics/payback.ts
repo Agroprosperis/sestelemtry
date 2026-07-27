@@ -55,6 +55,19 @@ function monthIdx(monthKey: string): number {
   return Number(monthKey.slice(5, 7)) - 1
 }
 
+// monthCoverage estimates how complete a month's telemetry is (0..1]
+// from hours_with_data vs the month's calendar hours. Partial months —
+// commissioning mid-month, data gaps, the open current month — then
+// contribute proportionally to the EBITDA pace instead of diluting it
+// (a month with 20% of data used to weigh like a full month and drag
+// the payback forecast far out for freshly launched sites).
+function monthCoverage(m: EconomicsAnnualMonthRollup): number {
+  const match = /^(\d{4})-(\d{2})$/.exec(m.month)
+  if (!match) return 1
+  const hoursInMonth = new Date(Number(match[1]), Number(match[2]), 0).getDate() * 24
+  return Math.min(Math.max(m.totals.hours_with_data / hoursInMonth, 0.01), 1)
+}
+
 // buildSeasonalFactors blends the default insolation profile with the
 // observed EBITDA of each calendar month (weighted by how many times we
 // saw that month, capped at 3), then renormalizes the mean back to 1.
@@ -62,23 +75,25 @@ function monthIdx(monthKey: string): number {
 // that is kept — the forecast should dip where the facts dip.
 function buildSeasonalFactors(monthsWithData: EconomicsAnnualMonthRollup[]): number[] {
   const sum = Array<number>(12).fill(0)
-  const cnt = Array<number>(12).fill(0)
+  const cov = Array<number>(12).fill(0)
   let total = 0
   let weightTotal = 0
   for (const m of monthsWithData) {
     const i = monthIdx(m.month)
+    const coverage = monthCoverage(m)
     sum[i] += m.totals.ebitda_uah
-    cnt[i] += 1
+    cov[i] += coverage
     total += m.totals.ebitda_uah
-    weightTotal += DEFAULT_SEASONALITY[i]
+    weightTotal += DEFAULT_SEASONALITY[i] * coverage
   }
   const base = weightTotal > 0 ? total / weightTotal : 0
   if (!(base > 0)) return DEFAULT_SEASONALITY
 
   const blended = DEFAULT_SEASONALITY.map((w, i) => {
-    if (cnt[i] === 0) return w
-    const observed = sum[i] / cnt[i] / base
-    const n = Math.min(cnt[i], 3)
+    if (cov[i] < 0.05) return w
+    // Observed factor per full-month equivalent of data.
+    const observed = sum[i] / cov[i] / base
+    const n = Math.min(cov[i], 3)
     return (observed * n + w) / (n + 1)
   })
   const mean = blended.reduce((a, b) => a + b, 0) / 12
@@ -121,6 +136,10 @@ export type PaybackModel = {
   priorMonths: number
   allTimeEbitda: number
   totalMonthsWithData: number
+  // effectiveMonths is the data-coverage-weighted month count (a month
+  // with half its hours covered counts as 0.5), used for the pace and
+  // fact averages.
+  effectiveMonths: number
   // annualEbitda / monthlyPace are the seasonally-adjusted run rate: the
   // observed EBITDA divided by the seasonal weight of the observed
   // months, so a summer-only window does not overstate the year.
@@ -175,14 +194,19 @@ export function buildPaybackModel({
   // Seasonally-adjusted pace: divide the all-time EBITDA by the seasonal
   // weight of every month that produced it (prior months sit directly
   // before the first visible month), instead of the plain month count.
+  // Each window month weighs by its data coverage, so a half-covered
+  // month contributes half a month to the denominator.
   const windowFirstMonth = monthsWithData[0]?.month ?? null
   let seasonalWeight = 0
+  let effectiveMonths = priorMonths
   if (windowFirstMonth) {
     for (let k = 1; k <= priorMonths; k += 1) {
       seasonalWeight += seasonalFactors[monthIdx(addMonths(windowFirstMonth, -k))]
     }
     for (const m of monthsWithData) {
-      seasonalWeight += seasonalFactors[monthIdx(m.month)]
+      const coverage = monthCoverage(m)
+      seasonalWeight += seasonalFactors[monthIdx(m.month)] * coverage
+      effectiveMonths += coverage
     }
   }
   const monthlyPace = seasonalWeight > 0 ? allTimeEbitda / seasonalWeight : 0
@@ -193,8 +217,10 @@ export function buildPaybackModel({
   // crossing when the forecast walk reaches CAPEX.
   let paybackYears = annualEbitda > 0 ? capexUah / annualEbitda : Infinity
   const operationYears = totalMonthsWithData / 12
+  // Annualize the fact ROI over data-covered time, so partial months do
+  // not understate it.
   const avgAnnualRoi =
-    capexUah > 0 && operationYears > 0 ? allTimeEbitda / capexUah / operationYears : NaN
+    capexUah > 0 && effectiveMonths > 0 ? (allTimeEbitda / capexUah) * (12 / effectiveMonths) : NaN
   const paidOff = allTimeEbitda >= capexUah && capexUah > 0
 
   const rows: CapexPaybackRow[] = []
@@ -288,7 +314,7 @@ export function buildPaybackModel({
   let scenario: PaybackScenario | null = null
   if (!paidOff && capexUah > 0 && monthsWithData.length >= 3 && monthlyPace > 0 && lastFactMonthKey) {
     const residuals = monthsWithData.map(
-      (m) => m.totals.ebitda_uah - monthlyPace * seasonalFactors[monthIdx(m.month)],
+      (m) => m.totals.ebitda_uah - monthlyPace * seasonalFactors[monthIdx(m.month)] * monthCoverage(m),
     )
     const mean = residuals.reduce((a, b) => a + b, 0) / residuals.length
     const variance = residuals.reduce((a, v) => a + (v - mean) * (v - mean), 0) / (residuals.length - 1)
@@ -318,6 +344,7 @@ export function buildPaybackModel({
     priorMonths,
     allTimeEbitda,
     totalMonthsWithData,
+    effectiveMonths,
     annualEbitda,
     monthlyPace,
     seasonalFactors,

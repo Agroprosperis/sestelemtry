@@ -350,7 +350,8 @@ export function EconomicsPaybackView({ data, capexUah, plannedPaybackMonths }: P
     return d.toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit', year: 'numeric' })
   }, [lastFactMonthKey])
 
-  const avgMonthlyFact = model.totalMonthsWithData > 0 ? allTimeEbitda / model.totalMonthsWithData : NaN
+  // Per data-covered month, so partial months don't drag the average.
+  const avgMonthlyFact = model.effectiveMonths > 0 ? allTimeEbitda / model.effectiveMonths : NaN
 
   // Effect chart entries: every fact month plus a seasonal forecast for
   // the rest of the last fact month's calendar year (like the mockup's
@@ -555,9 +556,15 @@ export function EconomicsPaybackView({ data, capexUah, plannedPaybackMonths }: P
               {todayT !== null && todayT > 0 ? (
                 <ReferenceLine
                   x={todayT}
-                  stroke="#cbd5e1"
-                  strokeDasharray="3 3"
-                  label={{ value: 'Сьогодні', position: 'insideTopRight', fontSize: 11, fill: '#94a3b8' }}
+                  stroke="#64748b"
+                  strokeWidth={1.2}
+                  strokeDasharray="4 4"
+                  // The fact window is often a thin slice at the left of a
+                  // multi-year axis, so the caption goes to the right of
+                  // the line where there is room (for a vertical reference
+                  // line "insideTopLeft" anchors the text start at the
+                  // line, extending rightwards).
+                  label={{ value: 'Сьогодні', position: 'insideTopLeft', fontSize: 11, fill: '#475569', dx: 4 }}
                 />
               ) : null}
               {paybackT !== null ? (
@@ -600,7 +607,7 @@ export function EconomicsPaybackView({ data, capexUah, plannedPaybackMonths }: P
                   fill="#2f6fed"
                   stroke="#fff"
                   strokeWidth={1.5}
-                  label={{ value: `Повернуто ${uahShortHrn(allTimeEbitda)}`, position: 'top', fontSize: 11, fill: '#2f6fed' }}
+                  label={{ value: `Повернуто ${uahShortHrn(allTimeEbitda)}`, position: 'top', fontSize: 11, fill: '#2f6fed', dy: -6 }}
                 />
               ) : null}
               {paybackT !== null ? (
