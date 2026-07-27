@@ -342,11 +342,6 @@ function AnnualCapex({
           <span className="economics-month-mini-note">з початку експлуатації</span>
         </div>
         <div className="economics-month-mini">
-          <span className="economics-month-mini-label">Окупність</span>
-          <span className="economics-month-mini-value">{paybackLabel(paybackYears)}</span>
-          <span className="economics-month-mini-note">від початку експлуатації</span>
-        </div>
-        <div className="economics-month-mini">
           <span className="economics-month-mini-label">ROI</span>
           <span className={`economics-month-mini-value ${roi >= 0 ? 'good' : ''}`}>{formatPercent(roi)}</span>
           <span className="economics-month-mini-note">EBITDA всього / CAPEX</span>
@@ -357,6 +352,11 @@ function AnnualCapex({
           <span className="economics-month-mini-note">
             {totalMonthsWithData > 0 ? `${paybackLabel(operationYears)} експлуатації` : 'немає даних'}
           </span>
+        </div>
+        <div className="economics-month-mini">
+          <span className="economics-month-mini-label">Окупність</span>
+          <span className="economics-month-mini-value">{paybackLabel(paybackYears)}</span>
+          <span className="economics-month-mini-note">від початку експлуатації</span>
         </div>
       </div>
 
