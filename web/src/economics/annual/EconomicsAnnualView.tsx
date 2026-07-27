@@ -1,10 +1,11 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import {
   Bar,
   BarChart,
   CartesianGrid,
   ComposedChart,
   Line,
+  ReferenceDot,
   ReferenceLine,
   ResponsiveContainer,
   Tooltip,
@@ -88,7 +89,6 @@ export function EconomicsAnnualView({ data, organizationID, capexUah, onSelectMo
         ebitda={t.ebitda_uah}
         priorEbitda={data.prior_ebitda_uah}
         priorMonthsWithData={data.prior_months_with_data}
-        scope={scope}
       />
       <div className="economics-month-grid2">
         <MonthlyFinance totals={t} scope={scope} />
@@ -144,13 +144,11 @@ function QuarterCards({ quarters }: { quarters: EconomicsAnnualQuarter[] }) {
   )
 }
 
-// --- CAPEX / payback / ROI ---
+// --- CAPEX / payback ---
 //
-// A display-only panel driven by the per-object CAPEX from the tariff
-// config plus the period EBITDA. Payback annualises the period EBITDA
-// (× 12 / months-with-data) so a partial window still yields a sane
-// years-to-payback estimate. The cumulative line shows accumulated
-// EBITDA across the period against the CAPEX reference line.
+// Display-only panel: CAPEX from tariff config + all-time EBITDA. The
+// main chart is UAH cumulative effect vs CAPEX with a linear run-rate
+// forecast to the payback point; seasonality lives in a secondary chart.
 
 // paybackLabel formats fractional years as "N р. M міс." (or just
 // months under a year). Non-positive / non-finite input reads "—".
@@ -166,65 +164,99 @@ function paybackLabel(years: number): string {
   return months > 0 ? `${whole} р. ${months} міс.` : `${whole} р.`
 }
 
-// CapexCumRow carries both series the ROI chart draws: the running
-// all-time cumulative EBITDA (cum, from the operation-start opening
-// balance) and that single month's standalone EBITDA (month). The
-// optional opening-balance point has month = null so the monthly series
-// leaves a gap there.
-//
-// Everything is expressed against CAPEX so one percent axis carries all
-// three series: cumRoi is the payback share reached so far (cumulative
-// EBITDA / CAPEX), avgAnnualRoi is the time-weighted average annual ROI
-// as of that month (cumulative EBITDA annualised over every elapsed
-// month with data / CAPEX), and monthAnnualRoi is the pace of that
-// single month alone (its EBITDA × 12 / CAPEX).
-type CapexCumRow = {
-  label: string
-  cum: number
-  month: number | null
-  cumRoi: number
-  avgAnnualRoi: number | null
-  monthAnnualRoi: number | null
+const axisDecimalFmt = new Intl.NumberFormat('uk-UA', { maximumFractionDigits: 1 })
+const axisIntegerFmt = new Intl.NumberFormat('uk-UA', { maximumFractionDigits: 0 })
+
+// moneyAxis picks one unit so Y ticks stay short ("3,6"); the unit is
+// named once in the chart caption.
+function moneyAxis(max: number): { unit: string; tick: (v: number) => string } {
+  if (Math.abs(max) >= 1_000_000) {
+    return { unit: 'млн ₴', tick: (v) => axisDecimalFmt.format(v / 1_000_000) }
+  }
+  return { unit: 'тис. ₴', tick: (v) => axisIntegerFmt.format(v / 1_000) }
 }
 
-// pctShort renders ROI axis ticks compactly ("18%").
-function pctShort(v: number): string {
-  if (!Number.isFinite(v)) return ''
-  return `${Math.round(v * 100)}%`
+function addMonths(yyyyMm: string, n: number): string {
+  const m = /^(\d{4})-(\d{2})$/.exec(yyyyMm)
+  if (!m) return yyyyMm
+  const d = new Date(Number(m[1]), Number(m[2]) - 1 + n, 1)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
 }
 
-const ROI_SERIES = [
-  { key: 'cumRoi', name: 'накопичений ROI', color: '#2f6fed' },
-  { key: 'avgAnnualRoi', name: 'середньорічний ROI', color: '#12b76a' },
-  { key: 'monthAnnualRoi', name: 'ROI місяця × 12', color: '#7c3aed' },
-] as const
-
-type CapexTooltipProps = {
+type CapexPaybackTooltipProps = {
   active?: boolean
-  payload?: { payload: CapexCumRow }[]
+  payload?: { payload: CapexPaybackRow }[]
 }
 
-// CapexTooltip keeps the UAH amounts available even though the axis is a
-// percentage of CAPEX.
-function CapexTooltip({ active, payload }: CapexTooltipProps) {
+type CapexPaybackRow = {
+  label: string
+  monthKey: string | null
+  // factCum is set on factual points (and the bridge "today" row).
+  factCum: number | null
+  // forecastCum is set from "today" onward so the dashed line joins the fact line.
+  forecastCum: number | null
+  monthEbitda: number | null
+  isToday: boolean
+  isPayback: boolean
+  kind: 'fact' | 'forecast' | 'bridge'
+}
+
+function CapexPaybackTooltip({ active, payload }: CapexPaybackTooltipProps) {
+  if (!active || !payload?.length) return null
+  const row = payload[0].payload
+  const cum = row.forecastCum ?? row.factCum
+  const isForecast = row.kind === 'forecast'
+  return (
+    <div className="economics-trend-tip">
+      <div className="economics-trend-tip-day">
+        {row.label}
+        {row.isToday ? ' · сьогодні' : ''}
+        {row.isPayback ? ' · окупність' : ''}
+      </div>
+      <div className="economics-trend-tip-row">
+        <i style={{ background: isForecast ? '#93c5fd' : '#2f6fed' }} />
+        <span>{isForecast ? 'Прогноз накопичено' : 'Накопичено'}</span>
+        <b>{cum === null ? '—' : formatUah(cum)}</b>
+      </div>
+      {row.monthEbitda !== null ? (
+        <div className="economics-trend-tip-row">
+          <i style={{ background: '#12b76a' }} />
+          <span>EBITDA за місяць</span>
+          <b>{formatUah(row.monthEbitda)}</b>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+type SeasonalGrain = 'month' | 'quarter' | 'year'
+
+type SeasonalRow = {
+  label: string
+  period: number
+  cum: number
+}
+
+type SeasonalTooltipProps = {
+  active?: boolean
+  payload?: { payload: SeasonalRow }[]
+}
+
+function SeasonalTooltip({ active, payload }: SeasonalTooltipProps) {
   if (!active || !payload?.length) return null
   const row = payload[0].payload
   return (
     <div className="economics-trend-tip">
       <div className="economics-trend-tip-day">{row.label}</div>
-      {ROI_SERIES.map((s) => {
-        const v = row[s.key]
-        return (
-          <div className="economics-trend-tip-row" key={s.key}>
-            <i style={{ background: s.color }} />
-            <span>{s.name}</span>
-            <b>{v === null ? '—' : formatPercent(v)}</b>
-          </div>
-        )
-      })}
-      <div className="economics-month-muted">
-        EBITDA {formatUah(row.cum)} накопичено
-        {row.month !== null ? ` · ${formatUah(row.month)} за місяць` : ''}
+      <div className="economics-trend-tip-row">
+        <i style={{ background: '#12b76a' }} />
+        <span>Ефект за період</span>
+        <b>{formatUah(row.period)}</b>
+      </div>
+      <div className="economics-trend-tip-row">
+        <i style={{ background: '#2f6fed' }} />
+        <span>Накопичено</span>
+        <b>{formatUah(row.cum)}</b>
       </div>
     </div>
   )
@@ -236,91 +268,146 @@ function AnnualCapex({
   ebitda,
   priorEbitda,
   priorMonthsWithData,
-  scope,
 }: {
   capexUah: number
   months: EconomicsAnnualMonthRollup[]
   ebitda: number
   // priorEbitda is the cumulative EBITDA earned before the window start
-  // (the ROI opening balance since the start of operation).
+  // (the opening balance since the start of operation).
   priorEbitda: number
   // priorMonthsWithData is how many months with data precede the window,
   // used to annualise all-time EBITDA for the payback estimate.
   priorMonthsWithData: number
-  scope: PeriodScope
 }) {
-  // Guard against a backend that hasn't shipped prior_ebitda_uah yet
-  // (undefined) — otherwise the running sum would become NaN and the
-  // whole chart would vanish.
+  const [seasonGrain, setSeasonGrain] = useState<SeasonalGrain>('month')
+
   const prior = Number.isFinite(priorEbitda) ? priorEbitda : 0
   const hasPrior = Math.abs(prior) > 0.5
   const priorMonths = Number.isFinite(priorMonthsWithData) ? priorMonthsWithData : 0
-  const rows = useMemo<CapexCumRow[]>(() => {
-    const out: CapexCumRow[] = []
+  const monthsWithData = useMemo(
+    () => months.filter((m) => m.totals.hours_with_data > 0),
+    [months],
+  )
+  const monthsWithDataCount = monthsWithData.length
+  const allTimeEbitda = prior + ebitda
+  const totalMonthsWithData = monthsWithDataCount + priorMonths
+  const annualEbitda = totalMonthsWithData > 0 ? (allTimeEbitda * 12) / totalMonthsWithData : 0
+  const monthlyPace = annualEbitda / 12
+  const paybackYears = annualEbitda > 0 ? capexUah / annualEbitda : Infinity
+  const coveredShare = capexUah > 0 ? Math.max(0, Math.min(allTimeEbitda / capexUah, 1)) : 0
+  const remaining = Math.max(capexUah - allTimeEbitda, 0)
+  const operationYears = totalMonthsWithData / 12
+  const paidOff = allTimeEbitda >= capexUah && capexUah > 0
+
+  const paybackRows = useMemo<CapexPaybackRow[]>(() => {
+    const out: CapexPaybackRow[] = []
     let acc = prior
-    // elapsed counts every month with data since the start of operation,
-    // including the ones before the window, so the running average is
-    // annualised over the true operating age at each point.
-    let elapsed = priorMonths
-    const roiAt = (cum: number) => (capexUah > 0 ? cum / capexUah : 0)
-    const avgAt = (cum: number, m: number) => (capexUah > 0 && m > 0 ? (cum * 12) / (m * capexUah) : null)
-    // Seed the cumulative line at the opening balance so the trajectory
-    // continues from where prior operation left off (SPEC: залишок з
-    // початку експлуатації).
     if (hasPrior) {
       out.push({
-        label: 'старт',
-        cum: acc,
-        month: null,
-        cumRoi: roiAt(acc),
-        avgAnnualRoi: avgAt(acc, elapsed),
-        monthAnnualRoi: null,
+        label: 'Початок',
+        monthKey: null,
+        factCum: acc,
+        forecastCum: null,
+        monthEbitda: null,
+        isToday: false,
+        isPayback: false,
+        kind: 'fact',
       })
     }
-    for (const m of months) {
-      if (m.totals.hours_with_data <= 0) continue
+    for (const m of monthsWithData) {
       acc += m.totals.ebitda_uah
-      elapsed += 1
       out.push({
         label: formatMonthShort(m.month),
-        cum: acc,
-        month: m.totals.ebitda_uah,
-        cumRoi: roiAt(acc),
-        avgAnnualRoi: avgAt(acc, elapsed),
-        monthAnnualRoi: capexUah > 0 ? (m.totals.ebitda_uah * 12) / capexUah : null,
+        monthKey: m.month,
+        factCum: acc,
+        forecastCum: null,
+        monthEbitda: m.totals.ebitda_uah,
+        isToday: false,
+        isPayback: false,
+        kind: 'fact',
       })
     }
+    if (out.length === 0) return out
+
+    const last = out[out.length - 1]
+    last.isToday = true
+    last.forecastCum = last.factCum
+    last.kind = 'bridge'
+
+    if (paidOff || !(monthlyPace > 0) || last.factCum === null) return out
+
+    let forecastAcc = last.factCum
+    let cursor = last.monthKey ?? '2000-01'
+    for (let i = 0; i < 180 && forecastAcc < capexUah; i++) {
+      cursor = addMonths(cursor, 1)
+      const next = Math.min(forecastAcc + monthlyPace, capexUah)
+      const hit = next >= capexUah - 0.5
+      forecastAcc = next
+      out.push({
+        label: formatMonthShort(cursor),
+        monthKey: cursor,
+        factCum: null,
+        forecastCum: forecastAcc,
+        monthEbitda: null,
+        isToday: false,
+        isPayback: hit,
+        kind: 'forecast',
+      })
+      if (hit) break
+    }
     return out
-  }, [months, prior, hasPrior, priorMonths, capexUah])
+  }, [monthsWithData, prior, hasPrior, paidOff, monthlyPace, capexUah])
+
+  const todayLabel = paybackRows.find((r) => r.isToday)?.label ?? null
+  const paybackPoint = paybackRows.find((r) => r.isPayback) ?? null
+  const yMax = Math.max(capexUah, allTimeEbitda, ...paybackRows.map((r) => r.forecastCum ?? r.factCum ?? 0), 0)
+  const axis = moneyAxis(yMax)
+
+  const seasonalRows = useMemo<SeasonalRow[]>(() => {
+    type Bucket = { label: string; period: number; order: string }
+    const buckets: Bucket[] = []
+    if (seasonGrain === 'month') {
+      for (const m of monthsWithData) {
+        buckets.push({ label: formatMonthShort(m.month), period: m.totals.ebitda_uah, order: m.month })
+      }
+    } else if (seasonGrain === 'quarter') {
+      const map = new Map<string, Bucket>()
+      for (const m of monthsWithData) {
+        const y = m.month.slice(0, 4)
+        const q = Math.ceil(Number(m.month.slice(5, 7)) / 3)
+        const key = `${y}-Q${q}`
+        const cur = map.get(key) ?? { label: `${Q_ROMAN[q - 1]} кв. ${y}`, period: 0, order: key }
+        cur.period += m.totals.ebitda_uah
+        map.set(key, cur)
+      }
+      buckets.push(...[...map.values()].sort((a, b) => a.order.localeCompare(b.order)))
+    } else {
+      const map = new Map<string, Bucket>()
+      for (const m of monthsWithData) {
+        const y = m.month.slice(0, 4)
+        const cur = map.get(y) ?? { label: y, period: 0, order: y }
+        cur.period += m.totals.ebitda_uah
+        map.set(y, cur)
+      }
+      buckets.push(...[...map.values()].sort((a, b) => a.order.localeCompare(b.order)))
+    }
+    let acc = prior
+    return buckets.map((b) => {
+      acc += b.period
+      return { label: b.label, period: b.period, cum: acc }
+    })
+  }, [monthsWithData, seasonGrain, prior])
+
+  const seasonAxis = moneyAxis(Math.max(...seasonalRows.map((r) => Math.abs(r.period)), ...seasonalRows.map((r) => Math.abs(r.cum)), 0))
 
   if (!(capexUah > 0)) return null
 
-  const monthsWithData = rows.filter((r) => r.month !== null).length
-  // All-time EBITDA since the start of operation drives ROI / залишок so
-  // a single-year view reflects capex recouped across prior years too.
-  const allTimeEbitda = prior + ebitda
-  // Payback is estimated from the operation-start run-rate: all-time
-  // EBITDA annualised over every month with data (window + prior), not
-  // just the selected year's pace.
-  const totalMonthsWithData = monthsWithData + priorMonths
-  const annualEbitda = totalMonthsWithData > 0 ? (allTimeEbitda * 12) / totalMonthsWithData : 0
-  const paybackYears = annualEbitda > 0 ? capexUah / annualEbitda : Infinity
-  const roi = allTimeEbitda / capexUah
-  // Time-weighted average annual ROI: every month contributes its actual
-  // EBITDA and the sum is spread over the real operating age, so partial
-  // years neither inflate nor dilute the yearly return.
-  const avgAnnualRoi = totalMonthsWithData > 0 ? annualEbitda / capexUah : NaN
-  const coveredShare = Math.max(0, Math.min(roi, 1))
-  const remaining = Math.max(capexUah - allTimeEbitda, 0)
-  const periodWord = scope === 'year' ? 'за рік' : 'за період'
-  const operationYears = totalMonthsWithData / 12
-
   return (
-    <section className="economics-card economics-month-section economics-capex" aria-label="Окупність та ROI">
+    <section className="economics-card economics-month-section economics-capex" aria-label="Окупність проєкту">
       <div className="economics-month-section-head">
         <h3 className="economics-month-section-title">
           Окупність проєкту
-          <OptimumInfo tip="CAPEX — разові капітальні інвестиції з налаштувань об'єкта. Окупність і ROI рахуються від початку експлуатації: EBITDA всього (усі збережені дні) приведено до року за фактичною кількістю місяців з даними. Окупність = CAPEX / річний темп EBITDA. ROI = EBITDA всього / CAPEX. Середньозважений річний ROI = річний темп EBITDA / CAPEX, тобто накопичений ROI, рознесений на фактичний строк експлуатації (кожен місяць входить зі своєю EBITDA)." />
+          <OptimumInfo tip="CAPEX — разові капітальні інвестиції з налаштувань об'єкта. Повернуто = накопичений EBITDA з початку експлуатації. Прогноз окупності = CAPEX / річний темп EBITDA (накопичений EBITDA × 12 / місяців з даними). Середньорічний фактичний ROI = накопичений EBITDA / CAPEX / роки експлуатації." />
         </h3>
         <span className="economics-month-muted">CAPEX із налаштувань об'єкта</span>
       </div>
@@ -332,102 +419,196 @@ function AnnualCapex({
           <span className="economics-month-mini-note">разові інвестиції</span>
         </div>
         <div className="economics-month-mini">
-          <span className="economics-month-mini-label">EBITDA {periodWord}</span>
-          <span className={`economics-month-mini-value ${ebitda >= 0 ? 'good' : ''}`}>{formatUah(ebitda)}</span>
-          <span className="economics-month-mini-note">{monthsWithData} міс. даних</span>
-        </div>
-        <div className="economics-month-mini">
-          <span className="economics-month-mini-label">EBITDA всього</span>
+          <span className="economics-month-mini-label">Повернуто інвестицій</span>
           <span className={`economics-month-mini-value ${allTimeEbitda >= 0 ? 'good' : ''}`}>{formatUah(allTimeEbitda)}</span>
-          <span className="economics-month-mini-note">з початку експлуатації</span>
+          <span className="economics-month-mini-note">накопичений ефект</span>
         </div>
         <div className="economics-month-mini">
-          <span className="economics-month-mini-label">ROI</span>
-          <span className={`economics-month-mini-value ${roi >= 0 ? 'good' : ''}`}>{formatPercent(roi)}</span>
-          <span className="economics-month-mini-note">EBITDA всього / CAPEX</span>
+          <span className="economics-month-mini-label">Залишилось повернути</span>
+          <span className="economics-month-mini-value">{paidOff ? '0 грн' : formatUah(remaining)}</span>
+          <span className="economics-month-mini-note">{paidOff ? 'капекс окуплено' : 'до повної окупності'}</span>
         </div>
         <div className="economics-month-mini">
-          <span className="economics-month-mini-label">Середньорічний ROI</span>
-          <span className={`economics-month-mini-value ${avgAnnualRoi >= 0 ? 'good' : ''}`}>{formatPercent(avgAnnualRoi)}</span>
-          <span className="economics-month-mini-note">
-            {totalMonthsWithData > 0 ? `${paybackLabel(operationYears)} експлуатації` : 'немає даних'}
+          <span className="economics-month-mini-label">
+            Покрито CAPEX
+            <OptimumInfo tip={`Середньорічний фактичний ROI за весь період експлуатації = накопичений EBITDA / CAPEX / роки експлуатації. Зараз: ${formatPercent(Number.isFinite(operationYears) && operationYears > 0 ? allTimeEbitda / capexUah / operationYears : NaN)} за ${paybackLabel(operationYears)}.`} />
           </span>
+          <span className={`economics-month-mini-value ${coveredShare >= 0 ? 'good' : ''}`}>{formatPercent(coveredShare)}</span>
+          <span className="economics-month-mini-note">повернуто / CAPEX</span>
         </div>
         <div className="economics-month-mini">
-          <span className="economics-month-mini-label">Окупність</span>
-          <span className="economics-month-mini-value">{paybackLabel(paybackYears)}</span>
+          <span className="economics-month-mini-label">Прогноз окупності</span>
+          <span className="economics-month-mini-value">{paidOff ? 'окуплено' : paybackLabel(paybackYears)}</span>
           <span className="economics-month-mini-note">від початку експлуатації</span>
         </div>
       </div>
 
       <div className="economics-capex-progress">
         <div className="economics-capex-progress-head">
-          <span>Накопичений EBITDA покрив {formatPercent(coveredShare)} капексу</span>
-          <span className="economics-month-muted">
-            {hasPrior ? `у т.ч. до початку періоду ${formatUah(prior)} · ` : ''}
-            {remaining > 0 ? `залишок з початку експл. ${formatUah(remaining)}` : 'капекс окуплено'}
+          <span>
+            Повернуто {uahShort(allTimeEbitda)} із {uahShort(capexUah)}.
+            {paidOff ? ' Капекс окуплено.' : ` Залишилось повернути ${uahShort(remaining)}.`}
           </span>
+          {hasPrior ? (
+            <span className="economics-month-muted">
+              Накопичений EBITDA до вибраного періоду: {formatUah(prior)}
+            </span>
+          ) : null}
         </div>
         <div className="economics-capex-bar">
           <span className="economics-capex-bar-fill" style={{ width: `${coveredShare * 100}%` }} />
         </div>
       </div>
 
-      {rows.length > 1 ? (
+      {paybackRows.length > 1 ? (
         <div className="economics-month-chart economics-capex-chart">
           <div className="economics-capex-chart-head">
             <span className="economics-capex-chart-title">
-              Динаміка ROI
-              <span className="economics-capex-chart-unit">% до CAPEX</span>
-              <OptimumInfo tip="Усі три серії — відсоток до CAPEX. Стовпці — річний темп окремого місяця (EBITDA місяця × 12 / CAPEX). Зелена лінія — середньозважений річний ROI від початку експлуатації: накопичена EBITDA, приведена до року за фактичною кількістю місяців з даними. Синя лінія — накопичений ROI, тобто яку частину капексу вже покрито; на 100% проєкт окупається." />
+              Накопичена окупність проєкту
+              <span className="economics-capex-chart-unit">{axis.unit}</span>
+              <OptimumInfo tip="Суцільна лінія — фактичний накопичений EBITDA. Пунктир — базовий прогноз тим самим річним темпом до перетину з CAPEX. Вертикаль «Сьогодні» — остання фактична точка; точка окупності — прогнозована дата повного повернення інвестицій." />
             </span>
             <span className="economics-month-legend">
-              {ROI_SERIES.map((s) => (
-                <span key={s.key}>
-                  <i style={{ background: s.color }} />
-                  {s.name}
-                </span>
-              ))}
+              <span><i style={{ background: '#2f6fed' }} />факт</span>
+              <span><i style={{ background: '#93c5fd' }} />прогноз</span>
+              <span><i style={{ background: '#94a3b8' }} />CAPEX</span>
             </span>
           </div>
-          <ResponsiveContainer width="100%" height={210}>
-            <ComposedChart data={rows} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+          <ResponsiveContainer width="100%" height={220}>
+            <ComposedChart data={paybackRows} margin={{ top: 12, right: 12, bottom: 0, left: 0 }}>
+              <CartesianGrid strokeDasharray="2 5" stroke="#e7ecf2" vertical={false} />
+              <XAxis
+                dataKey="label"
+                tick={{ fontSize: 11, fill: '#8a94a6' }}
+                tickLine={false}
+                axisLine={false}
+                interval={paybackRows.length > 24 ? Math.ceil(paybackRows.length / 12) - 1 : 0}
+              />
+              <YAxis
+                tick={{ fontSize: 11, fill: '#98a2b3' }}
+                width={36}
+                tickLine={false}
+                axisLine={false}
+                tickFormatter={axis.tick}
+                domain={[0, (dataMax: number) => Math.max(dataMax, capexUah) * 1.05]}
+              />
+              <Tooltip content={<CapexPaybackTooltip />} cursor={{ stroke: '#cbd5e1' }} />
+              <ReferenceLine
+                y={capexUah}
+                stroke="#94a3b8"
+                strokeDasharray="5 4"
+                label={{ value: `CAPEX ${uahShort(capexUah)}`, position: 'insideTopRight', fontSize: 11, fill: '#64748b' }}
+              />
+              {todayLabel ? (
+                <ReferenceLine
+                  x={todayLabel}
+                  stroke="#cbd5e1"
+                  strokeDasharray="3 3"
+                  label={{ value: 'Сьогодні', position: 'insideTopLeft', fontSize: 11, fill: '#94a3b8' }}
+                />
+              ) : null}
+              <Line
+                type="monotone"
+                dataKey="factCum"
+                stroke="#2f6fed"
+                strokeWidth={2.2}
+                dot={false}
+                connectNulls={false}
+              />
+              <Line
+                type="monotone"
+                dataKey="forecastCum"
+                stroke="#2f6fed"
+                strokeWidth={2}
+                strokeDasharray="6 4"
+                strokeOpacity={0.75}
+                dot={false}
+                connectNulls={false}
+              />
+              {paybackPoint ? (
+                <ReferenceDot
+                  x={paybackPoint.label}
+                  y={capexUah}
+                  r={4}
+                  fill="#dc2626"
+                  stroke="#fff"
+                  strokeWidth={1.5}
+                  label={{
+                    value: `окупність ${paybackPoint.label}`,
+                    position: 'top',
+                    fontSize: 11,
+                    fill: '#dc2626',
+                  }}
+                />
+              ) : null}
+            </ComposedChart>
+          </ResponsiveContainer>
+        </div>
+      ) : null}
+
+      {seasonalRows.length > 0 ? (
+        <div className="economics-month-chart economics-capex-chart economics-capex-seasonal">
+          <div className="economics-capex-chart-head">
+            <span className="economics-capex-chart-title">
+              Щомісячний економічний ефект
+              <span className="economics-capex-chart-unit">{seasonAxis.unit}</span>
+              <OptimumInfo tip="Стовпці — EBITDA (економічний ефект) за вибрану гранулярність у межах поточного вікна. Лінія — накопичений EBITDA від початку експлуатації (із залишком до вибраного періоду)." />
+            </span>
+            <div className="economics-capex-season-tools">
+              <span className="economics-month-legend">
+                <span><i style={{ background: '#12b76a' }} />ефект</span>
+                <span><i style={{ background: '#2f6fed' }} />накопичено</span>
+              </span>
+              <div className="economics-range-switch economics-capex-grain" role="group" aria-label="Гранулярність ефекту">
+                {(
+                  [
+                    ['month', 'місяці'],
+                    ['quarter', 'квартали'],
+                    ['year', 'роки'],
+                  ] as const
+                ).map(([key, label]) => (
+                  <button
+                    key={key}
+                    type="button"
+                    className={seasonGrain === key ? 'active' : undefined}
+                    onClick={() => setSeasonGrain(key)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+          <ResponsiveContainer width="100%" height={170}>
+            <ComposedChart data={seasonalRows} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
               <CartesianGrid strokeDasharray="2 5" stroke="#e7ecf2" vertical={false} />
               <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#8a94a6' }} tickLine={false} axisLine={false} />
               <YAxis
+                yAxisId="period"
                 tick={{ fontSize: 11, fill: '#98a2b3' }}
-                width={38}
+                width={36}
                 tickLine={false}
                 axisLine={false}
-                tickFormatter={pctShort}
+                tickFormatter={seasonAxis.tick}
               />
-              <Tooltip content={<CapexTooltip />} cursor={{ stroke: '#cbd5e1' }} />
-              <ReferenceLine y={0} stroke="#98a2b3" />
-              {/* The payback threshold only enters the axis range as the
-                  project nears 100% of CAPEX; until then recharts drops
-                  it rather than flattening the whole chart. */}
-              <ReferenceLine
-                y={1}
-                stroke="#dc2626"
-                strokeDasharray="5 4"
-                label={{ value: 'окупність', position: 'insideTopRight', fontSize: 11, fill: '#dc2626' }}
-              />
+              <YAxis yAxisId="cum" orientation="right" hide width={0} />
+              <Tooltip content={<SeasonalTooltip />} cursor={{ fill: 'rgba(148, 163, 184, 0.12)' }} />
               <Bar
-                dataKey="monthAnnualRoi"
-                fill="#7c3aed"
-                fillOpacity={0.2}
-                stroke="#7c3aed"
+                yAxisId="period"
+                dataKey="period"
+                fill="#12b76a"
+                fillOpacity={0.35}
+                stroke="#12b76a"
                 strokeWidth={1}
-                maxBarSize={26}
+                maxBarSize={28}
                 radius={[3, 3, 0, 0]}
               />
-              <Line type="monotone" dataKey="cumRoi" stroke="#2f6fed" strokeWidth={2.2} dot={false} />
               <Line
+                yAxisId="cum"
                 type="monotone"
-                dataKey="avgAnnualRoi"
-                stroke="#12b76a"
-                strokeWidth={2.2}
-                strokeDasharray="6 4"
+                dataKey="cum"
+                stroke="#2f6fed"
+                strokeWidth={2}
                 dot={false}
               />
             </ComposedChart>
