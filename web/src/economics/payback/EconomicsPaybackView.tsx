@@ -13,7 +13,6 @@ import {
   YAxis,
 } from 'recharts'
 import type { EconomicsAnnualResponse } from '../../api'
-import { CapexPaybackTooltip } from '../annual/EconomicsAnnualView'
 import { OptimumInfo } from '../monthly/EconomicsMonthlyView'
 import {
   formatKwh,
@@ -27,6 +26,7 @@ import { uahShort } from '../monthly/rollup'
 import {
   addMonths,
   buildPaybackModel,
+  type CapexPaybackRow,
   moneyAxis,
   paybackAxis,
   paybackLabel,
@@ -206,6 +206,49 @@ function KvRow({ icon, tone, label, value }: { icon: IconName; tone: Tone; label
   )
 }
 
+// --- Cumulative payback chart tooltip ---
+
+type CapexPaybackTooltipProps = {
+  active?: boolean
+  payload?: { payload: CapexPaybackRow }[]
+}
+
+function CapexPaybackTooltip({ active, payload }: CapexPaybackTooltipProps) {
+  if (!active || !payload?.length) return null
+  const row = payload[0].payload
+  const cum = row.factCum ?? row.forecastCum
+  const isForecast = row.kind === 'forecast'
+  const title =
+    row.kind === 'start'
+      ? 'Початок експлуатації'
+      : row.monthKey
+        ? formatMonthTitle(row.monthKey)
+        : ''
+  return (
+    <div className="economics-trend-tip">
+      <div className="economics-trend-tip-day">
+        {title}
+        {isForecast ? ' · прогноз' : ''}
+      </div>
+      <div className="economics-trend-tip-row">
+        <i style={{ background: isForecast ? '#60a5fa' : '#2f6fed' }} />
+        <span>{isForecast ? 'Прогноз накопичено' : 'Накопичено'}</span>
+        <b>{cum === null ? '—' : formatUah(cum)}</b>
+      </div>
+      {row.monthEbitda !== null ? (
+        <div className="economics-trend-tip-row">
+          <i style={{ background: '#12b76a' }} />
+          <span>EBITDA за місяць</span>
+          <b>{formatUah(row.monthEbitda)}</b>
+        </div>
+      ) : null}
+      {row.kind === 'prior' ? (
+        <div className="economics-month-muted">накопичений EBITDA до помісячної деталізації</div>
+      ) : null}
+    </div>
+  )
+}
+
 // --- Monthly effect chart (fact + forecast to the year end) ---
 
 type EffectGrain = 'month' | 'quarter' | 'year'
@@ -278,6 +321,7 @@ export function EconomicsPaybackView({ data, capexUah, plannedPaybackMonths }: P
     hasPrior,
     allTimeEbitda,
     monthlyPace,
+    seasonalFactors,
     paybackYears,
     coveredShare,
     remaining,
@@ -300,7 +344,7 @@ export function EconomicsPaybackView({ data, capexUah, plannedPaybackMonths }: P
   const axis = moneyAxis(yMax)
   const startRow = paybackRows.find((r) => r.kind === 'start') ?? null
 
-  // Effect chart entries: every fact month plus a run-rate forecast for
+  // Effect chart entries: every fact month plus a seasonal forecast for
   // the rest of the last fact month's calendar year (like the mockup's
   // "fact Jan–Jul, forecast Aug–Dec").
   const effectRows = useMemo<EffectRow[]>(() => {
@@ -314,7 +358,11 @@ export function EconomicsPaybackView({ data, capexUah, plannedPaybackMonths }: P
       const year = lastFactMonthKey.slice(0, 4)
       let cursor = addMonths(lastFactMonthKey, 1)
       while (cursor.slice(0, 4) === year) {
-        entries.push({ month: cursor, value: monthlyPace, forecast: true })
+        entries.push({
+          month: cursor,
+          value: monthlyPace * seasonalFactors[Number(cursor.slice(5, 7)) - 1],
+          forecast: true,
+        })
         cursor = addMonths(cursor, 1)
       }
     }
@@ -357,7 +405,7 @@ export function EconomicsPaybackView({ data, capexUah, plannedPaybackMonths }: P
         cumForecast: b.hasForecast ? acc : null,
       }
     })
-  }, [monthsWithData, lastFactMonthKey, paidOff, monthlyPace, grain, prior])
+  }, [monthsWithData, lastFactMonthKey, paidOff, monthlyPace, seasonalFactors, grain, prior])
 
   // Seed the forecast cumulative line from the last fact bucket so the
   // two line segments join without a gap.
@@ -402,7 +450,7 @@ export function EconomicsPaybackView({ data, capexUah, plannedPaybackMonths }: P
       <div className="economics-payback-head">
         <h2>
           Окупність проєкту СЕС
-          <OptimumInfo tip="CAPEX — разові капітальні інвестиції з налаштувань об'єкта. Повернуто = накопичений EBITDA з початку експлуатації. Прогноз окупності = CAPEX / річний темп EBITDA (накопичений EBITDA × 12 / місяців з даними)." />
+          <OptimumInfo tip="CAPEX — разові капітальні інвестиції з налаштувань об'єкта. Повернуто = накопичений EBITDA з початку експлуатації. Прогноз окупності будується помісячно з урахуванням сезонності виробітку: темп EBITDA оцінюється за фактичними даними з поправкою на сезон, а майбутні місяці отримують свій сезонний коефіцієнт (літо швидше, зима повільніше)." />
         </h2>
         <span className="economics-month-muted">
           Дані оновлено: {lastFactMonthKey ? formatMonthTitle(lastFactMonthKey) : '—'}
@@ -469,7 +517,7 @@ export function EconomicsPaybackView({ data, capexUah, plannedPaybackMonths }: P
           <div className="economics-payback-range">
             <span className="economics-payback-range-label">
               Прогноз окупності (діапазон)
-              <OptimumInfo tip="Діапазон = базовий темп EBITDA ± похибка середнього за спостереженими місяцями. Оптимістичний сценарій — швидший темп, консервативний — повільніший. Діапазон звужується з накопиченням даних." />
+              <OptimumInfo tip="Діапазон = сезонно скоригований темп EBITDA ± похибка середнього за відхиленнями фактичних місяців від сезонного очікування. Оптимістичний сценарій — швидший темп, консервативний — повільніший. Діапазон звужується з накопиченням даних." />
             </span>
             <span className="economics-payback-range-value">
               {paybackLabel(scenario.optYears)} – {paybackLabel(scenario.consYears)}
@@ -485,7 +533,7 @@ export function EconomicsPaybackView({ data, capexUah, plannedPaybackMonths }: P
             <span className="economics-capex-chart-title">
               Накопичена окупність проєкту
               <span className="economics-capex-chart-unit">{axis.unit}</span>
-              <OptimumInfo tip="Суцільна лінія — фактичний накопичений EBITDA від початку експлуатації. Пунктир — базовий прогноз тим самим річним темпом до перетину з CAPEX. Вертикаль «Сьогодні» — остання фактична точка; точка окупності — прогнозований місяць повного повернення інвестицій." />
+              <OptimumInfo tip="Суцільна лінія — фактичний накопичений EBITDA від початку експлуатації. Пунктир — сезонний прогноз: кожен майбутній місяць додає свій очікуваний EBITDA (влітку більше, взимку менше), тому лінія хвиляста, як і факт. Вертикаль «Сьогодні» — остання фактична точка; точка окупності — прогнозований місяць повного повернення інвестицій." />
             </span>
             <span className="economics-month-legend">
               <span><i style={{ background: '#2f6fed' }} />Факт (накопичений EBITDA)</span>
@@ -621,7 +669,7 @@ export function EconomicsPaybackView({ data, capexUah, plannedPaybackMonths }: P
             <span className="economics-capex-chart-title">
               Щомісячний економічний ефект
               <span className="economics-capex-chart-unit">{effectAxis.unit}</span>
-              <OptimumInfo tip="Стовпці — EBITDA за період: сині — факт, фіолетові — базовий прогноз до кінця поточного року. Пунктирні лінії — накопичений EBITDA від початку експлуатації (права шкала): синя — факт, фіолетова — прогноз." />
+              <OptimumInfo tip="Стовпці — EBITDA за період: сині — факт, фіолетові — сезонний прогноз до кінця поточного року. Пунктирні лінії — накопичений EBITDA від початку експлуатації (права шкала): синя — факт, фіолетова — прогноз." />
             </span>
             <div className="economics-payback-effect-tools">
               <span className="economics-month-legend">
@@ -762,8 +810,9 @@ export function EconomicsPaybackView({ data, capexUah, plannedPaybackMonths }: P
       </div>
 
       <section className="economics-banner economics-payback-note" role="note">
-        Прогноз базується на фактичному темпі EBITDA за {model.totalMonthsWithData} міс. експлуатації і може
-        змінюватися залежно від виробітку електроенергії, цін РДН, тарифів та операційних витрат.
+        Прогноз базується на фактичному темпі EBITDA за {model.totalMonthsWithData} міс. експлуатації з
+        урахуванням сезонності сонячного виробітку і може змінюватися залежно від виробітку електроенергії,
+        цін РДН, тарифів та операційних витрат.
       </section>
     </>
   )

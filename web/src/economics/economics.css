@@ -2474,50 +2474,7 @@ button.economics-optimum-row.open {
   gap: 12px;
 }
 
-/* --- CAPEX / payback panel (annual) --- */
-.economics-capex-cards {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 10px;
-  margin-top: 4px;
-}
-
-/* Five metrics share one row here, so the shared mini-card gets a denser
-   scale inside this panel only — same border/background family. */
-.economics-capex-cards .economics-month-mini {
-  gap: 2px;
-  padding: 10px 12px;
-}
-
-.economics-capex-cards .economics-month-mini-label,
-.economics-capex-cards .economics-month-mini-note {
-  font-size: 11px;
-}
-
-.economics-capex-cards .economics-month-mini-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.economics-capex-cards .economics-month-mini-value {
-  font-size: 16px;
-}
-
-.economics-capex-progress {
-  margin-top: 14px;
-}
-
-.economics-capex-progress-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 12px;
-  font-size: 12.5px;
-  color: #334155;
-  margin-bottom: 6px;
-}
-
+/* --- CAPEX / payback chart primitives (shared with the payback page) --- */
 .economics-capex-bar {
   position: relative;
   height: 10px;
@@ -2532,10 +2489,6 @@ button.economics-optimum-row.open {
   border-radius: 999px;
   background: linear-gradient(90deg, #12b76a, #2f6fed);
   transition: width 0.2s ease;
-}
-
-.economics-capex-chart {
-  margin-top: 14px;
 }
 
 .economics-capex-chart-head {
@@ -2565,39 +2518,6 @@ button.economics-optimum-row.open {
 
 .economics-capex-chart-unit::before {
   content: '· ';
-}
-
-.economics-capex-chart .economics-month-legend {
-  gap: 4px 10px;
-  font-size: 11px;
-}
-
-.economics-capex-season-tools {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-.economics-capex-grain button {
-  padding: 4px 10px;
-  font-size: 12px;
-}
-
-.economics-capex-seasonal {
-  margin-top: 18px;
-}
-
-@media (max-width: 1100px) {
-  .economics-capex-cards {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-}
-
-@media (max-width: 720px) {
-  .economics-capex-cards {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
 }
 
 .economics-quarter-card {

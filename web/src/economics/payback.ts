@@ -1,8 +1,7 @@
-// Shared CAPEX-payback math for the economics views: the annual
-// dashboard panel and the standalone "Окупність проєкту" page both
-// render the same model — cumulative EBITDA since the start of
-// operation on a numeric month axis, extended with a linear run-rate
-// forecast to the CAPEX crossing.
+// Shared CAPEX-payback math for the "Окупність проєкту" page:
+// cumulative EBITDA since the start of operation on a numeric month
+// axis, extended with a seasonal month-by-month forecast to the CAPEX
+// crossing (summers climb fast, winters flatten — like the fact line).
 
 import type { EconomicsAnnualMonthRollup } from '../api'
 import { formatMonthShort } from './monthly/format'
@@ -47,6 +46,45 @@ export function formatMonthYearShort(monthKey: string): string {
   return short === monthKey ? monthKey : `${short} ’${monthKey.slice(2, 4)}`
 }
 
+// DEFAULT_SEASONALITY is the typical monthly share of annual PV output
+// for Ukraine's latitudes (Jan..Dec), scaled so the mean factor is 1.
+// It seeds the forecast shape until real data covers a calendar month.
+const DEFAULT_SEASONALITY = [0.42, 0.6, 1.02, 1.32, 1.5, 1.5, 1.56, 1.44, 1.14, 0.78, 0.42, 0.3]
+
+function monthIdx(monthKey: string): number {
+  return Number(monthKey.slice(5, 7)) - 1
+}
+
+// buildSeasonalFactors blends the default insolation profile with the
+// observed EBITDA of each calendar month (weighted by how many times we
+// saw that month, capped at 3), then renormalizes the mean back to 1.
+// Observed months may push a factor negative (e.g. opex-heavy winters);
+// that is kept — the forecast should dip where the facts dip.
+function buildSeasonalFactors(monthsWithData: EconomicsAnnualMonthRollup[]): number[] {
+  const sum = Array<number>(12).fill(0)
+  const cnt = Array<number>(12).fill(0)
+  let total = 0
+  let weightTotal = 0
+  for (const m of monthsWithData) {
+    const i = monthIdx(m.month)
+    sum[i] += m.totals.ebitda_uah
+    cnt[i] += 1
+    total += m.totals.ebitda_uah
+    weightTotal += DEFAULT_SEASONALITY[i]
+  }
+  const base = weightTotal > 0 ? total / weightTotal : 0
+  if (!(base > 0)) return DEFAULT_SEASONALITY
+
+  const blended = DEFAULT_SEASONALITY.map((w, i) => {
+    if (cnt[i] === 0) return w
+    const observed = sum[i] / cnt[i] / base
+    const n = Math.min(cnt[i], 3)
+    return (observed * n + w) / (n + 1)
+  })
+  const mean = blended.reduce((a, b) => a + b, 0) / 12
+  return mean > 0.05 ? blended.map((v) => v / mean) : DEFAULT_SEASONALITY
+}
+
 // CapexPaybackRow is one point of the payback chart. t is months elapsed
 // since the start of operation (fractional for the exact CAPEX crossing)
 // and drives a numeric X axis, so multi-year forecasts keep an honest
@@ -83,8 +121,14 @@ export type PaybackModel = {
   priorMonths: number
   allTimeEbitda: number
   totalMonthsWithData: number
+  // annualEbitda / monthlyPace are the seasonally-adjusted run rate: the
+  // observed EBITDA divided by the seasonal weight of the observed
+  // months, so a summer-only window does not overstate the year.
   annualEbitda: number
   monthlyPace: number
+  // seasonalFactors are the Jan..Dec multipliers (mean 1) applied to
+  // monthlyPace when projecting individual future months.
+  seasonalFactors: number[]
   paybackYears: number
   coveredShare: number
   remaining: number
@@ -126,11 +170,28 @@ export function buildPaybackModel({
 
   const allTimeEbitda = prior + ebitda
   const totalMonthsWithData = monthsWithData.length + priorMonths
-  const annualEbitda = totalMonthsWithData > 0 ? (allTimeEbitda * 12) / totalMonthsWithData : 0
-  const monthlyPace = annualEbitda / 12
-  const paybackYears = annualEbitda > 0 ? capexUah / annualEbitda : Infinity
+  const seasonalFactors = buildSeasonalFactors(monthsWithData)
+
+  // Seasonally-adjusted pace: divide the all-time EBITDA by the seasonal
+  // weight of every month that produced it (prior months sit directly
+  // before the first visible month), instead of the plain month count.
+  const windowFirstMonth = monthsWithData[0]?.month ?? null
+  let seasonalWeight = 0
+  if (windowFirstMonth) {
+    for (let k = 1; k <= priorMonths; k += 1) {
+      seasonalWeight += seasonalFactors[monthIdx(addMonths(windowFirstMonth, -k))]
+    }
+    for (const m of monthsWithData) {
+      seasonalWeight += seasonalFactors[monthIdx(m.month)]
+    }
+  }
+  const monthlyPace = seasonalWeight > 0 ? allTimeEbitda / seasonalWeight : 0
+  const annualEbitda = monthlyPace * 12
   const coveredShare = capexUah > 0 ? Math.max(0, Math.min(allTimeEbitda / capexUah, 1)) : 0
   const remaining = Math.max(capexUah - allTimeEbitda, 0)
+  // Linear estimate as a fallback; refined below to the exact seasonal
+  // crossing when the forecast walk reaches CAPEX.
+  let paybackYears = annualEbitda > 0 ? capexUah / annualEbitda : Infinity
   const operationYears = totalMonthsWithData / 12
   const avgAnnualRoi =
     capexUah > 0 && operationYears > 0 ? allTimeEbitda / capexUah / operationYears : NaN
@@ -186,51 +247,51 @@ export function buildPaybackModel({
         paybackT = hit.t
         paybackMonthKey = hit.monthKey
       }
-    } else if (monthlyPace > 0 && capexUah > 0) {
-      // Bridge point so the dashed projection continues the fact line.
+    } else if (annualEbitda > 0 && capexUah > 0) {
+      // Bridge point so the dashed projection continues the fact line,
+      // then walk future months applying the seasonal factor of each one:
+      // the projection climbs steeply through summers and flattens (or
+      // dips) through winters, like the fact line does.
       rows[rows.length - 1].forecastCum = acc
-      const exactT = todayT + (capexUah - acc) / monthlyPace
-      const endT = Math.min(exactT, todayT + FORECAST_CAP_MONTHS)
-      let ft = todayT
       let fAcc = acc
-      while (ft + 1 < endT) {
-        ft += 1
-        fAcc += monthlyPace
+      for (let k = 1; k <= FORECAST_CAP_MONTHS; k += 1) {
+        const key = addMonths(lastFactMonthKey, k)
+        const monthE = monthlyPace * seasonalFactors[monthIdx(key)]
+        if (paybackT === null && monthE > 0 && fAcc < capexUah && fAcc + monthE >= capexUah) {
+          // Interpolate the exact crossing inside this month.
+          paybackT = todayT + k - 1 + (capexUah - fAcc) / monthE
+          paybackMonthKey = key
+          paybackYears = paybackT / 12
+        }
+        fAcc += monthE
         rows.push({
-          t: ft,
-          monthKey: addMonths(lastFactMonthKey, ft - todayT),
+          t: todayT + k,
+          monthKey: key,
           factCum: null,
           forecastCum: fAcc,
-          monthEbitda: null,
+          monthEbitda: monthE,
           kind: 'forecast',
         })
-      }
-      const reached = exactT <= todayT + FORECAST_CAP_MONTHS
-      rows.push({
-        t: endT,
-        monthKey: addMonths(lastFactMonthKey, Math.ceil(endT - todayT)),
-        factCum: null,
-        forecastCum: reached ? capexUah : acc + monthlyPace * FORECAST_CAP_MONTHS,
-        monthEbitda: null,
-        kind: 'forecast',
-      })
-      if (reached) {
-        paybackT = endT
-        paybackMonthKey = addMonths(lastFactMonthKey, Math.ceil(exactT - todayT))
+        // Stop at the end of the crossing month so the dashed line ends
+        // just past the payback marker.
+        if (paybackT !== null) break
       }
     }
   }
 
   const tMax = rows.length > 0 ? rows[rows.length - 1].t : 0
 
-  // Scenario range: ± one standard error of the monthly pace, taken
-  // from the variability of the visible window's monthly EBITDA. Needs
-  // at least 3 observed months and a strictly positive lower bound.
+  // Scenario range: ± one standard error of the monthly pace. The
+  // spread comes from the residuals against the seasonal expectation
+  // (not raw month-to-month swings, which are mostly seasonality), so
+  // the range reflects genuine uncertainty and narrows with data.
   let scenario: PaybackScenario | null = null
   if (!paidOff && capexUah > 0 && monthsWithData.length >= 3 && monthlyPace > 0 && lastFactMonthKey) {
-    const values = monthsWithData.map((m) => m.totals.ebitda_uah)
-    const mean = values.reduce((a, b) => a + b, 0) / values.length
-    const variance = values.reduce((a, v) => a + (v - mean) * (v - mean), 0) / (values.length - 1)
+    const residuals = monthsWithData.map(
+      (m) => m.totals.ebitda_uah - monthlyPace * seasonalFactors[monthIdx(m.month)],
+    )
+    const mean = residuals.reduce((a, b) => a + b, 0) / residuals.length
+    const variance = residuals.reduce((a, v) => a + (v - mean) * (v - mean), 0) / (residuals.length - 1)
     const sem = Math.sqrt(variance) / Math.sqrt(totalMonthsWithData)
     const consPace = monthlyPace - sem
     const optPace = monthlyPace + sem
@@ -259,6 +320,7 @@ export function buildPaybackModel({
     totalMonthsWithData,
     annualEbitda,
     monthlyPace,
+    seasonalFactors,
     paybackYears,
     coveredShare,
     remaining,

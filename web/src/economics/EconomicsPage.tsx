@@ -378,7 +378,6 @@ export function EconomicsPage() {
             <EconomicsAnnualView
               data={annual.year}
               organizationID={organizationID}
-              capexUah={tariffs.capexUah}
               onSelectMonth={jumpToMonth}
             />
           ) : (
