@@ -15,9 +15,9 @@ import {
 import type { EconomicsAnnualResponse } from '../../api'
 import { OptimumInfo } from '../monthly/EconomicsMonthlyView'
 import {
-  formatKwh,
   formatMonthTitle,
   formatMonthShort,
+  formatMwh,
   formatPercent,
   formatPrice,
   formatUah,
@@ -630,13 +630,15 @@ export function EconomicsPaybackView({ data, capexUah, plannedPaybackMonths }: P
           </ResponsiveContainer>
 
           <div className="economics-payback-chart-foot">
-            <SideRow
-              icon="clock"
-              tone="blue"
-              label="Накопичений EBITDA до періоду"
-              value={formatUah(prior)}
-              note={hasPrior ? `у т.ч. до початку помісячних даних (${model.priorMonths} міс.)` : 'до початку помісячних даних'}
-            />
+            {hasPrior ? (
+              <SideRow
+                icon="clock"
+                tone="blue"
+                label="Накопичений EBITDA до періоду"
+                value={formatUah(prior)}
+                note={`до початку помісячних даних (${model.priorMonths} міс.)`}
+              />
+            ) : null}
             <SideRow
               icon="calendar"
               tone="green"
@@ -746,7 +748,13 @@ export function EconomicsPaybackView({ data, capexUah, plannedPaybackMonths }: P
               value={Number.isFinite(avgAnnualRoi) ? formatPercent(avgAnnualRoi) : '—'}
               note={`за ${paybackLabel(operationYears)} експлуатації`}
             />
-            <SideRow icon="sun" tone="blue" label="Виробіток за період" value={formatKwh(data.totals.pv_kwh)} />
+            <SideRow
+              icon="sun"
+              tone="blue"
+              label="Виробіток за період"
+              value={formatMwh(data.totals.pv_kwh)}
+              note="за місяці з даними телеметрії"
+            />
             <SideRow
               icon="tag"
               tone="orange"
