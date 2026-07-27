@@ -185,7 +185,16 @@ export function buildPaybackModel({
   const prior = Number.isFinite(priorEbitda) ? priorEbitda : 0
   const hasPrior = Math.abs(prior) > 0.5
   const priorMonths = Number.isFinite(priorMonthsWithData) ? priorMonthsWithData : 0
-  const monthsWithData = months.filter((m) => m.totals.hours_with_data > 0)
+  // Months before the plant actually started operating can carry
+  // telemetry (imported meters, consumption) with zero computed
+  // economics; they'd show a flat head on the chart and dilute the
+  // pace. Operation starts at the first month with real activity, so
+  // trim the leading inactive months (mid-series zero months stay).
+  const withHours = months.filter((m) => m.totals.hours_with_data > 0)
+  const firstActive = withHours.findIndex(
+    (m) => Math.abs(m.totals.ebitda_uah) > 0.5 || m.totals.pv_kwh > 0.5,
+  )
+  const monthsWithData = firstActive >= 0 ? withHours.slice(firstActive) : []
 
   const allTimeEbitda = prior + ebitda
   const totalMonthsWithData = monthsWithData.length + priorMonths
