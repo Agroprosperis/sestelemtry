@@ -48,7 +48,10 @@ export const IDLE_KW = 0.05
 export type LivePvState = 'generating' | 'idle'
 export type LiveLoadState = 'consuming' | 'idle'
 export type LiveEssState = 'charging' | 'discharging' | 'idle'
-export type LiveGridState = 'importing' | 'exporting' | 'idle'
+// `unavailable` = SmartLogger returned its INT32/UINT32 "all-ones"
+// sentinel (typically when the grid meter is offline / the site is
+// islanded). The UI renders a dash instead of a kW number.
+export type LiveGridState = 'importing' | 'exporting' | 'idle' | 'unavailable'
 
 export type LiveAllocation = {
   pvKw: number
@@ -70,7 +73,7 @@ export type LiveAllocation = {
   // netExportKw: positive when the site exports more than it
   // imports (= grid_export - grid_import). Drives the "Exporting
   // X kW to grid" / "Importing Y kW from grid" subtitle in the
-  // central status hub.
+  // central status hub. Zero when the grid reading is unavailable.
   netExportKw: number
   status: 'normal' | 'no_data'
   // observedAt mirrors the freshest timestamp we found among the
@@ -101,33 +104,68 @@ export const NO_DATA_ALLOCATION: LiveAllocation = {
   observedAt: null,
 }
 
+// INT32_MAX / UINT32_MAX scaled by the Huawei power-register gain
+// (0.001). SmartLogger writes these sentinels when a meter is
+// unreachable — most commonly the grid POC meter during islanding
+// or a Modbus outage. 2_147_483.647 kW is not a physical reading;
+// treating it as one blew the live diagram up to "2.1 GW import".
+const INT32_MAX = 2147483647
+const UINT32_MAX = 4294967295
+const POWER_GAIN = 0.001
+
+// isModbusPowerSentinel reports whether a kW value is one of the
+// well-known SmartLogger invalid sentinels after gain scaling.
+// Tolerance of `gain * 10` matches energyflow.IsInvalidUint32Scaled
+// so float64 round-trip noise doesn't miss the hit.
+export function isModbusPowerSentinel(value: number): boolean {
+  if (!Number.isFinite(value)) return false
+  const tol = POWER_GAIN * 10
+  if (Math.abs(value - INT32_MAX * POWER_GAIN) < tol) return true
+  if (Math.abs(value - INT32_MIN * POWER_GAIN) < tol) return true
+  if (Math.abs(value - UINT32_MAX * POWER_GAIN) < tol) return true
+  return false
+}
+
+// INT32_MIN as a Number literal (safe within float64 mantissa for
+// this magnitude). Used only for the negative signed sentinel.
+const INT32_MIN = -2147483648
+
 function readNumber(metric: CurrentMetric | undefined): number {
   if (!metric) return 0
   const n = Number(metric.value)
-  return Number.isFinite(n) ? n : 0
+  if (!Number.isFinite(n) || isModbusPowerSentinel(n)) return 0
+  return n
 }
 
 function readOptionalNumber(metric: CurrentMetric | undefined): number | null {
   if (!metric) return null
   const n = Number(metric.value)
-  return Number.isFinite(n) ? n : null
+  if (!Number.isFinite(n) || isModbusPowerSentinel(n)) return null
+  return n
 }
 
 // derivedLoadKw computes site-wide load from the bus-balance
-// identity. Returns null when any of the three bus inputs is
-// missing — a partial sum would mislead, in which case the
-// caller falls back to the raw `load_power_kw` register reading.
-// `Math.abs` matches `CurrentSnapshotNarrative.derivedLoadKw` and
-// handles the rare case where rounding leaves the sum slightly
-// negative (e.g. inverter standby noise).
+// identity. Returns null when PV or ESS is missing — a partial
+// sum would mislead, in which case the caller falls back to the
+// raw `load_power_kw` register reading.
+//
+// A missing/sentinel *grid* reading is treated as 0 kW (islanded /
+// meter offline). That matches Kirchhoff when there is no grid
+// exchange and avoids poisoning load with ~2.1e6 kW from the
+// INT32_MAX sentinel. `Math.abs` matches
+// `CurrentSnapshotNarrative.derivedLoadKw` and handles the rare
+// case where rounding leaves the sum slightly negative.
 function derivedLoadKw(
   metrics: CurrentResponse['metrics'],
   essDischargeSign: 1 | -1,
 ): number | null {
   const pv = readOptionalNumber(metrics.active_pv_power_kw)
-  const grid = readOptionalNumber(metrics.grid_connected_active_power_kw)
   const ess = readOptionalNumber(metrics.active_ess_power_kw)
-  if (pv === null || grid === null || ess === null) return null
+  if (pv === null || ess === null) return null
+  // Grid may be null (sentinel / missing) — treat as 0 for the
+  // islanded bus balance. Explicit zero from a healthy meter is
+  // already a real reading and arrives as 0 via readOptionalNumber.
+  const grid = readOptionalNumber(metrics.grid_connected_active_power_kw) ?? 0
   return Math.abs(pv + grid + essDischargeSign * ess)
 }
 
@@ -150,7 +188,17 @@ export function liveAllocationFromCurrent(
 
   const m = current.metrics
   const pvKw = readNumber(m.active_pv_power_kw)
-  const gridKw = readNumber(m.grid_connected_active_power_kw)
+  // Grid meter offline / islanded: SmartLogger returns INT32_MAX
+  // (→ ~2.15e6 kW after gain). Detect before any bus math so we
+  // don't invent a multi-GW import and poison derived load.
+  const rawGrid = m.grid_connected_active_power_kw
+    ? Number(m.grid_connected_active_power_kw.value)
+    : null
+  const gridUnavailable =
+    rawGrid !== null &&
+    Number.isFinite(rawGrid) &&
+    isModbusPowerSentinel(rawGrid)
+  const gridKw = gridUnavailable ? 0 : readNumber(m.grid_connected_active_power_kw)
   const essKw = essDischargeSign * readNumber(m.active_ess_power_kw)
   // Prefer bus-balance derivation; raw 40503 is a backup-load-only
   // reading that misrepresents site-wide consumption in many modes.
@@ -168,12 +216,13 @@ export function liveAllocationFromCurrent(
   // No power readings at all = the device is offline / hasn't
   // reported yet. We still return a valid allocation but flag it
   // so the UI can render a "no data" pill instead of pretending
-  // every flow is genuinely 0 kW.
+  // every flow is genuinely 0 kW. A lone grid sentinel does NOT
+  // count as a real reading — without it the site still has PV/ESS.
   const anyReading =
     m.active_pv_power_kw ||
     m.load_power_kw ||
-    m.grid_connected_active_power_kw ||
-    m.active_ess_power_kw
+    m.active_ess_power_kw ||
+    (m.grid_connected_active_power_kw && !gridUnavailable)
   if (!anyReading) {
     return { ...NO_DATA_ALLOCATION, observedAt }
   }
@@ -221,8 +270,13 @@ export function liveAllocationFromCurrent(
       essKw > IDLE_KW ? 'discharging' : essKw < -IDLE_KW ? 'charging' : 'idle',
     socPercent,
     gridKw: Math.abs(gridKw),
-    gridState:
-      gridKw > IDLE_KW ? 'importing' : gridKw < -IDLE_KW ? 'exporting' : 'idle',
+    gridState: gridUnavailable
+      ? 'unavailable'
+      : gridKw > IDLE_KW
+        ? 'importing'
+        : gridKw < -IDLE_KW
+          ? 'exporting'
+          : 'idle',
     pvToLoadKw: pvToLoad,
     pvToEssKw: pvToEss,
     pvToGridKw: pvToGrid,

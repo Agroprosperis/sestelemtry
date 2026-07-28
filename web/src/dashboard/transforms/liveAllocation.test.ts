@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  isModbusPowerSentinel,
   liveAllocationFromCurrent,
   NO_DATA_ALLOCATION,
   type LiveAllocation,
@@ -222,5 +223,38 @@ describe('liveAllocationFromCurrent', () => {
     expect(out.loadKw).toBe(0)
     expect(out.pvToLoadKw).toBe(0)
     expect(out.pvToGridKw).toBe(1)
+  })
+
+  it('treats INT32_MAX grid sentinel as unavailable (islanded / meter offline)', () => {
+    // Krolevets production snapshot: grid POC meter returned
+    // INT32_MAX * gain(0.001) ≈ 2_147_483.647 kW while PV and ESS
+    // were healthy. Before the sentinel filter the live diagram
+    // showed a multi-GW "import" and load = |pv+grid+ess| ≈ 2.1e6.
+    const sentinel = 2147483647 * 0.001
+    const out = liveAllocationFromCurrent(
+      buildCurrent({
+        active_pv_power_kw: 110.83,
+        load_power_kw: 50,
+        grid_connected_active_power_kw: sentinel,
+        active_ess_power_kw: -60.75,
+      }),
+    )
+    expect(out.gridState).toBe('unavailable')
+    expect(out.gridKw).toBe(0)
+    expect(out.netExportKw).toBe(0)
+    // Islanded bus balance: |110.83 + 0 + (-60.75)| ≈ 50.08 kW.
+    expect(out.loadKw).toBeCloseTo(50.08, 2)
+    expect(out.pvState).toBe('generating')
+    expect(out.essState).toBe('charging')
+    expect(out.status).toBe('normal')
+  })
+
+  it('isModbusPowerSentinel matches INT32 and UINT32 all-ones after gain', () => {
+    expect(isModbusPowerSentinel(2147483647 * 0.001)).toBe(true)
+    expect(isModbusPowerSentinel(2147483.65)).toBe(true)
+    expect(isModbusPowerSentinel(-2147483648 * 0.001)).toBe(true)
+    expect(isModbusPowerSentinel(4294967295 * 0.001)).toBe(true)
+    expect(isModbusPowerSentinel(110.83)).toBe(false)
+    expect(isModbusPowerSentinel(0)).toBe(false)
   })
 })

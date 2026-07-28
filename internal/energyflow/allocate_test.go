@@ -184,6 +184,27 @@ func TestIsInvalidUint32Scaled(t *testing.T) {
 	}
 }
 
+func TestIsInvalidInt32Scaled(t *testing.T) {
+	cases := []struct {
+		v, gain float64
+		want    bool
+	}{
+		{2147483.647, 0.001, true},  // INT32_MAX * 0.001
+		{2147483.65, 0.001, true},   // float round-trip of the same
+		{-2147483.648, 0.001, true}, // INT32_MIN * 0.001
+		{110.83, 0.001, false},
+		{0, 0.001, false},
+		{1.0, 0, false},
+		{math.NaN(), 0.001, false},
+	}
+	for _, c := range cases {
+		got := IsInvalidInt32Scaled(c.v, c.gain)
+		if got != c.want {
+			t.Errorf("IsInvalidInt32Scaled(%g, %g): got %v want %v", c.v, c.gain, got, c.want)
+		}
+	}
+}
+
 // 11. Balance check passes for healthy inputs and never rejects the
 // interval. The two checks are independent and produce stable text.
 func TestAllocate_BalanceCheckPasses(t *testing.T) {

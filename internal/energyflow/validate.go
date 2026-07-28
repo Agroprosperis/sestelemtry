@@ -2,6 +2,29 @@ package energyflow
 
 import "math"
 
+// IsInvalidInt32Scaled reports whether value is the SmartLogger's
+// well-known INT32 "max" sentinel scaled by gain:
+//
+//	const invalid = 2147483647 * gain   // 0x7FFFFFFF
+//	return |value - invalid| < gain * 10
+//
+// The grid-connected active power register (40505, INT32, gain
+// 0.001) emits this when the POC meter is unreachable — typically
+// islanding or a Modbus fault. Left untreated it surfaces as
+// ~2_147_483.647 kW on the live energy-flow diagram.
+func IsInvalidInt32Scaled(value, gain float64) bool {
+	if !isFiniteFloat(gain) || gain <= 0 {
+		return false
+	}
+	if !isFiniteFloat(value) {
+		return false
+	}
+	invalidPos := 2147483647.0 * gain
+	invalidNeg := -2147483648.0 * gain
+	tol := gain * 10
+	return math.Abs(value-invalidPos) < tol || math.Abs(value-invalidNeg) < tol
+}
+
 // IsInvalidUint32Scaled reports whether value is the SmartLogger's
 // well-known UINT32 "all-ones" sentinel scaled by gain. Mirrors the
 // helper in the spec:

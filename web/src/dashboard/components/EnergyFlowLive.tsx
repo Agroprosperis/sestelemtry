@@ -120,7 +120,8 @@ function clampSpeed(kw: number): number {
   return 3 - 2.4 * ratio
 }
 
-function formatKw(value: number): string {
+function formatKw(value: number | null): string {
+  if (value === null) return '—'
   return `${formatChartNumber(value)} kW`
 }
 
@@ -143,7 +144,9 @@ function buildEdges(allocation: LiveAllocation): EdgeRender[] {
   const pvActive = allocation.pvState !== 'idle'
   const loadActive = allocation.loadState !== 'idle'
   const essActive = allocation.essState !== 'idle'
-  const gridActive = allocation.gridState !== 'idle'
+  const gridActive =
+    allocation.gridState === 'importing' ||
+    allocation.gridState === 'exporting'
   return [
     {
       id: 'pv',
@@ -400,15 +403,22 @@ export function EnergyFlowLive({
             />
           }
           title="Мережа"
-          kw={allocation.gridKw}
+          kw={
+            allocation.gridState === 'unavailable' ? null : allocation.gridKw
+          }
           status={
             allocation.gridState === 'importing'
               ? 'Імпорт'
               : allocation.gridState === 'exporting'
                 ? 'Експорт'
-                : 'Очікує'
+                : allocation.gridState === 'unavailable'
+                  ? 'Немає даних'
+                  : 'Очікує'
           }
-          active={allocation.gridState !== 'idle'}
+          active={
+            allocation.gridState === 'importing' ||
+            allocation.gridState === 'exporting'
+          }
           debug={debug}
           registers={registers}
           metricKeys={['grid_connected_active_power_kw']}
@@ -463,6 +473,9 @@ export function EnergyFlowLive({
 // jolt the surrounding bezier paths each render.
 function describeBalance(a: LiveAllocation): { kw: string; text: string } {
   if (a.status === 'no_data') return { kw: '--', text: 'без даних' }
+  if (a.gridState === 'unavailable') {
+    return { kw: '—', text: 'мережа недоступна' }
+  }
   if (a.netExportKw > 0.05) {
     return {
       kw: `+${formatChartNumber(a.netExportKw)} kW`,
@@ -487,7 +500,7 @@ type NodeCardProps = {
   state: LivePvState | LiveLoadState | LiveEssState | LiveGridState
   icon: React.ReactNode
   title: string
-  kw: number
+  kw: number | null
   status: string
   active: boolean
   soc?: number | null
@@ -517,6 +530,7 @@ function NodeCard({
   registers,
   metricKeys,
 }: NodeCardProps) {
+  const kwLabel = formatKw(kw)
   return (
     <div
       className={`energy-flow-live-node energy-flow-live-node--${variant}${
@@ -524,7 +538,7 @@ function NodeCard({
       }`}
       data-state={state}
       role="group"
-      aria-label={`${title}: ${formatKw(kw)} (${status})`}
+      aria-label={`${title}: ${kwLabel} (${status})`}
     >
       <div className="energy-flow-live-node-head">
         <span className="energy-flow-live-node-icon">{icon}</span>
@@ -539,7 +553,7 @@ function NodeCard({
           )}
         </h3>
       </div>
-      <strong className="energy-flow-live-node-kw">{formatKw(kw)}</strong>
+      <strong className="energy-flow-live-node-kw">{kwLabel}</strong>
       <span className="energy-flow-live-node-status">{status}</span>
       {typeof soc === 'number' && Number.isFinite(soc) && (
         <div className="energy-flow-live-soc" aria-label={`SOC ${soc.toFixed(0)}%`}>
