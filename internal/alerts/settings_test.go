@@ -96,7 +96,6 @@ func TestValidateRejectsBadSettings(t *testing.T) {
 		"bad recipient":        func(s *Settings) { s.Recipients = []string{"ops at example.com"} },
 		"enabled without host": func(s *Settings) { s.SMTP.Host = "" },
 		"enabled without from": func(s *Settings) { s.SMTP.From = "" },
-		"auth without tls":     func(s *Settings) { s.SMTP.TLS = TLSNone; s.SMTP.Username = "user" },
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -115,6 +114,19 @@ func TestValidateAllowsIncompleteWhenDisabled(t *testing.T) {
 	s := DefaultSettings()
 	if err := s.Validate(); err != nil {
 		t.Fatalf("empty disabled settings must validate: %v", err)
+	}
+}
+
+// TestValidateAcceptsCredentialsWithoutTLS covers the internal relay on
+// port 25: a private-network setup the operator picks deliberately, and
+// one the form must not refuse to save.
+func TestValidateAcceptsCredentialsWithoutTLS(t *testing.T) {
+	s := validSettings()
+	s.SMTP.TLS = TLSNone
+	s.SMTP.Port = 25
+	s.SMTP.Username = "s-elevators@example.com"
+	if err := s.Validate(); err != nil {
+		t.Fatalf("plain relay with a username must validate: %v", err)
 	}
 }
 

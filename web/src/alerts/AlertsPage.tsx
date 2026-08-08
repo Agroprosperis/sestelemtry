@@ -413,6 +413,13 @@ function GeneralCard({
           />
         </label>
       </div>
+      {settings.smtp.tls === 'none' ? (
+        <p className="alerts-section-sub">
+          Без шифрування логін і пароль ідуть мережею у відкритому вигляді —
+          лише для внутрішнього релея. Якщо релей пропускає пошту за IP,
+          лишіть «Користувач» порожнім.
+        </p>
+      ) : null}
       {passwordConfigured && password === null ? (
         <p className="alerts-section-sub">
           Пароль уже збережено. Порожнє поле лишає його без змін.

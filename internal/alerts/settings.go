@@ -197,9 +197,6 @@ func (s Settings) Validate() error {
 		if s.SMTP.From == "" {
 			return fmt.Errorf("smtp.from is required when alerts are enabled")
 		}
-		if s.SMTP.Username != "" && s.SMTP.TLS == TLSNone {
-			return fmt.Errorf("smtp.username requires tls %q or %q", TLSStartTLS, TLSImplicit)
-		}
 	}
 	return nil
 }

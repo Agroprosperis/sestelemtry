@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/mail"
 	"net/smtp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -51,11 +52,6 @@ func NewMailer(settings SMTPSettings, password string) (*Mailer, error) {
 	case TLSStartTLS, TLSImplicit, TLSNone:
 	default:
 		return nil, fmt.Errorf("alerts: unsupported smtp tls mode %q", settings.TLS)
-	}
-	// net/smtp refuses PLAIN auth over an unencrypted link, and failing
-	// here with a clear message beats surfacing that deep inside a send.
-	if settings.Username != "" && settings.TLS == TLSNone {
-		return nil, fmt.Errorf("alerts: smtp username requires tls %q or %q", TLSStartTLS, TLSImplicit)
 	}
 	timeout := settings.Timeout.Duration()
 	if timeout <= 0 {
@@ -107,9 +103,8 @@ func (m *Mailer) Send(ctx context.Context, to []string, msg Message) error {
 		}
 	}
 	if m.smtp.Username != "" {
-		auth := smtp.PlainAuth("", m.smtp.Username, m.password, m.smtp.Host)
-		if err := client.Auth(auth); err != nil {
-			return fmt.Errorf("alerts: smtp auth: %w", err)
+		if err := m.authenticate(client); err != nil {
+			return err
 		}
 	}
 	if err := client.Mail(m.from); err != nil {
@@ -139,6 +134,86 @@ func (m *Mailer) Send(ctx context.Context, to []string, msg Message) error {
 		return fmt.Errorf("alerts: QUIT: %w", err)
 	}
 	return nil
+}
+
+// authenticate logs in, if the relay actually wants credentials.
+//
+// Two accommodations for the relays these sites run. One: a relay that
+// authorizes by source IP advertises no AUTH extension at all, and a
+// username left in the settings form must not turn that into a failed
+// send. Two: an internal relay on port 25 without TLS is a legitimate
+// setup on a private network, but net/smtp refuses to hand PLAIN
+// credentials to an unencrypted connection — since the operator chose
+// "no encryption" deliberately, we send them rather than report the
+// relay as unusable.
+func (m *Mailer) authenticate(client *smtp.Client) error {
+	supported, mechanisms := client.Extension("AUTH")
+	if !supported {
+		return nil
+	}
+	offered := strings.Fields(strings.ToUpper(mechanisms))
+	var auth smtp.Auth
+	switch {
+	case slices.Contains(offered, "PLAIN"):
+		if m.smtp.TLS == TLSNone {
+			auth = plainAuthNoTLS{username: m.smtp.Username, password: m.password}
+		} else {
+			auth = smtp.PlainAuth("", m.smtp.Username, m.password, m.smtp.Host)
+		}
+	case slices.Contains(offered, "LOGIN"):
+		auth = &loginAuth{username: m.smtp.Username, password: m.password}
+	default:
+		return fmt.Errorf("alerts: smtp server offers no supported auth mechanism (advertises %q)", mechanisms)
+	}
+	if err := client.Auth(auth); err != nil {
+		return fmt.Errorf("alerts: smtp auth: %w", err)
+	}
+	return nil
+}
+
+// plainAuthNoTLS is PLAIN without net/smtp's refusal to send
+// credentials over an unencrypted link. Used only when the operator
+// selected "no encryption" for the mail server.
+type plainAuthNoTLS struct {
+	username string
+	password string
+}
+
+func (a plainAuthNoTLS) Start(*smtp.ServerInfo) (string, []byte, error) {
+	return "PLAIN", []byte("\x00" + a.username + "\x00" + a.password), nil
+}
+
+func (a plainAuthNoTLS) Next(_ []byte, more bool) ([]byte, error) {
+	if more {
+		return nil, fmt.Errorf("alerts: unexpected server challenge during PLAIN auth")
+	}
+	return nil, nil
+}
+
+// loginAuth implements the non-standard LOGIN mechanism, which Exchange
+// and older relays offer where PLAIN is absent. net/smtp has no
+// built-in for it.
+type loginAuth struct {
+	username string
+	password string
+}
+
+func (a *loginAuth) Start(*smtp.ServerInfo) (string, []byte, error) {
+	return "LOGIN", nil, nil
+}
+
+func (a *loginAuth) Next(fromServer []byte, more bool) ([]byte, error) {
+	if !more {
+		return nil, nil
+	}
+	prompt := strings.ToLower(strings.TrimSpace(strings.TrimSuffix(string(fromServer), ":")))
+	switch prompt {
+	case "username":
+		return []byte(a.username), nil
+	case "password":
+		return []byte(a.password), nil
+	}
+	return nil, fmt.Errorf("alerts: unexpected LOGIN challenge %q", fromServer)
 }
 
 // BuildRFC822 renders the wire form of the email.

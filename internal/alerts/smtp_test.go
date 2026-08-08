@@ -18,11 +18,10 @@ func TestNewMailerRejectsBadOptions(t *testing.T) {
 		From: "alerts@example.com",
 	}
 	cases := map[string]func(o *SMTPSettings){
-		"no host":          func(o *SMTPSettings) { o.Host = "" },
-		"bad port":         func(o *SMTPSettings) { o.Port = 0 },
-		"unknown tls":      func(o *SMTPSettings) { o.TLS = "ssl" },
-		"bad from":         func(o *SMTPSettings) { o.From = "not an address" },
-		"auth without tls": func(o *SMTPSettings) { o.TLS = TLSNone; o.Username = "user" },
+		"no host":     func(o *SMTPSettings) { o.Host = "" },
+		"bad port":    func(o *SMTPSettings) { o.Port = 0 },
+		"unknown tls": func(o *SMTPSettings) { o.TLS = "ssl" },
+		"bad from":    func(o *SMTPSettings) { o.From = "not an address" },
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -110,12 +109,7 @@ func TestSendDeliversToServer(t *testing.T) {
 	}
 	defer ln.Close()
 
-	type result struct {
-		transcript []string
-		data       string
-		err        error
-	}
-	done := make(chan result, 1)
+	done := make(chan smtpSession, 1)
 	go func() { done <- serveSMTP(ln) }()
 
 	host, port, err := net.SplitHostPort(ln.Addr().String())
@@ -152,6 +146,97 @@ func TestSendDeliversToServer(t *testing.T) {
 	}
 }
 
+// TestSendSkipsAuthWhenRelayOffersNone covers the internal relay that
+// authorizes by source IP: a username left in the settings must not
+// turn a working relay into a failed send.
+func TestSendSkipsAuthWhenRelayOffersNone(t *testing.T) {
+	session, err := sendVia(t, SMTPSettings{Username: "s-elevators@example.com"}, "secret")
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	transcript := strings.Join(session.transcript, "\n")
+	if strings.Contains(transcript, "AUTH") {
+		t.Fatalf("must not authenticate against a relay without AUTH:\n%s", transcript)
+	}
+	if !strings.Contains(transcript, "RCPT TO:<ops@example.com>") {
+		t.Fatalf("message was not delivered:\n%s", transcript)
+	}
+}
+
+// TestSendAuthenticatesPlainWithoutTLS is the port 25 internal relay:
+// net/smtp would refuse the credentials, we send them because the
+// operator chose an unencrypted connection knowingly.
+func TestSendAuthenticatesPlainWithoutTLS(t *testing.T) {
+	session, err := sendVia(t, SMTPSettings{Username: "user"}, "secret", "AUTH PLAIN LOGIN")
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	transcript := strings.Join(session.transcript, "\n")
+	if !strings.Contains(transcript, "AUTH PLAIN |user|secret") {
+		t.Fatalf("credentials were not sent:\n%s", transcript)
+	}
+}
+
+func TestSendFallsBackToLoginMechanism(t *testing.T) {
+	session, err := sendVia(t, SMTPSettings{Username: "user"}, "secret", "AUTH LOGIN")
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	transcript := strings.Join(session.transcript, "\n")
+	for _, want := range []string{"Username: user", "Password: secret"} {
+		if !strings.Contains(transcript, want) {
+			t.Fatalf("transcript missing %q:\n%s", want, transcript)
+		}
+	}
+}
+
+func TestSendReportsUnsupportedAuthMechanism(t *testing.T) {
+	_, err := sendVia(t, SMTPSettings{Username: "user"}, "secret", "AUTH CRAM-MD5")
+	if err == nil {
+		t.Fatal("expected an error for a relay we cannot authenticate against")
+	}
+	if !strings.Contains(err.Error(), "CRAM-MD5") {
+		t.Fatalf("error should name the advertised mechanisms: %v", err)
+	}
+}
+
+// sendVia delivers one message to a throwaway relay that advertises the
+// given ESMTP extensions, and reports the conversation it saw.
+func sendVia(t *testing.T, settings SMTPSettings, password string, extensions ...string) (smtpSession, error) {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Skipf("cannot listen: %v", err)
+	}
+	defer ln.Close()
+
+	done := make(chan smtpSession, 1)
+	go func() { done <- serveSMTP(ln, extensions...) }()
+
+	host, port, err := net.SplitHostPort(ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	settings.Host = host
+	settings.Port = atoi(t, port)
+	settings.TLS = TLSNone
+	settings.From = "alerts@example.com"
+	settings.Timeout = Duration(5 * time.Second)
+
+	m, err := NewMailer(settings, password)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Send(context.Background(), []string{"ops@example.com"}, Message{Subject: "тест", Body: "тіло\n"}); err != nil {
+		return smtpSession{}, err
+	}
+	session := <-done
+	if session.err != nil {
+		t.Fatalf("server: %v", session.err)
+	}
+	return session, nil
+}
+
 func TestSendHonoursCancelledContext(t *testing.T) {
 	m, err := NewMailer(SMTPSettings{
 		Host: "127.0.0.1", Port: 1, TLS: TLSNone,
@@ -167,13 +252,17 @@ func TestSendHonoursCancelledContext(t *testing.T) {
 	}
 }
 
-// serveSMTP accepts one connection and speaks the minimum ESMTP needed
-// by net/smtp, returning the commands it saw and the delivered payload.
-func serveSMTP(ln net.Listener) (res struct {
+type smtpSession struct {
 	transcript []string
 	data       string
 	err        error
-}) {
+}
+
+// serveSMTP accepts one connection and speaks the minimum ESMTP needed
+// by net/smtp, returning the commands it saw and the delivered payload.
+// extensions are advertised in the EHLO reply, so a test can present a
+// relay that wants credentials or one that authorizes by IP.
+func serveSMTP(ln net.Listener, extensions ...string) (res smtpSession) {
 	conn, err := ln.Accept()
 	if err != nil {
 		res.err = err
@@ -197,7 +286,41 @@ func serveSMTP(ln net.Listener) (res struct {
 		res.transcript = append(res.transcript, cmd)
 		switch {
 		case strings.HasPrefix(cmd, "EHLO"), strings.HasPrefix(cmd, "HELO"):
-			write("250 mock")
+			// The greeting must come first: net/smtp reads extensions
+			// from every line of the reply except the opening one.
+			if len(extensions) == 0 {
+				write("250 mock")
+				break
+			}
+			write("250-mock")
+			for _, ext := range extensions[:len(extensions)-1] {
+				write("250-" + ext)
+			}
+			write("250 " + extensions[len(extensions)-1])
+		case strings.HasPrefix(cmd, "AUTH LOGIN"):
+			for _, prompt := range []string{"Username:", "Password:"} {
+				write("334 " + base64.StdEncoding.EncodeToString([]byte(prompt)))
+				answer, err := r.ReadString('\n')
+				if err != nil {
+					res.err = err
+					return res
+				}
+				decoded, err := base64.StdEncoding.DecodeString(strings.TrimRight(answer, "\r\n"))
+				if err != nil {
+					res.err = err
+					return res
+				}
+				res.transcript = append(res.transcript, prompt+" "+string(decoded))
+			}
+			write("235 authenticated")
+		case strings.HasPrefix(cmd, "AUTH PLAIN "):
+			decoded, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(cmd, "AUTH PLAIN "))
+			if err != nil {
+				res.err = err
+				return res
+			}
+			res.transcript[len(res.transcript)-1] = "AUTH PLAIN " + strings.ReplaceAll(string(decoded), "\x00", "|")
+			write("235 authenticated")
 		case strings.HasPrefix(cmd, "MAIL FROM"), strings.HasPrefix(cmd, "RCPT TO"):
 			write("250 OK")
 		case cmd == "DATA":

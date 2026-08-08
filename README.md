@@ -305,6 +305,12 @@ Keep the password out of the YAML: `SMTP_PASSWORD` overrides
 `alerts.smtp.password`, and `deploy/docker-compose.yml` passes it through from
 `deploy/.env`. A password saved on the settings page wins over both.
 
+An internal relay on port 25 works too. Credentials are only sent when the
+relay advertises `AUTH` (`PLAIN`, or `LOGIN` for Exchange), so a relay that
+authorizes by source IP is fine with the username field filled in or empty;
+with `tls: none` they travel in the clear, which is a private-network-only
+proposition.
+
 The page's **Надіслати тестовий лист** button verifies delivery to the real
 address list; the same check from a shell (works even with alerts disabled, and
 without a reachable database):
