@@ -9,6 +9,7 @@ Modbus telemetry collector for Huawei SmartLogger + dashboard stack.
 - `dam-collector` (Go): once per day, fetches Day-Ahead Market (RDN) prices from oree.com.ua and stores them in `market_dam_prices`
 - `weather-collector` (Go): caches Open-Meteo forecasts per org in TimescaleDB
 - `economics-recompute` (Go): on a schedule, recomputes + persists hourly/daily economics into `economics_hourly` / `economics_daily` so the dashboard reads a warm cache (reads only the local DB; no external API)
+- `alert-watchdog` (Go): emails operators when a Modbus device stops writing telemetry
 - `web` (React + Vite): dashboard UI
 
 ## API endpoints
@@ -241,6 +242,58 @@ The manual recompute dialog on the economics dashboard still works (forced
 backfills after tariff/DAM edits); FusionSolar reconciliation still requires
 the manual archive import. The daemon supports a one-shot `-once` flag (single
 finalize + today pass, then exit) for cron or testing.
+
+## Connectivity alerts by email
+
+`alert-watchdog` emails operators when a site stops reporting. Every
+`check_interval` it reads the freshest telemetry timestamp of each configured
+Modbus device; a device silent for longer than `stale_after` is announced as a
+lost connection, and (optionally) again when it comes back. Because detection
+reads the database rather than the Modbus link, a crashed collector produces
+the same alert as a dead network or a powered-off SmartLogger.
+
+All devices that change state in one check share a single email — a site-wide
+outage sends one message, not one per elevator. While a device stays down a
+reminder goes out every `repeat_interval`. If the send fails (the uplink that
+died often took the mail relay with it), nothing is marked as notified and the
+next check retries.
+
+The container ships with every stack but is gated by `alerts.enabled` in
+`config.yaml`:
+
+```yaml
+alerts:
+  enabled: true
+  check_interval: 1m          # how often to sample freshness
+  stale_after: 10m            # silence longer than this = connection lost
+  repeat_interval: 6h         # remind while still down; negative disables
+  notify_recovery: true       # also email when a device comes back
+  smtp:
+    host: smtp.example.com
+    port: 587                 # defaults: 587 (starttls/none), 465 (implicit)
+    tls: starttls             # starttls | implicit | none
+    username: alerts@example.com
+    password: ""              # prefer the SMTP_PASSWORD env var
+    from: "СЕС Моніторинг <alerts@example.com>"
+    to:
+      - ops@example.com
+    timeout: 20s
+```
+
+Keep the password out of the YAML: `SMTP_PASSWORD` overrides
+`alerts.smtp.password`, and `deploy/docker-compose.yml` passes it through from
+`deploy/.env`. Verify credentials before arming the watchdog (works even with
+`enabled: false`):
+
+```bash
+cd deploy
+docker compose run --rm alert-watchdog -config /etc/sestelemetry/config.yaml -test-email
+```
+
+`-once` runs a single check pass and exits, for cron or debugging. State lives
+in `device_alert_state` (`migrations/010_alerts.sql`, also created on startup),
+so restarting the container does not re-announce an outage operators already
+know about.
 
 ### Safe production update path
 

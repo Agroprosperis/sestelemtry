@@ -116,6 +116,28 @@ services:
       - ${SESTELEMETRY_HOST_CONFIG_PATH:-/etc/sestelemetry/config.yaml}:/etc/sestelemetry/config.yaml:ro
       - ${SESTELEMETRY_HOST_REGISTERS_PATH:-/etc/sestelemetry/registers}:/etc/sestelemetry/registers:ro
 
+  # Activation is gated by `alerts.enabled` in config.yaml. Watches how
+  # fresh each Modbus device's telemetry is and emails operators when a
+  # site goes quiet; idles when disabled. Put the SMTP password in
+  # deploy/.env (SMTP_PASSWORD=...) instead of the mounted config so the
+  # YAML stays free of secrets.
+  alert-watchdog:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@timescaledb:5432/telemetry?sslmode=disable
+      TZ: Europe/Kyiv
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+    entrypoint: ["/usr/local/bin/alert-watchdog"]
+    command: ["-config", "/etc/sestelemetry/config.yaml"]
+    volumes:
+      - ${SESTELEMETRY_HOST_CONFIG_PATH:-/etc/sestelemetry/config.yaml}:/etc/sestelemetry/config.yaml:ro
+      - ${SESTELEMETRY_HOST_REGISTERS_PATH:-/etc/sestelemetry/registers}:/etc/sestelemetry/registers:ro
+
   web:
     build:
       context: ../web

@@ -169,6 +169,84 @@ type Economics struct {
 	MaxConcurrency int           `yaml:"max_concurrency"`
 }
 
+// SMTPTLSMode selects how the alert watchdog secures its connection to
+// the mail server.
+//
+//   - "starttls" (default): plain connect on the submission port (587),
+//     upgraded with STARTTLS before authenticating.
+//   - "implicit": TLS from the first byte (the classic 465 "smtps" port).
+//   - "none": no encryption. Only sane for an in-network relay that does
+//     not ask for credentials.
+type SMTPTLSMode string
+
+const (
+	SMTPTLSStartTLS SMTPTLSMode = "starttls"
+	SMTPTLSImplicit SMTPTLSMode = "implicit"
+	SMTPTLSNone     SMTPTLSMode = "none"
+)
+
+// SMTP describes the outbound mail server used for alert delivery.
+//
+// Password may be left empty in the YAML and supplied through the
+// SMTP_PASSWORD environment variable instead — same convention as
+// DATABASE_URL and the FUSIONSOLAR_* secrets, so the config file can
+// stay readable by anyone who can read the container mount.
+type SMTP struct {
+	Host     string      `yaml:"host"`
+	Port     int         `yaml:"port"`
+	TLS      SMTPTLSMode `yaml:"tls"`
+	Username string      `yaml:"username"`
+	Password string      `yaml:"password"`
+	// From is the envelope sender. It accepts either a bare address
+	// ("alerts@example.com") or a display form
+	// ("СЕС Моніторинг <alerts@example.com>").
+	From string   `yaml:"from"`
+	To   []string `yaml:"to"`
+	// Timeout bounds the whole send (dial + handshake + DATA). A stuck
+	// relay must not wedge the watchdog's check loop.
+	Timeout time.Duration `yaml:"timeout"`
+}
+
+// Alerts configures the optional alert-watchdog service that emails
+// operators when a site stops reporting telemetry.
+//
+// Detection is deliberately database-side rather than inside the
+// collector: "no fresh rows for this device" also covers the case where
+// the collector process itself died, which a collector-side dial-failure
+// counter would miss.
+type Alerts struct {
+	Enabled bool `yaml:"enabled"`
+	// CheckInterval is how often the watchdog samples freshness. It
+	// bounds how late an alert can be on top of StaleAfter.
+	CheckInterval time.Duration `yaml:"check_interval"`
+	// StaleAfter is the silence that counts as "connection lost".
+	// Production sites poll every second, so anything beyond a few
+	// minutes is a genuine fault rather than jitter.
+	StaleAfter time.Duration `yaml:"stale_after"`
+	// RepeatInterval re-sends a reminder while a device stays down, so
+	// a long outage doesn't fall off the operator's radar after the
+	// first email. Unset defaults to 6h; a negative value disables
+	// reminders (mirrors the oree.backfill_days convention).
+	RepeatInterval time.Duration `yaml:"repeat_interval"`
+	// NotifyRecovery sends a follow-up when a device starts reporting
+	// again. Pointer so an explicit `false` is distinguishable from an
+	// omitted key, which defaults to true.
+	NotifyRecovery *bool `yaml:"notify_recovery"`
+	SMTP           SMTP  `yaml:"smtp"`
+}
+
+// NotifyRecoveryEnabled reports whether recovery emails are on,
+// treating an unset key as enabled.
+func (a Alerts) NotifyRecoveryEnabled() bool {
+	return a.NotifyRecovery == nil || *a.NotifyRecovery
+}
+
+// RemindersEnabled reports whether the watchdog re-notifies while a
+// device stays down.
+func (a Alerts) RemindersEnabled() bool {
+	return a.RepeatInterval > 0
+}
+
 type Root struct {
 	DatabaseURL        string             `yaml:"database_url"`
 	RegisterCatalog    string             `yaml:"register_catalog"`
@@ -178,6 +256,7 @@ type Root struct {
 	OREE               OREE               `yaml:"oree"`
 	Weather            Weather            `yaml:"weather"`
 	Economics          Economics          `yaml:"economics"`
+	Alerts             Alerts             `yaml:"alerts"`
 }
 
 // Load reads YAML config from path and applies defaults.
@@ -232,6 +311,12 @@ func Load(path string) (*Root, error) {
 	c.applyEconomicsDefaults()
 	if c.Economics.Enabled {
 		if err := c.validateEconomics(); err != nil {
+			return nil, err
+		}
+	}
+	c.applyAlertsDefaults()
+	if c.Alerts.Enabled {
+		if err := c.validateAlerts(); err != nil {
 			return nil, err
 		}
 	}
@@ -336,6 +421,88 @@ func (c *Root) applyEconomicsDefaults() {
 	if e.MaxConcurrency <= 0 {
 		e.MaxConcurrency = 2
 	}
+}
+
+func (c *Root) applyAlertsDefaults() {
+	a := &c.Alerts
+	if a.CheckInterval <= 0 {
+		a.CheckInterval = time.Minute
+	}
+	if a.StaleAfter <= 0 {
+		a.StaleAfter = 10 * time.Minute
+	}
+	if a.RepeatInterval == 0 {
+		a.RepeatInterval = 6 * time.Hour
+	}
+	if a.NotifyRecovery == nil {
+		enabled := true
+		a.NotifyRecovery = &enabled
+	}
+	s := &a.SMTP
+	s.Host = strings.TrimSpace(s.Host)
+	s.Username = strings.TrimSpace(s.Username)
+	s.From = strings.TrimSpace(s.From)
+	s.TLS = SMTPTLSMode(strings.ToLower(strings.TrimSpace(string(s.TLS))))
+	if s.TLS == "" {
+		s.TLS = SMTPTLSStartTLS
+	}
+	if s.Port == 0 {
+		if s.TLS == SMTPTLSImplicit {
+			s.Port = 465
+		} else {
+			s.Port = 587
+		}
+	}
+	if s.Timeout <= 0 {
+		s.Timeout = 20 * time.Second
+	}
+	recipients := make([]string, 0, len(s.To))
+	for _, addr := range s.To {
+		if addr = strings.TrimSpace(addr); addr != "" {
+			recipients = append(recipients, addr)
+		}
+	}
+	s.To = recipients
+}
+
+func (c *Root) validateAlerts() error {
+	a := &c.Alerts
+	if a.CheckInterval < 10*time.Second {
+		return fmt.Errorf("config: alerts.check_interval must be >= 10s, got %s", a.CheckInterval)
+	}
+	if a.CheckInterval > time.Hour {
+		return fmt.Errorf("config: alerts.check_interval must be <= 1h, got %s", a.CheckInterval)
+	}
+	if a.StaleAfter < time.Minute {
+		return fmt.Errorf("config: alerts.stale_after must be >= 1m, got %s", a.StaleAfter)
+	}
+	if a.StaleAfter > 24*time.Hour {
+		return fmt.Errorf("config: alerts.stale_after must be <= 24h, got %s", a.StaleAfter)
+	}
+	// A threshold shorter than the sampling cadence would fire on the
+	// gap between two checks rather than on a real outage.
+	if a.StaleAfter < a.CheckInterval {
+		return fmt.Errorf("config: alerts.stale_after (%s) must be >= alerts.check_interval (%s)",
+			a.StaleAfter, a.CheckInterval)
+	}
+	switch a.SMTP.TLS {
+	case SMTPTLSStartTLS, SMTPTLSImplicit, SMTPTLSNone:
+	default:
+		return fmt.Errorf("config: alerts.smtp.tls must be starttls, implicit or none, got %q", a.SMTP.TLS)
+	}
+	if a.SMTP.Host == "" {
+		return fmt.Errorf("config: alerts.smtp.host is required")
+	}
+	if a.SMTP.Port < 1 || a.SMTP.Port > 65535 {
+		return fmt.Errorf("config: alerts.smtp.port out of range: %d", a.SMTP.Port)
+	}
+	if a.SMTP.From == "" {
+		return fmt.Errorf("config: alerts.smtp.from is required")
+	}
+	if len(a.SMTP.To) == 0 {
+		return fmt.Errorf("config: alerts.smtp.to requires at least one recipient")
+	}
+	return nil
 }
 
 func (c *Root) validateEconomics() error {

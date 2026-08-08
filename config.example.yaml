@@ -203,3 +203,26 @@ economics:
   finalize_days: 3              # nightly: recompute the last N days (ending yesterday)
   today_interval: 1h            # refresh the current (non-final) day this often
   max_concurrency: 2            # how many orgs to recompute in parallel
+
+# Connectivity alerts (consumed by alert-watchdog). Every `check_interval`
+# the watchdog reads the freshest telemetry timestamp of every configured
+# Modbus device; a device silent for longer than `stale_after` is reported
+# as "connection lost" by email. Because the check reads the database
+# rather than the Modbus link, it also catches a dead collector process.
+# Set enabled: false to skip running the alert-watchdog against this config.
+alerts:
+  enabled: false
+  check_interval: 1m            # how often to sample freshness
+  stale_after: 10m              # silence longer than this = connection lost
+  repeat_interval: 6h           # remind while still down; negative disables
+  notify_recovery: true         # also email when a device comes back
+  smtp:
+    host: smtp.example.com
+    port: 587                   # defaults: 587 (starttls/none), 465 (implicit)
+    tls: starttls               # starttls | implicit | none
+    username: alerts@example.com
+    password: ""                # leave empty and pass SMTP_PASSWORD instead
+    from: "СЕС Моніторинг <alerts@example.com>"
+    to:
+      - ops@example.com
+    timeout: 20s

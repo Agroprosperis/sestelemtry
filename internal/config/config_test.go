@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -294,6 +295,192 @@ economics:
 	}
 	if _, err := Load(path); err != nil {
 		t.Fatalf("disabled economics with bad fields must still load: %v", err)
+	}
+}
+
+func TestLoadAppliesAlertsDefaults(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	content := `register_catalog: registers/huawei_smartlogger.yaml
+organizations:
+  - id: org-a
+    modbus:
+      host: 127.0.0.1
+alerts:
+  enabled: true
+  smtp:
+    host: smtp.example.com
+    from: alerts@example.com
+    to:
+      - " ops@example.com "
+      - ""
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load error: %v", err)
+	}
+	a := cfg.Alerts
+	if a.CheckInterval != time.Minute {
+		t.Fatalf("check_interval default: %v", a.CheckInterval)
+	}
+	if a.StaleAfter != 10*time.Minute {
+		t.Fatalf("stale_after default: %v", a.StaleAfter)
+	}
+	if a.RepeatInterval != 6*time.Hour {
+		t.Fatalf("repeat_interval default: %v", a.RepeatInterval)
+	}
+	if !a.NotifyRecoveryEnabled() {
+		t.Fatal("notify_recovery must default to true")
+	}
+	if !a.RemindersEnabled() {
+		t.Fatal("reminders must be on by default")
+	}
+	if a.SMTP.TLS != SMTPTLSStartTLS {
+		t.Fatalf("tls default: %q", a.SMTP.TLS)
+	}
+	if a.SMTP.Port != 587 {
+		t.Fatalf("port default for starttls: %d", a.SMTP.Port)
+	}
+	if a.SMTP.Timeout != 20*time.Second {
+		t.Fatalf("timeout default: %v", a.SMTP.Timeout)
+	}
+	if len(a.SMTP.To) != 1 || a.SMTP.To[0] != "ops@example.com" {
+		t.Fatalf("recipients must be trimmed and compacted: %#v", a.SMTP.To)
+	}
+}
+
+// TestLoadAlertsImplicitTLSPort covers the one default that depends on
+// another field: implicit TLS lives on 465, not the submission port.
+func TestLoadAlertsImplicitTLSPort(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	content := `register_catalog: registers/huawei_smartlogger.yaml
+organizations:
+  - id: org-a
+    modbus:
+      host: 127.0.0.1
+alerts:
+  enabled: true
+  notify_recovery: false
+  repeat_interval: -1s
+  smtp:
+    host: smtp.example.com
+    tls: IMPLICIT
+    from: alerts@example.com
+    to: [ops@example.com]
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load error: %v", err)
+	}
+	if cfg.Alerts.SMTP.TLS != SMTPTLSImplicit {
+		t.Fatalf("tls must be normalized to lowercase: %q", cfg.Alerts.SMTP.TLS)
+	}
+	if cfg.Alerts.SMTP.Port != 465 {
+		t.Fatalf("port default for implicit tls: %d", cfg.Alerts.SMTP.Port)
+	}
+	if cfg.Alerts.NotifyRecoveryEnabled() {
+		t.Fatal("explicit notify_recovery: false must be honoured")
+	}
+	if cfg.Alerts.RemindersEnabled() {
+		t.Fatal("negative repeat_interval must disable reminders")
+	}
+}
+
+func TestLoadRejectsBadAlerts(t *testing.T) {
+	dir := t.TempDir()
+	// Validation only runs for an enabled service, so each case enables
+	// alerts explicitly.
+	cases := map[string]string{
+		"check interval too short": `alerts:
+  enabled: true
+  check_interval: 1s
+  smtp:
+    host: smtp.example.com
+    from: alerts@example.com
+    to: [ops@example.com]
+`,
+		"stale below check interval": `alerts:
+  enabled: true
+  check_interval: 30m
+  stale_after: 5m
+  smtp:
+    host: smtp.example.com
+    from: alerts@example.com
+    to: [ops@example.com]
+`,
+		"unknown tls mode": `alerts:
+  enabled: true
+  smtp:
+    host: smtp.example.com
+    tls: ssl
+    from: alerts@example.com
+    to: [ops@example.com]
+`,
+		"missing host": `alerts:
+  enabled: true
+  smtp:
+    from: alerts@example.com
+    to: [ops@example.com]
+`,
+		"missing from": `alerts:
+  enabled: true
+  smtp:
+    host: smtp.example.com
+    to: [ops@example.com]
+`,
+		"no recipients": `alerts:
+  enabled: true
+  smtp:
+    host: smtp.example.com
+    from: alerts@example.com
+`,
+	}
+	for name, alerts := range cases {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(dir, strings.ReplaceAll(name, " ", "-")+".yaml")
+			content := `register_catalog: registers/huawei_smartlogger.yaml
+organizations:
+  - id: org-a
+    modbus:
+      host: 127.0.0.1
+` + alerts
+			if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := Load(path); err == nil {
+				t.Fatal("expected validation error, got nil")
+			}
+		})
+	}
+}
+
+// TestLoadIgnoresDisabledAlerts confirms an incomplete alerts block does
+// not block startup while the service is off, mirroring oree/weather.
+func TestLoadIgnoresDisabledAlerts(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	content := `register_catalog: registers/huawei_smartlogger.yaml
+organizations:
+  - id: org-a
+    modbus:
+      host: 127.0.0.1
+alerts:
+  enabled: false
+  smtp:
+    tls: nonsense
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err != nil {
+		t.Fatalf("disabled alerts with bad fields must still load: %v", err)
 	}
 }
 
