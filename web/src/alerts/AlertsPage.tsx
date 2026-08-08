@@ -75,6 +75,14 @@ export function AlertsPage() {
   const orgs = useOrganizationList()
   const [test, setTest] = useState<TestState>(null)
 
+  // The test email is sent by the server from the stored settings, so
+  // an address that is only typed into the form would produce a
+  // baffling "no recipients configured". Make saving the precondition
+  // instead of letting the operator discover it from an error.
+  const testHint = dirty
+    ? 'Спочатку збережіть налаштування — тест використовує збережені значення'
+    : 'Надіслати на фактичний список адрес'
+
   const runTest = useCallback(async (organizationID?: string) => {
     const target = organizationID ?? ''
     setTest({ target, status: 'sending' })
@@ -185,7 +193,10 @@ export function AlertsPage() {
                         <button
                           type="button"
                           className="alerts-secondary"
-                          disabled={test?.target === org.id && test.status === 'sending'}
+                          disabled={
+                            dirty || (test?.target === org.id && test.status === 'sending')
+                          }
+                          title={testHint}
                           onClick={() => runTest(org.id)}
                         >
                           Тест
@@ -200,10 +211,17 @@ export function AlertsPage() {
           </section>
 
           <div className="alerts-actions">
+            {dirty ? (
+              <span className="alerts-dirty-note">
+                Є незбережені зміни. Тестовий лист надсилає сервер за
+                збереженими налаштуваннями.
+              </span>
+            ) : null}
             <button
               type="button"
               className="alerts-secondary"
-              disabled={test?.target === '' && test.status === 'sending'}
+              disabled={dirty || (test?.target === '' && test.status === 'sending')}
+              title={testHint}
               onClick={() => runTest()}
             >
               {test?.target === '' && test.status === 'sending'
@@ -225,8 +243,10 @@ export function AlertsPage() {
           {test && test.target === '' ? <TestResult test={test} /> : null}
 
           <p className="alerts-hint">
-            Тестовий лист іде на фактичний список адрес незалежно від вмикачів —
-            саме щоб перевірити доставку до того, як станеться аварія.
+            Тестовий лист надсилає сервер за збереженими налаштуваннями, на
+            фактичний список адрес і незалежно від вмикачів — саме щоб
+            перевірити доставку до того, як станеться аварія. Тому спершу
+            «Зберегти», потім «Тест».
           </p>
           <p className="alerts-hint">
             <strong>Доступ.</strong> API дашборда не має автентифікації, а пароль

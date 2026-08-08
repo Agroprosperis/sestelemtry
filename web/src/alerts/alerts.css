@@ -244,6 +244,13 @@
   color: #15803d;
 }
 
+.alerts-dirty-note {
+  margin-right: auto;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  color: #b45309;
+}
+
 .alerts-save {
   display: inline-flex;
   align-items: center;

@@ -124,6 +124,25 @@ describe('AlertsPage', () => {
     expect('smtp_password' in body).toBe(false)
   })
 
+  // The server sends the test from the stored settings, so an address
+  // that only exists in the form would fail with a baffling
+  // "no recipients configured".
+  it('blocks the test email until the edits are saved', async () => {
+    stubApi()
+    render(<AlertsPage />)
+    const test = await screen.findByRole('button', { name: 'Надіслати тестовий лист' })
+    expect(test).toBeEnabled()
+
+    fireEvent.change(screen.getByLabelText('Отримувачі за замовчуванням'), {
+      target: { value: 'new@example.com' },
+    })
+    expect(test).toBeDisabled()
+    expect(screen.getByText(/Є незбережені зміни/)).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Зберегти' }))
+    await waitFor(() => expect(test).toBeEnabled())
+  })
+
   it('reports where a test email landed', async () => {
     stubApi()
     render(<AlertsPage />)
