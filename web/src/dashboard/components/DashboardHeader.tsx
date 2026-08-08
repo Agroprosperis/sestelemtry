@@ -23,6 +23,14 @@ function goToStationView() {
   window.dispatchEvent(new PopStateEvent('popstate'))
 }
 
+function goToAlertsView() {
+  if (typeof window === 'undefined') return
+  const url = new URL(window.location.href)
+  url.searchParams.set('view', 'alerts')
+  window.history.pushState({}, '', url.toString())
+  window.dispatchEvent(new PopStateEvent('popstate'))
+}
+
 // DashboardHeader is the page-wide brand strip: logo + product name on
 // the left, and the global actions (archive import, data export) pinned
 // to the right. Range/period/org controls live in `DashboardControls`
@@ -65,6 +73,28 @@ export function DashboardHeader({ organizationID, onExportClick }: Props) {
             <path d="M9 21V9" />
           </svg>
           <span>Паспорт станції</span>
+        </button>
+        <button
+          type="button"
+          className="economics-switch-button"
+          onClick={goToAlertsView}
+          title="Налаштування сповіщень про втрату звʼязку"
+        >
+          <svg
+            aria-hidden="true"
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
+            <path d="M13.7 21a2 2 0 0 1-3.4 0" />
+          </svg>
+          <span>Сповіщення</span>
         </button>
         <button
           type="button"

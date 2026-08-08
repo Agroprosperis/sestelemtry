@@ -22,77 +22,67 @@ const (
 	TLSNone     = "none"
 )
 
-// SMTPOptions describes the mail server. The daemon maps the config
-// block onto this struct so the package stays independent of the YAML
-// schema (same split as internal/weather and internal/oree).
-type SMTPOptions struct {
-	Host     string
-	Port     int
-	TLS      string
-	Username string
-	Password string
-	From     string
-	To       []string
-	Timeout  time.Duration
-}
-
 // Mailer sends rendered messages over SMTP. It holds no connection:
 // outages are rare, so a fresh connection per email is simpler and
 // avoids babysitting a socket that idles for weeks.
+//
+// Recipients are a per-send argument rather than mailer state, because
+// one server delivers to several address lists: each organization can
+// replace the default recipients with its own.
 type Mailer struct {
-	opts SMTPOptions
-	from string
+	smtp     SMTPSettings
+	password string
+	from     string
+	timeout  time.Duration
 }
 
-// NewMailer validates the options and resolves the envelope sender.
-func NewMailer(opts SMTPOptions) (*Mailer, error) {
-	opts.Host = strings.TrimSpace(opts.Host)
-	if opts.Host == "" {
+// NewMailer validates the server settings and resolves the envelope
+// sender. The password is passed separately because it is stored apart
+// from the rest of the settings and never travels with them.
+func NewMailer(settings SMTPSettings, password string) (*Mailer, error) {
+	settings.Host = strings.TrimSpace(settings.Host)
+	if settings.Host == "" {
 		return nil, fmt.Errorf("alerts: smtp host is required")
 	}
-	if opts.Port < 1 || opts.Port > 65535 {
-		return nil, fmt.Errorf("alerts: smtp port out of range: %d", opts.Port)
+	if settings.Port < 1 || settings.Port > 65535 {
+		return nil, fmt.Errorf("alerts: smtp port out of range: %d", settings.Port)
 	}
-	switch opts.TLS {
+	switch settings.TLS {
 	case TLSStartTLS, TLSImplicit, TLSNone:
 	default:
-		return nil, fmt.Errorf("alerts: unsupported smtp tls mode %q", opts.TLS)
-	}
-	if len(opts.To) == 0 {
-		return nil, fmt.Errorf("alerts: at least one recipient is required")
+		return nil, fmt.Errorf("alerts: unsupported smtp tls mode %q", settings.TLS)
 	}
 	// net/smtp refuses PLAIN auth over an unencrypted link, and failing
 	// here with a clear message beats surfacing that deep inside a send.
-	if opts.Username != "" && opts.TLS == TLSNone {
+	if settings.Username != "" && settings.TLS == TLSNone {
 		return nil, fmt.Errorf("alerts: smtp username requires tls %q or %q", TLSStartTLS, TLSImplicit)
 	}
-	if opts.Timeout <= 0 {
-		opts.Timeout = 20 * time.Second
+	timeout := settings.Timeout.Duration()
+	if timeout <= 0 {
+		timeout = 20 * time.Second
 	}
-	from, err := envelopeAddress(opts.From)
+	from, err := envelopeAddress(settings.From)
 	if err != nil {
 		return nil, err
 	}
-	return &Mailer{opts: opts, from: from}, nil
+	return &Mailer{smtp: settings, password: password, from: from, timeout: timeout}, nil
 }
 
-// Recipients returns the configured destination addresses.
-func (m *Mailer) Recipients() []string {
-	return append([]string(nil), m.opts.To...)
-}
-
-// Send delivers one message to every configured recipient.
-func (m *Mailer) Send(ctx context.Context, msg Message) error {
+// Send delivers one message to the given recipients.
+func (m *Mailer) Send(ctx context.Context, to []string, msg Message) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	addr := net.JoinHostPort(m.opts.Host, strconv.Itoa(m.opts.Port))
-	dialer := &net.Dialer{Timeout: m.opts.Timeout}
+	if len(to) == 0 {
+		return fmt.Errorf("alerts: at least one recipient is required")
+	}
+	addr := net.JoinHostPort(m.smtp.Host, strconv.Itoa(m.smtp.Port))
+	dialer := &net.Dialer{Timeout: m.timeout}
 
 	var conn net.Conn
 	var err error
-	if m.opts.TLS == TLSImplicit {
-		td := &tls.Dialer{NetDialer: dialer, Config: &tls.Config{ServerName: m.opts.Host}}
+	if m.smtp.TLS == TLSImplicit {
+		td := &tls.Dialer{NetDialer: dialer, Config: &tls.Config{ServerName: m.smtp.Host}}
 		conn, err = td.DialContext(ctx, "tcp", addr)
 	} else {
 		conn, err = dialer.DialContext(ctx, "tcp", addr)
@@ -102,22 +92,22 @@ func (m *Mailer) Send(ctx context.Context, msg Message) error {
 	}
 	// One deadline for the whole conversation: a relay that accepts the
 	// connection and then stalls must not wedge the check loop.
-	_ = conn.SetDeadline(time.Now().Add(m.opts.Timeout))
+	_ = conn.SetDeadline(time.Now().Add(m.timeout))
 	defer conn.Close()
 
-	client, err := smtp.NewClient(conn, m.opts.Host)
+	client, err := smtp.NewClient(conn, m.smtp.Host)
 	if err != nil {
 		return fmt.Errorf("alerts: smtp handshake: %w", err)
 	}
 	defer client.Close()
 
-	if m.opts.TLS == TLSStartTLS {
-		if err := client.StartTLS(&tls.Config{ServerName: m.opts.Host}); err != nil {
+	if m.smtp.TLS == TLSStartTLS {
+		if err := client.StartTLS(&tls.Config{ServerName: m.smtp.Host}); err != nil {
 			return fmt.Errorf("alerts: starttls: %w", err)
 		}
 	}
-	if m.opts.Username != "" {
-		auth := smtp.PlainAuth("", m.opts.Username, m.opts.Password, m.opts.Host)
+	if m.smtp.Username != "" {
+		auth := smtp.PlainAuth("", m.smtp.Username, m.password, m.smtp.Host)
 		if err := client.Auth(auth); err != nil {
 			return fmt.Errorf("alerts: smtp auth: %w", err)
 		}
@@ -125,20 +115,20 @@ func (m *Mailer) Send(ctx context.Context, msg Message) error {
 	if err := client.Mail(m.from); err != nil {
 		return fmt.Errorf("alerts: MAIL FROM %s: %w", m.from, err)
 	}
-	for _, rcpt := range m.opts.To {
-		to, err := envelopeAddress(rcpt)
+	for _, rcpt := range to {
+		parsed, err := envelopeAddress(rcpt)
 		if err != nil {
 			return err
 		}
-		if err := client.Rcpt(to); err != nil {
-			return fmt.Errorf("alerts: RCPT TO %s: %w", to, err)
+		if err := client.Rcpt(parsed); err != nil {
+			return fmt.Errorf("alerts: RCPT TO %s: %w", parsed, err)
 		}
 	}
 	w, err := client.Data()
 	if err != nil {
 		return fmt.Errorf("alerts: DATA: %w", err)
 	}
-	if _, err := w.Write(BuildRFC822(m.opts.From, m.opts.To, msg, time.Now())); err != nil {
+	if _, err := w.Write(BuildRFC822(m.smtp.From, to, msg, time.Now())); err != nil {
 		w.Close()
 		return fmt.Errorf("alerts: write body: %w", err)
 	}

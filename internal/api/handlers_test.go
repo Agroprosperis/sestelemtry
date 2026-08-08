@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/nesh/sestelemetry/internal/alerts"
 )
 
 type mockStore struct {
@@ -70,6 +72,64 @@ type mockStore struct {
 	dataRangeMax time.Time
 	dataRangeOK  bool
 	dataRangeErr error
+
+	alertSettings         *alerts.Settings
+	alertPasswordSet      bool
+	alertSettingsGetErr   error
+	alertSettingsPutErr   error
+	alertSettingsWrite    *alerts.Settings
+	alertPasswordWrite    *string
+	alertPasswordWriteSet bool
+	alertPassword         string
+	orgAlertSettings      map[string]alerts.OrgSettings
+	orgAlertSettingsErr   error
+	orgAlertLastOrg       string
+	orgAlertLastWrite     alerts.OrgSettings
+}
+
+func (m *mockStore) GetAlertSettings(_ context.Context) (alerts.Settings, bool, bool, error) {
+	if m.alertSettingsGetErr != nil {
+		return alerts.Settings{}, false, false, m.alertSettingsGetErr
+	}
+	if m.alertSettings == nil {
+		return alerts.Settings{}, false, false, nil
+	}
+	return *m.alertSettings, m.alertPasswordSet, true, nil
+}
+
+func (m *mockStore) AlertSMTPPassword(_ context.Context) (string, error) {
+	return m.alertPassword, nil
+}
+
+func (m *mockStore) UpsertAlertSettings(_ context.Context, settings alerts.Settings, password *string) error {
+	if m.alertSettingsPutErr != nil {
+		return m.alertSettingsPutErr
+	}
+	m.alertSettingsWrite = &settings
+	m.alertPasswordWrite = password
+	m.alertPasswordWriteSet = true
+	m.alertSettings = &settings
+	return nil
+}
+
+func (m *mockStore) LoadOrgAlertSettings(_ context.Context) (map[string]alerts.OrgSettings, error) {
+	if m.orgAlertSettingsErr != nil {
+		return nil, m.orgAlertSettingsErr
+	}
+	return m.orgAlertSettings, nil
+}
+
+func (m *mockStore) UpsertOrgAlertSettings(_ context.Context, organizationID string, settings alerts.OrgSettings) error {
+	if m.orgAlertSettingsErr != nil {
+		return m.orgAlertSettingsErr
+	}
+	m.orgAlertLastOrg = organizationID
+	m.orgAlertLastWrite = settings
+	if m.orgAlertSettings == nil {
+		m.orgAlertSettings = make(map[string]alerts.OrgSettings)
+	}
+	m.orgAlertSettings[organizationID] = settings
+	return nil
 }
 
 func (m *mockStore) TelemetryDataRange(_ context.Context, _ string) (time.Time, time.Time, bool, error) {

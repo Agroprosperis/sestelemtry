@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/nesh/sestelemetry/internal/alerts"
 	"github.com/nesh/sestelemetry/internal/api"
 	"github.com/nesh/sestelemetry/internal/config"
 	"github.com/nesh/sestelemetry/internal/dam"
@@ -82,6 +83,12 @@ func main() {
 		log.Error("db_init_plant_inventory", "err", err)
 		os.Exit(1)
 	}
+	// Alert delivery settings edited on the notifications page. The API
+	// is their only writer; alert-watchdog just reads them.
+	if err := storage.InitAlertSettingsSchema(ctx, pool); err != nil {
+		log.Error("db_init_alert_settings", "err", err)
+		os.Exit(1)
+	}
 
 	store := api.NewStore(pool)
 	// Boot-time feature detection: if the collector has run migration 004
@@ -115,6 +122,13 @@ func main() {
 			loadedCfg = cfg
 			svc.SetOrganizations(toOrganizationInfos(cfg.Organizations))
 			svc.SetEnergyFlowOrgs(toEnergyFlowOrgs(cfg.Organizations))
+			// What the notifications page shows until an operator saves
+			// it: the same YAML the watchdog falls back to, so the form
+			// reflects the behaviour actually in force.
+			svc.SetAlertFallback(
+				alerts.SettingsFromConfig(cfg.Alerts),
+				strings.TrimSpace(os.Getenv("SMTP_PASSWORD")),
+			)
 			if cfg.OREE.Enabled {
 				// On-demand DAM refresh: a single attempt with no
 				// backoff so an operator clicking the dashboard

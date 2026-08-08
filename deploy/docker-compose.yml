@@ -45,6 +45,10 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgres://postgres:postgres@timescaledb:5432/telemetry?sslmode=disable
+      # Lets the notifications page send a test email before an operator
+      # has typed the mail password into it (same secret the watchdog
+      # uses). A password saved on the page takes precedence.
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
     # Mount the same YAML the collector reads so the API can populate
     # /api/v1/organizations (org id, display name, location). Without
     # the mount + -config flag the endpoint returns an empty list and

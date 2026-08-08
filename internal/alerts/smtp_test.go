@@ -11,41 +11,49 @@ import (
 )
 
 func TestNewMailerRejectsBadOptions(t *testing.T) {
-	base := SMTPOptions{
+	base := SMTPSettings{
 		Host: "smtp.example.com",
 		Port: 587,
 		TLS:  TLSStartTLS,
 		From: "alerts@example.com",
-		To:   []string{"ops@example.com"},
 	}
-	cases := map[string]func(o *SMTPOptions){
-		"no host":          func(o *SMTPOptions) { o.Host = "" },
-		"bad port":         func(o *SMTPOptions) { o.Port = 0 },
-		"unknown tls":      func(o *SMTPOptions) { o.TLS = "ssl" },
-		"no recipients":    func(o *SMTPOptions) { o.To = nil },
-		"bad from":         func(o *SMTPOptions) { o.From = "not an address" },
-		"auth without tls": func(o *SMTPOptions) { o.TLS = TLSNone; o.Username = "user" },
+	cases := map[string]func(o *SMTPSettings){
+		"no host":          func(o *SMTPSettings) { o.Host = "" },
+		"bad port":         func(o *SMTPSettings) { o.Port = 0 },
+		"unknown tls":      func(o *SMTPSettings) { o.TLS = "ssl" },
+		"bad from":         func(o *SMTPSettings) { o.From = "not an address" },
+		"auth without tls": func(o *SMTPSettings) { o.TLS = TLSNone; o.Username = "user" },
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
-			opts := base
-			opts.To = append([]string(nil), base.To...)
-			mutate(&opts)
-			if _, err := NewMailer(opts); err == nil {
+			settings := base
+			mutate(&settings)
+			if _, err := NewMailer(settings, ""); err == nil {
 				t.Fatal("expected an error, got nil")
 			}
 		})
 	}
 }
 
+func TestSendRejectsEmptyRecipients(t *testing.T) {
+	m, err := NewMailer(SMTPSettings{
+		Host: "smtp.example.com", Port: 587, TLS: TLSStartTLS, From: "alerts@example.com",
+	}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Send(context.Background(), nil, Message{Subject: "s", Body: "b"}); err == nil {
+		t.Fatal("expected an error for an empty recipient list")
+	}
+}
+
 func TestNewMailerAcceptsDisplayName(t *testing.T) {
-	m, err := NewMailer(SMTPOptions{
+	m, err := NewMailer(SMTPSettings{
 		Host: "smtp.example.com",
 		Port: 465,
 		TLS:  TLSImplicit,
 		From: "СЕС Моніторинг <alerts@example.com>",
-		To:   []string{"ops@example.com"},
-	})
+	}, "")
 	if err != nil {
 		t.Fatalf("NewMailer: %v", err)
 	}
@@ -114,18 +122,18 @@ func TestSendDeliversToServer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m, err := NewMailer(SMTPOptions{
+	m, err := NewMailer(SMTPSettings{
 		Host:    host,
 		Port:    atoi(t, port),
 		TLS:     TLSNone,
 		From:    "alerts@example.com",
-		To:      []string{"ops@example.com"},
-		Timeout: 5 * time.Second,
-	})
+		Timeout: Duration(5 * time.Second),
+	}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := m.Send(context.Background(), Message{Subject: "тест", Body: "тіло\n"}); err != nil {
+	to := []string{"ops@example.com"}
+	if err := m.Send(context.Background(), to, Message{Subject: "тест", Body: "тіло\n"}); err != nil {
 		t.Fatalf("Send: %v", err)
 	}
 
@@ -145,17 +153,16 @@ func TestSendDeliversToServer(t *testing.T) {
 }
 
 func TestSendHonoursCancelledContext(t *testing.T) {
-	m, err := NewMailer(SMTPOptions{
+	m, err := NewMailer(SMTPSettings{
 		Host: "127.0.0.1", Port: 1, TLS: TLSNone,
-		From: "alerts@example.com", To: []string{"ops@example.com"},
-		Timeout: time.Second,
-	})
+		From: "alerts@example.com", Timeout: Duration(time.Second),
+	}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if err := m.Send(ctx, Message{Subject: "s", Body: "b"}); err == nil {
+	if err := m.Send(ctx, []string{"ops@example.com"}, Message{Subject: "s", Body: "b"}); err == nil {
 		t.Fatal("expected an error for a cancelled context")
 	}
 }

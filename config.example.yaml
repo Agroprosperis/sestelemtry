@@ -209,7 +209,12 @@ economics:
 # Modbus device; a device silent for longer than `stale_after` is reported
 # as "connection lost" by email. Because the check reads the database
 # rather than the Modbus link, it also catches a dead collector process.
-# Set enabled: false to skip running the alert-watchdog against this config.
+#
+# STARTING VALUES ONLY. The dashboard's notifications page (?view=alerts) is
+# the source of truth: once it is saved, these settings live in the database
+# (per-organization recipients and switches too) and the watchdog picks up
+# changes without a restart. This block is what the page shows — and what the
+# watchdog acts on — until that first save.
 alerts:
   enabled: false
   check_interval: 1m            # how often to sample freshness
@@ -223,6 +228,6 @@ alerts:
     username: alerts@example.com
     password: ""                # leave empty and pass SMTP_PASSWORD instead
     from: "СЕС Моніторинг <alerts@example.com>"
-    to:
+    to:                         # default recipients; per-org lists live in the UI
       - ops@example.com
     timeout: 20s

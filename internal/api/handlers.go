@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nesh/sestelemetry/internal/alerts"
 	"github.com/nesh/sestelemetry/internal/economics"
 	"github.com/nesh/sestelemetry/internal/fusionsolar"
 )
@@ -59,6 +60,13 @@ type Handlers struct {
 	// economics backs the /api/v1/economics/* routes. nil when the
 	// service wasn't wired at startup — the handlers respond 503.
 	economics *economics.Service
+	// alertFallback / alertFallbackPassword are what the notifications
+	// page shows before anything has been saved: the `alerts:` block
+	// from config.yaml (and SMTP_PASSWORD, if the deployment sets it).
+	// Showing the values the watchdog currently acts on keeps the first
+	// save from silently downgrading a YAML-configured deployment.
+	alertFallback         alerts.Settings
+	alertFallbackPassword string
 }
 
 // FusionSolarImporter synchronously pulls historical device data from
@@ -135,6 +143,22 @@ type storeReader interface {
 	// PlantInventoryHistory returns per-field change events derived
 	// from recent plant-inventory snapshots.
 	PlantInventoryHistory(ctx context.Context, organizationID string, limit int) (PlantInventoryHistoryResponse, error)
+	// GetAlertSettings returns the site-wide alert configuration,
+	// whether an SMTP password is stored, and whether anything has been
+	// saved at all (false means the caller falls back to config.yaml).
+	// The password itself is never part of this result.
+	GetAlertSettings(ctx context.Context) (alerts.Settings, bool, bool, error)
+	// AlertSMTPPassword returns the stored mail password. Separate from
+	// GetAlertSettings so every use of the secret is greppable.
+	AlertSMTPPassword(ctx context.Context) (string, error)
+	// UpsertAlertSettings replaces the site-wide configuration. A nil
+	// password leaves the stored one untouched.
+	UpsertAlertSettings(ctx context.Context, settings alerts.Settings, password *string) error
+	// LoadOrgAlertSettings returns per-organization delivery overrides
+	// keyed by organization id; organizations without a row are absent.
+	LoadOrgAlertSettings(ctx context.Context) (map[string]alerts.OrgSettings, error)
+	// UpsertOrgAlertSettings replaces one organization's override.
+	UpsertOrgAlertSettings(ctx context.Context, organizationID string, settings alerts.OrgSettings) error
 	Ready(ctx context.Context) error
 }
 
@@ -169,6 +193,10 @@ func NewHandlers(store storeReader, allowOrigin string) *Handlers {
 		store:       store,
 		allowOrigin: allowOrigin,
 		log:         slog.Default(),
+		// Never a zero Settings: the notifications page reads this
+		// before a config is wired, and a zero value would show port 0
+		// and an empty TLS mode as if an operator had chosen them.
+		alertFallback: alerts.DefaultSettings(),
 	}
 }
 
@@ -305,6 +333,9 @@ func (h *Handlers) Router() http.Handler {
 	mux.HandleFunc("/api/v1/plant-inventory", h.plantInventory)
 	mux.HandleFunc("/api/v1/organization-tariffs", h.organizationTariffs)
 	mux.HandleFunc("/api/v1/organization-tariff-schedule", h.organizationTariffSchedule)
+	mux.HandleFunc("/api/v1/alert-settings", h.alertSettings)
+	mux.HandleFunc("/api/v1/alert-settings/test-email", h.alertSettingsTestEmail)
+	mux.HandleFunc("/api/v1/organization-alert-settings", h.organizationAlertSettings)
 	mux.HandleFunc("/api/v1/economics/daily", h.economicsDaily)
 	mux.HandleFunc("/api/v1/economics/monthly", h.economicsMonthly)
 	mux.HandleFunc("/api/v1/economics/annual", h.economicsAnnual)

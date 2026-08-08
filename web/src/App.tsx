@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
+import { AlertsPage } from './alerts/AlertsPage'
 import { Dashboard } from './dashboard/Dashboard'
 import { EconomicsPage } from './economics/EconomicsPage'
 import { ImportPage } from './import/ImportPage'
 import { StationPage } from './station/StationPage'
 
-type View = 'dashboard' | 'economics' | 'import' | 'station'
+type View = 'dashboard' | 'economics' | 'import' | 'station' | 'alerts'
 
 // readView reads the `?view=` query parameter on every render and
 // returns the active page id. We deliberately avoid pulling in
@@ -18,6 +19,7 @@ function readView(): View {
   if (view === 'economics') return 'economics'
   if (view === 'import') return 'import'
   if (view === 'station') return 'station'
+  if (view === 'alerts') return 'alerts'
   return 'dashboard'
 }
 
@@ -43,6 +45,9 @@ function App() {
   }
   if (view === 'station') {
     return <StationPage />
+  }
+  if (view === 'alerts') {
+    return <AlertsPage />
   }
   return <Dashboard />
 }

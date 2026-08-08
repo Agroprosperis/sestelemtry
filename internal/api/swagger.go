@@ -599,6 +599,169 @@ paths:
               schema:
                 type: string
                 example: internal server error
+  /api/v1/alert-settings:
+    get:
+      summary: Site-wide alert delivery settings
+      operationId: getAlertSettings
+      description: |
+        Returns the SMTP server, thresholds and default recipient list
+        used by alert-watchdog. The SMTP password is never included;
+        smtp_password_configured only reports whether one is stored.
+        When nothing has been saved, the payload is the "alerts:" block
+        from config.yaml (saved=false) so the settings page shows the
+        behaviour currently in force instead of blanks.
+      responses:
+        "200":
+          description: Alert settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AlertSettings"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: internal server error
+    put:
+      summary: Save the site-wide alert delivery settings
+      operationId: putAlertSettings
+      description: |
+        Replaces the settings (last-writer-wins). Durations are Go
+        duration strings ("10m"). repeat_interval 0 disables reminders.
+        smtp_password is optional: omitted keeps the stored password,
+        "" clears it, any other value replaces it. Unknown JSON fields
+        are rejected.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AlertSettingsUpdate"
+      responses:
+        "204":
+          description: Settings saved
+        "400":
+          description: Malformed body or invalid value
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: stale_after (5m0s) must be >= check_interval (30m0s)
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: internal server error
+  /api/v1/alert-settings/test-email:
+    post:
+      summary: Send a test alert email
+      operationId: postAlertTestEmail
+      description: |
+        Delivers a test message to the addresses that would receive a
+        real alert, ignoring the enabled switches. With organization_id
+        the organization's effective list is used; without it, the
+        default one.
+      parameters:
+        - name: organization_id
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Message accepted by the relay
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  recipients:
+                    type: array
+                    items:
+                      type: string
+                required: [recipients]
+        "400":
+          description: No recipients configured or unusable SMTP settings
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: no recipients configured
+        "502":
+          description: The mail relay rejected the message
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "alerts: smtp auth: 535 5.7.8 authentication failed"
+  /api/v1/organization-alert-settings:
+    get:
+      summary: Per-organization alert overrides
+      operationId: getOrganizationAlertSettings
+      description: |
+        Overrides keyed by organization id. Organizations the operator
+        never customized are absent: they are enabled and inherit the
+        default recipient list.
+      responses:
+        "200":
+          description: Overrides by organization
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  organizations:
+                    type: object
+                    additionalProperties:
+                      $ref: "#/components/schemas/OrgAlertSettings"
+                required: [organizations]
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: internal server error
+    put:
+      summary: Save one organization's alert override
+      operationId: putOrganizationAlertSettings
+      description: |
+        A non-empty recipients list replaces the default one for this
+        organization (it is not merged). An empty list means "inherit
+        the default list".
+      parameters:
+        - name: organization_id
+          in: query
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OrgAlertSettings"
+      responses:
+        "204":
+          description: Override saved
+        "400":
+          description: Missing organization_id, malformed body, or invalid address
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: 'recipient is not a valid address: "ops at example.com"'
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: internal server error
 components:
   schemas:
     DashboardMetric:
@@ -1046,4 +1209,94 @@ components:
         - include_vat
         - vat_rate
         - ess_capacity_kwh
+    SMTPSettings:
+      type: object
+      description: Mail server, without the password.
+      properties:
+        host:
+          type: string
+          example: smtp.gmail.com
+        port:
+          type: integer
+          example: 587
+        tls:
+          type: string
+          enum: [starttls, implicit, none]
+        username:
+          type: string
+        from:
+          type: string
+          example: СЕС Моніторинг <alerts@example.com>
+        timeout:
+          type: string
+          example: 20s
+      required: [host, port, tls, username, from, timeout]
+    AlertSettingsBase:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+        check_interval:
+          type: string
+          description: How often freshness is sampled (10s..1h).
+          example: 1m
+        stale_after:
+          type: string
+          description: Silence that counts as a lost connection (1m..24h, >= check_interval).
+          example: 10m
+        repeat_interval:
+          type: string
+          description: Reminder cadence for an ongoing outage; "0s" disables reminders.
+          example: 6h
+        notify_recovery:
+          type: boolean
+        smtp:
+          $ref: "#/components/schemas/SMTPSettings"
+        recipients:
+          type: array
+          description: Default address list, inherited by organizations without their own.
+          items:
+            type: string
+      required:
+        - enabled
+        - check_interval
+        - stale_after
+        - repeat_interval
+        - notify_recovery
+        - smtp
+        - recipients
+    AlertSettings:
+      allOf:
+        - $ref: "#/components/schemas/AlertSettingsBase"
+        - type: object
+          properties:
+            smtp_password_configured:
+              type: boolean
+              description: Whether a password is stored. The password itself is never returned.
+            saved:
+              type: boolean
+              description: False when the payload is the config.yaml fallback.
+          required: [smtp_password_configured, saved]
+    AlertSettingsUpdate:
+      allOf:
+        - $ref: "#/components/schemas/AlertSettingsBase"
+        - type: object
+          properties:
+            smtp_password:
+              type: string
+              nullable: true
+              description: >
+                Omitted or null keeps the stored password, "" clears it,
+                any other value replaces it.
+    OrgAlertSettings:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+        recipients:
+          type: array
+          description: Replaces the default list for this organization; empty inherits it.
+          items:
+            type: string
+      required: [enabled, recipients]
 `

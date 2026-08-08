@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/nesh/sestelemetry/internal/alerts"
 	"github.com/nesh/sestelemetry/internal/storage"
 )
 
@@ -1060,6 +1061,65 @@ func (s *Store) UpsertOrgTariffs(ctx context.Context, organizationID string, tar
 		return fmt.Errorf("encode org tariffs: %w", err)
 	}
 	return storage.UpsertOrgTariffs(ctx, s.pool, organizationID, payload)
+}
+
+// GetAlertSettings returns the persisted alert configuration. The
+// middle bool reports whether an SMTP password is stored; the last one
+// is false when nothing has been saved, which the handler turns into the
+// config.yaml fallback. JSON decoding happens here so the storage layer
+// stays schema-free.
+func (s *Store) GetAlertSettings(ctx context.Context) (alerts.Settings, bool, bool, error) {
+	payload, passwordSet, ok, err := storage.GetAlertSettings(ctx, s.pool)
+	if err != nil || !ok {
+		return alerts.Settings{}, false, false, err
+	}
+	out, err := alerts.DecodeSettings(payload)
+	if err != nil {
+		return alerts.Settings{}, false, false, err
+	}
+	return out, passwordSet, true, nil
+}
+
+// AlertSMTPPassword returns the stored mail password ("" when none).
+func (s *Store) AlertSMTPPassword(ctx context.Context) (string, error) {
+	return storage.GetSMTPPassword(ctx, s.pool)
+}
+
+// UpsertAlertSettings persists the alert configuration. A nil password
+// leaves the stored one untouched.
+func (s *Store) UpsertAlertSettings(ctx context.Context, settings alerts.Settings, password *string) error {
+	payload, err := json.Marshal(settings)
+	if err != nil {
+		return fmt.Errorf("encode alert settings: %w", err)
+	}
+	return storage.UpsertAlertSettings(ctx, s.pool, payload, password)
+}
+
+// LoadOrgAlertSettings returns every per-organization override, keyed by
+// organization id.
+func (s *Store) LoadOrgAlertSettings(ctx context.Context) (map[string]alerts.OrgSettings, error) {
+	rows, err := storage.LoadOrgAlertSettings(ctx, s.pool)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]alerts.OrgSettings, len(rows))
+	for _, row := range rows {
+		parsed, err := alerts.DecodeOrgSettings(row.Settings)
+		if err != nil {
+			return nil, fmt.Errorf("organization %s: %w", row.OrganizationID, err)
+		}
+		out[row.OrganizationID] = parsed
+	}
+	return out, nil
+}
+
+// UpsertOrgAlertSettings persists one organization's override.
+func (s *Store) UpsertOrgAlertSettings(ctx context.Context, organizationID string, settings alerts.OrgSettings) error {
+	payload, err := json.Marshal(settings)
+	if err != nil {
+		return fmt.Errorf("encode organization alert settings: %w", err)
+	}
+	return storage.UpsertOrgAlertSettings(ctx, s.pool, organizationID, payload)
 }
 
 // TariffScheduleVersion is one effective-dated tariff version exposed by

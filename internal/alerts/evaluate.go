@@ -221,11 +221,15 @@ func Evaluate(observations []Observation, prev map[Key]State, now time.Time, th 
 }
 
 // RevertNotifications rolls last_notified_at back to its previous value
-// for every device that produced an event. The daemon calls this when
-// the email could not be delivered, so the next check retries instead of
-// recording a notification that never reached anyone.
-func (r Result) RevertNotifications(prev map[Key]State) {
-	for _, e := range r.Events {
+// for the given events. The daemon calls this when an email could not be
+// delivered, so the next check retries instead of recording a
+// notification that never reached anyone.
+//
+// It takes the events rather than reverting everything because one tick
+// can produce several emails — one per distinct recipient list — and a
+// relay that rejects one of them may well have accepted the others.
+func (r Result) RevertNotifications(prev map[Key]State, events []Event) {
+	for _, e := range events {
 		key := e.Key()
 		next, ok := r.States[key]
 		if !ok {

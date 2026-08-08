@@ -228,7 +228,7 @@ func TestRevertNotificationsAfterFailedSend(t *testing.T) {
 		t.Fatalf("events = %v, want reminder + down", got)
 	}
 
-	res.RevertNotifications(prev)
+	res.RevertNotifications(prev, res.Events)
 
 	if st := res.States[ke.Key()]; st.LastNotifiedAt == nil || !st.LastNotifiedAt.Equal(previous) {
 		t.Fatalf("reminder rollback = %+v, want %v", st.LastNotifiedAt, previous)

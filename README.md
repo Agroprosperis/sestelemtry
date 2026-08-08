@@ -252,14 +252,35 @@ lost connection, and (optionally) again when it comes back. Because detection
 reads the database rather than the Modbus link, a crashed collector produces
 the same alert as a dead network or a powered-off SmartLogger.
 
-All devices that change state in one check share a single email — a site-wide
-outage sends one message, not one per elevator. While a device stays down a
-reminder goes out every `repeat_interval`. If the send fails (the uplink that
-died often took the mail relay with it), nothing is marked as notified and the
-next check retries.
+Devices that change state in one check and share a destination address share a
+single email — a site-wide outage sends one message, not one per elevator.
+While a device stays down a reminder goes out every `repeat_interval`. If a
+send fails (the uplink that died often took the mail relay with it), that
+message's devices are not marked as notified and the next check retries them;
+mail that did go out to other recipients is unaffected.
 
-The container ships with every stack but is gated by `alerts.enabled` in
-`config.yaml`:
+### Configuring it
+
+The dashboard's **Сповіщення** page (`?view=alerts`) is where this is set up:
+the SMTP server, the thresholds above, a default recipient list, and per
+organization a switch plus its own address list. **An organization's own list
+replaces the default one** — that is how a site gets routed to its operator
+alone. Leave it empty to inherit the default list.
+
+Settings live in `alert_settings` / `organization_alert_settings`
+(`migrations/011_alert_settings.sql`, also created on startup) and the watchdog
+re-reads them every check, so a change takes effect without restarting the
+container. The SMTP password is stored in its own column and is never returned
+by the API: the page only learns whether one is set, and saving without
+touching the field leaves it alone.
+
+> **Access.** The API has no authentication, and the password sits in Postgres
+> as plain text. Do not expose the API port to the internet — keep it on an
+> internal network or behind an authenticating proxy.
+
+The `alerts:` block in `config.yaml` is the fallback used until the page is
+saved for the first time (the page shows those values, so a first save does not
+silently downgrade a YAML-configured deployment):
 
 ```yaml
 alerts:
@@ -282,18 +303,21 @@ alerts:
 
 Keep the password out of the YAML: `SMTP_PASSWORD` overrides
 `alerts.smtp.password`, and `deploy/docker-compose.yml` passes it through from
-`deploy/.env`. Verify credentials before arming the watchdog (works even with
-`enabled: false`):
+`deploy/.env`. A password saved on the settings page wins over both.
+
+The page's **Надіслати тестовий лист** button verifies delivery to the real
+address list; the same check from a shell (works even with alerts disabled, and
+without a reachable database):
 
 ```bash
 cd deploy
 docker compose run --rm alert-watchdog -config /etc/sestelemetry/config.yaml -test-email
 ```
 
-`-once` runs a single check pass and exits, for cron or debugging. State lives
-in `device_alert_state` (`migrations/010_alerts.sql`, also created on startup),
-so restarting the container does not re-announce an outage operators already
-know about.
+`-once` runs a single check pass and exits, for cron or debugging. Device state
+lives in `device_alert_state` (`migrations/010_alerts.sql`, also created on
+startup), so restarting the container does not re-announce an outage operators
+already know about.
 
 ### Safe production update path
 
