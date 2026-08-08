@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import type { EconomicsPortfolioResponse, EconomicsPortfolioSite, EconomicsPortfolioTrendMonth } from '../../api'
 import { formatOrganizationLabel } from '../../dashboard/config'
+import { OptimumInfo } from '../monthly/EconomicsMonthlyView'
 import { formatMonthTitle, formatMwh, formatMwhNumber, formatPercent, formatPeriodTitle, formatUah, formatYearTitle } from '../monthly/format'
 import { useEconomicsPortfolioData } from '../useEconomicsPortfolioData'
 
@@ -24,13 +25,19 @@ type Props = {
   refreshKey?: number
 }
 
-// compareTotal is the stacked-bar length: project effect + both reserves.
+// compareTotal is the stacked-bar length: earned EBITDA + both reserves.
 function compareTotal(s: EconomicsPortfolioSite): number {
-  return s.effect_uah + s.schedule_reserve_uah + s.bess_reserve_uah
+  return s.ebitda_uah + s.schedule_reserve_uah + s.bess_reserve_uah
 }
 
+// OPTIMUM_TIP explains the УЗЕ reserve in operator language: the
+// optimum is the best dispatch the battery could have run inside its
+// own demonstrated envelope, so the reserve is missed upside, not loss.
+const OPTIMUM_TIP =
+  'Оптимум УЗЕ — найкращий можливий графік заряду/розряду батареї в межах її ж фактичних можливостей (потужність, діапазон SOC, ККД циклу за телеметрією періоду), оцінений за цінами РДН і тарифами. Резерв = оптимум − факт: це недоотримана вигода, яку ще можна забрати кращим керуванням, а не збиток.'
+
 // EconomicsPortfolioView is the zведений (all-objects) dashboard: a per-
-// object comparison of project effect + work-schedule reserve + УЗЕ
+// object comparison of earned EBITDA + work-schedule reserve + УЗЕ
 // optimum reserve (project_net), with ⚠ flags for objects whose УЗЕ
 // telemetry had anomalous days excluded (§2).
 export function EconomicsPortfolioView({
@@ -182,14 +189,37 @@ function PortfolioBody({
   return (
     <>
       <div className="economics-portfolio-cards">
-        <SummaryCard label="Ефект проєкту" value={formatUah(totals.effect_uah)} sub="за період, всі об'єкти" />
-        <SummaryCard label="Резерв графіка робіт" value={formatUah(totals.schedule_reserve_uah)} sub="перенесення гнучких робіт у день" amber />
-        <SummaryCard label="Оптимум УЗЕ (резерв)" value={formatUah(totals.bess_reserve_uah)} sub="project_net, наскрізний DP" amber />
-        <SummaryCard label="Разом з резервами" value={formatUah(totals.effect_uah + totals.action_reserve_uah)} sub="ефект + резерв графіка + УЗЕ" good />
+        <SummaryCard
+          label="EBITDA"
+          value={formatUah(totals.ebitda_uah)}
+          sub="за період, всі об'єкти"
+          info="EBITDA = дохід та економія від СЕС і УЗЕ мінус операційні витрати за період, підсумовані по всіх об'єктах."
+        />
+        <SummaryCard
+          label="Резерв графіка робіт"
+          value={formatUah(totals.schedule_reserve_uah)}
+          sub="перенесення гнучких робіт у день"
+          info="Скільки ще можна зекономити, перенісши гнучкі роботи на денні години з дешевшою електроенергією та власним виробітком СЕС."
+          amber
+        />
+        <SummaryCard
+          label="Оптимум УЗЕ (резерв)"
+          value={formatUah(totals.bess_reserve_uah)}
+          sub="недобрана вигода УЗЕ проти оптимального графіка"
+          info={OPTIMUM_TIP}
+          amber
+        />
+        <SummaryCard
+          label="Разом з резервами"
+          value={formatUah(totals.ebitda_uah + totals.action_reserve_uah)}
+          sub="EBITDA + резерв графіка + УЗЕ"
+          info="Потенційний результат періоду: фактична EBITDA плюс обидва резерви, якби їх забрали повністю."
+          good
+        />
       </div>
 
       <div className="economics-portfolio-legend">
-        <span><i style={{ background: '#7c3aed' }} />ефект проєкту</span>
+        <span><i style={{ background: '#7c3aed' }} />EBITDA</span>
         <span><i style={{ background: '#f59e0b' }} />резерв графіка</span>
         <span><i style={{ background: '#0ea5e9' }} />оптимум УЗЕ</span>
       </div>
@@ -209,9 +239,12 @@ function PortfolioBody({
           }
           const total = compareTotal(s)
           const outerW = (total / maxTotal) * 100
-          const eW = total ? (s.effect_uah / total) * 100 : 0
-          const sW = total ? (s.schedule_reserve_uah / total) * 100 : 0
-          const bW = total ? (s.bess_reserve_uah / total) * 100 : 0
+          // A loss-making object can push a segment negative; clamp so the
+          // stack degrades to an empty slot instead of an invalid width.
+          const share = (v: number) => (total > 0 ? Math.max((v / total) * 100, 0) : 0)
+          const eW = share(s.ebitda_uah)
+          const sW = share(s.schedule_reserve_uah)
+          const bW = share(s.bess_reserve_uah)
           return (
             <div className="economics-portfolio-row" key={s.id}>
               <span className="economics-portfolio-name">
@@ -227,7 +260,7 @@ function PortfolioBody({
                   <div className="economics-portfolio-fill bess" style={{ width: `${bW}%` }} />
                 </div>
               </div>
-              <span className="economics-portfolio-value">{formatUah(s.effect_uah)}</span>
+              <span className="economics-portfolio-value">{formatUah(s.ebitda_uah)}</span>
             </div>
           )
         })}
@@ -238,10 +271,12 @@ function PortfolioBody({
           <thead>
             <tr>
               <th>Об'єкт</th>
-              <th>Ефект проєкту</th>
               <th>EBITDA</th>
               <th>Резерв графіка</th>
-              <th>Оптимум УЗЕ</th>
+              <th>
+                Оптимум УЗЕ
+                <OptimumInfo tip={OPTIMUM_TIP} />
+              </th>
               <th>Разом резерв</th>
               <th>СЕС</th>
               <th>Захоплення УЗЕ</th>
@@ -261,7 +296,6 @@ function PortfolioBody({
                   </td>
                   {s.has_data ? (
                     <>
-                      <td>{formatUah(s.effect_uah)}</td>
                       <td>{formatUah(s.ebitda_uah)}</td>
                       <td>{formatUah(s.schedule_reserve_uah)}</td>
                       <td>{formatUah(s.bess_reserve_uah)}</td>
@@ -270,14 +304,13 @@ function PortfolioBody({
                       <td>{formatPercent(captured)}</td>
                     </>
                   ) : (
-                    <td colSpan={7} className="economics-portfolio-empty-cell">немає даних</td>
+                    <td colSpan={6} className="economics-portfolio-empty-cell">немає даних</td>
                   )}
                 </tr>
               )
             })}
             <tr className="economics-table-summary-row">
               <td className="economics-month-table-left">Портфель</td>
-              <td>{formatUah(totals.effect_uah)}</td>
               <td>{formatUah(totals.ebitda_uah)}</td>
               <td>{formatUah(totals.schedule_reserve_uah)}</td>
               <td>{formatUah(totals.bess_reserve_uah)}</td>
@@ -332,7 +365,7 @@ function PortfolioTrend({ months }: { months: EconomicsPortfolioTrendMonth[] }) 
         {months.map((m) => {
           const tip = `${m.month}\nСЕС ${formatMwhNumber(m.pv_kwh)} · спож. ${formatMwhNumber(m.load_kwh)} · імпорт ${formatMwhNumber(
             m.grid_import_kwh,
-          )} · експорт ${formatMwhNumber(m.grid_export_kwh)}\nЕфект ${formatUah(m.effect_uah)}`
+          )} · експорт ${formatMwhNumber(m.grid_export_kwh)}\nEBITDA ${formatUah(m.ebitda_uah)}`
           return (
             <div className="economics-portfolio-trend-col" key={m.month} title={tip}>
               <div className="economics-portfolio-trend-bars">
@@ -356,19 +389,26 @@ function SummaryCard({
   label,
   value,
   sub,
+  info,
   amber,
   good,
 }: {
   label: string
   value: string
   sub: string
+  // info renders the hover "i" next to the label, for metrics whose
+  // meaning is not obvious from the caption alone (e.g. the УЗЕ optimum).
+  info?: string
   amber?: boolean
   good?: boolean
 }): ReactNode {
   const cls = good ? 'kpi-card kpi-card-success' : amber ? 'kpi-card kpi-card-warning' : 'kpi-card'
   return (
     <div className={cls}>
-      <span className="kpi-label">{label}</span>
+      <span className="kpi-label">
+        {label}
+        {info ? <OptimumInfo tip={info} /> : null}
+      </span>
       <span className="kpi-value">{value}</span>
       <span className="kpi-sub">{sub}</span>
     </div>

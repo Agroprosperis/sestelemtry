@@ -800,14 +800,15 @@ type EconomicsPortfolioSite struct {
 }
 
 // EconomicsPortfolioTrendMonth is one month of the portfolio energy trend
-// (year scope): the YYYY-MM key plus the sum across all objects.
+// (year scope): the YYYY-MM key plus the sum across all objects, with
+// EBITDA as the money figure the portfolio view reports everywhere.
 type EconomicsPortfolioTrendMonth struct {
 	Month         string  `json:"month"`
 	PvKwh         float64 `json:"pv_kwh"`
 	LoadKwh       float64 `json:"load_kwh"`
 	GridImportKwh float64 `json:"grid_import_kwh"`
 	GridExportKwh float64 `json:"grid_export_kwh"`
-	EffectUah     float64 `json:"effect_uah"`
+	EbitdaUah     float64 `json:"ebitda_uah"`
 }
 
 // EconomicsPortfolioResponse is the body of GET /api/v1/economics/portfolio:
@@ -993,7 +994,7 @@ func (h *Handlers) economicsPortfolio(w http.ResponseWriter, r *http.Request) {
 					row.LoadKwh += mr.Totals.Load
 					row.GridImportKwh += mr.Totals.GridImport
 					row.GridExportKwh += mr.Totals.GridExport
-					row.EffectUah += mr.Totals.Effect
+					row.EbitdaUah += mr.Totals.Ebitda
 				}
 			}
 		}

@@ -841,7 +841,7 @@ export type EconomicsPortfolioTrendMonth = {
   load_kwh: number
   grid_import_kwh: number
   grid_export_kwh: number
-  effect_uah: number
+  ebitda_uah: number
 }
 
 export type EconomicsPortfolioResponse = {
