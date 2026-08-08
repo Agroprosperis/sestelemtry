@@ -2692,6 +2692,12 @@ button.economics-optimum-row.open {
   cursor: help;
   position: relative;
   vertical-align: middle;
+  /* Hosts like .kpi-label are uppercase with extra tracking, which
+     would turn the badge glyph into an off-centre "I" and shout the
+     whole tooltip; the badge and its bubble always read as plain text
+     (the ::after bubble inherits both resets from here). */
+  text-transform: none;
+  letter-spacing: normal;
 }
 
 .economics-info::after {

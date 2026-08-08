@@ -34,7 +34,7 @@ function compareTotal(s: EconomicsPortfolioSite): number {
 // optimum is the best dispatch the battery could have run inside its
 // own demonstrated envelope, so the reserve is missed upside, not loss.
 const OPTIMUM_TIP =
-  'Оптимум УЗЕ — найкращий можливий графік заряду/розряду батареї в межах її ж фактичних можливостей (потужність, діапазон SOC, ККД циклу за телеметрією періоду), оцінений за цінами РДН і тарифами. Резерв = оптимум − факт: це недоотримана вигода, яку ще можна забрати кращим керуванням, а не збиток.'
+  'Оптимум — найкращий графік заряду/розряду батареї в межах її ж фактичних можливостей (потужність, діапазон SOC, ККД циклу за телеметрією періоду), оцінений за цінами РДН і тарифами. Резерв = оптимум − факт: недоотримана вигода, яку ще можна забрати кращим керуванням, а не збиток.'
 
 // EconomicsPortfolioView is the zведений (all-objects) dashboard: a per-
 // object comparison of earned EBITDA + work-schedule reserve + УЗЕ
