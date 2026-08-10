@@ -25,14 +25,16 @@ import {
   formatCycles,
   formatDayLabel,
   formatDayOfMonth,
-  formatKwh,
+  formatKwhNumber,
   formatMonthTitle,
   formatMwh,
   formatMwhNumber,
   formatPercent,
+  formatPercentNumber,
   formatPrice,
   formatShare,
   formatUah,
+  formatUahNumber,
 } from './format'
 import {
   type AiCard,
@@ -1034,20 +1036,23 @@ function MonthlyHeatmap({ margins }: { margins: EconomicsMonthlyDayMargin[] }) {
 
 // --- Daily detail table + Excel export ---
 
-const COLUMNS = [
-  'Дата',
-  'РДН сер. (грн/кВт·год)',
-  'СЕС (кВт·год)',
-  'Споживання (кВт·год)',
-  'Імпорт (кВт·год)',
-  'Вартість імпорту (грн)',
-  'Факт. ціна (грн/кВт·год)',
-  'Експорт (кВт·год)',
-  'Самоспож. (%)',
-  'УЗЕ цикли (екв.)',
-  'EBITDA (грн)',
-  'Ефект (грн)',
-  'УЗЕ ефект (грн)',
+// Thirteen columns only fit without a horizontal scrollbar if the unit
+// lives in the header rather than in every cell, so each column carries
+// its unit as a second, smaller header line.
+const COLUMNS: { label: string; unit?: string }[] = [
+  { label: 'Дата' },
+  { label: 'РДН сер.', unit: 'грн/кВт·год' },
+  { label: 'СЕС', unit: 'кВт·год' },
+  { label: 'Споживання', unit: 'кВт·год' },
+  { label: 'Імпорт', unit: 'кВт·год' },
+  { label: 'Вартість імпорту', unit: 'грн' },
+  { label: 'Факт. ціна', unit: 'грн/кВт·год' },
+  { label: 'Експорт', unit: 'кВт·год' },
+  { label: 'Самоспож.', unit: '%' },
+  { label: 'УЗЕ цикли', unit: 'екв.' },
+  { label: 'EBITDA', unit: 'грн' },
+  { label: 'Ефект', unit: 'грн' },
+  { label: 'УЗЕ ефект', unit: 'грн' },
 ]
 
 function dayRowValues(d: EconomicsMonthlyDay): string[] {
@@ -1056,17 +1061,17 @@ function dayRowValues(d: EconomicsMonthlyDay): string[] {
   return [
     formatDayLabel(d.date),
     formatPrice(d.rdn_avg_uah_per_kwh),
-    formatKwh(d.pv_kwh),
-    formatKwh(d.load_kwh),
-    formatKwh(d.grid_import_kwh),
-    formatUah(d.import_cost_uah),
+    formatKwhNumber(d.pv_kwh),
+    formatKwhNumber(d.load_kwh),
+    formatKwhNumber(d.grid_import_kwh),
+    formatUahNumber(d.import_cost_uah),
     formatPrice(unitCostUahPerKwh(d.import_cost_uah, d.load_kwh)),
-    formatKwh(d.grid_export_kwh),
-    formatPercent(selfShare),
+    formatKwhNumber(d.grid_export_kwh),
+    formatPercentNumber(selfShare),
     formatCycles(d.equivalent_cycles),
-    formatUah(d.ebitda_uah),
-    formatUah(d.effect_uah),
-    formatUah(d.ess_net_uah),
+    formatUahNumber(d.ebitda_uah),
+    formatUahNumber(d.effect_uah),
+    formatUahNumber(d.ess_net_uah),
   ]
 }
 
@@ -1075,7 +1080,7 @@ function escapeHtml(s: string): string {
 }
 
 function exportToExcel(days: EconomicsMonthlyDay[], month: string) {
-  const head = `<tr>${COLUMNS.map((c) => `<th>${escapeHtml(c)}</th>`).join('')}</tr>`
+  const head = `<tr>${COLUMNS.map((c) => `<th>${escapeHtml(c.unit ? `${c.label}, ${c.unit}` : c.label)}</th>`).join('')}</tr>`
   const body = days
     .map((d) => `<tr>${dayRowValues(d).map((v) => `<td>${escapeHtml(v)}</td>`).join('')}</tr>`)
     .join('')
@@ -1120,7 +1125,10 @@ function MonthlyDailyTable({
           <thead>
             <tr>
               {COLUMNS.map((c) => (
-                <th key={c}>{c}</th>
+                <th key={c.label}>
+                  {c.label}
+                  {c.unit ? <small>{c.unit}</small> : null}
+                </th>
               ))}
             </tr>
           </thead>
@@ -1129,33 +1137,33 @@ function MonthlyDailyTable({
               <tr key={d.date}>
                 <td className="economics-month-table-left">{formatDayLabel(d.date)}</td>
                 <td>{formatPrice(d.rdn_avg_uah_per_kwh)}</td>
-                <td>{formatKwh(d.pv_kwh)}</td>
-                <td>{formatKwh(d.load_kwh)}</td>
-                <td>{formatKwh(d.grid_import_kwh)}</td>
-                <td>{formatUah(d.import_cost_uah)}</td>
+                <td>{formatKwhNumber(d.pv_kwh)}</td>
+                <td>{formatKwhNumber(d.load_kwh)}</td>
+                <td>{formatKwhNumber(d.grid_import_kwh)}</td>
+                <td>{formatUahNumber(d.import_cost_uah)}</td>
                 <td>{formatPrice(unitCostUahPerKwh(d.import_cost_uah, d.load_kwh))}</td>
-                <td>{formatKwh(d.grid_export_kwh)}</td>
-                <td>{formatPercent(d.pv_kwh > 0 ? (d.pv_to_load_kwh + d.pv_to_ess_kwh) / d.pv_kwh : 0)}</td>
+                <td>{formatKwhNumber(d.grid_export_kwh)}</td>
+                <td>{formatPercentNumber(d.pv_kwh > 0 ? (d.pv_to_load_kwh + d.pv_to_ess_kwh) / d.pv_kwh : 0)}</td>
                 <td>{formatCycles(d.equivalent_cycles)}</td>
-                <td className={signClass(d.ebitda_uah)}>{formatUah(d.ebitda_uah)}</td>
-                <td className={signClass(d.effect_uah)}>{formatUah(d.effect_uah)}</td>
-                <td>{formatUah(d.ess_net_uah)}</td>
+                <td className={signClass(d.ebitda_uah)}>{formatUahNumber(d.ebitda_uah)}</td>
+                <td className={signClass(d.effect_uah)}>{formatUahNumber(d.effect_uah)}</td>
+                <td>{formatUahNumber(d.ess_net_uah)}</td>
               </tr>
             ))}
             <tr className="economics-table-summary-row">
               <td className="economics-month-table-left">Разом</td>
               <td>{formatPrice(totals.rdn_avg_uah_per_kwh)}</td>
-              <td>{formatKwh(totals.pv_kwh)}</td>
-              <td>{formatKwh(totals.load_kwh)}</td>
-              <td>{formatKwh(totals.grid_import_kwh)}</td>
-              <td>{formatUah(totals.import_cost_uah)}</td>
+              <td>{formatKwhNumber(totals.pv_kwh)}</td>
+              <td>{formatKwhNumber(totals.load_kwh)}</td>
+              <td>{formatKwhNumber(totals.grid_import_kwh)}</td>
+              <td>{formatUahNumber(totals.import_cost_uah)}</td>
               <td>{formatPrice(unitCostUahPerKwh(totals.import_cost_uah, totals.load_kwh))}</td>
-              <td>{formatKwh(totals.grid_export_kwh)}</td>
-              <td>{formatPercent(selfShare)}</td>
+              <td>{formatKwhNumber(totals.grid_export_kwh)}</td>
+              <td>{formatPercentNumber(selfShare)}</td>
               <td>{formatCycles(totals.equivalent_cycles)}</td>
-              <td className={signClass(totals.ebitda_uah)}>{formatUah(totals.ebitda_uah)}</td>
-              <td className={signClass(totals.effect_uah)}>{formatUah(totals.effect_uah)}</td>
-              <td>{formatUah(totals.ess_net_uah)}</td>
+              <td className={signClass(totals.ebitda_uah)}>{formatUahNumber(totals.ebitda_uah)}</td>
+              <td className={signClass(totals.effect_uah)}>{formatUahNumber(totals.effect_uah)}</td>
+              <td>{formatUahNumber(totals.ess_net_uah)}</td>
             </tr>
           </tbody>
         </table>

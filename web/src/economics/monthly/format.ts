@@ -56,6 +56,24 @@ export function formatKwh(kwh: number): string {
   return `${kwhFmt.format(Math.round(kwh))} кВт·год`
 }
 
+// The *Number variants drop the unit for dense tables, where repeating
+// "кВт·год"/"грн"/"%" in every cell costs more width than the numbers
+// themselves; those tables carry the unit in the column header instead.
+export function formatKwhNumber(kwh: number): string {
+  if (!Number.isFinite(kwh)) return '—'
+  return kwhFmt.format(Math.round(kwh))
+}
+
+export function formatUahNumber(v: number): string {
+  if (!Number.isFinite(v)) return '—'
+  return uahFmt.format(Math.round(v))
+}
+
+export function formatPercentNumber(v: number): string {
+  if (!Number.isFinite(v)) return '—'
+  return mwhFmt.format(v * 100)
+}
+
 export function formatPercent(v: number): string {
   if (!Number.isFinite(v)) return '—'
   return percentFmt.format(v)

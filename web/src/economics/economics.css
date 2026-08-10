@@ -628,10 +628,17 @@
   gap: 12px;
 }
 
-.kpi-strip,
-.kpi-secondary-strip {
+.kpi-strip {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+/* The secondary row carries six metrics that belong on one line, so its
+   track floor is tighter than the primary strip's four headline cards. */
+.kpi-secondary-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(176px, 1fr));
   gap: 12px;
 }
 
