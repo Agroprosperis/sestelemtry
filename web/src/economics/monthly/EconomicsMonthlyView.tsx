@@ -71,6 +71,15 @@ export function EconomicsMonthlyView({ data, organizationID }: Props) {
   )
 }
 
+// unitCostUahPerKwh is what one consumed kWh actually cost: everything
+// bought from the grid spread over the whole load. It lands below the
+// market import price because СЕС and УЗЕ cover part of the load for
+// free. The battery-charging purchase stays in the numerator — that
+// energy reaches the object too, just later.
+function unitCostUahPerKwh(importCostUah: number, loadKwh: number): number {
+  return loadKwh > 0 ? importCostUah / loadKwh : NaN
+}
+
 // --- KPI strip ---
 
 export function MonthlyKpis({ totals, scope = 'month' }: { totals: EconomicsMonthlyTotals; scope?: PeriodScope }) {
@@ -88,6 +97,16 @@ export function MonthlyKpis({ totals, scope = 'month' }: { totals: EconomicsMont
     `Фактично куплена з мережі електроенергія ${w.per} та її повна вартість за цінами РДН із розподілом, передачею, надбавкою постачальника і ПДВ. ` +
     `На споживання — ${formatUah(purchaseToLoadUah)}, на заряд УЗЕ — ${formatUah(totals.expense_grid_charge_uah)}. ` +
     'У EBITDA як витрата входить лише заряд УЗЕ: купівля на споживання вже врахована через дохід від самоспоживання.'
+  const unitCost = unitCostUahPerKwh(totals.import_cost_uah, totals.load_kwh)
+  // The same load valued as if every kWh came from the grid, so both
+  // prices share a denominator and the discount reduces to a cost ratio.
+  const baselineUnitCost = unitCostUahPerKwh(totals.baseline_cost_uah, totals.load_kwh)
+  const unitDiscount =
+    totals.baseline_cost_uah > 0 ? 1 - totals.import_cost_uah / totals.baseline_cost_uah : NaN
+  const unitCostTip =
+    `Уся куплена з мережі електроенергія (${formatUah(totals.import_cost_uah)}), поділена на все споживання ${w.of} (${formatMwh(totals.load_kwh)}). ` +
+    'Виходить дешевше за ринкову ціну імпорту, бо частину споживання безкоштовно закривають СЕС та УЗЕ. ' +
+    'Для порівняння наведено ціну без проєкту — якби всі кіловат-години купували з мережі.'
 
   return (
     <section className="economics-kpis" aria-label={`Ключові показники ${w.of}`}>
@@ -125,6 +144,16 @@ export function MonthlyKpis({ totals, scope = 'month' }: { totals: EconomicsMont
           <span className="kpi-sub">
             {formatMwh(totals.grid_import_kwh)} · споживання {formatMwhNumber(totals.grid_to_load_kwh)} / УЗЕ{' '}
             {formatMwhNumber(totals.grid_to_ess_kwh)}
+          </span>
+        </div>
+        <div className="kpi-card kpi-card-secondary">
+          <span className="kpi-label">
+            Фактична ціна 1 кВт·год
+            <OptimumInfo tip={unitCostTip} />
+          </span>
+          <span className="kpi-value">{formatPrice(unitCost)}</span>
+          <span className="kpi-sub">
+            грн/кВт·год · без проєкту {formatPrice(baselineUnitCost)} · дешевше на {formatPercent(unitDiscount)}
           </span>
         </div>
         <div className="kpi-card kpi-card-secondary">
@@ -1012,6 +1041,7 @@ const COLUMNS = [
   'Споживання (кВт·год)',
   'Імпорт (кВт·год)',
   'Вартість імпорту (грн)',
+  'Факт. ціна (грн/кВт·год)',
   'Експорт (кВт·год)',
   'Самоспож. (%)',
   'УЗЕ цикли (екв.)',
@@ -1030,6 +1060,7 @@ function dayRowValues(d: EconomicsMonthlyDay): string[] {
     formatKwh(d.load_kwh),
     formatKwh(d.grid_import_kwh),
     formatUah(d.import_cost_uah),
+    formatPrice(unitCostUahPerKwh(d.import_cost_uah, d.load_kwh)),
     formatKwh(d.grid_export_kwh),
     formatPercent(selfShare),
     formatCycles(d.equivalent_cycles),
@@ -1102,6 +1133,7 @@ function MonthlyDailyTable({
                 <td>{formatKwh(d.load_kwh)}</td>
                 <td>{formatKwh(d.grid_import_kwh)}</td>
                 <td>{formatUah(d.import_cost_uah)}</td>
+                <td>{formatPrice(unitCostUahPerKwh(d.import_cost_uah, d.load_kwh))}</td>
                 <td>{formatKwh(d.grid_export_kwh)}</td>
                 <td>{formatPercent(d.pv_kwh > 0 ? (d.pv_to_load_kwh + d.pv_to_ess_kwh) / d.pv_kwh : 0)}</td>
                 <td>{formatCycles(d.equivalent_cycles)}</td>
@@ -1117,6 +1149,7 @@ function MonthlyDailyTable({
               <td>{formatKwh(totals.load_kwh)}</td>
               <td>{formatKwh(totals.grid_import_kwh)}</td>
               <td>{formatUah(totals.import_cost_uah)}</td>
+              <td>{formatPrice(unitCostUahPerKwh(totals.import_cost_uah, totals.load_kwh))}</td>
               <td>{formatKwh(totals.grid_export_kwh)}</td>
               <td>{formatPercent(selfShare)}</td>
               <td>{formatCycles(totals.equivalent_cycles)}</td>
