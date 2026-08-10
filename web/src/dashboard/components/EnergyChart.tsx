@@ -18,6 +18,7 @@ import type { UzePlanResponse } from '../../api'
 import type { DashboardMetric } from '../../types'
 import {
   AI_PLAN_COLOR,
+  AI_PLAN_LOAD_COLOR,
   AI_PLAN_SOC_COLOR,
   dayPowerColor,
   energyColor,
@@ -26,14 +27,18 @@ import {
 import { formatChartNumber } from '../format'
 import { DAY_POWER_METRIC_KEYS, DAY_POWER_METRIC_LABELS } from '../metrics'
 import type { RangePreset } from '../range'
-import { type AiPlanBucket, aiPlanBuckets, aiPlanHasDispatch } from '../transforms/aiPlan'
+import {
+  type AiPlanBucket,
+  aiPlanBuckets,
+  aiPlanHasDispatch,
+  aiPlanHasLoad,
+} from '../transforms/aiPlan'
 import type { EnergyRow } from '../transforms/buckets'
 import type { DAMChartRow } from '../transforms/dam'
 import type { PowerChartRow } from '../transforms/power'
 import type { PvForecastHourlyRow } from '../transforms/pvForecast'
 import type { SOCChartRow } from '../transforms/soc'
 import type { EnergySummary as Summary } from '../transforms/summary'
-import { AiPlanSummary } from './AiPlanSummary'
 import { ChartSkeleton } from './ChartSkeleton'
 import { EnergySummary } from './EnergySummary'
 import { EnergyTooltip } from './EnergyTooltip'
@@ -73,6 +78,10 @@ const AI_ESS_LABEL = 'Рекомендація ШІ (УЗЕ)'
 const AI_SOC_KEY = 'ai_soc_pct'
 const AI_SOC_LABEL = 'SOC за планом ШІ'
 const AI_REASON_KEY = 'ai_reason_text'
+// The recommended elevator consumption, negated like load_power_kw so the
+// planned load sits next to the actual load sink below zero.
+const AI_LOAD_KEY = 'ai_load_kw'
+const AI_LOAD_LABEL = 'Споживання за планом ШІ'
 
 // Day preset uses 5-minute buckets (288 per day); show every 12th tick so
 // labels land on the hour and the axis stays readable.
@@ -150,8 +159,12 @@ export function EnergyChart({
   // Track which day-chart series the user has temporarily hidden by
   // clicking the corresponding legend item. State lives on the chart so
   // it survives re-renders triggered by data refetches but resets on
-  // unmount (preset change).
-  const [hiddenSeries, setHiddenSeries] = useState<Set<string>>(() => new Set())
+  // unmount (preset change). The AI recommendation starts hidden — it is
+  // an opt-in overlay the user turns on from the legend when they want
+  // to compare against the optimum, not three extra lines by default.
+  const [hiddenSeries, setHiddenSeries] = useState<Set<string>>(
+    () => new Set([AI_ESS_KEY, AI_SOC_KEY, AI_LOAD_KEY]),
+  )
   const toggleSeries = useCallback((id: string) => {
     setHiddenSeries((prev) => {
       const next = new Set(prev)
@@ -205,6 +218,9 @@ export function EnergyChart({
       if (bucket) {
         merged[AI_ESS_KEY] = bucket.essKw
         if (bucket.socPct != null) merged[AI_SOC_KEY] = bucket.socPct
+        // Negated like load_power_kw so the planned consumption sits next
+        // to the actual load sink below zero.
+        if (bucket.loadKw != null) merged[AI_LOAD_KEY] = -bucket.loadKw
         // Carried on the row (not as a series) so the tooltip can explain
         // why the optimizer chose this hour's action.
         merged[AI_REASON_KEY] = bucket.reasonText
@@ -215,6 +231,7 @@ export function EnergyChart({
   const hasSoc = (socSeries ?? []).some((r) => r.soc != null && Number.isFinite(r.soc))
   const hasPvForecast = (pvForecastSeries ?? []).length > 0
   const hasAiPlan = preset === 'day' && aiPlanHasDispatch(aiPlan ?? null)
+  const hasAiLoad = preset === 'day' && aiPlanHasLoad(aiPlan ?? null)
 
   const dayLabels = useMemo(() => dayData.map((r) => String(r.time)), [dayData])
   const hourlyAreas = useMemo(() => hourlyDamAreas(damSeries, dayLabels), [damSeries, dayLabels])
@@ -245,6 +262,9 @@ export function EnergyChart({
     if (hasAiPlan) {
       items.push({ id: AI_ESS_KEY, label: AI_ESS_LABEL, color: AI_PLAN_COLOR })
     }
+    if (hasAiLoad) {
+      items.push({ id: AI_LOAD_KEY, label: AI_LOAD_LABEL, color: AI_PLAN_LOAD_COLOR })
+    }
     items.push({ id: DAM_PRICE_KEY, label: DAM_PRICE_LABEL, color: DAM_PRICE_COLOR })
     if (hasSoc) {
       items.push({ id: SOC_KEY, label: SOC_LABEL, color: SOC_COLOR })
@@ -253,7 +273,7 @@ export function EnergyChart({
       items.push({ id: AI_SOC_KEY, label: AI_SOC_LABEL, color: AI_PLAN_SOC_COLOR })
     }
     return items
-  }, [hasSoc, hasPvForecast, hasAiPlan])
+  }, [hasSoc, hasPvForecast, hasAiPlan, hasAiLoad])
 
   const renderDayLegend = useCallback(
     () => (
@@ -289,7 +309,6 @@ export function EnergyChart({
   return (
     <div className="chart-card">
       <h2>Energy Trend</h2>
-      {preset === 'day' && <AiPlanSummary plan={aiPlan} loading={loading} />}
       <EnergySummary summary={summary} loading={loading} />
       <div className="chart-wrap">
         {loading ? (
@@ -436,6 +455,25 @@ export function EnergyChart({
                     stroke={AI_PLAN_SOC_COLOR}
                     strokeWidth={2}
                     strokeDasharray="4 4"
+                    dot={false}
+                    activeDot={{ r: 4 }}
+                    connectNulls
+                    isAnimationActive={false}
+                  />
+                )}
+                {/* Recommended consumption: also a step (the schedule says
+                    "run at N kW this hour") and negated like the actual
+                    load line so plan and fact sit next to each other
+                    below zero. */}
+                {hasAiLoad && !hiddenSeries.has(AI_LOAD_KEY) && (
+                  <Line
+                    yAxisId="power"
+                    type="stepAfter"
+                    dataKey={AI_LOAD_KEY}
+                    name={AI_LOAD_LABEL}
+                    stroke={AI_PLAN_LOAD_COLOR}
+                    strokeWidth={2}
+                    strokeDasharray="6 3"
                     dot={false}
                     activeDot={{ r: 4 }}
                     connectNulls

@@ -1240,6 +1240,17 @@ components:
         reason_text:
           type: string
           description: Operator-facing explanation (Ukrainian).
+        recommended_load_kw:
+          type: number
+          format: double
+          nullable: true
+          description: >
+            Recommended elevator consumption for the hour (kW == kWh over
+            the hourly bucket). The day's actual energy redistributed into
+            PV-surplus and cheap РДН hours: the minimum observed hourly
+            load stays in every hour, no hour exceeds the day's maximum
+            observed hourly load, and the daily total is conserved. Null
+            for hours without telemetry.
         rdn_uah_per_kwh:
           type: number
           format: double

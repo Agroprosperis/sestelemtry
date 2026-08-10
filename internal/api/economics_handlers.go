@@ -191,6 +191,11 @@ type UzePlanHour struct {
 	ReasonCode string `json:"reason_code"`
 	ReasonText string `json:"reason_text"`
 
+	// RecommendedLoadKw is the elevator consumption schedule that soaks
+	// up exported PV and cheap РДН hours with the same daily energy.
+	// null for hours without telemetry.
+	RecommendedLoadKw *float64 `json:"recommended_load_kw"`
+
 	RdnUahPerKwh *float64 `json:"rdn_uah_per_kwh"`
 }
 
@@ -301,18 +306,19 @@ func (h *Handlers) uzePlan(w http.ResponseWriter, r *http.Request) {
 	}
 	for i, hr := range plan.Hours {
 		resp.Hours[i] = UzePlanHour{
-			Hour:             hr.Hour,
-			RecommendedEssKw: hr.RecommendedEssKw,
-			SocPct:           hr.SocPct,
-			EssToLoadKwh:     hr.EssToLoadKwh,
-			EssToGridKwh:     hr.EssToGridKwh,
-			PvToEssKwh:       hr.PvToEssKwh,
-			GridToEssKwh:     hr.GridToEssKwh,
-			EffectUah:        hr.EffectUah,
-			Action:           hr.Action,
-			ReasonCode:       hr.ReasonCode,
-			ReasonText:       hr.ReasonText,
-			RdnUahPerKwh:     hr.Rdn,
+			Hour:              hr.Hour,
+			RecommendedEssKw:  hr.RecommendedEssKw,
+			SocPct:            hr.SocPct,
+			EssToLoadKwh:      hr.EssToLoadKwh,
+			EssToGridKwh:      hr.EssToGridKwh,
+			PvToEssKwh:        hr.PvToEssKwh,
+			GridToEssKwh:      hr.GridToEssKwh,
+			EffectUah:         hr.EffectUah,
+			Action:            hr.Action,
+			ReasonCode:        hr.ReasonCode,
+			ReasonText:        hr.ReasonText,
+			RecommendedLoadKw: hr.RecommendedLoadKw,
+			RdnUahPerKwh:      hr.Rdn,
 		}
 	}
 	writeJSON(w, http.StatusOK, resp)

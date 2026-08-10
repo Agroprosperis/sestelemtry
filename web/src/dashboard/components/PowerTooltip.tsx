@@ -22,6 +22,7 @@ const SOC_KEY = 'soc_percent'
 const PV_FORECAST_KEY = 'planned_ac_kw'
 const AI_ESS_KEY = 'ai_ess_power_kw'
 const AI_SOC_KEY = 'ai_soc_pct'
+const AI_LOAD_KEY = 'ai_load_kw'
 const AI_REASON_KEY = 'ai_reason_text'
 
 // Anything closer to zero than this is treated as "idle" — both the
@@ -99,6 +100,11 @@ export function PowerTooltip({ active, label, payload }: Props) {
   const aiSocEntry = byKey.get(AI_SOC_KEY)
   const aiSocValue = Number(aiSocEntry?.value)
   const showAiSoc = Number.isFinite(aiSocValue)
+  // The recommended load is stored negated on the row (drawn as a sink);
+  // flip it back to a positive consumption number, like the load row.
+  const aiLoadEntry = byKey.get(AI_LOAD_KEY)
+  const aiLoadValue = Number(aiLoadEntry?.value)
+  const showAiLoad = Number.isFinite(aiLoadValue)
   const reasonRaw = payload.find((e) => e.payload?.[AI_REASON_KEY] != null)?.payload?.[AI_REASON_KEY]
   const reasonText = typeof reasonRaw === 'string' ? reasonRaw : ''
 
@@ -184,6 +190,18 @@ export function PowerTooltip({ active, label, payload }: Props) {
           />
           <span className="energy-tooltip-name">SOC за планом ШІ</span>
           <span className="energy-tooltip-value">{formatChartNumber(aiSocValue)} %</span>
+        </div>
+      )}
+      {showAiLoad && (
+        <div className="energy-tooltip-row energy-tooltip-dam">
+          <span
+            className="energy-tooltip-dot"
+            style={{ backgroundColor: aiLoadEntry?.color ?? '#d97706' }}
+          />
+          <span className="energy-tooltip-name">ШІ: споживання</span>
+          <span className="energy-tooltip-value">
+            {formatChartNumber(Math.abs(aiLoadValue))} кВт
+          </span>
         </div>
       )}
       {showAiEss && reasonText && <div className="energy-tooltip-reason">{reasonText}</div>}

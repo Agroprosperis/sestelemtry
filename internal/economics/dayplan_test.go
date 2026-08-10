@@ -285,6 +285,211 @@ func TestGetDayPlanEndToEnd(t *testing.T) {
 	}
 }
 
+// loadShiftDay is a synthetic elevator day: constant 20 kWh of base load
+// every hour, heavy milling (180 kWh extra) in the expensive evening, an
+// exported PV surplus at midday and a cheap night — exactly the day the
+// schedule recommendation exists to fix.
+func loadShiftDay(loc *time.Location) []HourlyRecord {
+	dayStart := time.Date(2026, 4, 1, 0, 0, 0, 0, loc)
+	out := make([]HourlyRecord, 24)
+	for h := 0; h < 24; h++ {
+		rec := HourlyRecord{HourStart: dayStart.Add(time.Duration(h) * time.Hour)}
+		price := 5.0
+		switch {
+		case h >= 1 && h <= 3:
+			price = 1
+		case h >= 19 && h <= 21:
+			price = 20
+		}
+		rdn := price * 1000
+		rec.Rdn = &rdn
+		rec.ImportPrice = price
+		rec.ExportPrice = price * 0.8
+
+		rec.GridToLoad = 20
+		if h >= 19 && h <= 21 {
+			rec.GridToLoad = 80 // 60 kWh/h of movable evening milling
+		}
+		if h >= 11 && h <= 13 {
+			rec.PVToGrid = 100 // exported PV surplus nobody consumed
+		}
+		rec.GridImport = rec.GridToLoad
+		out[h] = rec
+	}
+	return out
+}
+
+func recommendedFor(t *testing.T, hourly []HourlyRecord, loc *time.Location) [24]*float64 {
+	t.Helper()
+	opts := buildDayOpts(hourly, loc, nil)
+	do := opts["2026-04-01"]
+	if do == nil {
+		t.Fatal("buildDayOpts produced no day")
+	}
+	return recommendLoad(do)
+}
+
+// TestRecommendLoadShiftsIntoPvAndCheapHours locks in the three invariants
+// the chart line asserts visually: daily energy is conserved, no hour
+// exceeds the demonstrated peak, and the movable load lands in the
+// PV-surplus and cheap hours instead of the expensive evening.
+func TestRecommendLoadShiftsIntoPvAndCheapHours(t *testing.T) {
+	loc := time.UTC
+	hourly := loadShiftDay(loc)
+	rec := recommendedFor(t, hourly, loc)
+
+	var totalFact, totalRec float64
+	for h, r := range hourly {
+		totalFact += r.GridToLoad
+		if rec[h] == nil {
+			t.Fatalf("hour %d: no recommendation", h)
+		}
+		totalRec += *rec[h]
+		if *rec[h] > 80+1e-6 {
+			t.Errorf("hour %d: %.1f kWh exceeds the demonstrated 80 kWh peak", h, *rec[h])
+		}
+		if *rec[h] < 20-1e-6 {
+			t.Errorf("hour %d: %.1f kWh drops below the 20 kWh base load", h, *rec[h])
+		}
+	}
+	if math.Abs(totalRec-totalFact) > 1e-6 {
+		t.Fatalf("energy not conserved: recommended %.3f vs actual %.3f", totalRec, totalFact)
+	}
+
+	// The evening milling must move out, and with the night import (1)
+	// cheaper than the forgone PV export (4) the 180 kWh fills the three
+	// night hours to the 80 kWh peak.
+	for h := 19; h <= 21; h++ {
+		if *rec[h] > 20+1e-6 {
+			t.Errorf("hour %d: %.1f kWh still scheduled in the expensive evening", h, *rec[h])
+		}
+	}
+	for h := 1; h <= 3; h++ {
+		if *rec[h] < 80-1e-6 {
+			t.Errorf("hour %d: %.1f kWh, want the full 80 kWh in the cheap night", h, *rec[h])
+		}
+	}
+}
+
+// TestRecommendLoadPrefersPvSurplus: without a cheap night, consuming the
+// exported PV (cost = forgone export, 4) beats running on grid at the flat
+// import price (5), so the milling moves under the solar peak.
+func TestRecommendLoadPrefersPvSurplus(t *testing.T) {
+	loc := time.UTC
+	hourly := loadShiftDay(loc)
+	for i := range hourly {
+		if i >= 1 && i <= 3 {
+			rdn := 5000.0
+			hourly[i].Rdn = &rdn
+			hourly[i].ImportPrice = 5
+			hourly[i].ExportPrice = 4
+		}
+	}
+	rec := recommendedFor(t, hourly, loc)
+
+	for h := 11; h <= 13; h++ {
+		if *rec[h] < 80-1e-6 {
+			t.Errorf("hour %d: %.1f kWh, want the full 80 kWh under the PV surplus", h, *rec[h])
+		}
+	}
+	for h := 19; h <= 21; h++ {
+		if *rec[h] > 20+1e-6 {
+			t.Errorf("hour %d: %.1f kWh still scheduled in the expensive evening", h, *rec[h])
+		}
+	}
+}
+
+// TestRecommendLoadWithoutPricesEqualsFact: no РДН anywhere → nothing to
+// optimise against, so the recommendation must be the factual profile,
+// not an invented schedule.
+func TestRecommendLoadWithoutPricesEqualsFact(t *testing.T) {
+	loc := time.UTC
+	hourly := loadShiftDay(loc)
+	for i := range hourly {
+		hourly[i].Rdn = nil
+	}
+	rec := recommendedFor(t, hourly, loc)
+	for h, r := range hourly {
+		if rec[h] == nil || math.Abs(*rec[h]-r.GridToLoad) > 1e-6 {
+			t.Errorf("hour %d: recommended %v, want the factual %.1f", h, rec[h], r.GridToLoad)
+		}
+	}
+}
+
+// TestRecommendLoadFlatDay: with nothing movable (base == peak) the
+// recommendation is the fact — there is no headroom to shift into.
+func TestRecommendLoadFlatDay(t *testing.T) {
+	loc := time.UTC
+	hourly := loadShiftDay(loc)
+	for i := range hourly {
+		hourly[i].GridToLoad = 50
+	}
+	rec := recommendedFor(t, hourly, loc)
+	for h := range hourly {
+		if rec[h] == nil || math.Abs(*rec[h]-50) > 1e-6 {
+			t.Errorf("hour %d: recommended %v, want 50", h, rec[h])
+		}
+	}
+}
+
+// TestRecommendLoadPartialPrices: hours without a РДН price must not be
+// scheduled above base, and the energy they can't take spills into the
+// priced hours while the daily total still balances.
+func TestRecommendLoadPartialPrices(t *testing.T) {
+	loc := time.UTC
+	hourly := loadShiftDay(loc)
+	// Strip prices from the night — the cheapest hours vanish from the
+	// eligible set.
+	for h := 0; h <= 6; h++ {
+		hourly[h].Rdn = nil
+	}
+	rec := recommendedFor(t, hourly, loc)
+
+	var totalFact, totalRec float64
+	for h, r := range hourly {
+		totalFact += r.GridToLoad
+		if rec[h] == nil {
+			t.Fatalf("hour %d: no recommendation", h)
+		}
+		totalRec += *rec[h]
+		if h <= 6 && *rec[h] > 20+1e-6 {
+			t.Errorf("hour %d: %.1f kWh of extra load scheduled without a price", h, *rec[h])
+		}
+	}
+	if math.Abs(totalRec-totalFact) > 1e-6 {
+		t.Fatalf("energy not conserved: recommended %.3f vs actual %.3f", totalRec, totalFact)
+	}
+}
+
+// TestGetDayPlanCarriesRecommendedLoad: the service wires the schedule
+// into the same payload as the УЗЕ plan.
+func TestGetDayPlanCarriesRecommendedLoad(t *testing.T) {
+	b, loc := newKyivBackend(t)
+	tariffs := flatTariffs
+	tariffs.EssCapacityKwh = 100
+	tariffs.EssPowerLimitKw = 50
+	b.schedule = Schedule{{EffectiveFrom: mustDate("1970-01-01"), Tariffs: tariffs}}
+	b.hourly = loadShiftDay(loc)
+
+	plan, err := NewService(b).GetDayPlan(context.Background(), "org1", "2026-04-01", "Europe/Kyiv")
+	if err != nil {
+		t.Fatalf("GetDayPlan: %v", err)
+	}
+	if !plan.Available {
+		t.Fatal("expected an available plan")
+	}
+	var sum float64
+	for _, h := range plan.Hours {
+		if h.RecommendedLoadKw == nil {
+			t.Fatalf("hour %d: recommended load missing", h.Hour)
+		}
+		sum += *h.RecommendedLoadKw
+	}
+	if math.Abs(sum-(21*20+3*80)) > 1e-6 {
+		t.Errorf("Σ recommended = %.1f, want the day's actual load", sum)
+	}
+}
+
 func TestGetDayPlanRejectsBadDate(t *testing.T) {
 	b, _ := newKyivBackend(t)
 	if _, err := NewService(b).GetDayPlan(context.Background(), "org1", "01-04-2026", "Europe/Kyiv"); err == nil {

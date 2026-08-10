@@ -536,6 +536,10 @@ export type UzePlanHour = {
   action: UzePlanAction
   reason_code: string
   reason_text: string
+  // recommended_load_kw is the elevator consumption schedule: the day's
+  // actual energy redistributed into PV-surplus / cheap РДН hours. null
+  // for hours without telemetry.
+  recommended_load_kw: number | null
   rdn_uah_per_kwh: number | null
 }
 

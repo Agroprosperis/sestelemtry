@@ -63,3 +63,8 @@ export const AI_PLAN_COLOR = '#db2777'
 // band is #a855f7) so both read as "state of charge" on the right axis.
 // Matches the `socOpt` violet of the monthly cycle chart.
 export const AI_PLAN_SOC_COLOR = '#9333ea'
+
+// The recommended consumption stays in the load family — a darker amber
+// than the actual load line (#f59e0b), the same planned-vs-actual pairing
+// the PV forecast uses with its darker green.
+export const AI_PLAN_LOAD_COLOR = '#d97706'

@@ -1,6 +1,5 @@
-// Shared formatters for economics figures. Kept in one module so every
-// view that reports currency / energy / prices — the monthly page and
-// the dashboard's daily recommendation alike — renders them identically.
+// Shared formatters for the monthly economics view. Kept in one module
+// so every section renders currency / energy / prices identically.
 
 const uahFmt = new Intl.NumberFormat('uk-UA', {
   style: 'decimal',

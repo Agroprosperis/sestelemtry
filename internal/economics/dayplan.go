@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"sort"
 	"time"
 )
 
@@ -61,6 +62,11 @@ type DayPlanHour struct {
 	Action     string // "charge" | "discharge" | "hold"
 	ReasonCode string
 	ReasonText string
+
+	// RecommendedLoadKw is the elevator consumption the same daily energy
+	// would be scheduled at to soak up exported PV and cheap РДН hours
+	// (see recommendLoad). nil for hours without telemetry.
+	RecommendedLoadKw *float64
 
 	Rdn *float64
 }
@@ -150,6 +156,153 @@ func classifyHour(s dispatchStep, oh optimumHour, socKwh, maxFutureImport float6
 	}
 }
 
+// loadOf is one hour's consumption in kWh (hourly buckets, so also the
+// average kW). For anomalous hours the ESS leg is dropped — same rule as
+// dayOpt.addHour — so a corrupt discharge reading can't inflate the
+// day's demonstrated base / peak consumption.
+func (do *dayOpt) loadOf(i int) float64 {
+	r := do.raw[i]
+	load := r.PVToLoad + r.GridToLoad
+	if !do.badHour[i] {
+		load += r.EssToLoad
+	}
+	return load
+}
+
+// recommendLoad redistributes the day's ACTUAL consumption into the hours
+// where it would have been cheapest to run — the hourly counterpart of the
+// monthly "резерв графіка" (shifting flexible elevator work into exported
+// PV, valued at the import−export gap).
+//
+// Rules, in order of what they protect:
+//   - Energy conserved: the elevator still has to process the same volume,
+//     so Σ recommended == Σ actual, always.
+//   - Base stays put: the day's minimum hourly load (ventilation, office)
+//     runs in every hour — only the load ABOVE it is treated as movable.
+//   - Demonstrated ceiling: no hour is scheduled above the day's maximum
+//     observed hourly load — the elevator can't mill faster than it has
+//     shown it can.
+//   - Cheapest hours first: flexible energy fills PV-surplus bands (cost =
+//     the forgone export) before grid bands (cost = the all-in import
+//     price). Hours without a РДН price take no extra load; whatever can't
+//     fit into priced hours waterfills back into them.
+//   - No prices at all → the recommendation is the fact: there is nothing
+//     to optimise against, and inventing a schedule would be noise.
+//
+// Deliberately independent of the УЗЕ plan (both are computed from the
+// same realised flows): coupling them would need a joint optimisation and
+// a load model we don't have yet.
+func recommendLoad(do *dayOpt) [24]*float64 {
+	var out [24]*float64
+
+	var hours []int
+	base, peak, total := math.Inf(1), 0.0, 0.0
+	anyTradable := false
+	for i := 0; i < 24; i++ {
+		if !do.hasRaw[i] {
+			continue
+		}
+		hours = append(hours, i)
+		l := do.loadOf(i)
+		total += l
+		if l < base {
+			base = l
+		}
+		if l > peak {
+			peak = l
+		}
+		if do.hours[i].tradable {
+			anyTradable = true
+		}
+	}
+	if len(hours) == 0 || total <= 0 {
+		return out
+	}
+	if !anyTradable {
+		for _, i := range hours {
+			v := do.loadOf(i)
+			out[i] = &v
+		}
+		return out
+	}
+
+	headroom := peak - base
+	flexible := total - base*float64(len(hours))
+	alloc := make(map[int]float64, len(hours))
+
+	// One price band per source per hour: consuming exported PV costs the
+	// export price it forgoes, anything beyond that comes from the grid at
+	// the import price. PV already feeding the battery is left to the УЗЕ
+	// plan — only pv_to_grid is up for grabs.
+	type band struct {
+		hour int
+		kwh  float64
+		cost float64
+	}
+	var bands []band
+	for _, i := range hours {
+		if !do.hours[i].tradable || headroom <= 0 {
+			continue
+		}
+		pv := math.Min(do.raw[i].PVToGrid, headroom)
+		if pv > 0 {
+			bands = append(bands, band{hour: i, kwh: pv, cost: do.hours[i].exportPrice})
+		}
+		if grid := headroom - pv; grid > 0 {
+			bands = append(bands, band{hour: i, kwh: grid, cost: do.hours[i].importPrice})
+		}
+	}
+	sort.SliceStable(bands, func(a, b int) bool {
+		if bands[a].cost != bands[b].cost {
+			return bands[a].cost < bands[b].cost
+		}
+		return bands[a].hour < bands[b].hour
+	})
+	left := flexible
+	for _, b := range bands {
+		if left <= 0 {
+			break
+		}
+		take := math.Min(b.kwh, left)
+		// A band shares the hour's headroom with the other band of the
+		// same hour, so re-check what's actually still free there.
+		if free := headroom - alloc[b.hour]; take > free {
+			take = free
+		}
+		if take <= 0 {
+			continue
+		}
+		alloc[b.hour] += take
+		left -= take
+	}
+	// Whatever priced hours couldn't absorb (some hours unpriced, tight
+	// ceiling) waterfills back into the unpriced hours' headroom — the
+	// energy has to go somewhere, and "somewhere" should still respect
+	// the demonstrated ceiling.
+	if left > 1e-9 {
+		var open []int
+		for _, i := range hours {
+			if !do.hours[i].tradable && headroom-alloc[i] > 0 {
+				open = append(open, i)
+			}
+		}
+		sort.Slice(open, func(a, b int) bool {
+			return headroom-alloc[open[a]] < headroom-alloc[open[b]]
+		})
+		for n, i := range open {
+			share := math.Min(left/float64(len(open)-n), headroom-alloc[i])
+			alloc[i] += share
+			left -= share
+		}
+	}
+
+	for _, i := range hours {
+		v := base + alloc[i]
+		out[i] = &v
+	}
+	return out
+}
+
 // buildDayPlan solves one day's optimal dispatch and packages it for the
 // dashboard. do carries the day's hourly optimizer context; p the battery
 // envelope. The schedule comes from buildCycle so the daily chart and the
@@ -185,6 +338,7 @@ func buildDayPlan(key string, do *dayOpt, p optimumParams, capacityKwh, powerLim
 	plan.Available = true
 	plan.SocStartPct = opt.SocStart
 	plan.Hours = make([]DayPlanHour, n)
+	recLoad := recommendLoad(do)
 
 	var anomalous, priced, missingPrice, withSoc int
 	socKwh := 0.0
@@ -210,17 +364,18 @@ func buildDayPlan(key string, do *dayOpt, p optimumParams, capacityKwh, powerLim
 			soc = *opt.SocPct[i]
 		}
 		row := DayPlanHour{
-			Hour:             i,
-			RecommendedEssKw: discharge - charge,
-			SocPct:           soc,
-			EssToLoadKwh:     opt.ToLoadKwh[i],
-			EssToGridKwh:     opt.ToGridKwh[i],
-			PvToEssKwh:       opt.ChgPvKwh[i],
-			GridToEssKwh:     opt.ChgGridKwh[i],
-			EffectUah:        effect,
-			Action:           action,
-			ReasonCode:       code,
-			ReasonText:       text,
+			Hour:              i,
+			RecommendedEssKw:  discharge - charge,
+			SocPct:            soc,
+			EssToLoadKwh:      opt.ToLoadKwh[i],
+			EssToGridKwh:      opt.ToGridKwh[i],
+			PvToEssKwh:        opt.ChgPvKwh[i],
+			GridToEssKwh:      opt.ChgGridKwh[i],
+			EffectUah:         effect,
+			Action:            action,
+			ReasonCode:        code,
+			ReasonText:        text,
+			RecommendedLoadKw: recLoad[i],
 		}
 		if do.hasRaw[i] && do.raw[i].Rdn != nil {
 			v := *do.raw[i].Rdn

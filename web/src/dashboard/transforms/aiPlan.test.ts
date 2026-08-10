@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { UzePlanHour, UzePlanResponse } from '../../api'
-import { aiPlanBuckets, aiPlanHasDispatch } from './aiPlan'
+import { aiPlanBuckets, aiPlanHasDispatch, aiPlanHasLoad } from './aiPlan'
 
 function hour(over: Partial<UzePlanHour> & { hour: number }): UzePlanHour {
   return {
@@ -14,6 +14,7 @@ function hour(over: Partial<UzePlanHour> & { hour: number }): UzePlanHour {
     action: 'hold',
     reason_code: 'HOLD_LOW_PRICE',
     reason_text: 'Утримуємо',
+    recommended_load_kw: null,
     rdn_uah_per_kwh: null,
     ...over,
   }
@@ -82,6 +83,22 @@ describe('aiPlanBuckets', () => {
     expect(buckets.get(240)?.action).toBe('discharge')
   })
 
+  it('steps the recommended load across the hour and keeps it null without telemetry', () => {
+    const buckets = aiPlanBuckets(
+      plan([
+        hour({ hour: 2, recommended_load_kw: 65.5 }),
+        hour({ hour: 3, recommended_load_kw: null }),
+      ]),
+    )
+
+    for (let i = 24; i < 36; i++) {
+      expect(buckets.get(i)?.loadKw).toBe(65.5)
+    }
+    for (let i = 36; i < 48; i++) {
+      expect(buckets.get(i)?.loadKw).toBeNull()
+    }
+  })
+
   it('carries the reason text so the tooltip can explain the hour', () => {
     const buckets = aiPlanBuckets(
       plan([hour({ hour: 3, recommended_ess_kw: -10, reason_text: 'Заряд від надлишку СЕС' })]),
@@ -108,6 +125,20 @@ describe('aiPlanBuckets', () => {
 
     expect(buckets.size).toBe(12)
     expect(buckets.get(72)?.essKw).toBe(10)
+  })
+})
+
+describe('aiPlanHasLoad', () => {
+  it('is true once an hour carries a positive recommended load', () => {
+    expect(aiPlanHasLoad(plan([hour({ hour: 0, recommended_load_kw: 40 })]))).toBe(true)
+  })
+
+  it('is false without a schedule or for an unavailable plan', () => {
+    expect(aiPlanHasLoad(plan([hour({ hour: 0 })]))).toBe(false)
+    expect(aiPlanHasLoad(null)).toBe(false)
+    expect(
+      aiPlanHasLoad(plan([hour({ hour: 0, recommended_load_kw: 40 })], { available: false })),
+    ).toBe(false)
   })
 })
 

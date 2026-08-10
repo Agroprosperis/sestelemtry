@@ -166,6 +166,20 @@ describe('PowerTooltip AI recommendation', () => {
     expect(screen.queryByText('SOC за планом ШІ')).toBeNull()
   })
 
+  it('flips the negated recommended load back to positive consumption', () => {
+    render(
+      <PowerTooltip
+        active
+        label="12:05"
+        payload={[
+          { dataKey: 'ai_load_kw', name: 'ai load', value: -65.5, color: '#d97706', payload: {} },
+        ]}
+      />,
+    )
+    expect(screen.getByText('ШІ: споживання')).toBeInTheDocument()
+    expect(screen.getByText(/^65[.,]5\s*кВт$/)).toBeInTheDocument()
+  })
+
   it('stays out of the way when there is no recommendation', () => {
     render(
       <PowerTooltip

@@ -11,6 +11,9 @@ const BUCKETS_PER_HOUR = 12
 export type AiPlanBucket = {
   essKw: number
   socPct: number | null
+  // loadKw is the recommended elevator consumption, stepped like essKw.
+  // null when the hour has no telemetry to redistribute.
+  loadKw: number | null
   action: UzePlanAction
   reasonText: string
   effectUah: number
@@ -33,6 +36,8 @@ export function aiPlanBuckets(plan: UzePlanResponse | null): Map<number, AiPlanB
     if (!Number.isFinite(essKw)) continue
     const socRaw = Number(hour.soc_pct)
     const soc = Number.isFinite(socRaw) ? socRaw : null
+    const loadRaw = Number(hour.recommended_load_kw)
+    const load = hour.recommended_load_kw != null && Number.isFinite(loadRaw) ? loadRaw : null
     const effectRaw = Number(hour.effect_uah)
 
     const base = h * BUCKETS_PER_HOUR
@@ -43,6 +48,7 @@ export function aiPlanBuckets(plan: UzePlanResponse | null): Map<number, AiPlanB
         // would draw the battery arriving at its end-of-hour state
         // before it had moved the energy to get there.
         socPct: i === BUCKETS_PER_HOUR - 1 ? soc : null,
+        loadKw: load,
         action: hour.action,
         reasonText: hour.reason_text ?? '',
         effectUah: Number.isFinite(effectRaw) ? effectRaw : 0,
@@ -59,5 +65,14 @@ export function aiPlanHasDispatch(plan: UzePlanResponse | null): boolean {
   if (!plan || !plan.available) return false
   return (plan.hours ?? []).some(
     (h) => Number.isFinite(Number(h?.recommended_ess_kw)) && Math.abs(Number(h.recommended_ess_kw)) > 0.5,
+  )
+}
+
+// aiPlanHasLoad reports whether the plan carries a consumption schedule
+// worth drawing — at least one hour with a positive recommended load.
+export function aiPlanHasLoad(plan: UzePlanResponse | null): boolean {
+  if (!plan || !plan.available) return false
+  return (plan.hours ?? []).some(
+    (h) => h?.recommended_load_kw != null && Number(h.recommended_load_kw) > 0.5,
   )
 }
