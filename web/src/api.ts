@@ -581,6 +581,10 @@ export type EconomicsMonthlyTotals = {
   expense_total_uah: number
   ebitda_uah: number
 
+  // What the grid import actually cost. Not an EBITDA expense line —
+  // only the battery-charging part (expense_grid_charge_uah) is.
+  import_cost_uah: number
+
   ess_withdrawn_cost_uah: number
   ess_realized_profit_uah: number
   ess_degradation_cost_uah: number
@@ -620,6 +624,7 @@ export type EconomicsMonthlyDay = {
   effect_uah: number
   ess_net_uah: number
   ebitda_uah: number
+  import_cost_uah: number
 
   ess_fact_uah: number
   ess_optimum_uah: number

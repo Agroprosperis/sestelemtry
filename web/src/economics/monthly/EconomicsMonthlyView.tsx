@@ -81,6 +81,13 @@ export function MonthlyKpis({ totals, scope = 'month' }: { totals: EconomicsMont
   const ebitdaClass = totals.ebitda_uah >= 0 ? 'kpi-card kpi-card-success' : 'kpi-card kpi-card-danger'
   const essClass = totals.ess_net_uah >= 0 ? 'kpi-card kpi-card-info' : 'kpi-card kpi-card-warning'
   const savingShare = totals.baseline_cost_uah > 0 ? totals.ebitda_uah / totals.baseline_cost_uah : 0
+  // The import that went straight to the load is the remainder: the
+  // battery-charging leg is the only part booked as an EBITDA expense.
+  const purchaseToLoadUah = totals.import_cost_uah - totals.expense_grid_charge_uah
+  const purchaseTip =
+    `Фактично куплена з мережі електроенергія ${w.per} та її повна вартість за цінами РДН із розподілом, передачею, надбавкою постачальника і ПДВ. ` +
+    `На споживання — ${formatUah(purchaseToLoadUah)}, на заряд УЗЕ — ${formatUah(totals.expense_grid_charge_uah)}. ` +
+    'У EBITDA як витрата входить лише заряд УЗЕ: купівля на споживання вже врахована через дохід від самоспоживання.'
 
   return (
     <section className="economics-kpis" aria-label={`Ключові показники ${w.of}`}>
@@ -109,6 +116,17 @@ export function MonthlyKpis({ totals, scope = 'month' }: { totals: EconomicsMont
       </div>
 
       <div className="kpi-secondary-strip">
+        <div className="kpi-card kpi-card-secondary">
+          <span className="kpi-label">
+            Куплено з мережі
+            <OptimumInfo tip={purchaseTip} />
+          </span>
+          <span className="kpi-value">{formatUah(totals.import_cost_uah)}</span>
+          <span className="kpi-sub">
+            {formatMwh(totals.grid_import_kwh)} · споживання {formatMwhNumber(totals.grid_to_load_kwh)} / УЗЕ{' '}
+            {formatMwhNumber(totals.grid_to_ess_kwh)}
+          </span>
+        </div>
         <div className="kpi-card kpi-card-secondary">
           <span className="kpi-label">Уникнутий імпорт</span>
           <span className="kpi-value">{formatMwh(avoidedImportKwh)}</span>
@@ -674,7 +692,10 @@ export function MonthlyBalance({ totals, scope = 'month' }: { totals: EconomicsM
   const essNet = totals.ess_charged_kwh - totals.ess_discharged_kwh
   const checkTotal = consumption + exportTotal + essNet
 
-  const gridToLoadCost = totals.grid_to_load_kwh * totals.avg_import_price_uah_per_kwh
+  // Taking the remainder of the total purchase beats pricing the load
+  // leg at the blended average: charging is deliberately shifted into
+  // cheap hours, so the average overstates what the load actually cost.
+  const gridToLoadCost = totals.import_cost_uah - totals.expense_grid_charge_uah
 
   const bars: BalanceBar[] = [
     {
@@ -990,6 +1011,7 @@ const COLUMNS = [
   'СЕС (кВт·год)',
   'Споживання (кВт·год)',
   'Імпорт (кВт·год)',
+  'Вартість імпорту (грн)',
   'Експорт (кВт·год)',
   'Самоспож. (%)',
   'УЗЕ цикли (екв.)',
@@ -1007,6 +1029,7 @@ function dayRowValues(d: EconomicsMonthlyDay): string[] {
     formatKwh(d.pv_kwh),
     formatKwh(d.load_kwh),
     formatKwh(d.grid_import_kwh),
+    formatUah(d.import_cost_uah),
     formatKwh(d.grid_export_kwh),
     formatPercent(selfShare),
     formatCycles(d.equivalent_cycles),
@@ -1078,6 +1101,7 @@ function MonthlyDailyTable({
                 <td>{formatKwh(d.pv_kwh)}</td>
                 <td>{formatKwh(d.load_kwh)}</td>
                 <td>{formatKwh(d.grid_import_kwh)}</td>
+                <td>{formatUah(d.import_cost_uah)}</td>
                 <td>{formatKwh(d.grid_export_kwh)}</td>
                 <td>{formatPercent(d.pv_kwh > 0 ? (d.pv_to_load_kwh + d.pv_to_ess_kwh) / d.pv_kwh : 0)}</td>
                 <td>{formatCycles(d.equivalent_cycles)}</td>
@@ -1092,6 +1116,7 @@ function MonthlyDailyTable({
               <td>{formatKwh(totals.pv_kwh)}</td>
               <td>{formatKwh(totals.load_kwh)}</td>
               <td>{formatKwh(totals.grid_import_kwh)}</td>
+              <td>{formatUah(totals.import_cost_uah)}</td>
               <td>{formatKwh(totals.grid_export_kwh)}</td>
               <td>{formatPercent(selfShare)}</td>
               <td>{formatCycles(totals.equivalent_cycles)}</td>

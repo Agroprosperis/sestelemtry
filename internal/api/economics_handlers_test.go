@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -172,5 +173,31 @@ func TestTariffScheduleDeleteNotFound(t *testing.T) {
 	h.Router().ServeHTTP(rec, req)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("expected 404 (mock deletes 0 rows), got %d", rec.Code)
+	}
+}
+
+// The month's purchase cost is shown next to a per-day column of the same
+// figure, so the days must add up to the total even when each day bought
+// at a different average price.
+func TestImportCostDaysSumToMonth(t *testing.T) {
+	days := []economics.MonthDay{
+		{Date: "2026-06-01", Totals: economics.DailyTotals{GridImport: 100, AvgImportPrice: 5}},
+		{Date: "2026-06-02", Totals: economics.DailyTotals{GridImport: 300, AvgImportPrice: 7}},
+	}
+	// The rollup re-weights daily prices by their kWh, so the month's
+	// average is 6.5 UAH/kWh over 400 kWh.
+	month := economics.MonthlyTotals{GridImport: 400, AvgImportPrice: 6.5}
+
+	var daysSum float64
+	for _, d := range days {
+		daysSum += monthlyDayToJSON(d).ImportCostUah
+	}
+	total := monthlyTotalsToJSON(month).ImportCostUah
+
+	if math.Abs(total-2600) > 1e-9 {
+		t.Fatalf("month import cost = %v, want 2600", total)
+	}
+	if math.Abs(total-daysSum) > 1e-9 {
+		t.Fatalf("days sum to %v but month reports %v", daysSum, total)
 	}
 }

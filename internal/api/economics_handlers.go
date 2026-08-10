@@ -212,6 +212,13 @@ type EconomicsMonthlyTotals struct {
 	ExpenseTotalUah      float64 `json:"expense_total_uah"`
 	EbitdaUah            float64 `json:"ebitda_uah"`
 
+	// ImportCostUah is what the grid import actually cost over the
+	// period. It is deliberately NOT an EBITDA expense line: the part
+	// consumed directly is already priced in through the
+	// self-consumption revenue legs, and only the battery-charging part
+	// (ExpenseGridChargeUah) is booked as a cost.
+	ImportCostUah float64 `json:"import_cost_uah"`
+
 	EssWithdrawnCostUah         float64 `json:"ess_withdrawn_cost_uah"`
 	EssRealizedProfitUah        float64 `json:"ess_realized_profit_uah"`
 	EssDegradationCostUah       float64 `json:"ess_degradation_cost_uah"`
@@ -312,6 +319,7 @@ type EconomicsMonthlyDay struct {
 	EffectUah       float64 `json:"effect_uah"`
 	EssNetUah       float64 `json:"ess_net_uah"`
 	EbitdaUah       float64 `json:"ebitda_uah"`
+	ImportCostUah   float64 `json:"import_cost_uah"`
 
 	EssFactUah          float64 `json:"ess_fact_uah"`
 	EssOptimumUah       float64 `json:"ess_optimum_uah"`
@@ -475,6 +483,15 @@ type EconomicsMonthlyResponse struct {
 	UzeCycles      []EconomicsUzeCycle         `json:"uze_cycles"`
 }
 
+// importCostUah reconstructs the money actually spent on grid import.
+// The average import price is itself a kWh-weighted ratio over exactly
+// this import volume, so multiplying back recovers the original sum of
+// price x kWh — an exact figure, not an estimate (same reconstruction
+// the monthly rollup relies on when re-weighting daily prices).
+func importCostUah(avgImportPrice, gridImportKwh float64) float64 {
+	return avgImportPrice * gridImportKwh
+}
+
 func monthlyTotalsToJSON(t economics.MonthlyTotals) EconomicsMonthlyTotals {
 	return EconomicsMonthlyTotals{
 		BaselineCostUah:             t.BaselineCost,
@@ -506,6 +523,7 @@ func monthlyTotalsToJSON(t economics.MonthlyTotals) EconomicsMonthlyTotals {
 		ExpenseGridChargeUah:        t.ExpenseGridCharge,
 		ExpenseTotalUah:             t.ExpenseTotal,
 		EbitdaUah:                   t.Ebitda,
+		ImportCostUah:               importCostUah(t.AvgImportPrice, t.GridImport),
 		EssWithdrawnCostUah:         t.EssWithdrawnCost,
 		EssRealizedProfitUah:        t.EssRealizedProfit,
 		EssDegradationCostUah:       t.EssDegradationCost,
@@ -542,6 +560,7 @@ func monthlyDayToJSON(d economics.MonthDay) EconomicsMonthlyDay {
 		EffectUah:           t.Effect,
 		EssNetUah:           t.EssNet,
 		EbitdaUah:           t.Ebitda,
+		ImportCostUah:       importCostUah(t.AvgImportPrice, t.GridImport),
 		EssFactUah:          d.EssFact,
 		EssOptimumUah:       d.EssOptimum,
 		EssReserveUah:       d.EssReserve,

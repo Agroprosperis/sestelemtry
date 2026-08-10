@@ -49,6 +49,7 @@ function emptyTotals(): EconomicsMonthlyResponse['totals'] {
     expense_grid_charge_uah: 0,
     expense_total_uah: 0,
     ebitda_uah: 0,
+    import_cost_uah: 0,
     ess_withdrawn_cost_uah: 0,
     ess_realized_profit_uah: 0,
     ess_degradation_cost_uah: 0,
