@@ -1,0 +1,293 @@
+package economics
+
+import (
+	"context"
+	"math"
+	"strings"
+	"testing"
+	"time"
+)
+
+// planParams is a 100 kWh / 50 kW battery with realistic friction, so a
+// price spread has to be worth more than the round trip before the
+// optimizer will trade on it.
+var planParams = optimumParams{
+	capacityKwh:          100,
+	degradationUahPerKwh: 0.6,
+	maxChargeKwh:         50,
+	maxDischargeKwh:      50,
+	socMinKwh:            0,
+	socMaxKwh:            100,
+	rte:                  0.9,
+}
+
+// arbitrageDay is a synthetic day with a cheap night (hours 1-3) and an
+// expensive evening (hours 19-21): the textbook case the optimizer should
+// answer with "charge at night, discharge into the evening load".
+func arbitrageDay(loc *time.Location, priced bool) []HourlyRecord {
+	dayStart := time.Date(2026, 4, 1, 0, 0, 0, 0, loc)
+	out := make([]HourlyRecord, 24)
+	for h := 0; h < 24; h++ {
+		rec := HourlyRecord{
+			HourStart:  dayStart.Add(time.Duration(h) * time.Hour),
+			GridToLoad: 200,
+			GridImport: 200,
+		}
+		price := 5.0
+		switch {
+		case h >= 1 && h <= 3:
+			price = 1
+		case h >= 19 && h <= 21:
+			price = 20
+		}
+		if priced {
+			rdn := price * 1000
+			rec.Rdn = &rdn
+			rec.ImportPrice = price
+			rec.ExportPrice = price
+		}
+		if h == 0 {
+			rec.EssRemainingKwhStart = floatPtr(0)
+		}
+		out[h] = rec
+	}
+	return out
+}
+
+func planFor(t *testing.T, hourly []HourlyRecord, loc *time.Location) DayPlan {
+	t.Helper()
+	opts := buildDayOpts(hourly, loc, nil)
+	do := opts["2026-04-01"]
+	if do == nil {
+		t.Fatal("buildDayOpts produced no day")
+	}
+	return buildDayPlan("2026-04-01", do, planParams, planParams.capacityKwh, 50, loc)
+}
+
+// TestBuildDayPlanArbitrage: the recommendation charges in the cheap
+// quartile, discharges in the expensive one, and never leaves the SOC
+// window — the three properties the chart's two lines assert visually.
+func TestBuildDayPlanArbitrage(t *testing.T) {
+	loc := time.UTC
+	hourly := arbitrageDay(loc, true)
+	plan := planFor(t, hourly, loc)
+
+	if !plan.Available {
+		t.Fatal("plan should be available for a fully-priced day")
+	}
+	if len(plan.Hours) != 24 {
+		t.Fatalf("got %d hours, want 24", len(plan.Hours))
+	}
+
+	var cheapCharge, peakDischarge float64
+	for _, h := range plan.Hours {
+		kw := h.RecommendedEssKw
+		if h.Hour >= 1 && h.Hour <= 3 && kw < 0 {
+			cheapCharge += -kw
+		}
+		if h.Hour >= 19 && h.Hour <= 21 && kw > 0 {
+			peakDischarge += kw
+		}
+		if h.SocPct < 0 || h.SocPct > 100 {
+			t.Fatalf("hour %d: SOC %.1f%% outside 0..100", h.Hour, h.SocPct)
+		}
+	}
+	if cheapCharge <= 0 {
+		t.Error("expected the plan to charge during the cheap night hours")
+	}
+	if peakDischarge <= 0 {
+		t.Error("expected the plan to discharge during the expensive evening hours")
+	}
+
+	// The direction is what must never invert: buying into the evening
+	// peak or selling through the cheap night would be a straight loss,
+	// however the optimizer fills the mid-priced hours in between.
+	for _, h := range plan.Hours {
+		if h.Hour >= 19 && h.Hour <= 21 && h.RecommendedEssKw < -planIdleKwh {
+			t.Errorf("hour %d: charging %.2f kW into the evening peak", h.Hour, -h.RecommendedEssKw)
+		}
+		if h.Hour >= 1 && h.Hour <= 3 && h.RecommendedEssKw > planIdleKwh {
+			t.Errorf("hour %d: discharging %.2f kW through the cheap night", h.Hour, h.RecommendedEssKw)
+		}
+	}
+}
+
+// TestBuildDayPlanEffectMatchesOptimizeDay: the per-hour effects the
+// tooltip shows must add up to the same optimum the monthly reserve is
+// computed from, or the daily and monthly pages would disagree.
+func TestBuildDayPlanEffectMatchesOptimizeDay(t *testing.T) {
+	loc := time.UTC
+	hourly := arbitrageDay(loc, true)
+	plan := planFor(t, hourly, loc)
+
+	opts := buildDayOpts(hourly, loc, nil)
+	want := optimizeDay(opts["2026-04-01"].hours[:], 0, planParams, modeFull)
+
+	var sum float64
+	for _, h := range plan.Hours {
+		sum += h.EffectUah
+	}
+	if math.Abs(sum-want) > 1e-6 {
+		t.Errorf("Σ hourly effect = %v, optimizeDay = %v", sum, want)
+	}
+	if math.Abs(plan.Totals.OptimumUah-want) > 1e-6 {
+		t.Errorf("totals optimum = %v, optimizeDay = %v", plan.Totals.OptimumUah, want)
+	}
+}
+
+// TestBuildDayPlanReasonsMatchActions guards the explainability contract:
+// every hour carries an action, a reason code consistent with it, and
+// operator-facing text.
+func TestBuildDayPlanReasonsMatchActions(t *testing.T) {
+	loc := time.UTC
+	plan := planFor(t, arbitrageDay(loc, true), loc)
+
+	for _, h := range plan.Hours {
+		if h.ReasonText == "" {
+			t.Errorf("hour %d: empty reason text", h.Hour)
+		}
+		switch h.Action {
+		case "charge":
+			if h.RecommendedEssKw >= 0 {
+				t.Errorf("hour %d: action=charge but power %.2f kW is not negative", h.Hour, h.RecommendedEssKw)
+			}
+			if !strings.HasPrefix(h.ReasonCode, "CHARGE_") {
+				t.Errorf("hour %d: action=charge with reason %q", h.Hour, h.ReasonCode)
+			}
+		case "discharge":
+			if h.RecommendedEssKw <= 0 {
+				t.Errorf("hour %d: action=discharge but power %.2f kW is not positive", h.Hour, h.RecommendedEssKw)
+			}
+			if !strings.HasPrefix(h.ReasonCode, "DISCHARGE_") {
+				t.Errorf("hour %d: action=discharge with reason %q", h.Hour, h.ReasonCode)
+			}
+		case "hold":
+			if math.Abs(h.RecommendedEssKw) > planIdleKwh {
+				t.Errorf("hour %d: action=hold but power is %.2f kW", h.Hour, h.RecommendedEssKw)
+			}
+		default:
+			t.Errorf("hour %d: unknown action %q", h.Hour, h.Action)
+		}
+	}
+
+}
+
+// TestBuildDayPlanHoldsForPeak: a battery that starts full and has no way
+// to monetise its charge until the evening should be explained as waiting
+// for that peak, not as "the price is too low to bother".
+func TestBuildDayPlanHoldsForPeak(t *testing.T) {
+	loc := time.UTC
+	dayStart := time.Date(2026, 4, 1, 0, 0, 0, 0, loc)
+	hourly := make([]HourlyRecord, 24)
+	for h := 0; h < 24; h++ {
+		rec := HourlyRecord{HourStart: dayStart.Add(time.Duration(h) * time.Hour)}
+		rdn := 5000.0
+		rec.Rdn = &rdn
+		rec.ImportPrice = 5
+		// No load to displace and no export value outside the peak, so
+		// there is nothing the stored energy can be sold into yet.
+		if h == 20 {
+			rdn = 20000
+			rec.ImportPrice = 20
+			rec.GridToLoad = 200
+			rec.GridImport = 200
+		}
+		if h == 0 {
+			rec.EssRemainingKwhStart = floatPtr(100)
+		}
+		hourly[h] = rec
+	}
+	plan := planFor(t, hourly, loc)
+
+	for _, h := range plan.Hours {
+		if h.Hour >= 20 {
+			continue
+		}
+		if h.Action != "hold" {
+			t.Fatalf("hour %d: action %q, want hold", h.Hour, h.Action)
+		}
+		if h.ReasonCode != ReasonHoldForFuturePeak {
+			t.Errorf("hour %d: reason %q, want %q", h.Hour, h.ReasonCode, ReasonHoldForFuturePeak)
+		}
+	}
+	if plan.Hours[20].Action != "discharge" {
+		t.Errorf("hour 20: action %q, want discharge", plan.Hours[20].Action)
+	}
+}
+
+// TestBuildDayPlanWithoutPrices: with no РДН the optimizer has nothing to
+// trade against, so it must recommend nothing and say why rather than
+// invent a schedule.
+func TestBuildDayPlanWithoutPrices(t *testing.T) {
+	loc := time.UTC
+	plan := planFor(t, arbitrageDay(loc, false), loc)
+
+	for _, h := range plan.Hours {
+		if math.Abs(h.RecommendedEssKw) > planIdleKwh {
+			t.Errorf("hour %d: dispatch %.2f kW without a price", h.Hour, h.RecommendedEssKw)
+		}
+		if h.ReasonCode != ReasonNoPrice {
+			t.Errorf("hour %d: reason %q, want %q", h.Hour, h.ReasonCode, ReasonNoPrice)
+		}
+	}
+	if plan.Totals.OptimumUah != 0 {
+		t.Errorf("optimum = %v, want 0 without prices", plan.Totals.OptimumUah)
+	}
+	found := false
+	for _, w := range plan.Warnings {
+		if w == WarnNoPrices {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("warnings = %v, want %s", plan.Warnings, WarnNoPrices)
+	}
+}
+
+// TestBuildDayPlanNoData: a day the optimizer never saw is reported as
+// unavailable, which is what makes the chart overlay degrade quietly.
+func TestBuildDayPlanNoData(t *testing.T) {
+	if plan := buildDayPlan("2026-04-01", nil, planParams, 100, 50, time.UTC); plan.Available {
+		t.Error("a nil day should not produce an available plan")
+	}
+}
+
+// TestGetDayPlanEndToEnd exercises the service wiring: tz resolution,
+// tariff lookup, the hourly load, and the plan returned to the handler.
+func TestGetDayPlanEndToEnd(t *testing.T) {
+	b, loc := newKyivBackend(t)
+	tariffs := flatTariffs
+	tariffs.EssCapacityKwh = 100
+	tariffs.EssPowerLimitKw = 50
+	tariffs.RoundtripEfficiency = 1
+	b.schedule = Schedule{{EffectiveFrom: mustDate("1970-01-01"), Tariffs: tariffs}}
+	b.hourly = arbitrageDay(loc, true)
+
+	plan, err := NewService(b).GetDayPlan(context.Background(), "org1", "2026-04-01", "Europe/Kyiv")
+	if err != nil {
+		t.Fatalf("GetDayPlan: %v", err)
+	}
+	if !plan.Available {
+		t.Fatal("expected an available plan")
+	}
+	if plan.OrganizationID != "org1" || plan.Date != "2026-04-01" || plan.Tz != "Europe/Kyiv" {
+		t.Errorf("identity fields = %q/%q/%q", plan.OrganizationID, plan.Date, plan.Tz)
+	}
+	if plan.CapacityKwh != 100 || plan.PowerKw != 50 {
+		t.Errorf("envelope = %v kWh / %v kW, want 100/50", plan.CapacityKwh, plan.PowerKw)
+	}
+	if plan.Totals.OptimumUah <= 0 {
+		t.Errorf("optimum = %v, want a profitable day", plan.Totals.OptimumUah)
+	}
+	if plan.Totals.ReserveUah <= 0 {
+		t.Errorf("reserve = %v, want the idle battery to leave the whole optimum on the table",
+			plan.Totals.ReserveUah)
+	}
+}
+
+func TestGetDayPlanRejectsBadDate(t *testing.T) {
+	b, _ := newKyivBackend(t)
+	if _, err := NewService(b).GetDayPlan(context.Background(), "org1", "01-04-2026", "Europe/Kyiv"); err == nil {
+		t.Error("expected an error for a non-ISO date")
+	}
+}

@@ -121,3 +121,59 @@ describe('PowerTooltip directional labels', () => {
     expect(screen.getAllByText(/^0\s*kW$/).length).toBeGreaterThan(0)
   })
 })
+
+// The AI recommendation shares active_ess_power_kw's sign convention, so
+// it gets the same directional treatment — plus the optimizer's reason,
+// which is carried on the chart row rather than drawn as its own series.
+describe('PowerTooltip AI recommendation', () => {
+  function withPlan(essKw: number, extra: Record<string, unknown> = {}) {
+    return [
+      { dataKey: 'ai_ess_power_kw', name: 'ai', value: essKw, color: '#db2777', payload: extra },
+      ...Object.entries(extra)
+        .filter(([k]) => k !== 'ai_reason_text')
+        .map(([dataKey, value]) => ({ dataKey, name: dataKey, value, color: '#000' })),
+    ]
+  }
+
+  it('names a negative recommendation as charge and shows the magnitude', () => {
+    render(<PowerTooltip active label="02:05" payload={withPlan(-180.5)} />)
+    expect(screen.getByText('ШІ: заряд УЗЕ')).toBeInTheDocument()
+    expect(screen.getByText(/^180[.,]5\s*кВт$/)).toBeInTheDocument()
+  })
+
+  it('names a positive recommendation as discharge', () => {
+    render(<PowerTooltip active label="20:05" payload={withPlan(120)} />)
+    expect(screen.getByText('ШІ: розряд УЗЕ')).toBeInTheDocument()
+  })
+
+  it('shows the optimizer reason for the hour', () => {
+    render(
+      <PowerTooltip
+        active
+        label="02:05"
+        payload={withPlan(-180.5, { ai_reason_text: 'Заряд з мережі — дешева година' })}
+      />,
+    )
+    expect(screen.getByText('Заряд з мережі — дешева година')).toBeInTheDocument()
+  })
+
+  it('renders the planned SOC only on the bucket that carries it', () => {
+    render(<PowerTooltip active label="02:55" payload={withPlan(-180.5, { ai_soc_pct: 74.5 })} />)
+    expect(screen.getByText('SOC за планом ШІ')).toBeInTheDocument()
+
+    cleanup()
+    render(<PowerTooltip active label="02:05" payload={withPlan(-180.5)} />)
+    expect(screen.queryByText('SOC за планом ШІ')).toBeNull()
+  })
+
+  it('stays out of the way when there is no recommendation', () => {
+    render(
+      <PowerTooltip
+        active
+        label="14:35"
+        payload={buildPayload({ active_ess_power_kw: 3.5, load_power_kw: -100 })}
+      />,
+    )
+    expect(screen.queryByText(/^ШІ:/)).toBeNull()
+  })
+})

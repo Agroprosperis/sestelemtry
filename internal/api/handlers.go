@@ -342,6 +342,7 @@ func (h *Handlers) Router() http.Handler {
 	mux.HandleFunc("/api/v1/economics/portfolio", h.economicsPortfolio)
 	mux.HandleFunc("/api/v1/economics/recompute", h.economicsRecompute)
 	mux.HandleFunc("/api/v1/economics/data-range", h.economicsDataRange)
+	mux.HandleFunc("/api/v1/uze-plan", h.uzePlan)
 	mux.HandleFunc("/swagger", h.swaggerUI)
 	mux.HandleFunc("/swagger/", h.swaggerUI)
 	mux.HandleFunc("/swagger/openapi.yaml", h.swaggerSpec)

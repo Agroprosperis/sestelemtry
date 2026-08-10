@@ -315,6 +315,80 @@ paths:
               schema:
                 type: string
                 example: internal server error
+  /api/v1/uze-plan:
+    get:
+      summary: Recommended УЗЕ (BESS) dispatch for one day
+      operationId: getUzePlan
+      description: |
+        Returns the hourly battery schedule an optimally-run system would
+        have followed on the requested day, solved by the same
+        dynamic-programming optimizer (project_net accounting) that backs
+        the monthly "факт vs оптимум" reserve.
+
+        This is a retrospective benchmark, not a forecast: the optimizer
+        runs on the day's ACTUAL PV, load and РДН prices, so it answers
+        "how should the battery have been run" rather than "what will
+        happen". Hours without a РДН price are not tradable and the
+        battery holds through them.
+
+        recommended_ess_kw is signed like the telemetry metric
+        active_ess_power_kw (positive = discharge, negative = charge) and,
+        because buckets are hourly, equals the kWh moved in that hour.
+        soc_pct is the modelled state of charge at the END of the hour on
+        the pack's 10-90% operating band.
+      parameters:
+        - name: organization_id
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+          description: Calendar day (YYYY-MM-DD) interpreted in tz.
+        - name: tz
+          in: query
+          required: false
+          schema:
+            type: string
+            default: UTC
+          description: |
+            IANA timezone used to define the day boundaries
+            (e.g. Europe/Kyiv). Unknown zones return 400.
+      responses:
+        "200":
+          description: |
+            The day's recommended dispatch. available=false (with an empty
+            hours array) when the day has no usable telemetry or the SOC
+            window is degenerate.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UzePlanResponse"
+        "400":
+          description: Invalid or missing query parameters
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: date must be YYYY-MM-DD
+        "503":
+          description: Economics service not configured
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: economics service not configured
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: internal server error
   /api/v1/registers:
     get:
       summary: Modbus register metadata for export annotation
@@ -1111,6 +1185,154 @@ components:
           items:
             $ref: "#/components/schemas/EnergyFlowHourlyRow"
       required: [organization_id, date, tz, hours]
+    UzePlanHour:
+      type: object
+      properties:
+        hour:
+          type: integer
+          minimum: 0
+          maximum: 23
+        recommended_ess_kw:
+          type: number
+          format: double
+          description: >
+            Average ESS power over the hour, signed like
+            active_ess_power_kw: positive = discharge, negative = charge.
+          example: -180.5
+        soc_pct:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 100
+          description: Modelled state of charge at the END of the hour.
+        ess_to_load_kwh:
+          type: number
+          format: double
+        ess_to_grid_kwh:
+          type: number
+          format: double
+        pv_to_ess_kwh:
+          type: number
+          format: double
+        grid_to_ess_kwh:
+          type: number
+          format: double
+        effect_uah:
+          type: number
+          format: double
+          description: >
+            This hour's contribution to the day's optimum: discharge value
+            less grid-charge cost, less the export forgone by storing PV,
+            less degradation.
+        action:
+          type: string
+          enum: [charge, discharge, hold]
+        reason_code:
+          type: string
+          enum:
+            - DISCHARGE_PEAK_IMPORT
+            - DISCHARGE_TO_GRID
+            - CHARGE_PV_SURPLUS
+            - CHARGE_GRID_CHEAP
+            - HOLD_FOR_FUTURE_PEAK
+            - HOLD_LOW_PRICE
+            - NO_PRICE
+        reason_text:
+          type: string
+          description: Operator-facing explanation (Ukrainian).
+        rdn_uah_per_kwh:
+          type: number
+          format: double
+          nullable: true
+      required: [hour, recommended_ess_kw, soc_pct, action, reason_code]
+    UzePlanTotals:
+      type: object
+      description: |
+        The day's optimum-vs-fact headline plus the waterfall legs behind
+        the optimum. reserve_uah = max(0, optimum - fact);
+        captured_share = fact / optimum (may be negative when the
+        realised dispatch lost money).
+      properties:
+        optimum_uah:
+          type: number
+          format: double
+        fact_uah:
+          type: number
+          format: double
+        reserve_uah:
+          type: number
+          format: double
+        captured_share:
+          type: number
+          format: double
+        charge_pv_kwh:
+          type: number
+          format: double
+        charge_grid_kwh:
+          type: number
+          format: double
+        discharge_kwh:
+          type: number
+          format: double
+        export_val_uah:
+          type: number
+          format: double
+        load_val_uah:
+          type: number
+          format: double
+        charge_pv_cost_uah:
+          type: number
+          format: double
+        grid_cost_uah:
+          type: number
+          format: double
+        degradation_uah:
+          type: number
+          format: double
+    UzePlanResponse:
+      type: object
+      properties:
+        organization_id:
+          type: string
+          example: ze
+        date:
+          type: string
+          format: date
+          example: "2026-05-09"
+        tz:
+          type: string
+          example: Europe/Kyiv
+        available:
+          type: boolean
+          description: >
+            False when the day has no usable telemetry or the SOC window
+            is degenerate; hours is then empty.
+        soc_start_pct:
+          type: number
+          format: double
+          description: Modelled state of charge before hour 0.
+        capacity_kwh:
+          type: number
+          format: double
+          description: Usable ESS capacity (the 10-90% SOC window).
+        power_kw:
+          type: number
+          format: double
+        hours:
+          type: array
+          maxItems: 24
+          items:
+            $ref: "#/components/schemas/UzePlanHour"
+        totals:
+          $ref: "#/components/schemas/UzePlanTotals"
+        warnings:
+          type: array
+          description: >
+            Data-quality flags, e.g. NO_RDN, PARTIAL_RDN:3, NO_SOC,
+            TELEMETRY_ANOMALY:2.
+          items:
+            type: string
+      required: [organization_id, date, tz, available, hours, totals]
     OrgTariffs:
       type: object
       description: |

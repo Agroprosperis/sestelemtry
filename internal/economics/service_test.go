@@ -17,6 +17,11 @@ type fakeBackend struct {
 
 	canonical map[string]CanonicalDaily // keyed by YYYY-MM-DD
 
+	// hourly, when set, is served verbatim by LoadHourlyRange (filtered
+	// to the requested window) instead of being reconstructed from saved
+	// days — lets a test hand the optimizer a synthetic day directly.
+	hourly []HourlyRecord
+
 	saved      map[string]StoredDay // keyed by YYYY-MM-DD
 	saveCount  int
 	flowsCalls int
@@ -95,6 +100,15 @@ func (b *fakeBackend) LoadDailyRange(_ context.Context, _ string, from, to time.
 
 func (b *fakeBackend) LoadHourlyRange(_ context.Context, _ string, from, to time.Time) ([]HourlyRecord, error) {
 	var out []HourlyRecord
+	if b.hourly != nil {
+		for _, r := range b.hourly {
+			if r.HourStart.Before(from) || !r.HourStart.Before(to) {
+				continue
+			}
+			out = append(out, r)
+		}
+		return out, nil
+	}
 	for _, d := range b.saved {
 		for _, r := range d.Rows {
 			if r == nil {

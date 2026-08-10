@@ -388,23 +388,11 @@ func AggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly
 		num float64 // sum(rdn * import)
 		den float64 // sum(import)
 	}
-	// Per-day optimizer context: the 24 hourly slots, the residual at the
-	// earliest hour (the day's starting SOC), and the accumulators the
-	// fact-vs-optimum decomposition needs.
-	type dayOpt struct {
-		hours     [24]optimumHour
-		raw       [24]HourlyRecord // raw hourly slice for the cycle chart's fact series
-		hasRaw    [24]bool
-		badHour   [24]bool // anomalous hours zeroed for ESS optimum / fact
-		startKwh  float64
-		startHour int
-		haveStart bool
-		pvSurplus float64 // Σ available PV surplus
-		actualPv  float64 // Σ actual pv_to_ess
-		essNet    float64 // Σ EssNet excluding anomalous hours
-	}
 	dayRdn := make(map[string]*rdnAcc)
-	dayOpts := make(map[string]*dayOpt)
+	// Per-day optimizer contexts (24 hourly slots + the day's opening SOC
+	// residual), shared with the single-day plan path so both render the
+	// same DP schedule.
+	dayOpts := buildDayOpts(hourly, loc, isBadHour)
 	margins := make(map[string][]*float64)
 	var monthRdnNum, monthRdnDen, monthRdnMax float64
 	haveRdnMax := false
@@ -423,52 +411,6 @@ func AggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly
 			if !math.IsInf(m, 0) && !math.IsNaN(m) {
 				v := m
 				grid[hour] = &v
-			}
-		}
-		if hour >= 0 && hour < 24 {
-			do := dayOpts[key]
-			if do == nil {
-				do = &dayOpt{}
-				dayOpts[key] = do
-			}
-			do.raw[hour] = h
-			do.hasRaw[hour] = true
-			if isBadHour(h) {
-				// Keep the hour slot (prices / SOC continuity) but drop
-				// ESS activity so one corrupt spike can't wipe the day.
-				do.badHour[hour] = true
-				oh := optimumHour{}
-				if h.Rdn != nil {
-					oh.tradable = true
-					oh.importPrice = h.ImportPrice
-					oh.exportPrice = h.ExportPrice
-				}
-				do.hours[hour] = oh
-			} else {
-				pvSurplus := h.PVToGrid + h.PVToEss
-				oh := optimumHour{
-					// PV not consumed by load is available to charge (or
-					// export); load not served by PV is the import the
-					// battery can displace at import price.
-					pvSurplusKwh:        pvSurplus,
-					displaceableKwh:     h.GridToLoad + h.EssToLoad,
-					actualPvChargeKwh:   h.PVToEss,
-					actualGridChargeKwh: h.GridToEss,
-				}
-				if h.Rdn != nil {
-					oh.tradable = true
-					oh.importPrice = h.ImportPrice
-					oh.exportPrice = h.ExportPrice
-				}
-				do.hours[hour] = oh
-				do.pvSurplus += pvSurplus
-				do.actualPv += h.PVToEss
-				do.essNet += h.EssNet
-			}
-			if h.EssRemainingKwhStart != nil && (!do.haveStart || hour < do.startHour) {
-				do.startKwh = *h.EssRemainingKwhStart
-				do.startHour = hour
-				do.haveStart = true
 			}
 		}
 		if h.Rdn != nil {
@@ -551,126 +493,6 @@ func AggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly
 			pv:       full - noPv,
 			pvMissed: math.Max(0, do.pvSurplus-do.actualPv),
 		}
-	}
-
-	// buildCycle reconstructs one day's optimal dispatch (modeFull) by
-	// backtracking the SOC DP and packages it with the realised fact series
-	// into a UzeCycle for the expandable cycle chart (§1.3 / §3.6). Returns
-	// ok=false when the day's SOC window is degenerate.
-	socPctOf := func(kwh float64) float64 {
-		if capacityKwh <= 0 {
-			return 0
-		}
-		// Map the usable window onto the pack's 10–90% operating band:
-		// empty usable → 10%, full usable → 90%, i.e. capacity/80 kWh per
-		// pack-percent (6.45 kWh/1% for a 516 kWh usable pack, §3.7).
-		return clampFloat(10+kwh/capacityKwh*80, 0, 100)
-	}
-	buildCycle := func(key string, do *dayOpt, fact float64) (UzeCycle, bool) {
-		if do == nil {
-			return UzeCycle{}, false
-		}
-		start := optParams.socMinKwh
-		if do.haveStart {
-			start = do.startKwh
-		}
-		steps, socStartKwh, optEffect, ok := optimizeDaySchedule(do.hours[:], start, optParams, modeFull)
-		if !ok {
-			return UzeCycle{}, false
-		}
-		const n = 24
-		opt := CycleOptimal{
-			ToLoadKwh:   make([]float64, n),
-			ToGridKwh:   make([]float64, n),
-			ChgPvKwh:    make([]float64, n),
-			ChgGridKwh:  make([]float64, n),
-			SocPct:      make([]*float64, n),
-			ExportUah:   make([]float64, n),
-			LoadUah:     make([]float64, n),
-			GridCostUah: make([]float64, n),
-			SocStart:    socPctOf(socStartKwh),
-		}
-		fc := CycleFact{
-			EssKw:  make([]float64, n),
-			SocPct: make([]*float64, n),
-			Rdn:    make([]float64, n),
-		}
-		labels := make([]string, n)
-		dm := key
-		if dt, err := time.ParseInLocation("2006-01-02", key, loc); err == nil {
-			dm = dt.Format("02.01")
-		}
-		var sum CycleSummaryOptimal
-		for i := 0; i < n; i++ {
-			labels[i] = fmt.Sprintf("%s %02d", dm, i)
-			oh := do.hours[i]
-			s := steps[i]
-			opt.ToLoadKwh[i] = s.toLoadKwh
-			opt.ToGridKwh[i] = s.toGridKwh
-			opt.ChgPvKwh[i] = s.chgPvKwh
-			opt.ChgGridKwh[i] = s.chgGridKwh
-			soc := socPctOf(s.endResidualKwh)
-			opt.SocPct[i] = &soc
-			opt.ExportUah[i] = s.toGridKwh * oh.exportPrice
-			opt.LoadUah[i] = s.toLoadKwh * oh.importPrice
-			opt.GridCostUah[i] = s.chgGridKwh * oh.importPrice
-			dischargeAC := s.toLoadKwh + s.toGridKwh
-			sum.ExportVal += opt.ExportUah[i]
-			sum.LoadVal += opt.LoadUah[i]
-			sum.GridCost += opt.GridCostUah[i]
-			sum.ChargePvCost += s.chgPvKwh * pvChargePriceFor(oh)
-			sum.Degradation += dischargeAC * optParams.degradationUahPerKwh
-			sum.ChargePvKwh += s.chgPvKwh
-			sum.ChargeGridKwh += s.chgGridKwh
-			sum.DischargeKwh += dischargeAC
-			if do.hasRaw[i] {
-				r := do.raw[i]
-				fc.EssKw[i] = r.EssDischarged - r.EssCharged
-				if r.Rdn != nil {
-					fc.Rdn[i] = *r.Rdn
-				}
-			}
-		}
-		sum.EffectUah = optEffect
-
-		// Fact SOC is drawn at hour boundaries: soc_start before hour 0,
-		// then end-of-hour i == start-of-hour i+1.
-		for i := 0; i < n; i++ {
-			if do.hasRaw[i] && do.raw[i].EssRemainingKwhStart != nil {
-				v := socPctOf(*do.raw[i].EssRemainingKwhStart)
-				fc.SocStart = &v
-				break
-			}
-		}
-		for i := 0; i+1 < n; i++ {
-			if do.hasRaw[i+1] && do.raw[i+1].EssRemainingKwhStart != nil {
-				v := socPctOf(*do.raw[i+1].EssRemainingKwhStart)
-				fc.SocPct[i] = &v
-			}
-		}
-
-		reserve := math.Max(0, optEffect-fact)
-		capture := 0.0
-		if optEffect != 0 {
-			capture = fact / optEffect * 100
-		}
-		return UzeCycle{
-			StartDate:       key,
-			EndDate:         key,
-			Label:           dm,
-			ActualEffectUah: fact,
-			OptEffectUah:    optEffect,
-			ReserveUah:      reserve,
-			CapturePct:      capture,
-			Chart: CycleChart{
-				Labels:      labels,
-				CapacityKwh: capacityKwh,
-				PowerKw:     powerLimitKw,
-				Optimal:     opt,
-				Fact:        fc,
-				Summary:     CycleSummary{Optimal: sum, Fact: CycleSummaryFact{EffectUah: fact}},
-			},
-		}, true
 	}
 
 	var totals MonthlyTotals
@@ -763,7 +585,7 @@ func AggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly
 		totals.EssPvMissedKwh += opt.pvMissed
 		monthFact += factEssNet
 		if opt.reserve >= cycleReserveThresholdUah {
-			if cyc, ok := buildCycle(key, do, factEssNet); ok {
+			if cyc, ok := buildCycle(key, do, factEssNet, optParams, capacityKwh, powerLimitKw, loc); ok {
 				uzeCycles = append(uzeCycles, cyc)
 			}
 		}

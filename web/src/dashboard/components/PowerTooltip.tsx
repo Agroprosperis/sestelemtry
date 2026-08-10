@@ -6,6 +6,9 @@ type PowerTooltipEntry = {
   name?: string | number
   value?: unknown
   color?: string
+  // The whole chart row recharts hit-tested, which carries the values we
+  // display but don't draw as their own series (e.g. the plan's reason).
+  payload?: Record<string, unknown>
 }
 
 type Props = {
@@ -17,6 +20,9 @@ type Props = {
 const DAM_PRICE_KEY = 'dam_price_uah_per_mwh'
 const SOC_KEY = 'soc_percent'
 const PV_FORECAST_KEY = 'planned_ac_kw'
+const AI_ESS_KEY = 'ai_ess_power_kw'
+const AI_SOC_KEY = 'ai_soc_pct'
+const AI_REASON_KEY = 'ai_reason_text'
 
 // Anything closer to zero than this is treated as "idle" — both the
 // ESS and the grid meter routinely sit at ±tens of watts even when
@@ -76,6 +82,25 @@ export function PowerTooltip({ active, label, payload }: Props) {
   const pvForecastEntry = byKey.get(PV_FORECAST_KEY)
   const pvForecastValue = Number(pvForecastEntry?.value)
   const showPvForecast = Number.isFinite(pvForecastValue)
+
+  // The recommendation is signed like the ESS metric, so it gets the same
+  // charge/discharge treatment: named by direction, shown as a magnitude.
+  const aiEssEntry = byKey.get(AI_ESS_KEY)
+  const aiEssValue = Number(aiEssEntry?.value)
+  const showAiEss = Number.isFinite(aiEssValue)
+  const aiEssName =
+    aiEssValue > IDLE_KW
+      ? 'ШІ: розряд УЗЕ'
+      : aiEssValue < -IDLE_KW
+        ? 'ШІ: заряд УЗЕ'
+        : 'ШІ: утримувати'
+  // SOC lands on the hour's closing bucket only (it's the end-of-hour
+  // state), same as the PV forecast above.
+  const aiSocEntry = byKey.get(AI_SOC_KEY)
+  const aiSocValue = Number(aiSocEntry?.value)
+  const showAiSoc = Number.isFinite(aiSocValue)
+  const reasonRaw = payload.find((e) => e.payload?.[AI_REASON_KEY] != null)?.payload?.[AI_REASON_KEY]
+  const reasonText = typeof reasonRaw === 'string' ? reasonRaw : ''
 
   return (
     <div className="energy-tooltip">
@@ -139,6 +164,29 @@ export function PowerTooltip({ active, label, payload }: Props) {
           <span className="energy-tooltip-value">{formatChartNumber(damValue)} грн/МВт·год</span>
         </div>
       )}
+      {showAiEss && (
+        <div className="energy-tooltip-row energy-tooltip-dam">
+          <span
+            className="energy-tooltip-dot"
+            style={{ backgroundColor: aiEssEntry?.color ?? '#db2777' }}
+          />
+          <span className="energy-tooltip-name">{aiEssName}</span>
+          <span className="energy-tooltip-value">
+            {formatChartNumber(Math.abs(aiEssValue))} кВт
+          </span>
+        </div>
+      )}
+      {showAiSoc && (
+        <div className="energy-tooltip-row energy-tooltip-dam">
+          <span
+            className="energy-tooltip-dot"
+            style={{ backgroundColor: aiSocEntry?.color ?? '#9333ea' }}
+          />
+          <span className="energy-tooltip-name">SOC за планом ШІ</span>
+          <span className="energy-tooltip-value">{formatChartNumber(aiSocValue)} %</span>
+        </div>
+      )}
+      {showAiEss && reasonText && <div className="energy-tooltip-reason">{reasonText}</div>}
     </div>
   )
 }

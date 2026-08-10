@@ -171,6 +171,153 @@ func (h *Handlers) economicsDaily(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// UzePlanHour is one hour of the recommended УЗЕ dispatch.
+type UzePlanHour struct {
+	Hour int `json:"hour"`
+	// RecommendedEssKw is signed like the telemetry metric
+	// active_ess_power_kw: positive = discharge, negative = charge.
+	RecommendedEssKw float64 `json:"recommended_ess_kw"`
+	// SocPct is the modelled state of charge at the END of the hour.
+	SocPct float64 `json:"soc_pct"`
+
+	EssToLoadKwh float64 `json:"ess_to_load_kwh"`
+	EssToGridKwh float64 `json:"ess_to_grid_kwh"`
+	PvToEssKwh   float64 `json:"pv_to_ess_kwh"`
+	GridToEssKwh float64 `json:"grid_to_ess_kwh"`
+
+	EffectUah float64 `json:"effect_uah"`
+
+	Action     string `json:"action"`
+	ReasonCode string `json:"reason_code"`
+	ReasonText string `json:"reason_text"`
+
+	RdnUahPerKwh *float64 `json:"rdn_uah_per_kwh"`
+}
+
+// UzePlanTotals is the day's optimum-vs-fact headline plus the waterfall
+// legs behind the optimum.
+type UzePlanTotals struct {
+	OptimumUah    float64 `json:"optimum_uah"`
+	FactUah       float64 `json:"fact_uah"`
+	ReserveUah    float64 `json:"reserve_uah"`
+	CapturedShare float64 `json:"captured_share"`
+
+	ChargePvKwh   float64 `json:"charge_pv_kwh"`
+	ChargeGridKwh float64 `json:"charge_grid_kwh"`
+	DischargeKwh  float64 `json:"discharge_kwh"`
+
+	ExportValUah    float64 `json:"export_val_uah"`
+	LoadValUah      float64 `json:"load_val_uah"`
+	ChargePvCostUah float64 `json:"charge_pv_cost_uah"`
+	GridCostUah     float64 `json:"grid_cost_uah"`
+	DegradationUah  float64 `json:"degradation_uah"`
+}
+
+// UzePlanResponse is the body of GET /api/v1/uze-plan.
+type UzePlanResponse struct {
+	OrganizationID string `json:"organization_id"`
+	Date           string `json:"date"`
+	Tz             string `json:"tz"`
+
+	// Available is false when the day has no usable hours or the SOC
+	// window is degenerate; Hours is then empty.
+	Available   bool    `json:"available"`
+	SocStartPct float64 `json:"soc_start_pct"`
+	CapacityKwh float64 `json:"capacity_kwh"`
+	PowerKw     float64 `json:"power_kw"`
+
+	Hours    []UzePlanHour `json:"hours"`
+	Totals   UzePlanTotals `json:"totals"`
+	Warnings []string      `json:"warnings,omitempty"`
+}
+
+// uzePlan serves the recommended УЗЕ dispatch for one day — what an
+// optimally-run battery would have done given that day's actual PV, load
+// and РДН prices. It is a retrospective benchmark (perfect foresight over
+// realised flows), not a forecast: without a load plan there is nothing
+// to optimise against for hours that have not happened yet.
+//
+//	GET /api/v1/uze-plan?organization_id=&date=YYYY-MM-DD&tz=
+func (h *Handlers) uzePlan(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if h.economics == nil {
+		http.Error(w, "economics service not configured", http.StatusServiceUnavailable)
+		return
+	}
+	orgID := strings.TrimSpace(r.URL.Query().Get("organization_id"))
+	if orgID == "" {
+		http.Error(w, "organization_id is required", http.StatusBadRequest)
+		return
+	}
+	dateStr := strings.TrimSpace(r.URL.Query().Get("date"))
+	if dateStr == "" {
+		http.Error(w, "date is required (YYYY-MM-DD)", http.StatusBadRequest)
+		return
+	}
+	loc, err := loadLocation(strings.TrimSpace(r.URL.Query().Get("tz")))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if _, err := time.ParseInLocation("2006-01-02", dateStr, loc); err != nil {
+		http.Error(w, "date must be YYYY-MM-DD", http.StatusBadRequest)
+		return
+	}
+
+	plan, err := h.economics.GetDayPlan(r.Context(), orgID, dateStr, loc.String())
+	if err != nil {
+		h.log.Error("api_uze_plan", "organization_id", orgID, "date", dateStr, "tz", loc.String(), "err", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	resp := UzePlanResponse{
+		OrganizationID: plan.OrganizationID,
+		Date:           plan.Date,
+		Tz:             plan.Tz,
+		Available:      plan.Available,
+		SocStartPct:    plan.SocStartPct,
+		CapacityKwh:    plan.CapacityKwh,
+		PowerKw:        plan.PowerKw,
+		Hours:          make([]UzePlanHour, len(plan.Hours)),
+		Totals: UzePlanTotals{
+			OptimumUah:      plan.Totals.OptimumUah,
+			FactUah:         plan.Totals.FactUah,
+			ReserveUah:      plan.Totals.ReserveUah,
+			CapturedShare:   plan.Totals.CapturedShare,
+			ChargePvKwh:     plan.Totals.ChargePvKwh,
+			ChargeGridKwh:   plan.Totals.ChargeGridKwh,
+			DischargeKwh:    plan.Totals.DischargeKwh,
+			ExportValUah:    plan.Totals.ExportValUah,
+			LoadValUah:      plan.Totals.LoadValUah,
+			ChargePvCostUah: plan.Totals.ChargePvCostUah,
+			GridCostUah:     plan.Totals.GridCostUah,
+			DegradationUah:  plan.Totals.DegradationUah,
+		},
+		Warnings: plan.Warnings,
+	}
+	for i, hr := range plan.Hours {
+		resp.Hours[i] = UzePlanHour{
+			Hour:             hr.Hour,
+			RecommendedEssKw: hr.RecommendedEssKw,
+			SocPct:           hr.SocPct,
+			EssToLoadKwh:     hr.EssToLoadKwh,
+			EssToGridKwh:     hr.EssToGridKwh,
+			PvToEssKwh:       hr.PvToEssKwh,
+			GridToEssKwh:     hr.GridToEssKwh,
+			EffectUah:        hr.EffectUah,
+			Action:           hr.Action,
+			ReasonCode:       hr.ReasonCode,
+			ReasonText:       hr.ReasonText,
+			RdnUahPerKwh:     hr.Rdn,
+		}
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
 // EconomicsMonthExtreme is the best / worst day of the month.
 type EconomicsMonthExtreme struct {
 	Date      string  `json:"date"`

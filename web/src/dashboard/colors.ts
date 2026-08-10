@@ -52,3 +52,14 @@ export function dayPowerColor(metricKey: string): string {
 // bars is the actual instantaneous PV output, the bars below are the
 // hourly forecast envelope.
 export const PV_FORECAST_COLOR = '#16a34a'
+
+// The AI recommendation gets its own hue — green, blue, gray and amber are
+// already spoken for by PV / ESS / grid / load, and the recommended ESS
+// power sits right next to the blue actual-ESS line, so it has to be
+// unmistakably a different series rather than a shade of the same one.
+export const AI_PLAN_COLOR = '#db2777'
+
+// The recommended SOC trajectory stays in the SOC family (the actual SOC
+// band is #a855f7) so both read as "state of charge" on the right axis.
+// Matches the `socOpt` violet of the monthly cycle chart.
+export const AI_PLAN_SOC_COLOR = '#9333ea'

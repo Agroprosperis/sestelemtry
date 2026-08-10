@@ -10,6 +10,7 @@ import { useDebugMode } from './hooks/useDebugMode'
 import { useOrganizationParam } from './hooks/useOrganizationParam'
 import { useRangeParams } from './hooks/useRangeParams'
 import { useRegistersWhenDebug } from './hooks/useRegistersWhenDebug'
+import { useUzeDayPlan } from './hooks/useUzeDayPlan'
 
 // RevenueChart sits below the fold for most users and pulls a sizable
 // recharts subgraph (AreaChart + gradients) that the energy chart
@@ -57,6 +58,14 @@ export function Dashboard() {
     preset,
     anchor,
     metricsAt,
+  })
+
+  // Fetched on its own pipeline: the server solves a dynamic program for
+  // the day, which must never gate the chart's own data from painting.
+  const { data: aiPlan } = useUzeDayPlan({
+    organizationID,
+    anchor,
+    enabled: preset === 'day',
   })
 
   return (
@@ -117,6 +126,7 @@ export function Dashboard() {
             socSeries={socSeries}
             powerSeries={powerSeries}
             pvForecastSeries={pvForecastSeries}
+            aiPlan={aiPlan}
           />
           <Suspense
             fallback={

@@ -1816,6 +1816,56 @@
   border-top: 1px solid #e2e8f0;
 }
 
+/* Why the optimizer chose this hour's action. Wraps onto a couple of
+ * lines, so it's capped and set smaller than the value rows above it. */
+.energy-tooltip-reason {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid #e2e8f0;
+  max-width: 260px;
+  color: #64748b;
+  font-size: 11px;
+  line-height: 1.35;
+  white-space: normal;
+}
+
+/* One-line optimum / fact / reserve verdict above the day chart. */
+.ai-plan-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 16px;
+  margin: -4px 0 10px;
+  font-size: 12px;
+}
+
+.ai-plan-summary-item {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.ai-plan-summary-item .lbl {
+  color: #64748b;
+}
+
+.ai-plan-summary-item strong {
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.ai-plan-summary-item strong.opt {
+  color: #16a34a;
+}
+
+.ai-plan-summary-item strong.bad {
+  color: #dc2626;
+}
+
+.ai-plan-summary-warn {
+  color: #b45309;
+}
+
 @media (max-width: 900px) {
   .dashboard-header {
     flex-direction: column;

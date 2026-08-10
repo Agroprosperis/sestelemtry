@@ -14,17 +14,26 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
+import type { UzePlanResponse } from '../../api'
 import type { DashboardMetric } from '../../types'
-import { dayPowerColor, energyColor, PV_FORECAST_COLOR } from '../colors'
+import {
+  AI_PLAN_COLOR,
+  AI_PLAN_SOC_COLOR,
+  dayPowerColor,
+  energyColor,
+  PV_FORECAST_COLOR,
+} from '../colors'
 import { formatChartNumber } from '../format'
 import { DAY_POWER_METRIC_KEYS, DAY_POWER_METRIC_LABELS } from '../metrics'
 import type { RangePreset } from '../range'
+import { type AiPlanBucket, aiPlanBuckets, aiPlanHasDispatch } from '../transforms/aiPlan'
 import type { EnergyRow } from '../transforms/buckets'
 import type { DAMChartRow } from '../transforms/dam'
 import type { PowerChartRow } from '../transforms/power'
 import type { PvForecastHourlyRow } from '../transforms/pvForecast'
 import type { SOCChartRow } from '../transforms/soc'
 import type { EnergySummary as Summary } from '../transforms/summary'
+import { AiPlanSummary } from './AiPlanSummary'
 import { ChartSkeleton } from './ChartSkeleton'
 import { EnergySummary } from './EnergySummary'
 import { EnergyTooltip } from './EnergyTooltip'
@@ -40,6 +49,7 @@ type Props = {
   socSeries?: SOCChartRow[]
   powerSeries?: PowerChartRow[]
   pvForecastSeries?: PvForecastHourlyRow[]
+  aiPlan?: UzePlanResponse | null
 }
 
 const DAM_PRICE_KEY = 'dam_price_uah_per_mwh'
@@ -55,6 +65,14 @@ const PV_FORECAST_KEY = 'planned_ac_kw'
 const PV_FORECAST_LABEL = 'Прогноз СЕС'
 // 5-min buckets, so HH:30 is index 6 within each 12-bucket hour.
 const PV_FORECAST_BUCKET_OFFSET = 6
+// The AI recommendation: the ESS dispatch an optimally-run battery would
+// have followed on this day, signed like active_ess_power_kw so the plan
+// and the realised ESS line can be read against each other directly.
+const AI_ESS_KEY = 'ai_ess_power_kw'
+const AI_ESS_LABEL = 'Рекомендація ШІ (УЗЕ)'
+const AI_SOC_KEY = 'ai_soc_pct'
+const AI_SOC_LABEL = 'SOC за планом ШІ'
+const AI_REASON_KEY = 'ai_reason_text'
 
 // Day preset uses 5-minute buckets (288 per day); show every 12th tick so
 // labels land on the hour and the axis stays readable.
@@ -115,6 +133,7 @@ export function EnergyChart({
   socSeries,
   powerSeries,
   pvForecastSeries,
+  aiPlan,
 }: Props) {
   const energyTooltip = useCallback(
     (props: Omit<React.ComponentProps<typeof EnergyTooltip>, 'preset'>) => (
@@ -150,6 +169,10 @@ export function EnergyChart({
   // The forecast value is attached only at one bucket per hour (HH:30) —
   // recharts then renders one centered Bar per hour with its width fixed
   // by `barSize`, instead of 12 stacked thin bars per hour.
+  const planBuckets = useMemo<Map<number, AiPlanBucket>>(
+    () => (preset === 'day' ? aiPlanBuckets(aiPlan ?? null) : new Map()),
+    [preset, aiPlan],
+  )
   const dayData = useMemo<PowerChartRow[]>(() => {
     if (preset !== 'day') return []
     const rows = powerSeries ?? []
@@ -175,11 +198,23 @@ export function EnergyChart({
           merged[PV_FORECAST_KEY] = planned
         }
       }
+      // The recommendation is hourly: the kW value repeats across the
+      // hour's 12 buckets (drawn as a step), the SOC only on the closing
+      // bucket since it is the end-of-hour state.
+      const bucket = planBuckets.get(idx)
+      if (bucket) {
+        merged[AI_ESS_KEY] = bucket.essKw
+        if (bucket.socPct != null) merged[AI_SOC_KEY] = bucket.socPct
+        // Carried on the row (not as a series) so the tooltip can explain
+        // why the optimizer chose this hour's action.
+        merged[AI_REASON_KEY] = bucket.reasonText
+      }
       return merged
     })
-  }, [preset, powerSeries, damSeries, socSeries, pvForecastSeries])
+  }, [preset, powerSeries, damSeries, socSeries, pvForecastSeries, planBuckets])
   const hasSoc = (socSeries ?? []).some((r) => r.soc != null && Number.isFinite(r.soc))
   const hasPvForecast = (pvForecastSeries ?? []).length > 0
+  const hasAiPlan = preset === 'day' && aiPlanHasDispatch(aiPlan ?? null)
 
   const dayLabels = useMemo(() => dayData.map((r) => String(r.time)), [dayData])
   const hourlyAreas = useMemo(() => hourlyDamAreas(damSeries, dayLabels), [damSeries, dayLabels])
@@ -207,12 +242,18 @@ export function EnergyChart({
     if (hasPvForecast) {
       items.push({ id: PV_FORECAST_KEY, label: PV_FORECAST_LABEL, color: PV_FORECAST_COLOR })
     }
+    if (hasAiPlan) {
+      items.push({ id: AI_ESS_KEY, label: AI_ESS_LABEL, color: AI_PLAN_COLOR })
+    }
     items.push({ id: DAM_PRICE_KEY, label: DAM_PRICE_LABEL, color: DAM_PRICE_COLOR })
     if (hasSoc) {
       items.push({ id: SOC_KEY, label: SOC_LABEL, color: SOC_COLOR })
     }
+    if (hasAiPlan) {
+      items.push({ id: AI_SOC_KEY, label: AI_SOC_LABEL, color: AI_PLAN_SOC_COLOR })
+    }
     return items
-  }, [hasSoc, hasPvForecast])
+  }, [hasSoc, hasPvForecast, hasAiPlan])
 
   const renderDayLegend = useCallback(
     () => (
@@ -248,6 +289,7 @@ export function EnergyChart({
   return (
     <div className="chart-card">
       <h2>Energy Trend</h2>
+      {preset === 'day' && <AiPlanSummary plan={aiPlan} loading={loading} />}
       <EnergySummary summary={summary} loading={loading} />
       <div className="chart-wrap">
         {loading ? (
@@ -361,6 +403,40 @@ export function EnergyChart({
                     strokeWidth={2}
                     strokeDasharray="5 4"
                     dot={{ r: 3, fill: PV_FORECAST_COLOR, stroke: PV_FORECAST_COLOR }}
+                    activeDot={{ r: 4 }}
+                    connectNulls
+                    isAnimationActive={false}
+                  />
+                )}
+                {/* The recommendation is a step: the optimizer's decision
+                    is "hold N kW for this hour", not a smooth ramp, so
+                    interpolating between hours would draw power the plan
+                    never asked for. */}
+                {hasAiPlan && !hiddenSeries.has(AI_ESS_KEY) && (
+                  <Line
+                    yAxisId="power"
+                    type="stepAfter"
+                    dataKey={AI_ESS_KEY}
+                    name={AI_ESS_LABEL}
+                    stroke={AI_PLAN_COLOR}
+                    strokeWidth={2}
+                    strokeDasharray="6 3"
+                    dot={false}
+                    activeDot={{ r: 4 }}
+                    connectNulls
+                    isAnimationActive={false}
+                  />
+                )}
+                {hasAiPlan && !hiddenSeries.has(AI_SOC_KEY) && (
+                  <Line
+                    yAxisId="soc"
+                    type="monotone"
+                    dataKey={AI_SOC_KEY}
+                    name={AI_SOC_LABEL}
+                    stroke={AI_PLAN_SOC_COLOR}
+                    strokeWidth={2}
+                    strokeDasharray="4 4"
+                    dot={false}
                     activeDot={{ r: 4 }}
                     connectNulls
                     isAnimationActive={false}

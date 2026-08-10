@@ -517,6 +517,79 @@ export async function fetchEconomicsDaily(
   return res.json()
 }
 
+// UzePlanAction is what the optimizer recommends the battery do in an hour.
+export type UzePlanAction = 'charge' | 'discharge' | 'hold'
+
+// UzePlanHour is one hour of the recommended УЗЕ dispatch.
+export type UzePlanHour = {
+  hour: number
+  // recommended_ess_kw is signed like the telemetry metric
+  // active_ess_power_kw: positive = discharge, negative = charge.
+  recommended_ess_kw: number
+  // soc_pct is the modelled state of charge at the END of the hour.
+  soc_pct: number
+  ess_to_load_kwh: number
+  ess_to_grid_kwh: number
+  pv_to_ess_kwh: number
+  grid_to_ess_kwh: number
+  effect_uah: number
+  action: UzePlanAction
+  reason_code: string
+  reason_text: string
+  rdn_uah_per_kwh: number | null
+}
+
+export type UzePlanTotals = {
+  optimum_uah: number
+  fact_uah: number
+  reserve_uah: number
+  captured_share: number
+  charge_pv_kwh: number
+  charge_grid_kwh: number
+  discharge_kwh: number
+  export_val_uah: number
+  load_val_uah: number
+  charge_pv_cost_uah: number
+  grid_cost_uah: number
+  degradation_uah: number
+}
+
+export type UzePlanResponse = {
+  organization_id: string
+  date: string
+  tz: string
+  // available is false when the day has no usable telemetry or the SOC
+  // window is degenerate; `hours` is then empty.
+  available: boolean
+  soc_start_pct: number
+  capacity_kwh: number
+  power_kw: number
+  hours: UzePlanHour[]
+  totals: UzePlanTotals
+  warnings?: string[]
+}
+
+// fetchUzeDayPlan reads the recommended УЗЕ dispatch for one day — what
+// an optimally-run battery would have done given that day's actual PV,
+// load and РДН prices. Retrospective benchmark, not a forecast.
+export async function fetchUzeDayPlan(
+  input: { organizationID: string; date: string; tz?: string },
+  signal?: AbortSignal,
+): Promise<UzePlanResponse> {
+  const url = buildURL('/api/v1/uze-plan', {
+    organization_id: input.organizationID,
+    date: input.date,
+    tz: input.tz || undefined,
+  })
+  const res = await fetch(url, { signal })
+  if (!res.ok) {
+    const body = await res.text().catch(() => '')
+    const suffix = body ? ` — ${body.trim()}` : ''
+    throw new Error(`uze-plan request failed: ${res.status}${suffix}`)
+  }
+  return res.json()
+}
+
 // EconomicsAnomalyHour is one excluded УЗЕ hour with classified reasons.
 export type EconomicsAnomalyHour = {
   at: string
