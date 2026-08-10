@@ -179,9 +179,14 @@ func (do *dayOpt) loadOf(i int) float64 {
 //     so Σ recommended == Σ actual, always.
 //   - Base stays put: the day's minimum hourly load (ventilation, office)
 //     runs in every hour — only the load ABOVE it is treated as movable.
-//   - Demonstrated ceiling: no hour is scheduled above the day's maximum
-//     observed hourly load — the elevator can't mill faster than it has
-//     shown it can.
+//   - Demonstrated ceiling: no hour is scheduled above peakKwh — the
+//     highest hourly load the elevator has demonstrated over a trailing
+//     window (see loadPeakWindowDays). The ceiling deliberately spans
+//     more than the plan day: on a quiet day the day's own maximum is
+//     idle-level, and clamping to it would make the recommendation
+//     invisible exactly when the advice ("this was the hour to mill")
+//     matters most. peakKwh ≤ the day's own maximum falls back to the
+//     day's maximum, so the fact profile always stays feasible.
 //   - Cheapest hours first: flexible energy fills PV-surplus bands (cost =
 //     the forgone export) before grid bands (cost = the all-in import
 //     price). Hours without a РДН price take no extra load; whatever can't
@@ -192,7 +197,7 @@ func (do *dayOpt) loadOf(i int) float64 {
 // Deliberately independent of the УЗЕ plan (both are computed from the
 // same realised flows): coupling them would need a joint optimisation and
 // a load model we don't have yet.
-func recommendLoad(do *dayOpt) [24]*float64 {
+func recommendLoad(do *dayOpt, peakKwh float64) [24]*float64 {
 	var out [24]*float64
 
 	var hours []int
@@ -214,6 +219,9 @@ func recommendLoad(do *dayOpt) [24]*float64 {
 		if do.hours[i].tradable {
 			anyTradable = true
 		}
+	}
+	if peakKwh > peak {
+		peak = peakKwh
 	}
 	if len(hours) == 0 || total <= 0 {
 		return out
@@ -309,11 +317,37 @@ func recommendLoad(do *dayOpt) [24]*float64 {
 	return out
 }
 
+// loadPeakWindowDays is the trailing window over which the load
+// recommendation's ceiling ("the elevator has demonstrated it can run at
+// this rate") is observed. One month covers normal duty rotation without
+// reaching back into a different season's crop.
+const loadPeakWindowDays = 30
+
+// demonstratedPeakLoadKwh is the highest hourly consumption over the
+// given records, with the ESS leg dropped on anomalous hours — the same
+// rule as dayOpt.loadOf, so one corrupt discharge reading can't set the
+// fleet-wide ceiling.
+func demonstratedPeakLoadKwh(hourly []HourlyRecord, isBad func(HourlyRecord) bool) float64 {
+	peak := 0.0
+	for _, h := range hourly {
+		load := h.PVToLoad + h.GridToLoad
+		if isBad == nil || !isBad(h) {
+			load += h.EssToLoad
+		}
+		if load > peak {
+			peak = load
+		}
+	}
+	return peak
+}
+
 // buildDayPlan solves one day's optimal dispatch and packages it for the
 // dashboard. do carries the day's hourly optimizer context; p the battery
-// envelope. The schedule comes from buildCycle so the daily chart and the
-// monthly cycle accordion can never diverge.
-func buildDayPlan(key string, do *dayOpt, p optimumParams, capacityKwh, powerLimitKw float64, loc *time.Location) DayPlan {
+// envelope; loadPeakKwh the demonstrated hourly-load ceiling for the load
+// recommendation (0 → the day's own maximum). The schedule comes from
+// buildCycle so the daily chart and the monthly cycle accordion can never
+// diverge.
+func buildDayPlan(key string, do *dayOpt, p optimumParams, capacityKwh, powerLimitKw, loadPeakKwh float64, loc *time.Location) DayPlan {
 	plan := DayPlan{
 		Date:        key,
 		CapacityKwh: capacityKwh,
@@ -344,7 +378,7 @@ func buildDayPlan(key string, do *dayOpt, p optimumParams, capacityKwh, powerLim
 	plan.Available = true
 	plan.SocStartPct = opt.SocStart
 	plan.Hours = make([]DayPlanHour, n)
-	recLoad := recommendLoad(do)
+	recLoad := recommendLoad(do, loadPeakKwh)
 
 	var anomalous, priced, missingPrice, withSoc int
 	socKwh := 0.0
@@ -458,9 +492,21 @@ func (s *Service) GetDayPlan(ctx context.Context, orgID, date, tz string) (DayPl
 	dayStart := time.Date(parsed.Year(), parsed.Month(), parsed.Day(), 0, 0, 0, 0, loc)
 	dayEnd := dayStart.AddDate(0, 0, 1)
 
-	hourly, err := s.backend.LoadHourlyRange(ctx, orgID, dayStart, dayEnd)
+	// The fetch reaches loadPeakWindowDays back so the load
+	// recommendation's ceiling can come from the elevator's recent
+	// demonstrated peak rather than the plan day alone; everything else
+	// (УЗЕ optimum, envelope, anomalies feeding the plan) uses only the
+	// plan day's slice.
+	windowStart := dayStart.AddDate(0, 0, -loadPeakWindowDays)
+	windowHourly, err := s.backend.LoadHourlyRange(ctx, orgID, windowStart, dayEnd)
 	if err != nil {
 		return DayPlan{}, fmt.Errorf("load hourly range: %w", err)
+	}
+	hourly := make([]HourlyRecord, 0, 24)
+	for _, h := range windowHourly {
+		if !h.HourStart.Before(dayStart) && h.HourStart.Before(dayEnd) {
+			hourly = append(hourly, h)
+		}
 	}
 
 	schedule, _ := s.backend.TariffSchedule(ctx, orgID)
@@ -479,8 +525,12 @@ func (s *Service) GetDayPlan(ctx context.Context, orgID, date, tz string) (DayPl
 		powerLimitKw = capacityKwh
 	}
 
-	badHours, _ := detectEssAnomalies(hourly, loc, powerLimitKw, essAnomalyTolerance)
+	// Anomalies are detected over the whole window (the check is
+	// per-hour, so the day's verdicts are unchanged) — the ceiling needs
+	// them too, or one corrupt discharge in the window would set it.
+	badHours, _ := detectEssAnomalies(windowHourly, loc, powerLimitKw, essAnomalyTolerance)
 	isBadHour := func(h HourlyRecord) bool { return badHours[h.HourStart.Unix()] }
+	loadPeakKwh := demonstratedPeakLoadKwh(windowHourly, isBadHour)
 
 	// The envelope must come from clean hours only: one corrupt reading
 	// would otherwise inflate the power / SOC window the optimum is
@@ -498,7 +548,7 @@ func (s *Service) GetDayPlan(ctx context.Context, orgID, date, tz string) (DayPl
 	params := deriveOptimumParams(cleanHourly, capacityKwh, tariffs.DegradationUahPerKwh, powerLimitKw, tariffs.RoundtripEfficiency)
 
 	dayOpts := buildDayOpts(hourly, loc, isBadHour)
-	plan := buildDayPlan(date, dayOpts[date], params, capacityKwh, powerLimitKw, loc)
+	plan := buildDayPlan(date, dayOpts[date], params, capacityKwh, powerLimitKw, loadPeakKwh, loc)
 	plan.OrganizationID = orgID
 	plan.Tz = loc.String()
 	return plan, nil
