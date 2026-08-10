@@ -82,6 +82,16 @@ function unitCostUahPerKwh(importCostUah: number, loadKwh: number): number {
   return loadKwh > 0 ? importCostUah / loadKwh : NaN
 }
 
+// importPriceUahPerKwh is the all-in delivered price of one imported kWh:
+// the РДН column plus distribution, transmission, supplier margin, other
+// fees and VAT when enabled. The backend builds import_cost_uah as that
+// kWh-weighted price times the imported volume, so dividing it back
+// recovers the price exactly — which is why the cost column never equals
+// РДН × kWh.
+function importPriceUahPerKwh(importCostUah: number, gridImportKwh: number): number {
+  return gridImportKwh > 0 ? importCostUah / gridImportKwh : NaN
+}
+
 // --- KPI strip ---
 
 export function MonthlyKpis({ totals, scope = 'month' }: { totals: EconomicsMonthlyTotals; scope?: PeriodScope }) {
@@ -1036,7 +1046,7 @@ function MonthlyHeatmap({ margins }: { margins: EconomicsMonthlyDayMargin[] }) {
 
 // --- Daily detail table + Excel export ---
 
-// Thirteen columns only fit without a horizontal scrollbar if the unit
+// Fourteen columns only fit without a horizontal scrollbar if the unit
 // lives in the header rather than in every cell, so each column carries
 // its unit as a second, smaller header line.
 const COLUMNS: { label: string; unit?: string }[] = [
@@ -1048,6 +1058,7 @@ const COLUMNS: { label: string; unit?: string }[] = [
   // needs no second word — and the numbers here are far narrower than
   // "Вартість імпорту" would force the column to be.
   { label: 'Вартість', unit: 'грн' },
+  { label: 'Ціна імпорту', unit: 'грн/кВт·год' },
   { label: 'Факт. ціна', unit: 'грн/кВт·год' },
   { label: 'РДН сер.', unit: 'грн/кВт·год' },
   { label: 'Експорт', unit: 'кВт·год' },
@@ -1067,6 +1078,7 @@ function dayRowValues(d: EconomicsMonthlyDay): string[] {
     formatKwhNumber(d.load_kwh),
     formatKwhNumber(d.grid_import_kwh),
     formatUahNumber(d.import_cost_uah),
+    formatPrice(importPriceUahPerKwh(d.import_cost_uah, d.grid_import_kwh)),
     formatPrice(unitCostUahPerKwh(d.import_cost_uah, d.load_kwh)),
     formatPrice(d.rdn_avg_uah_per_kwh),
     formatKwhNumber(d.grid_export_kwh),
@@ -1143,6 +1155,7 @@ function MonthlyDailyTable({
                 <td>{formatKwhNumber(d.load_kwh)}</td>
                 <td>{formatKwhNumber(d.grid_import_kwh)}</td>
                 <td>{formatUahNumber(d.import_cost_uah)}</td>
+                <td>{formatPrice(importPriceUahPerKwh(d.import_cost_uah, d.grid_import_kwh))}</td>
                 <td>{formatPrice(unitCostUahPerKwh(d.import_cost_uah, d.load_kwh))}</td>
                 <td>{formatPrice(d.rdn_avg_uah_per_kwh)}</td>
                 <td>{formatKwhNumber(d.grid_export_kwh)}</td>
@@ -1159,6 +1172,7 @@ function MonthlyDailyTable({
               <td>{formatKwhNumber(totals.load_kwh)}</td>
               <td>{formatKwhNumber(totals.grid_import_kwh)}</td>
               <td>{formatUahNumber(totals.import_cost_uah)}</td>
+              <td>{formatPrice(importPriceUahPerKwh(totals.import_cost_uah, totals.grid_import_kwh))}</td>
               <td>{formatPrice(unitCostUahPerKwh(totals.import_cost_uah, totals.load_kwh))}</td>
               <td>{formatPrice(totals.rdn_avg_uah_per_kwh)}</td>
               <td>{formatKwhNumber(totals.grid_export_kwh)}</td>
