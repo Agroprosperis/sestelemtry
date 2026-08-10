@@ -286,7 +286,8 @@ func TestGetDayPlanEndToEnd(t *testing.T) {
 }
 
 // loadShiftDay is a synthetic elevator day: constant 20 kWh of base load
-// every hour, heavy milling (180 kWh extra) in the expensive evening, an
+// every hour, heavy grain handling — drying/cleaning (180 kWh extra) —
+// in the expensive evening, an
 // exported PV surplus at midday and a cheap night — exactly the day the
 // schedule recommendation exists to fix.
 func loadShiftDay(loc *time.Location) []HourlyRecord {
@@ -308,7 +309,7 @@ func loadShiftDay(loc *time.Location) []HourlyRecord {
 
 		rec.GridToLoad = 20
 		if h >= 19 && h <= 21 {
-			rec.GridToLoad = 80 // 60 kWh/h of movable evening milling
+			rec.GridToLoad = 80 // 60 kWh/h of movable evening grain handling
 		}
 		if h >= 11 && h <= 13 {
 			rec.PVToGrid = 100 // exported PV surplus nobody consumed
@@ -356,7 +357,7 @@ func TestRecommendLoadShiftsIntoPvAndCheapHours(t *testing.T) {
 		t.Fatalf("energy not conserved: recommended %.3f vs actual %.3f", totalRec, totalFact)
 	}
 
-	// The evening milling must move out, and with the night import (1)
+	// The evening grain handling must move out, and with the night import (1)
 	// cheaper than the forgone PV export (4) the 180 kWh fills the three
 	// night hours to the 80 kWh peak.
 	for h := 19; h <= 21; h++ {
@@ -373,7 +374,7 @@ func TestRecommendLoadShiftsIntoPvAndCheapHours(t *testing.T) {
 
 // TestRecommendLoadPrefersPvSurplus: without a cheap night, consuming the
 // exported PV (cost = forgone export, 4) beats running on grid at the flat
-// import price (5), so the milling moves under the solar peak.
+// import price (5), so the grain handling moves under the solar peak.
 func TestRecommendLoadPrefersPvSurplus(t *testing.T) {
 	loc := time.UTC
 	hourly := loadShiftDay(loc)
@@ -442,7 +443,7 @@ func TestRecommendLoadWindowPeakUnlocksQuietDay(t *testing.T) {
 	}
 }
 
-// TestRecommendLoadKeepsSelfConsumedPv: milling that already runs on its
+// TestRecommendLoadKeepsSelfConsumedPv: grain handling that already runs on its
 // own solar must stay under the sun. Its true cost is the forgone export
 // (4), so a night import at 4.5 — cheaper than the day's import of 5 but
 // dearer than the export — must NOT pull the load out of the solar hours.
@@ -462,7 +463,7 @@ func TestRecommendLoadKeepsSelfConsumedPv(t *testing.T) {
 		rec.ExportPrice = price * 0.8
 
 		if h >= 11 && h <= 13 {
-			// The whole 80 kWh — base and milling — is self-consumed PV;
+			// The whole 80 kWh — base and grain handling — is self-consumed PV;
 			// nothing is exported.
 			rec.PVToLoad = 80
 		} else {
@@ -475,7 +476,7 @@ func TestRecommendLoadKeepsSelfConsumedPv(t *testing.T) {
 
 	for h := 11; h <= 13; h++ {
 		if *rec[h] < 80-1e-6 {
-			t.Errorf("hour %d: %.1f kWh — milling pulled off its own solar", h, *rec[h])
+			t.Errorf("hour %d: %.1f kWh — grain handling pulled off its own solar", h, *rec[h])
 		}
 	}
 	for h := 1; h <= 3; h++ {
@@ -577,7 +578,7 @@ func TestGetDayPlanCarriesRecommendedLoad(t *testing.T) {
 }
 
 // TestGetDayPlanCeilingFromTrailingWindow: the service derives the load
-// ceiling from the trailing window, so a milling hour a few days earlier
+// ceiling from the trailing window, so a heavy drying hour a few days earlier
 // lets a quiet day's recommendation exceed that day's own maximum.
 func TestGetDayPlanCeilingFromTrailingWindow(t *testing.T) {
 	b, loc := newKyivBackend(t)
@@ -588,7 +589,7 @@ func TestGetDayPlanCeilingFromTrailingWindow(t *testing.T) {
 
 	hourly := loadShiftDay(loc)
 	rdn := 5000.0
-	milling := HourlyRecord{
+	drying := HourlyRecord{
 		HourStart:   time.Date(2026, 3, 27, 12, 0, 0, 0, loc),
 		Rdn:         &rdn,
 		ImportPrice: 5,
@@ -596,7 +597,7 @@ func TestGetDayPlanCeilingFromTrailingWindow(t *testing.T) {
 		GridToLoad:  250,
 		GridImport:  250,
 	}
-	b.hourly = append([]HourlyRecord{milling}, hourly...)
+	b.hourly = append([]HourlyRecord{drying}, hourly...)
 
 	plan, err := NewService(b).GetDayPlan(context.Background(), "org1", "2026-04-01", "Europe/Kyiv")
 	if err != nil {
@@ -616,7 +617,7 @@ func TestGetDayPlanCeilingFromTrailingWindow(t *testing.T) {
 		}
 	}
 	if maxRec <= 80+1e-6 {
-		t.Errorf("max recommended %.1f kWh — the window's 250 kWh milling hour did not raise the ceiling", maxRec)
+		t.Errorf("max recommended %.1f kWh — the window's 250 kWh drying hour did not raise the ceiling", maxRec)
 	}
 	if maxRec > 250+1e-6 {
 		t.Errorf("max recommended %.1f kWh exceeds the demonstrated 250 kWh", maxRec)

@@ -184,8 +184,8 @@ func (do *dayOpt) loadOf(i int) float64 {
 //     window (see loadPeakWindowDays). The ceiling deliberately spans
 //     more than the plan day: on a quiet day the day's own maximum is
 //     idle-level, and clamping to it would make the recommendation
-//     invisible exactly when the advice ("this was the hour to mill")
-//     matters most. peakKwh ≤ the day's own maximum falls back to the
+//     invisible exactly when the advice ("this was the hour to dry and
+//     clean") matters most. peakKwh ≤ the day's own maximum falls back to the
 //     day's maximum, so the fact profile always stays feasible.
 //   - Cheapest hours first: flexible energy fills PV-surplus bands (cost =
 //     the forgone export) before grid bands (cost = the all-in import
@@ -243,7 +243,7 @@ func recommendLoad(do *dayOpt, peakKwh float64) [24]*float64 {
 	// grid at the all-in import price. PV available to load is everything
 	// the panels sent to load or grid — including what the ACTUAL load
 	// already self-consumed, otherwise a fully self-consumed solar hour
-	// would look import-priced and the milling would be "moved" to any
+	// would look import-priced and the grain handling would be "moved" to any
 	// hour marginally cheaper than import, losing the free sun. The base
 	// load eats its share of that PV first; PV already feeding the
 	// battery is left to the УЗЕ plan.
