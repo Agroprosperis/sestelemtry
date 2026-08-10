@@ -230,10 +230,15 @@ func recommendLoad(do *dayOpt) [24]*float64 {
 	flexible := total - base*float64(len(hours))
 	alloc := make(map[int]float64, len(hours))
 
-	// One price band per source per hour: consuming exported PV costs the
-	// export price it forgoes, anything beyond that comes from the grid at
-	// the import price. PV already feeding the battery is left to the УЗЕ
-	// plan — only pv_to_grid is up for grabs.
+	// One price band per source per hour: load served by the hour's own PV
+	// costs the export it forgoes, anything beyond that comes from the
+	// grid at the all-in import price. PV available to load is everything
+	// the panels sent to load or grid — including what the ACTUAL load
+	// already self-consumed, otherwise a fully self-consumed solar hour
+	// would look import-priced and the milling would be "moved" to any
+	// hour marginally cheaper than import, losing the free sun. The base
+	// load eats its share of that PV first; PV already feeding the
+	// battery is left to the УЗЕ plan.
 	type band struct {
 		hour int
 		kwh  float64
@@ -244,7 +249,8 @@ func recommendLoad(do *dayOpt) [24]*float64 {
 		if !do.hours[i].tradable || headroom <= 0 {
 			continue
 		}
-		pv := math.Min(do.raw[i].PVToGrid, headroom)
+		pvAvail := do.raw[i].PVToLoad + do.raw[i].PVToGrid - base
+		pv := math.Min(math.Max(pvAvail, 0), headroom)
 		if pv > 0 {
 			bands = append(bands, band{hour: i, kwh: pv, cost: do.hours[i].exportPrice})
 		}

@@ -399,6 +399,49 @@ func TestRecommendLoadPrefersPvSurplus(t *testing.T) {
 	}
 }
 
+// TestRecommendLoadKeepsSelfConsumedPv: milling that already runs on its
+// own solar must stay under the sun. Its true cost is the forgone export
+// (4), so a night import at 4.5 — cheaper than the day's import of 5 but
+// dearer than the export — must NOT pull the load out of the solar hours.
+func TestRecommendLoadKeepsSelfConsumedPv(t *testing.T) {
+	loc := time.UTC
+	dayStart := time.Date(2026, 4, 1, 0, 0, 0, 0, loc)
+	hourly := make([]HourlyRecord, 24)
+	for h := 0; h < 24; h++ {
+		rec := HourlyRecord{HourStart: dayStart.Add(time.Duration(h) * time.Hour)}
+		price := 5.0
+		if h >= 1 && h <= 3 {
+			price = 4.5
+		}
+		rdn := price * 1000
+		rec.Rdn = &rdn
+		rec.ImportPrice = price
+		rec.ExportPrice = price * 0.8
+
+		if h >= 11 && h <= 13 {
+			// The whole 80 kWh — base and milling — is self-consumed PV;
+			// nothing is exported.
+			rec.PVToLoad = 80
+		} else {
+			rec.GridToLoad = 20
+			rec.GridImport = 20
+		}
+		hourly[h] = rec
+	}
+	rec := recommendedFor(t, hourly, loc)
+
+	for h := 11; h <= 13; h++ {
+		if *rec[h] < 80-1e-6 {
+			t.Errorf("hour %d: %.1f kWh — milling pulled off its own solar", h, *rec[h])
+		}
+	}
+	for h := 1; h <= 3; h++ {
+		if *rec[h] > 20+1e-6 {
+			t.Errorf("hour %d: %.1f kWh scheduled at night although the sun was cheaper", h, *rec[h])
+		}
+	}
+}
+
 // TestRecommendLoadWithoutPricesEqualsFact: no РДН anywhere → nothing to
 // optimise against, so the recommendation must be the factual profile,
 // not an invented schedule.
