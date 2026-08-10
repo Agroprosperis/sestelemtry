@@ -159,11 +159,12 @@ export function EnergyChart({
   // Track which day-chart series the user has temporarily hidden by
   // clicking the corresponding legend item. State lives on the chart so
   // it survives re-renders triggered by data refetches but resets on
-  // unmount (preset change). The AI recommendation starts hidden — it is
-  // an opt-in overlay the user turns on from the legend when they want
-  // to compare against the optimum, not three extra lines by default.
+  // unmount (preset change). The battery-side AI series start hidden —
+  // an opt-in overlay for comparing against the optimum — while the
+  // recommended consumption schedule is on by default: it is the line
+  // the operator acts on.
   const [hiddenSeries, setHiddenSeries] = useState<Set<string>>(
-    () => new Set([AI_ESS_KEY, AI_SOC_KEY, AI_LOAD_KEY]),
+    () => new Set([AI_ESS_KEY, AI_SOC_KEY]),
   )
   const toggleSeries = useCallback((id: string) => {
     setHiddenSeries((prev) => {
