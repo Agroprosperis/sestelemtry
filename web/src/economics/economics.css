@@ -642,6 +642,16 @@
   gap: 12px;
 }
 
+/* Labels here vary in length, and a wrapped one used to push its own
+   value below the neighbours'. Subgrid hands the three lines of every
+   card to shared row tracks, so labels, values and captions stay on
+   their own baselines no matter how any single label wraps. */
+.kpi-secondary-strip .kpi-card {
+  display: grid;
+  grid-template-rows: subgrid;
+  grid-row: span 3;
+}
+
 .kpi-card {
   background: #ffffff;
   border: 1px solid #e2e8f0;

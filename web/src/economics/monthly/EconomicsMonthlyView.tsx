@@ -150,13 +150,20 @@ export function MonthlyKpis({ totals, scope = 'month' }: { totals: EconomicsMont
         </div>
         <div className="kpi-card kpi-card-secondary">
           <span className="kpi-label">
-            Фактична ціна 1 кВт·год
+            Факт. ціна 1 кВт·год
             <OptimumInfo tip={unitCostTip} />
           </span>
           <span className="kpi-value">{formatPrice(unitCost)}</span>
           <span className="kpi-sub">
             грн/кВт·год · без проєкту {formatPrice(baselineUnitCost)} · дешевше на {formatPercent(unitDiscount)}
           </span>
+        </div>
+        <div className="kpi-card kpi-card-secondary">
+          <span className="kpi-label">РДН: середня / max ціна</span>
+          <span className="kpi-value">
+            {formatPrice(totals.rdn_avg_uah_per_kwh)} / {formatPrice(totals.rdn_max_uah_per_kwh)}
+          </span>
+          <span className="kpi-sub">грн/кВт·год · зважено за обсягом імпорту</span>
         </div>
         <div className="kpi-card kpi-card-secondary">
           <span className="kpi-label">Уникнутий імпорт</span>
@@ -174,13 +181,6 @@ export function MonthlyKpis({ totals, scope = 'month' }: { totals: EconomicsMont
           <span className="kpi-label">Еквівалентні цикли УЗЕ</span>
           <span className="kpi-value">{formatCycles(totals.equivalent_cycles)}</span>
           <span className="kpi-sub">розряд {formatMwh(totals.ess_discharged_kwh)}</span>
-        </div>
-        <div className="kpi-card kpi-card-secondary">
-          <span className="kpi-label">РДН: середня / max ціна</span>
-          <span className="kpi-value">
-            {formatPrice(totals.rdn_avg_uah_per_kwh)} / {formatPrice(totals.rdn_max_uah_per_kwh)}
-          </span>
-          <span className="kpi-sub">грн/кВт·год · зважено за обсягом імпорту</span>
         </div>
       </div>
     </section>
