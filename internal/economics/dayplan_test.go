@@ -61,7 +61,7 @@ func planFor(t *testing.T, hourly []HourlyRecord, loc *time.Location) DayPlan {
 	if do == nil {
 		t.Fatal("buildDayOpts produced no day")
 	}
-	return buildDayPlan("2026-04-01", do, planParams, planParams.capacityKwh, 50, 0, loc)
+	return buildDayPlan("2026-04-01", do, planParams, planParams.capacityKwh, 50, loc)
 }
 
 // TestBuildDayPlanArbitrage: the recommendation charges in the cheap
@@ -247,7 +247,7 @@ func TestBuildDayPlanWithoutPrices(t *testing.T) {
 // TestBuildDayPlanNoData: a day the optimizer never saw is reported as
 // unavailable, which is what makes the chart overlay degrade quietly.
 func TestBuildDayPlanNoData(t *testing.T) {
-	if plan := buildDayPlan("2026-04-01", nil, planParams, 100, 50, 0, time.UTC); plan.Available {
+	if plan := buildDayPlan("2026-04-01", nil, planParams, 100, 50, time.UTC); plan.Available {
 		t.Error("a nil day should not produce an available plan")
 	}
 }
@@ -327,7 +327,7 @@ func recommendedFor(t *testing.T, hourly []HourlyRecord, loc *time.Location) [24
 	if do == nil {
 		t.Fatal("buildDayOpts produced no day")
 	}
-	return recommendLoad(do, 0)
+	return recommendLoad(do)
 }
 
 // TestRecommendLoadShiftsIntoPvAndCheapHours locks in the three invariants
@@ -397,49 +397,6 @@ func TestRecommendLoadPrefersPvSurplus(t *testing.T) {
 		if *rec[h] > 20+1e-6 {
 			t.Errorf("hour %d: %.1f kWh still scheduled in the expensive evening", h, *rec[h])
 		}
-	}
-}
-
-// TestRecommendLoadWindowPeakUnlocksQuietDay: on a quiet day the day's
-// own maximum is idle-level and the recommendation degenerates to a
-// ripple. A demonstrated peak from the trailing window lets the same
-// daily energy concentrate into the cheapest hours above the day's own
-// maximum — while the total, the base, and the window ceiling still hold.
-func TestRecommendLoadWindowPeakUnlocksQuietDay(t *testing.T) {
-	loc := time.UTC
-	hourly := loadShiftDay(loc)
-	opts := buildDayOpts(hourly, loc, nil)
-	do := opts["2026-04-01"]
-	if do == nil {
-		t.Fatal("buildDayOpts produced no day")
-	}
-	rec := recommendLoad(do, 300)
-
-	var totalFact, totalRec, maxRec float64
-	for h, r := range hourly {
-		totalFact += r.GridToLoad
-		if rec[h] == nil {
-			t.Fatalf("hour %d: no recommendation", h)
-		}
-		totalRec += *rec[h]
-		if *rec[h] > maxRec {
-			maxRec = *rec[h]
-		}
-		if *rec[h] > 300+1e-6 {
-			t.Errorf("hour %d: %.1f kWh exceeds the window ceiling", h, *rec[h])
-		}
-		if *rec[h] < 20-1e-6 {
-			t.Errorf("hour %d: %.1f kWh drops below the base", h, *rec[h])
-		}
-	}
-	if math.Abs(totalRec-totalFact) > 1e-6 {
-		t.Fatalf("energy not conserved: recommended %.3f vs actual %.3f", totalRec, totalFact)
-	}
-	// The whole movable volume (180 kWh) now fits into the single
-	// cheapest hour instead of being smeared across three at the day's
-	// own 80 kWh maximum.
-	if maxRec <= 80+1e-6 {
-		t.Errorf("max recommended %.1f kWh — window ceiling did not unlock the day's own maximum", maxRec)
 	}
 }
 
@@ -577,10 +534,11 @@ func TestGetDayPlanCarriesRecommendedLoad(t *testing.T) {
 	}
 }
 
-// TestGetDayPlanCeilingFromTrailingWindow: the service derives the load
-// ceiling from the trailing window, so a heavy drying hour a few days earlier
-// lets a quiet day's recommendation exceed that day's own maximum.
-func TestGetDayPlanCeilingFromTrailingWindow(t *testing.T) {
+// TestGetDayPlanCeilingIsTheDaysOwn: records outside the plan day (e.g. a
+// much heavier drying hour a few days earlier) must not raise the
+// ceiling — the recommendation redistributes the day within the day's own
+// demonstrated maximum.
+func TestGetDayPlanCeilingIsTheDaysOwn(t *testing.T) {
 	b, loc := newKyivBackend(t)
 	tariffs := flatTariffs
 	tariffs.EssCapacityKwh = 100
@@ -616,11 +574,8 @@ func TestGetDayPlanCeilingFromTrailingWindow(t *testing.T) {
 			maxRec = *h.RecommendedLoadKw
 		}
 	}
-	if maxRec <= 80+1e-6 {
-		t.Errorf("max recommended %.1f kWh — the window's 250 kWh drying hour did not raise the ceiling", maxRec)
-	}
-	if maxRec > 250+1e-6 {
-		t.Errorf("max recommended %.1f kWh exceeds the demonstrated 250 kWh", maxRec)
+	if maxRec > 80+1e-6 {
+		t.Errorf("max recommended %.1f kWh exceeds the day's own 80 kWh maximum", maxRec)
 	}
 	if want := 21*20.0 + 3*80.0; math.Abs(sum-want) > 1e-6 {
 		t.Errorf("Σ recommended = %.1f, want the plan day's own energy %.1f", sum, want)
