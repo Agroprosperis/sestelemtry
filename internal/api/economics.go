@@ -196,9 +196,12 @@ func (b *economicsBackend) LoadHourlyRange(ctx context.Context, orgID string, fr
 			GridToEss:            row.GridToEss,
 			GridToLoad:           row.GridToLoad,
 			EssToLoad:            row.EssToLoad,
+			EssToGrid:            row.EssToGrid,
 			EssCharged:           row.EssCharged,
 			EssDischarged:        row.EssDischarged,
 			EssNet:               row.EssNet,
+			EssRealizedProfitUah: row.EssRealizedProfit,
+			EssWithdrawnCostUah:  row.EssWithdrawnCost,
 			EssRemainingKwhStart: row.EssRemainingKwhStart,
 			// Persisted during recompute (energy-flow per-day walk); read
 			// cheaply here so the wide-window monthly/annual/portfolio path

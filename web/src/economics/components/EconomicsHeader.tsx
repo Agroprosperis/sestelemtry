@@ -427,6 +427,11 @@ export function EconomicsHeader({
         </div>
       </div>
 
+      {/* Tariffs belong to one organization, but the portfolio compares
+          several at once — editing an object's prices from that view would
+          be misleading, so the panel (and the version fetch behind it)
+          stays out of the tree there. */}
+      {range !== 'portfolio' && (
       <details className="economics-tariffs">
         <summary>
           <span>Параметри тарифів</span>
@@ -567,6 +572,7 @@ export function EconomicsHeader({
           onLoadVersion={onTariffsChange}
         />
       </details>
+      )}
     </header>
   )
 }

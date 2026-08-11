@@ -53,9 +53,21 @@ func TestAggregateMonthSumsAndWeightedPrices(t *testing.T) {
 	}
 
 	hourly := []HourlyRecord{
-		{HourStart: day1.Add(18 * time.Hour), Rdn: floatPtr(8), GridImport: 100, EssNet: 80, EssDischarged: 10},
-		{HourStart: day1.Add(20 * time.Hour), Rdn: floatPtr(12), GridImport: 100, EssNet: 40, EssDischarged: 20},
-		{HourStart: day2.Add(19 * time.Hour), Rdn: floatPtr(15), GridImport: 300, EssNet: 90, EssDischarged: 30},
+		{
+			HourStart: day1.Add(18 * time.Hour), Rdn: floatPtr(8), ImportPrice: 8, GridImport: 100,
+			EssToLoad: 10, EssNet: 80, EssDischarged: 10,
+			EssRealizedProfitUah: floatPtr(80), EssWithdrawnCostUah: floatPtr(0),
+		},
+		{
+			HourStart: day1.Add(20 * time.Hour), Rdn: floatPtr(12), ImportPrice: 12, GridImport: 100,
+			EssToLoad: 20, EssNet: 40, EssDischarged: 20,
+			EssRealizedProfitUah: floatPtr(40), EssWithdrawnCostUah: floatPtr(200),
+		},
+		{
+			HourStart: day2.Add(19 * time.Hour), Rdn: floatPtr(15), ImportPrice: 15, GridImport: 300,
+			EssToLoad: 30, EssNet: 90, EssDischarged: 30,
+			EssRealizedProfitUah: floatPtr(90), EssWithdrawnCostUah: floatPtr(360),
+		},
 	}
 
 	got := AggregateMonth("2026-06", loc, days, hourly, 100, 0.6, 0, 0)
@@ -124,9 +136,60 @@ func TestAggregateMonthSumsAndWeightedPrices(t *testing.T) {
 	if len(got.HourlyMargin[0].Hours) != 24 {
 		t.Fatalf("heatmap day hours = %d, want 24", len(got.HourlyMargin[0].Hours))
 	}
-	// day1 hour 18: margin = essNet/essDischarged = 80/10 = 8.
-	if h18 := got.HourlyMargin[0].Hours[18]; h18 == nil || math.Abs(*h18-8) > 1e-9 {
+	// day1 hour 18: margin = realized profit / discharged = 80/10 = 8.
+	if h18 := got.HourlyMargin[0].Hours[18]; h18 == nil || math.Abs(h18.Margin-8) > 1e-9 {
 		t.Fatalf("day1 hour18 margin = %v, want 8", h18)
+	}
+}
+
+// TestHeatmapMarginIgnoresSameHourCharging pins the fix for the cells
+// that used to read minus thousands of UAH/kWh: an hour that charges a
+// full pack while trickling a little back out must be judged on what
+// that trickle actually earned, not on the charging bill divided by it.
+func TestHeatmapMarginIgnoresSameHourCharging(t *testing.T) {
+	loc := time.UTC
+	day := time.Date(2026, 6, 1, 0, 0, 0, 0, loc)
+	days := []DailyRecord{{Day: day, IsFinal: true, Totals: DailyTotals{HoursWithData: 24}}}
+	hourly := []HourlyRecord{{
+		HourStart: day.Add(15 * time.Hour), Rdn: floatPtr(10), ImportPrice: 10,
+		GridToEss: 300, EssCharged: 300,
+		// Half a kWh back out: EssNet is dominated by the 3000 UAH charge.
+		EssDischarged: 0.5, EssToLoad: 0.5, EssNet: -2995,
+		EssRealizedProfitUah: floatPtr(3), EssWithdrawnCostUah: floatPtr(1.7),
+	}}
+
+	got := AggregateMonth("2026-06", loc, days, hourly, 645, 0.6, 0, 0)
+
+	if len(got.HourlyMargin) != 1 {
+		t.Fatalf("HourlyMargin rows = %d, want 1", len(got.HourlyMargin))
+	}
+	// Below the discharge floor, so the hour gets no cell at all rather
+	// than the -5990 UAH/kWh the old ratio produced.
+	if h15 := got.HourlyMargin[0].Hours[15]; h15 != nil {
+		t.Fatalf("hour15 margin = %v, want no cell", *h15)
+	}
+
+	// Same hour, same charging, but a real discharge: the cell now shows
+	// what the withdrawn energy earned per kWh (6/4 = 1.5), untouched by
+	// the 3000 UAH the pack spent filling up in the same hour.
+	hourly[0].EssDischarged = 4
+	hourly[0].EssToLoad = 4
+	hourly[0].EssNet = -2960
+	hourly[0].EssRealizedProfitUah = floatPtr(6)
+	hourly[0].EssWithdrawnCostUah = floatPtr(31.6)
+	got = AggregateMonth("2026-06", loc, days, hourly, 645, 0.6, 0, 0)
+	h15 := got.HourlyMargin[0].Hours[15]
+	if h15 == nil || math.Abs(h15.Margin-1.5) > 1e-9 {
+		t.Fatalf("hour15 margin = %v, want 1.5", h15)
+	}
+	// The hover breakdown must reconstruct the headline: revenue 4x10=40,
+	// cost 31.6, wear the 2.4 the persisted profit implies.
+	if math.Abs(h15.RevenueUah-40) > 1e-9 || math.Abs(h15.CostUah-31.6) > 1e-9 ||
+		math.Abs(h15.WearUah-2.4) > 1e-9 {
+		t.Fatalf("breakdown = %+v, want revenue 40 / cost 31.6 / wear 2.4", *h15)
+	}
+	if math.Abs(h15.Margin*h15.DischargedKwh-(h15.RevenueUah-h15.CostUah-h15.WearUah)) > 1e-9 {
+		t.Fatalf("breakdown does not add up to the margin: %+v", *h15)
 	}
 }
 

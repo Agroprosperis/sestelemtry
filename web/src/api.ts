@@ -729,11 +729,22 @@ export type EconomicsMonthlyDay = {
   hours_missing_price: number
 }
 
-// EconomicsMonthlyDayMargin is one heatmap row: 24 hourly ESS margins
-// (UAH per kWh discharged; null when the hour had no discharge/price).
+// EconomicsMonthlyMarginHour is one heatmap cell: what an hour of
+// discharge earned per kWh, plus the arithmetic behind it —
+// margin_uah_per_kwh × discharged_kwh = revenue − cost − wear.
+export type EconomicsMonthlyMarginHour = {
+  margin_uah_per_kwh: number
+  discharged_kwh: number
+  revenue_uah: number
+  cost_uah: number
+  wear_uah: number
+}
+
+// EconomicsMonthlyDayMargin is one heatmap row: 24 hourly ESS cells.
+// null for hours the pack sat out.
 export type EconomicsMonthlyDayMargin = {
   date: string
-  hours: Array<number | null>
+  hours: Array<EconomicsMonthlyMarginHour | null>
 }
 
 // EconomicsUzeCycle is one significant УЗЕ day (reserve ≥ 1000 ₴) with the

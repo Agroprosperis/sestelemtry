@@ -500,11 +500,22 @@ type EconomicsMonthlyDay struct {
 	HoursMissingPrice int `json:"hours_missing_price"`
 }
 
-// EconomicsMonthlyDayMargin is one heatmap row: 24 hourly ESS margins
-// (UAH per kWh discharged; null when the hour had no discharge/price).
+// EconomicsMonthlyMarginHour is one heatmap cell: the margin an hour of
+// discharge earned per kWh, plus the arithmetic behind it so the grid can
+// explain itself on hover.
+type EconomicsMonthlyMarginHour struct {
+	MarginUahPerKwh float64 `json:"margin_uah_per_kwh"`
+	DischargedKwh   float64 `json:"discharged_kwh"`
+	RevenueUah      float64 `json:"revenue_uah"`
+	CostUah         float64 `json:"cost_uah"`
+	WearUah         float64 `json:"wear_uah"`
+}
+
+// EconomicsMonthlyDayMargin is one heatmap row: 24 hourly ESS cells.
+// null for hours the pack sat out.
 type EconomicsMonthlyDayMargin struct {
-	Date  string     `json:"date"`
-	Hours []*float64 `json:"hours"`
+	Date  string                        `json:"date"`
+	Hours []*EconomicsMonthlyMarginHour `json:"hours"`
 }
 
 // EconomicsUzeCycle is one significant УЗЕ day (reserve ≥ 1000 ₴) with the
@@ -634,6 +645,23 @@ type EconomicsMonthlyResponse struct {
 	Days           []EconomicsMonthlyDay       `json:"days"`
 	HourlyMargin   []EconomicsMonthlyDayMargin `json:"hourly_margin"`
 	UzeCycles      []EconomicsUzeCycle         `json:"uze_cycles"`
+}
+
+func marginRowToJSON(m economics.DayMargin) EconomicsMonthlyDayMargin {
+	out := EconomicsMonthlyDayMargin{Date: m.Date, Hours: make([]*EconomicsMonthlyMarginHour, len(m.Hours))}
+	for i, c := range m.Hours {
+		if c == nil {
+			continue
+		}
+		out.Hours[i] = &EconomicsMonthlyMarginHour{
+			MarginUahPerKwh: c.Margin,
+			DischargedKwh:   c.DischargedKwh,
+			RevenueUah:      c.RevenueUah,
+			CostUah:         c.CostUah,
+			WearUah:         c.WearUah,
+		}
+	}
+	return out
 }
 
 // importCostUah reconstructs the money actually spent on grid import.
@@ -794,7 +822,7 @@ func (h *Handlers) economicsMonthly(w http.ResponseWriter, r *http.Request) {
 		resp.Days = append(resp.Days, monthlyDayToJSON(d))
 	}
 	for _, m := range month.HourlyMargin {
-		resp.HourlyMargin = append(resp.HourlyMargin, EconomicsMonthlyDayMargin{Date: m.Date, Hours: m.Hours})
+		resp.HourlyMargin = append(resp.HourlyMargin, marginRowToJSON(m))
 	}
 	for _, c := range month.Cycles {
 		resp.UzeCycles = append(resp.UzeCycles, uzeCycleToJSON(c))

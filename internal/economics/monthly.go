@@ -34,10 +34,23 @@ type HourlyRecord struct {
 	GridToEss  float64
 	GridToLoad float64
 	EssToLoad  float64
+	EssToGrid  float64
 
 	EssCharged    float64
 	EssDischarged float64
 	EssNet        float64
+
+	// EssWithdrawnCostUah is what the energy discharged this hour had
+	// cost to store, at the pack's weighted-average cost (see RollHour).
+	// nil for rows persisted before the cost-basis walk existed.
+	EssWithdrawnCostUah *float64
+
+	// EssRealizedProfitUah is the hour's discharge revenue minus the
+	// weighted-average cost of exactly the energy withdrawn and its wear
+	// (see RollHour). Unlike EssNet it carries no charging leg, so it
+	// divides cleanly by the hour's discharge. nil for rows persisted
+	// before the cost-basis walk existed.
+	EssRealizedProfitUah *float64
 
 	EssRemainingKwhStart *float64
 
@@ -73,12 +86,27 @@ type MonthDay struct {
 	EssPvMissedKwh   float64
 }
 
-// DayMargin is one row of the ESS marginality heatmap: 24 hourly margins
-// (UAH per kWh discharged) for one civil day. nil entries are hours with
-// no discharge (or no price).
+// MarginHour is one cell of the ESS marginality heatmap. Margin is the
+// headline number (UAH per kWh discharged); the rest is the arithmetic
+// behind it, carried so the dashboard can show an operator where the
+// figure came from instead of asking them to trust it. The four parts
+// satisfy Margin x DischargedKwh = RevenueUah − CostUah − WearUah.
+type MarginHour struct {
+	Margin        float64
+	DischargedKwh float64
+	RevenueUah    float64
+	// CostUah is the weighted-average cost of storing exactly the energy
+	// withdrawn this hour — zero for energy that came from the sun.
+	CostUah float64
+	WearUah float64
+}
+
+// DayMargin is one row of the ESS marginality heatmap: 24 hourly cells
+// for one civil day. nil entries are hours the pack sat out — no
+// meaningful discharge, no cost basis, or anomalous telemetry.
 type DayMargin struct {
 	Date  string
-	Hours []*float64
+	Hours []*MarginHour
 }
 
 // MonthExtreme records the day with the best / worst project effect.
@@ -368,6 +396,12 @@ type StoredMonth struct {
 	Cycles []UzeCycle
 }
 
+// heatmapMinDischargeKwh is the discharge an hour must show before the
+// marginality heatmap gives it a cell. A pack that gave back a fraction
+// of a kWh was idling, not trading, and its per-kWh ratio says more
+// about the divisor than about the hour.
+const heatmapMinDischargeKwh = 1.0
+
 // AggregateMonth folds the persisted daily + hourly records of one month
 // into a MonthlyTotals + per-day breakdown + ESS marginality heatmap.
 // capacityKwh is the ESS capacity used for the equivalent-cycle metric;
@@ -393,7 +427,7 @@ func AggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly
 	// residual), shared with the single-day plan path so both render the
 	// same DP schedule.
 	dayOpts := buildDayOpts(hourly, loc, isBadHour)
-	margins := make(map[string][]*float64)
+	margins := make(map[string][]*MarginHour)
 	var monthRdnNum, monthRdnDen, monthRdnMax float64
 	haveRdnMax := false
 
@@ -403,14 +437,24 @@ func AggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly
 		hour := local.Hour()
 		grid := margins[key]
 		if grid == nil {
-			grid = make([]*float64, 24)
+			grid = make([]*MarginHour, 24)
 			margins[key] = grid
 		}
-		if hour >= 0 && hour < 24 && h.EssDischarged > 0 && !isBadHour(h) {
-			m := h.EssNet / h.EssDischarged
+		if hour >= 0 && hour < 24 && h.EssDischarged >= heatmapMinDischargeKwh &&
+			!isBadHour(h) && h.EssRealizedProfitUah != nil && h.EssWithdrawnCostUah != nil {
+			m := *h.EssRealizedProfitUah / h.EssDischarged
 			if !math.IsInf(m, 0) && !math.IsNaN(m) {
-				v := m
-				grid[hour] = &v
+				revenue := h.EssToLoad*h.ImportPrice + h.EssToGrid*h.ExportPrice
+				grid[hour] = &MarginHour{
+					Margin:        m,
+					DischargedKwh: h.EssDischarged,
+					RevenueUah:    revenue,
+					CostUah:       *h.EssWithdrawnCostUah,
+					// Derived from the identity RollHour used, so the parts
+					// always reconstruct the margin shown — recomputing wear
+					// from today's tariff would not if the tariff has moved.
+					WearUah: revenue - *h.EssWithdrawnCostUah - *h.EssRealizedProfitUah,
+				}
 			}
 		}
 		if h.Rdn != nil {
@@ -676,7 +720,7 @@ func AggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly
 	for _, d := range outDays {
 		grid := margins[d.Date]
 		if grid == nil {
-			grid = make([]*float64, 24)
+			grid = make([]*MarginHour, 24)
 		}
 		hm = append(hm, DayMargin{Date: d.Date, Hours: grid})
 	}
