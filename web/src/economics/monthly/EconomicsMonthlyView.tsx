@@ -1010,7 +1010,7 @@ function BalanceSegment({
 function heatCellTip(date: string, hour: number, c: EconomicsMonthlyMarginHour): string {
   const hh = `${String(hour).padStart(2, '0')}:00`
   return (
-    `${formatDayOfMonth(date)}, ${hh} — розряд ${formatKwh(c.discharged_kwh)}\n` +
+    `${formatDayLabel(date)} ${hh} — розряд ${formatKwh(c.discharged_kwh)}\n` +
     `Виручка ${formatUah(c.revenue_uah)} (віддане в мережу за ціною експорту, у споживання — за ціною імпорту)\n` +
     `− собівартість збереженої енергії ${formatUah(c.cost_uah)}\n` +
     `− знос ${formatUah(c.wear_uah)}\n` +
@@ -1026,7 +1026,7 @@ const HEATMAP_TIP =
   'години. Витрати на заряд лишаються в годині заряду, тому маржу розряду вони не спотворюють. ' +
   'Години з розрядом до 1 кВт·год не показуємо. Наведіть на клітинку — покаже її розрахунок.'
 
-function MonthlyHeatmap({ margins }: { margins: EconomicsMonthlyDayMargin[] }) {
+export function MonthlyHeatmap({ margins }: { margins: EconomicsMonthlyDayMargin[] }) {
   return (
     <section className="economics-card economics-month-section" aria-label="Маржинальність УЗЕ">
       <div className="economics-month-section-head">
