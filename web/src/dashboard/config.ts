@@ -43,16 +43,44 @@ export const DASHBOARD_REFRESH_MS = 1000
 // midnight numbers until the operator manually reloaded.
 export const DASHBOARD_CHART_REFRESH_MS = 60_000
 
-// Earliest local-time instant whose cumulative-counter readings are
-// considered reliable. Energy Summary computes period totals as
-// `end - seed` over /current?at=... lookups; on periods that include
-// dates before this floor the seed query returns the lifetime counter
-// from a backfilled / faulty pre-deployment sample, which inflates the
-// totals to nonsense (e.g. April 2026 once showed ~65 MWh consumption
-// against ~20 MWh production). Both seed and end timestamps are clamped
-// to be at-or-after this instant; if the whole period sits before it,
-// totals are returned as zero.
+// Fallback floor for a site not listed in ORGANIZATION_OPERATION_START.
+// Energy Summary computes period totals as `end - seed` over
+// /current?at=... lookups; reach back past the day a site was
+// commissioned and the seed becomes a lifetime counter from a
+// pre-deployment test reading, which inflates the totals to nonsense
+// (e.g. April 2026 once showed ~65 MWh consumption against ~20 MWh
+// production). This date predates no real site, so an unlisted org
+// keeps the conservative behaviour it had before per-site floors
+// existed: nothing before it is charted or totalled.
 export const MIN_RELIABLE_DATA_AT = new Date(2026, 3, 30)
+
+// ORGANIZATION_OPERATION_START is the day each site was commissioned —
+// as far back as the FusionSolar archive import reaches, and therefore
+// how far back the dashboard may chart and total. Months of imported
+// archive stay invisible for any site whose entry is missing or too
+// late, which is what MIN_RELIABLE_DATA_AT does to everyone by default.
+//
+// Local-time constructor on purpose: `new Date('2025-06-20')` is UTC
+// midnight, which east of Greenwich is still 19 June locally and would
+// let one pre-commissioning evening back into the first bucket.
+//
+// `scripts/data_gaps.sql` reports coverage against the same dates —
+// keep the two in step when onboarding a site.
+export const ORGANIZATION_OPERATION_START: Record<string, Date> = {
+  ab: new Date(2025, 5, 20),
+  ze: new Date(2025, 0, 29),
+  ke: new Date(2025, 5, 30),
+  pe: new Date(2026, 2, 30),
+  pde: new Date(2025, 11, 24),
+  sm: new Date(2026, 2, 30),
+  de: new Date(2026, 3, 14),
+}
+
+// energyFloorFor returns the earliest local instant the dashboard may
+// chart or total for one organization.
+export function energyFloorFor(organizationID: string): Date {
+  return ORGANIZATION_OPERATION_START[organizationID] ?? MIN_RELIABLE_DATA_AT
+}
 
 export const FALLBACK_DASHBOARD_CONFIG: DashboardConfig = {
   cards: [

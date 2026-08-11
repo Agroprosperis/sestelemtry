@@ -10,8 +10,8 @@ import type { CurrentResponse, DashboardConfig } from '../../types'
 import {
   DASHBOARD_CHART_REFRESH_MS,
   DASHBOARD_REFRESH_MS,
+  energyFloorFor,
   FALLBACK_DASHBOARD_CONFIG,
-  MIN_RELIABLE_DATA_AT,
 } from '../config'
 import { DAY_POWER_FETCH_METRIC_KEYS, DAY_POWER_METRIC_KEYS } from '../metrics'
 import { endOfPeriod, rangeParams, startOfPeriod, type RangePreset } from '../range'
@@ -65,18 +65,20 @@ const FLOW_METRIC_KEYS = [
   'ess_to_grid_kwh',
 ]
 
-// clampEnergyFromIso raises the `from` edge to MIN_RELIABLE_DATA_AT so the
-// energy-summary seed sample isn't taken from pre-deployment garbage —
-// EXCEPT when the whole requested period sits before that floor (e.g. the
-// user is viewing an imported archive day/month). In that case clamping
-// would push `from` past `to` and invert the range, which the backend
-// rejects (the dashboard then showed "energy-summary request failed").
-// For wholly-historical periods the archive data IS the reliable source,
-// so we keep the real range unclamped.
-function clampEnergyFromIso(fromIso: string, toIso: string): string {
+// clampEnergyFromIso raises the `from` edge to this site's floor (its
+// commissioning day, or MIN_RELIABLE_DATA_AT for a site with no known
+// one) so the energy-summary seed sample isn't taken from
+// pre-deployment garbage — EXCEPT when the whole requested
+// period sits before that floor (e.g. the user is viewing an imported
+// archive day/month). In that case clamping would push `from` past
+// `to` and invert the range, which the backend rejects (the dashboard
+// then showed "energy-summary request failed"). For wholly-historical
+// periods the archive data IS the reliable source, so we keep the real
+// range unclamped.
+function clampEnergyFromIso(fromIso: string, toIso: string, floorMs: number): string {
   const fromMs = new Date(fromIso).getTime()
   const toMs = new Date(toIso).getTime()
-  const clamped = Math.max(fromMs, MIN_RELIABLE_DATA_AT.getTime())
+  const clamped = Math.max(fromMs, floorMs)
   if (clamped >= toMs) return fromIso
   return new Date(clamped).toISOString()
 }
@@ -188,6 +190,14 @@ export function useDashboardData(input: {
   const liveAllocation = useMemo<LiveAllocation>(
     () => liveAllocationFromCurrent(current /* essDischargeSign: hard-coded 1 for now */),
     [current],
+  )
+
+  // How far back this site's charts may reach. Carried as epoch ms so
+  // the effects below depend on a primitive rather than a fresh Date
+  // identity every render.
+  const energyFloorMs = useMemo(
+    () => energyFloorFor(organizationID).getTime(),
+    [organizationID],
   )
 
   // Forecast lives outside the main /timeseries effect so a slow n8n call
@@ -343,7 +353,7 @@ export function useDashboardData(input: {
         const rawRange = rangeParams(preset, anchorDate, now)
         const baseRange = {
           ...rawRange,
-          from: clampEnergyFromIso(rawRange.from, rawRange.to),
+          from: clampEnergyFromIso(rawRange.from, rawRange.to, energyFloorMs),
         }
         const damFromDate = startOfPeriod(preset, anchorDate)
         const damToExclusive = endOfPeriod(preset, anchorDate)
@@ -508,7 +518,7 @@ export function useDashboardData(input: {
       if (timer !== null) window.clearInterval(timer)
       document.removeEventListener('visibilitychange', onVisibilityChange)
     }
-  }, [organizationID, preset, anchorTime, metricsAtTime])
+  }, [organizationID, preset, anchorTime, metricsAtTime, energyFloorMs])
 
   // Period flows live on an independent pipeline from the
   // /timeseries chart fetch. The on-the-fly allocator inside
@@ -552,7 +562,7 @@ export function useDashboardData(input: {
       const rawRange = rangeParams(preset, anchorDate, now)
       const baseRange = {
         ...rawRange,
-        from: clampEnergyFromIso(rawRange.from, rawRange.to),
+        from: clampEnergyFromIso(rawRange.from, rawRange.to, energyFloorMs),
       }
 
       const summaryResp = await fetchEnergySummary(
@@ -582,7 +592,7 @@ export function useDashboardData(input: {
       }
       setFlowsRefreshing(false)
     }
-  }, [organizationID, preset, anchorTime])
+  }, [organizationID, preset, anchorTime, energyFloorMs])
 
   // Auto-trigger the flow allocator on `day` preset so the
   // BatteryDayNarrative / DailySummaryNarrative cards (which read
