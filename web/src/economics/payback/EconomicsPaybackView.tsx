@@ -785,9 +785,9 @@ export function EconomicsPaybackView({ data, capexUah, plannedPaybackMonths }: P
             <SideRow
               icon="wallet"
               tone="violet"
-              label="Операційні витрати"
+              label="Витрати на придбання електроенергії з мережі"
               value={formatUah(data.totals.expense_total_uah)}
-              note="за період"
+              note="заряд УЗЕ з мережі за період"
             />
             <SideRow icon="percent" tone="green" label="Чистий ефект (EBITDA)" value={formatUah(allTimeEbitda)} />
           </aside>
