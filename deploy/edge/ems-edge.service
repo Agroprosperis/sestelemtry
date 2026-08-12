@@ -1,0 +1,47 @@
+# EMS edge controller on the Siemens IOT2050 (shadow mode: reads
+# SmartLogger telemetry, computes virtual dispatch, never writes).
+# Install: /etc/systemd/system/ems-edge.service
+# Runbook: docs/runbooks/edge_deploy.md
+
+[Unit]
+Description=EMS Edge controller (SmartLogger telemetry + shadow control)
+After=network-online.target time-sync.target
+Wants=network-online.target
+
+# Never give up restarting: an unattended site device must keep
+# retrying even through long SmartLogger or WAN outages.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=ems-edge
+Group=ems-edge
+
+# SmartLogger hosts, cloud URL and the site Bearer token (chmod 600).
+EnvironmentFile=/etc/ems-edge/edge.env
+
+ExecStart=/opt/ems-edge/ems-edge -config /etc/ems-edge/config.yaml
+WorkingDirectory=/opt/ems-edge
+
+Restart=always
+RestartSec=5
+
+# /var/lib/ems-edge — blackbox SQLite + manifest cache. Created and
+# chowned automatically; survives binary upgrades.
+StateDirectory=ems-edge
+StateDirectoryMode=0750
+
+# Hardening: the process needs only its state dir and sockets.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+LimitNOFILE=65536
+
+# JSON logs to journald (persistent storage configured in the runbook).
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ems-edge
+
+[Install]
+WantedBy=multi-user.target

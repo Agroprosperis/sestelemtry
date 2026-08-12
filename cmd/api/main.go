@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -89,6 +90,12 @@ func main() {
 		log.Error("db_init_alert_settings", "err", err)
 		os.Exit(1)
 	}
+	// EMS edge ingest tables (batches, control decisions, events,
+	// heartbeats, manifests). Idempotent; mirrored by 012_edge.sql.
+	if err := storage.InitEdgeSchema(ctx, pool); err != nil {
+		log.Error("db_init_edge", "err", err)
+		os.Exit(1)
+	}
 
 	store := api.NewStore(pool)
 	// Boot-time feature detection: if the collector has run migration 004
@@ -104,6 +111,28 @@ func main() {
 	log.Info("api_features", "daily_cagg", hasCAGG)
 
 	svc := api.NewHandlers(store, *allowOrigin)
+
+	// EMS edge uplink: enabled only when per-site Bearer tokens exist
+	// (EDGE_SITE_TOKENS="ab=tokenA,ze=tokenB"). During the shadow phase
+	// edge telemetry lands under "<site><EDGE_ORG_SUFFIX>" (default
+	// "-edge") so dashboards keep a single source while the VM
+	// collector still polls the same SmartLoggers in parallel; set
+	// EDGE_ORG_SUFFIX="" at cutover.
+	var edgeIngest *api.EdgeIngest
+	if tokens := api.ParseEdgeTokens(os.Getenv("EDGE_SITE_TOKENS")); len(tokens) > 0 {
+		orgSuffix := "-edge"
+		if v, ok := os.LookupEnv("EDGE_ORG_SUFFIX"); ok {
+			orgSuffix = strings.TrimSpace(v)
+		}
+		edgeIngest = &api.EdgeIngest{
+			Pool:      pool,
+			Tokens:    tokens,
+			OrgSuffix: orgSuffix,
+			Log:       log,
+		}
+		svc.SetEdgeIngest(edgeIngest)
+		log.Info("api_edge_ingest_enabled", "sites", len(tokens), "org_suffix", orgSuffix)
+	}
 	// Optional: load org metadata from YAML so /api/v1/organizations
 	// can return display names + coordinates. The API server runs
 	// fine without a config (telemetry data lives in the DB), so a
@@ -146,6 +175,24 @@ func main() {
 			}
 			log.Info("api_config_loaded", "path", cfgPath, "organizations", len(cfg.Organizations))
 		}
+	}
+
+	// Forward planner (edge level A): republishes manifest-lite with
+	// plan.intervals for every edge site every 30 min. Tomorrow's DAM
+	// prices land ~15:30 and are picked up within one tick; a content-
+	// hash manifest_id makes unchanged plans no-ops, so the edge only
+	// sees a new version when the plan actually moved.
+	if edgeIngest != nil {
+		if loadedCfg != nil && loadedCfg.OREE.Zone != 0 {
+			edgeIngest.PlannerZone = loadedCfg.OREE.Zone
+		}
+		sites := make([]string, 0, len(edgeIngest.Tokens))
+		for site := range edgeIngest.Tokens {
+			sites = append(sites, site)
+		}
+		sort.Strings(sites)
+		go svc.RunEdgePlannerLoop(ctx, sites, 30*time.Minute)
+		log.Info("api_edge_planner_enabled", "sites", strings.Join(sites, ","))
 	}
 
 	// FusionSolar archive importer behind POST

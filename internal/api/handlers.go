@@ -67,6 +67,10 @@ type Handlers struct {
 	// save from silently downgrading a YAML-configured deployment.
 	alertFallback         alerts.Settings
 	alertFallbackPassword string
+	// edge backs the /api/v1/edge/* endpoints (EMS edge uplink +
+	// manifest distribution). nil when no EDGE_SITE_TOKENS were
+	// configured — the handlers respond 503.
+	edge *EdgeIngest
 }
 
 // FusionSolarImporter synchronously pulls historical device data from
@@ -343,6 +347,10 @@ func (h *Handlers) Router() http.Handler {
 	mux.HandleFunc("/api/v1/economics/recompute", h.economicsRecompute)
 	mux.HandleFunc("/api/v1/economics/data-range", h.economicsDataRange)
 	mux.HandleFunc("/api/v1/uze-plan", h.uzePlan)
+	mux.HandleFunc("/api/v1/edge/batch", h.edgeBatch)
+	mux.HandleFunc("/api/v1/edge/heartbeat", h.edgeHeartbeat)
+	mux.HandleFunc("/api/v1/edge/manifest", h.edgeManifest)
+	mux.HandleFunc("/api/v1/edge/manifest/publish", h.edgeManifestPublish)
 	mux.HandleFunc("/swagger", h.swaggerUI)
 	mux.HandleFunc("/swagger/", h.swaggerUI)
 	mux.HandleFunc("/swagger/openapi.yaml", h.swaggerSpec)

@@ -1,0 +1,76 @@
+# EMS edge (Siemens IOT2050) — example config for pilot site ab.
+# Spec: ems-spec docs/specs/ems_mvp_edge_shadow_spec.md §11.
+#
+# Secrets and site-specific hosts stay OUT of this file:
+#   - SmartLogger IPs come from env (expanded via ${VAR}),
+#   - the uplink Bearer token is read from the env var named in
+#     uplink.site_token_env.
+
+site_id: ab
+timezone: Europe/Kyiv
+
+# Register catalog shared with the cloud collector.
+register_catalog: registers/huawei_smartlogger.yaml
+
+smartlogger:
+  topology: single_smartlogger      # single_smartlogger | dual_smartlogger
+  poll_interval: 1s
+  devices:
+    - role: all                     # single topology: one box covers PV + ESS
+      host: ${EDGE_SL_HOST}         # set EDGE_SL_HOST in the env file; "mock" for tests
+      port: 502
+      unit_id: 0                    # vendor doc says 0; field devices often use 99
+
+# Dual-SmartLogger example (ze):
+# smartlogger:
+#   topology: dual_smartlogger
+#   poll_interval: 1s
+#   devices:
+#     - role: pv
+#       host: ${EDGE_SL_PV_HOST}    # 10.28.40.101
+#       unit_id: 0
+#     - role: ess
+#       host: ${EDGE_SL_ESS_HOST}   # 10.28.40.102
+#       unit_id: 0
+
+edge:
+  edge_id: iot2050-ab-001
+  platform: siemens_iot2050
+
+blackbox:
+  enabled: true
+  db_path: /data/blackbox/blackbox.db
+  retention_days: 30
+  disk_critical_pct: 95             # above this, uploaded rows are dropped oldest-first
+
+uplink:
+  enabled: true
+  base_url: ${EDGE_CLOUD_URL}       # e.g. https://vm-host:8080
+  batch_interval: 30s
+  batch_max_records: 600
+  heartbeat_interval: 30s
+  http_timeout: 20s
+  site_token_env: EMS_SITE_TOKEN_AB # env var holding the Bearer token
+
+manifest:
+  poll_interval: 60s
+  cache_path: /data/manifest/active_manifest.json
+
+control:
+  mode: shadow                      # monitor | shadow (auto_* rejected until MVP-3)
+  preset: economic_arbitrage        # fallback preset when no manifest is active
+  interval: 1s
+
+# Passport limits used when the manifest carries none and the
+# SmartLogger limit registers (40490/40492) are unavailable.
+limits:
+  grid:
+    import_limit_kw: 947
+    target_import_kw: 900
+  pv:
+    rated_kw: 450
+  bess:
+    rated_power_kw: 324
+    rated_capacity_kwh: 645
+    soc_min_economic_pct: 20
+    soc_max_economic_pct: 90

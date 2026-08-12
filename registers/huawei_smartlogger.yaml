@@ -122,6 +122,25 @@ registers:
     gain: 0.01
     offset: 0
 
+  # --- EMS edge shadow-control reads (MVP-1, read-only) ---
+  # Issue 52: gain column is divisor; our gain = 1/vendor_gain.
+
+  - metric_key: ess_charge_max_kw
+    name: Max ESS charge power, kW
+    address: 40490
+    data_type: UINT32
+    swap_type: ABCD_BE
+    gain: 0.001
+    offset: 0
+
+  - metric_key: ess_discharge_max_kw
+    name: Max ESS discharge power, kW
+    address: 40492
+    data_type: UINT32
+    swap_type: ABCD_BE
+    gain: 0.001
+    offset: 0
+
   - metric_key: load_power_kw
     name: Load power, kW
     address: 40503
@@ -168,6 +187,14 @@ registers:
     data_type: UINT16
     swap_type: ABCD_BE
     gain: 0.1
+    offset: 0
+
+  - metric_key: pcs_shutdown
+    name: ESS PCS shut down
+    address: 40540
+    data_type: UINT16
+    swap_type: ABCD_BE
+    gain: 1
     offset: 0
 
   # --- Plant inventory (rare poll; not in 1s telemetry whitelist) ---

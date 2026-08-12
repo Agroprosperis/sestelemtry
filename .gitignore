@@ -15,6 +15,9 @@ config.pe-single.yaml
 tmp/
 temp/
 
+# Build artifacts (make edge / edge-package)
+dist/
+
 # Local working/reference material (not part of the app)
 economic/
 solar_fusion_archive/
