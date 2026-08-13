@@ -16,6 +16,7 @@ import './economics.css'
 import { useEconomicsData } from './useEconomicsData'
 import { useEconomicsMonthlyData } from './useEconomicsMonthlyData'
 import { useEconomicsAnnualData } from './useEconomicsAnnualData'
+import { useCapexSchedule } from './useCapexSchedule'
 import { useOrgTariffs } from './useOrgTariffs'
 
 // DamRefreshState is the small UI state machine that drives the
@@ -232,6 +233,11 @@ export function EconomicsPage() {
     refreshKey,
   })
 
+  // Staged projects grow their CAPEX over time, and each step is already
+  // versioned in the tariff schedule; the payback page compares the
+  // cumulative EBITDA against the CAPEX standing in each month.
+  const capexSteps = useCapexSchedule(range === 'payback' ? organizationID : '', refreshKey)
+
   // jumpToMonth switches the page to the month view of the given YYYY-MM
   // (drill-down from an annual trend bar / table row). We keep the day
   // anchor at the first of that month so the month picker lands cleanly.
@@ -359,6 +365,7 @@ export function EconomicsPage() {
             <EconomicsPaybackView
               data={payback.year}
               capexUah={tariffs.capexUah}
+              capexSteps={capexSteps}
               plannedPaybackMonths={tariffs.plannedPaybackMonths}
             />
           ) : (

@@ -26,6 +26,7 @@ import {
   addMonths,
   buildPaybackModel,
   type CapexPaybackRow,
+  type CapexStep,
   moneyAxis,
   paybackAxis,
   paybackLabel,
@@ -39,7 +40,12 @@ import {
 
 type Props = {
   data: EconomicsAnnualResponse
+  // capexUah is the flat value from the tariff form; capexSteps is the
+  // dated CAPEX from the tariff schedule and wins whenever it is filled
+  // in, so a project built in stages is measured against what was
+  // invested by each month rather than against its final cost.
   capexUah: number
+  capexSteps: CapexStep[]
   // plannedPaybackMonths is the business-plan payback period (months);
   // 0 hides the plan-vs-forecast comparison.
   plannedPaybackMonths: number
@@ -194,9 +200,12 @@ function SideRow({
 type CapexPaybackTooltipProps = {
   active?: boolean
   payload?: { payload: CapexPaybackRow }[]
+  // staged adds the CAPEX row: with investments in stages, "накопичено"
+  // alone does not say which target the month was measured against.
+  staged?: boolean
 }
 
-function CapexPaybackTooltip({ active, payload }: CapexPaybackTooltipProps) {
+function CapexPaybackTooltip({ active, payload, staged }: CapexPaybackTooltipProps) {
   if (!active || !payload?.length) return null
   const row = payload[0].payload
   const cum = row.factCum ?? row.forecastCum
@@ -223,6 +232,13 @@ function CapexPaybackTooltip({ active, payload }: CapexPaybackTooltipProps) {
           <i style={{ background: '#12b76a' }} />
           <span>EBITDA за місяць</span>
           <b>{formatUah(row.monthEbitda)}</b>
+        </div>
+      ) : null}
+      {staged ? (
+        <div className="economics-trend-tip-row">
+          <i style={{ background: '#64748b' }} />
+          <span>CAPEX на цей місяць</span>
+          <b>{formatUah(row.capex)}</b>
         </div>
       ) : null}
       {row.kind === 'prior' ? (
@@ -291,21 +307,32 @@ function uahShortHrn(v: number): string {
   return formatUah(v)
 }
 
+// investmentStagesNote is the KPI caption for a staged CAPEX ("3 етапи
+// інвестицій"), with the Ukrainian plural the count needs.
+function investmentStagesNote(n: number): string {
+  const tens = n % 100
+  const last = n % 10
+  const word =
+    tens >= 12 && tens <= 14 ? 'етапів' : last === 1 ? 'етап' : last >= 2 && last <= 4 ? 'етапи' : 'етапів'
+  return `${n} ${word} інвестицій`
+}
+
 const Q_ROMAN = ['I', 'II', 'III', 'IV']
 
-export function EconomicsPaybackView({ data, capexUah, plannedPaybackMonths }: Props) {
+export function EconomicsPaybackView({ data, capexUah, capexSteps, plannedPaybackMonths }: Props) {
   const [grain, setGrain] = useState<EffectGrain>('month')
 
   const model = useMemo(
     () =>
       buildPaybackModel({
         capexUah,
+        capexSteps,
         months: data.months,
         ebitda: data.totals.ebitda_uah,
         priorEbitda: data.prior_ebitda_uah,
         priorMonthsWithData: data.prior_months_with_data,
       }),
-    [capexUah, data],
+    [capexUah, capexSteps, data],
   )
   const {
     monthsWithData,
@@ -314,6 +341,8 @@ export function EconomicsPaybackView({ data, capexUah, plannedPaybackMonths }: P
     allTimeEbitda,
     monthlyPace,
     seasonalFactors,
+    capexNow,
+    capexStages,
     paybackYears,
     coveredShare,
     remaining,
@@ -330,8 +359,16 @@ export function EconomicsPaybackView({ data, capexUah, plannedPaybackMonths }: P
     lastFactMonthKey,
   } = model
 
+  // A staged CAPEX is drawn as a staircase (and explained in the
+  // tooltip); a single-stage project keeps the plain horizontal line.
+  const staged = capexStages > 1
+  const capexMax = Math.max(capexNow, ...paybackRows.map((r) => r.capex))
+  // The payback marker sits on the CAPEX line, which may have stepped up
+  // by the month the projection crosses it.
+  const paybackCapex = paybackRows.find((r) => r.monthKey === paybackMonthKey)?.capex ?? capexNow
+
   const { ticks: timeTicks, format: tickLabel } = paybackAxis(tMax, firstMonthKey, timeOffset)
-  const yMax = Math.max(capexUah, allTimeEbitda, ...paybackRows.map((r) => r.forecastCum ?? r.factCum ?? 0), 0)
+  const yMax = Math.max(capexMax, allTimeEbitda, ...paybackRows.map((r) => r.forecastCum ?? r.factCum ?? 0), 0)
   const axis = moneyAxis(yMax)
   // Main-chart Y ticks carry the unit right in the label ("15 млн"),
   // like the final design.
@@ -438,14 +475,15 @@ export function EconomicsPaybackView({ data, capexUah, plannedPaybackMonths }: P
   const forecastMonths = Number.isFinite(paybackYears) ? paybackYears * 12 : NaN
   const deviationMonths = planMonths > 0 && Number.isFinite(forecastMonths) ? Math.round(forecastMonths - planMonths) : null
 
-  if (!(capexUah > 0)) {
+  if (!(capexNow > 0)) {
     return (
       <section className="economics-card economics-month-section" aria-label="Окупність проєкту">
         <div className="economics-month-section-head">
           <h3 className="economics-month-section-title">Окупність проєкту</h3>
         </div>
         <p className="economics-month-muted">
-          Вкажіть CAPEX проєкту в «Параметри тарифів», щоб побачити звіт про окупність інвестицій.
+          Вкажіть CAPEX проєкту в «Параметри тарифів» — або окремими сумами в колонці CAPEX у версіях
+          тарифів, якщо інвестували етапами, — щоб побачити звіт про окупність інвестицій.
         </p>
       </section>
     )
@@ -456,7 +494,7 @@ export function EconomicsPaybackView({ data, capexUah, plannedPaybackMonths }: P
       <div className="economics-payback-head">
         <h2>
           Окупність проєкту СЕС
-          <OptimumInfo tip="CAPEX — разові капітальні інвестиції з налаштувань об'єкта. Повернуто = накопичений EBITDA з початку експлуатації. Прогноз окупності будується помісячно з урахуванням сезонності виробітку: темп EBITDA оцінюється за фактичними даними з поправкою на сезон, а майбутні місяці отримують свій сезонний коефіцієнт (літо швидше, зима повільніше)." />
+          <OptimumInfo tip="CAPEX береться з колонки CAPEX у версіях тарифів: якщо проєкт інвестували етапами, планка окупності зростає разом із вкладеннями, а місяць порівнюється з тією сумою, що була вкладена на той час. Коли у версіях CAPEX не заповнений, діє одне значення з «Параметрів тарифів». Повернуто = накопичений EBITDA з початку експлуатації; середньорічний ROI рахується від середніх вкладень за період. Прогноз окупності будується помісячно з урахуванням сезонності виробітку: темп EBITDA оцінюється за фактом із поправкою на сезон, а майбутні місяці отримують свій сезонний коефіцієнт (літо швидше, зима повільніше)." />
         </h2>
         <span className="economics-month-muted">Дані оновлено: {updatedLabel}</span>
       </div>
@@ -466,8 +504,8 @@ export function EconomicsPaybackView({ data, capexUah, plannedPaybackMonths }: P
           icon="bars"
           tone="blue"
           label="CAPEX проєкту"
-          value={formatUah(capexUah)}
-          note="разові інвестиції"
+          value={formatUah(capexNow)}
+          note={staged ? investmentStagesNote(capexStages) : 'разові інвестиції'}
         />
         <KpiCard
           icon="wallet"
@@ -509,7 +547,7 @@ export function EconomicsPaybackView({ data, capexUah, plannedPaybackMonths }: P
                 <Icon name="coin" />
               </span>
               <span className="economics-payback-progress-caption">
-                Повернуто <b>{uahShortHrn(allTimeEbitda)}</b> із <b>{uahShortHrn(capexUah)}</b>
+                Повернуто <b>{uahShortHrn(allTimeEbitda)}</b> із <b>{uahShortHrn(capexNow)}</b>
               </span>
               <div className="economics-capex-bar economics-payback-bar">
                 <span className="economics-capex-bar-fill" style={{ width: `${coveredShare * 100}%` }} />
@@ -526,12 +564,22 @@ export function EconomicsPaybackView({ data, capexUah, plannedPaybackMonths }: P
               <span className="economics-capex-chart-title">
                 Накопичена окупність проєкту
                 <span className="economics-capex-chart-unit">{axis.unit}</span>
-                <OptimumInfo tip="Суцільна лінія — фактичний накопичений EBITDA від початку експлуатації. Пунктир — сезонний прогноз: кожен майбутній місяць додає свій очікуваний EBITDA (влітку більше, взимку менше), тому лінія хвиляста, як і факт. Вертикаль «Сьогодні» — остання фактична точка; точка окупності — прогнозований місяць повного повернення інвестицій." />
+                <OptimumInfo
+                  tip={
+                    staged
+                      ? 'Суцільна лінія — фактичний накопичений EBITDA від початку експлуатації. Пунктир — сезонний прогноз: кожен майбутній місяць додає свій очікуваний EBITDA (влітку більше, взимку менше). Сіра сходинка — CAPEX, що діяв у кожному місяці: проєкт інвестували етапами, тому планка окупності підіймається разом із вкладеннями.'
+                      : 'Суцільна лінія — фактичний накопичений EBITDA від початку експлуатації. Пунктир — сезонний прогноз: кожен майбутній місяць додає свій очікуваний EBITDA (влітку більше, взимку менше), тому лінія хвиляста, як і факт. Вертикаль «Сьогодні» — остання фактична точка; точка окупності — прогнозований місяць повного повернення інвестицій.'
+                  }
+                />
               </span>
               <span className="economics-month-legend">
                 <span><i style={{ background: '#2f6fed' }} />Фактичний накопичений EBITDA</span>
                 <span><i style={{ background: '#60a5fa' }} />Прогноз накопиченого EBITDA</span>
-                <span><i style={{ background: '#64748b' }} />CAPEX ({uahShortHrn(capexUah)})</span>
+                <span>
+                  <i style={{ background: '#64748b' }} />
+                  CAPEX ({uahShortHrn(capexNow)}
+                  {staged ? ', етапами' : ''})
+                </span>
                 <span><i style={{ background: '#7c3aed' }} />Точка окупності (прогноз)</span>
               </span>
             </div>
@@ -554,15 +602,27 @@ export function EconomicsPaybackView({ data, capexUah, plannedPaybackMonths }: P
                 tickLine={false}
                 axisLine={false}
                 tickFormatter={mainTick}
-                domain={[0, (dataMax: number) => Math.max(dataMax, capexUah) * 1.08]}
+                domain={[0, (dataMax: number) => Math.max(dataMax, capexMax) * 1.08]}
               />
-              <Tooltip content={<CapexPaybackTooltip />} cursor={{ stroke: '#cbd5e1' }} />
-              <ReferenceLine
-                y={capexUah}
-                stroke="#64748b"
-                strokeWidth={1.4}
-                label={{ value: `CAPEX ${uahShortHrn(capexUah)}`, position: 'insideTopLeft', fontSize: 11, fill: '#475569' }}
-              />
+              <Tooltip content={<CapexPaybackTooltip staged={staged} />} cursor={{ stroke: '#cbd5e1' }} />
+              {staged ? (
+                <Line
+                  type="stepAfter"
+                  dataKey="capex"
+                  stroke="#64748b"
+                  strokeWidth={1.4}
+                  dot={false}
+                  activeDot={false}
+                  isAnimationActive={false}
+                />
+              ) : (
+                <ReferenceLine
+                  y={capexNow}
+                  stroke="#64748b"
+                  strokeWidth={1.4}
+                  label={{ value: `CAPEX ${uahShortHrn(capexNow)}`, position: 'insideTopLeft', fontSize: 11, fill: '#475569' }}
+                />
+              )}
               {todayT !== null && todayT > 0 ? (
                 <ReferenceLine
                   x={todayT}
@@ -621,7 +681,7 @@ export function EconomicsPaybackView({ data, capexUah, plannedPaybackMonths }: P
                 />
               ) : null}
               {paybackT !== null ? (
-                <ReferenceDot x={paybackT} y={capexUah} r={4.5} fill="#7c3aed" stroke="#fff" strokeWidth={1.5} />
+                <ReferenceDot x={paybackT} y={paybackCapex} r={4.5} fill="#7c3aed" stroke="#fff" strokeWidth={1.5} />
               ) : null}
               {paybackT !== null ? (
                 // Invisible anchor that hangs the "Точка окупності" caption

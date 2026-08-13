@@ -100,6 +100,42 @@ function buildSeasonalFactors(monthsWithData: EconomicsAnnualMonthRollup[]): num
   return mean > 0.05 ? blended.map((v) => v / mean) : DEFAULT_SEASONALITY
 }
 
+// CapexStep is one dated CAPEX value from the org's tariff schedule:
+// the project's TOTAL investment in effect from `effectiveFrom`
+// (YYYY-MM-DD), not the amount paid on that date. A staged project
+// (an extra УЗЕ pack, more panels) therefore reads as a rising step
+// line, the same way capacity and power do in the schedule table.
+export type CapexStep = { effectiveFrom: string; capexUah: number }
+
+// capexResolver turns the dated schedule into a per-month lookup.
+//
+// Two rules make the numbers behave for real data: a version that takes
+// effect mid-month counts for that whole month (the money left the
+// account inside it), and months before the first funded version
+// inherit that first value — CAPEX is spent before the plant produces
+// anything, so an early version with CAPEX left at 0 means "not filled
+// in", not "a free project" (which would read as instant payback).
+export function capexResolver(
+  steps: CapexStep[],
+  fallbackUah: number,
+): (monthKey: string | null) => number {
+  const flat = Number.isFinite(fallbackUah) ? fallbackUah : 0
+  const funded = steps
+    .filter((s) => /^\d{4}-\d{2}-\d{2}$/.test(s.effectiveFrom) && Number.isFinite(s.capexUah) && s.capexUah > 0)
+    .sort((a, b) => a.effectiveFrom.localeCompare(b.effectiveFrom))
+  if (funded.length === 0) return () => flat
+  return (monthKey) => {
+    if (!monthKey) return funded[0].capexUah
+    const monthEnd = `${monthKey}-31`
+    let value = funded[0].capexUah
+    for (const s of funded) {
+      if (s.effectiveFrom > monthEnd) break
+      value = s.capexUah
+    }
+    return value
+  }
+}
+
 // CapexPaybackRow is one point of the payback chart. t is months elapsed
 // since the start of operation (fractional for the exact CAPEX crossing)
 // and drives a numeric X axis, so multi-year forecasts keep an honest
@@ -112,6 +148,9 @@ export type CapexPaybackRow = {
   factCum: number | null
   forecastCum: number | null
   monthEbitda: number | null
+  // capex is the investment target in effect for this month — a flat
+  // line for a single-stage project, a rising staircase for a staged one.
+  capex: number
   kind: 'start' | 'prior' | 'fact' | 'forecast'
 }
 
@@ -148,6 +187,13 @@ export type PaybackModel = {
   // seasonalFactors are the Jan..Dec multipliers (mean 1) applied to
   // monthlyPace when projecting individual future months.
   seasonalFactors: number[]
+  // capexNow is the investment in effect at the end of the fact window:
+  // everything put into the project so far, and the denominator for
+  // "повернуто / залишилось". capexStages counts the distinct funded
+  // stages, capexAvg is the time-weighted capital at work (see below).
+  capexNow: number
+  capexAvg: number
+  capexStages: number
   paybackYears: number
   coveredShare: number
   remaining: number
@@ -169,12 +215,16 @@ export type PaybackModel = {
 
 export function buildPaybackModel({
   capexUah,
+  capexSteps,
   months,
   ebitda,
   priorEbitda,
   priorMonthsWithData,
 }: {
+  // capexUah is the single value from the tariff form, used when the
+  // schedule carries no CAPEX at all (the pre-staging setup).
   capexUah: number
+  capexSteps?: CapexStep[]
   months: EconomicsAnnualMonthRollup[]
   // ebitda is the window total (may differ from the row sum by partial
   // months); prior* describe the history before the window start.
@@ -195,6 +245,19 @@ export function buildPaybackModel({
     (m) => Math.abs(m.totals.ebitda_uah) > 0.5 || m.totals.pv_kwh > 0.5,
   )
   const monthsWithData = firstActive >= 0 ? withHours.slice(firstActive) : []
+  const firstMonthKey = monthsWithData[0]?.month ?? null
+  const lastFactMonthKey = monthsWithData[monthsWithData.length - 1]?.month ?? null
+
+  // CAPEX is a step function of time (staged investments), so every
+  // comparison below asks for the CAPEX of a specific month instead of
+  // one global number. `capexNow` is what is invested as of the last
+  // fact month; with no fact months at all it falls back to the latest
+  // known stage.
+  const capexAt = capexResolver(capexSteps ?? [], capexUah)
+  const capexNow = capexAt(lastFactMonthKey ?? '9999-12')
+  const capexStages = new Set(
+    (capexSteps ?? []).filter((s) => s.capexUah > 0).map((s) => s.capexUah),
+  ).size
 
   const allTimeEbitda = prior + ebitda
   const totalMonthsWithData = monthsWithData.length + priorMonths
@@ -205,58 +268,82 @@ export function buildPaybackModel({
   // before the first visible month), instead of the plain month count.
   // Each window month weighs by its data coverage, so a half-covered
   // month contributes half a month to the denominator.
-  const windowFirstMonth = monthsWithData[0]?.month ?? null
+  const windowFirstMonth = firstMonthKey
   let seasonalWeight = 0
   let effectiveMonths = priorMonths
+  // capexWeighted accumulates the CAPEX in effect during each month of
+  // operation, so the ROI denominator is the capital that was actually
+  // at work — EBITDA earned before an expansion is not judged against
+  // the enlarged investment.
+  let capexWeighted = 0
   if (windowFirstMonth) {
     for (let k = 1; k <= priorMonths; k += 1) {
-      seasonalWeight += seasonalFactors[monthIdx(addMonths(windowFirstMonth, -k))]
+      const key = addMonths(windowFirstMonth, -k)
+      seasonalWeight += seasonalFactors[monthIdx(key)]
+      capexWeighted += capexAt(key)
     }
     for (const m of monthsWithData) {
       const coverage = monthCoverage(m)
       seasonalWeight += seasonalFactors[monthIdx(m.month)] * coverage
       effectiveMonths += coverage
+      capexWeighted += capexAt(m.month) * coverage
     }
   }
   const monthlyPace = seasonalWeight > 0 ? allTimeEbitda / seasonalWeight : 0
   const annualEbitda = monthlyPace * 12
-  const coveredShare = capexUah > 0 ? Math.max(0, Math.min(allTimeEbitda / capexUah, 1)) : 0
-  const remaining = Math.max(capexUah - allTimeEbitda, 0)
+  const capexAvg = effectiveMonths > 0 ? capexWeighted / effectiveMonths : capexNow
+  const coveredShare = capexNow > 0 ? Math.max(0, Math.min(allTimeEbitda / capexNow, 1)) : 0
+  const remaining = Math.max(capexNow - allTimeEbitda, 0)
   // Linear estimate as a fallback; refined below to the exact seasonal
   // crossing when the forecast walk reaches CAPEX.
-  let paybackYears = annualEbitda > 0 ? capexUah / annualEbitda : Infinity
+  let paybackYears = annualEbitda > 0 ? capexNow / annualEbitda : Infinity
   const operationYears = totalMonthsWithData / 12
   // Annualize the fact ROI over data-covered time, so partial months do
   // not understate it.
   const avgAnnualRoi =
-    capexUah > 0 && effectiveMonths > 0 ? (allTimeEbitda / capexUah) * (12 / effectiveMonths) : NaN
-  const paidOff = allTimeEbitda >= capexUah && capexUah > 0
+    capexAvg > 0 && effectiveMonths > 0 ? (allTimeEbitda / capexAvg) * (12 / effectiveMonths) : NaN
+  const paidOff = allTimeEbitda >= capexNow && capexNow > 0
 
   const rows: CapexPaybackRow[] = []
   let todayT: number | null = null
   let paybackT: number | null = null
   let paybackMonthKey: string | null = null
-  const firstMonthKey = monthsWithData[0]?.month ?? null
-  const lastFactMonthKey = monthsWithData[monthsWithData.length - 1]?.month ?? null
   const timeOffset = hasPrior && priorMonths > 0 ? priorMonths : 0
 
   if (firstMonthKey && lastFactMonthKey) {
     // Months since operation start: the prior window occupies [0,
     // priorMonths], each fact month of the visible window adds one.
     if (hasPrior && priorMonths > 0) {
-      rows.push({ t: 0, monthKey: null, factCum: 0, forecastCum: null, monthEbitda: null, kind: 'start' })
+      rows.push({
+        t: 0,
+        monthKey: null,
+        factCum: 0,
+        forecastCum: null,
+        monthEbitda: null,
+        capex: capexAt(addMonths(firstMonthKey, -priorMonths)),
+        kind: 'start',
+      })
       rows.push({
         t: priorMonths,
         monthKey: addMonths(firstMonthKey, -1),
         factCum: prior,
         forecastCum: null,
         monthEbitda: null,
+        capex: capexAt(addMonths(firstMonthKey, -1)),
         kind: 'prior',
       })
     } else {
       // No prior history (or the backend didn't count its months): the
       // window opens at the start of operation with the opening balance.
-      rows.push({ t: 0, monthKey: null, factCum: prior, forecastCum: null, monthEbitda: null, kind: 'start' })
+      rows.push({
+        t: 0,
+        monthKey: null,
+        factCum: prior,
+        forecastCum: null,
+        monthEbitda: null,
+        capex: capexAt(firstMonthKey),
+        kind: 'start',
+      })
     }
 
     let t = timeOffset
@@ -270,19 +357,21 @@ export function buildPaybackModel({
         factCum: acc,
         forecastCum: null,
         monthEbitda: m.totals.ebitda_uah,
+        capex: capexAt(m.month),
         kind: 'fact',
       })
     }
     todayT = t
 
-    if (acc >= capexUah && capexUah > 0) {
-      // Already paid off: mark the fact row where the line crossed CAPEX.
-      const hit = rows.find((r) => r.kind !== 'start' && (r.factCum ?? 0) >= capexUah)
+    if (acc >= capexNow && capexNow > 0) {
+      // Already paid off: mark the fact row where the line first covered
+      // the CAPEX standing at that time.
+      const hit = rows.find((r) => r.kind !== 'start' && (r.factCum ?? 0) >= r.capex)
       if (hit) {
         paybackT = hit.t
         paybackMonthKey = hit.monthKey
       }
-    } else if (annualEbitda > 0 && capexUah > 0) {
+    } else if (annualEbitda > 0 && capexNow > 0) {
       // Bridge point so the dashed projection continues the fact line,
       // then walk future months applying the seasonal factor of each one:
       // the projection climbs steeply through summers and flattens (or
@@ -292,9 +381,10 @@ export function buildPaybackModel({
       for (let k = 1; k <= FORECAST_CAP_MONTHS; k += 1) {
         const key = addMonths(lastFactMonthKey, k)
         const monthE = monthlyPace * seasonalFactors[monthIdx(key)]
-        if (paybackT === null && monthE > 0 && fAcc < capexUah && fAcc + monthE >= capexUah) {
+        const target = capexAt(key)
+        if (paybackT === null && monthE > 0 && fAcc < target && fAcc + monthE >= target) {
           // Interpolate the exact crossing inside this month.
-          paybackT = todayT + k - 1 + (capexUah - fAcc) / monthE
+          paybackT = todayT + k - 1 + (target - fAcc) / monthE
           paybackMonthKey = key
           paybackYears = paybackT / 12
         }
@@ -305,6 +395,7 @@ export function buildPaybackModel({
           factCum: null,
           forecastCum: fAcc,
           monthEbitda: monthE,
+          capex: target,
           kind: 'forecast',
         })
         // Stop at the end of the crossing month so the dashed line ends
@@ -321,7 +412,7 @@ export function buildPaybackModel({
   // (not raw month-to-month swings, which are mostly seasonality), so
   // the range reflects genuine uncertainty and narrows with data.
   let scenario: PaybackScenario | null = null
-  if (!paidOff && capexUah > 0 && monthsWithData.length >= 3 && monthlyPace > 0 && lastFactMonthKey) {
+  if (!paidOff && capexNow > 0 && monthsWithData.length >= 3 && monthlyPace > 0 && lastFactMonthKey) {
     const residuals = monthsWithData.map(
       (m) => m.totals.ebitda_uah - monthlyPace * seasonalFactors[monthIdx(m.month)] * monthCoverage(m),
     )
@@ -331,10 +422,10 @@ export function buildPaybackModel({
     const consPace = monthlyPace - sem
     const optPace = monthlyPace + sem
     if (consPace > 0) {
-      const consYears = capexUah / (consPace * 12)
-      const optYears = capexUah / (optPace * 12)
+      const consYears = capexNow / (consPace * 12)
+      const optYears = capexNow / (optPace * 12)
       const monthKeyFor = (pace: number): string | null => {
-        const rest = (capexUah - allTimeEbitda) / pace
+        const rest = (capexNow - allTimeEbitda) / pace
         return rest <= FORECAST_CAP_MONTHS ? addMonths(lastFactMonthKey, Math.ceil(rest)) : null
       }
       scenario = {
@@ -357,6 +448,9 @@ export function buildPaybackModel({
     annualEbitda,
     monthlyPace,
     seasonalFactors,
+    capexNow,
+    capexAvg,
+    capexStages,
     paybackYears,
     coveredShare,
     remaining,

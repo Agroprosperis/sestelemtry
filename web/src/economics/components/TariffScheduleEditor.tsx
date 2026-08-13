@@ -36,6 +36,23 @@ function formatNumber(value: number): string {
   return UK_NUMBER.format(value)
 }
 
+const UK_MILLIONS = new Intl.NumberFormat('uk-UA', { maximumFractionDigits: 2 })
+
+// CAPEX is orders of magnitude larger than the per-kWh columns, so it
+// reads as "20,5 млн" instead of eight digits that would stretch the
+// row. "—" marks a version saved before CAPEX was filled in; the
+// payback page then carries the value forward from the funded one.
+function formatCapex(uah: number): string {
+  if (!Number.isFinite(uah) || uah <= 0) return '—'
+  if (uah >= 1_000_000) return `${UK_MILLIONS.format(uah / 1_000_000)} млн`
+  return UK_NUMBER.format(Math.round(uah))
+}
+
+const CAPEX_TIP =
+  'Повні капітальні інвестиції в проєкт, що діють з цієї дати, а не приріст. ' +
+  'Для проєкту в кілька етапів піднімайте суму новою версією — сторінка «Окупність проєкту» ' +
+  'порівнює накопичений EBITDA з CAPEX, що діяв у кожному місяці.'
+
 type Props = {
   organizationID: string
   // The tariff bundle currently edited in the form — saved as the
@@ -231,6 +248,18 @@ export function TariffScheduleEditor({ organizationID, tariffs, defaultEffective
                   ККД
                   <small>0..1</small>
                 </th>
+                <th scope="col" className="num">
+                  CAPEX
+                  <span
+                    className="economics-info"
+                    data-tip={CAPEX_TIP}
+                    role="img"
+                    aria-label={CAPEX_TIP}
+                  >
+                    i
+                  </span>
+                  <small>грн</small>
+                </th>
                 <th scope="col" className="actions" aria-label="Дії" />
               </tr>
             </thead>
@@ -267,6 +296,7 @@ export function TariffScheduleEditor({ organizationID, tariffs, defaultEffective
                     <td className="num">
                       {v.tariffs.roundtripEfficiency > 0 ? formatNumber(v.tariffs.roundtripEfficiency) : 'емпір.'}
                     </td>
+                    <td className="num">{formatCapex(v.tariffs.capexUah)}</td>
                     <td className="actions">
                       <button
                         type="button"
