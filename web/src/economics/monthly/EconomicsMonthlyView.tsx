@@ -15,7 +15,6 @@ import type {
   EconomicsDataQuality,
   EconomicsMonthlyDay,
   EconomicsMonthlyDayMargin,
-  EconomicsMonthlyMarginHour,
   EconomicsMonthlyResponse,
   EconomicsMonthlyTotals,
   EconomicsUzeCycle,
@@ -26,7 +25,6 @@ import {
   formatCycles,
   formatDayLabel,
   formatDayOfMonth,
-  formatKwh,
   formatKwhNumber,
   formatMonthTitle,
   formatMwh,
@@ -42,7 +40,9 @@ import {
   type AiCard,
   type AiPanel,
   buildAiPanel,
+  HEATMAP_METRIC_TIP,
   HOURS,
+  heatCellTip,
   heatTier,
   PERIOD_WORDS,
   type PeriodScope,
@@ -1005,26 +1005,9 @@ function BalanceSegment({
 
 // --- ESS marginality heatmap ---
 
-// heatCellTip spells out the cell's arithmetic for the hour it covers, so
-// a number that looks surprising can be checked without leaving the page.
-function heatCellTip(date: string, hour: number, c: EconomicsMonthlyMarginHour): string {
-  const hh = `${String(hour).padStart(2, '0')}:00`
-  return (
-    `${formatDayLabel(date)} ${hh} — розряд ${formatKwh(c.discharged_kwh)}\n` +
-    `Виручка ${formatUah(c.revenue_uah)} (віддане в мережу за ціною експорту, у споживання — за ціною імпорту)\n` +
-    `− собівартість збереженої енергії ${formatUah(c.cost_uah)}\n` +
-    `− знос ${formatUah(c.wear_uah)}\n` +
-    `= ${formatUah(c.revenue_uah - c.cost_uah - c.wear_uah)} на ${formatKwh(c.discharged_kwh)} → ` +
-    `${formatPrice(c.margin_uah_per_kwh)} грн/кВт·год`
-  )
-}
-
 const HEATMAP_TIP =
-  'Маржа однієї години розряду УЗЕ. Виручка з розряду (у мережу — за ціною експорту, ' +
-  'у споживання — за ціною імпорту) мінус собівартість саме тієї енергії, що була в батареї ' +
-  '(заряд із мережі — за ціною тієї години, від СЕС — нуль), мінус знос; поділено на розряд ' +
-  'години. Витрати на заряд лишаються в годині заряду, тому маржу розряду вони не спотворюють. ' +
-  'Години з розрядом до 1 кВт·год не показуємо. Наведіть на клітинку — покаже її розрахунок.'
+  `${HEATMAP_METRIC_TIP} Години з розрядом до 1 кВт·год не показуємо. ` +
+  'Наведіть на клітинку — покаже її розрахунок.'
 
 export function MonthlyHeatmap({ margins }: { margins: EconomicsMonthlyDayMargin[] }) {
   return (
@@ -1056,7 +1039,11 @@ export function MonthlyHeatmap({ margins }: { margins: EconomicsMonthlyDayMargin
                     <td
                       key={h}
                       className={heatTier(c === null ? null : c.margin_uah_per_kwh)}
-                      title={c === null ? undefined : heatCellTip(row.date, h, c)}
+                      title={
+                        c === null
+                          ? undefined
+                          : heatCellTip(`${formatDayLabel(row.date)} ${String(h).padStart(2, '0')}:00`, c)
+                      }
                     >
                       {c === null ? '' : Math.round(c.margin_uah_per_kwh)}
                     </td>

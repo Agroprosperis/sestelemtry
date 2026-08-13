@@ -847,11 +847,12 @@ export type EconomicsAnnualQuarter = {
 }
 
 // EconomicsAnnualMonthMargin is one annual-heatmap row: 24 hour-of-day
-// ESS margins (UAH per kWh discharged) averaged across the month; null
-// when that hour had no discharge all month.
+// cells, each summing that hour across every day of the month; null when
+// the pack sat that hour out all month. Same cell as the monthly grid,
+// so both explain themselves with one tooltip.
 export type EconomicsAnnualMonthMargin = {
   month: string
-  hours: Array<number | null>
+  hours: Array<EconomicsMonthlyMarginHour | null>
 }
 
 export type EconomicsAnnualResponse = {

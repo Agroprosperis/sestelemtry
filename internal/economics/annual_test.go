@@ -69,8 +69,16 @@ func TestAggregateYearSumsMonthsAndQuarters(t *testing.T) {
 	}
 
 	hourly := []HourlyRecord{
-		{HourStart: jan.Add(19 * time.Hour), Rdn: floatPtr(12), GridImport: 100, EssNet: 90, EssDischarged: 30},
-		{HourStart: feb.Add(20 * time.Hour), Rdn: floatPtr(18), GridImport: 200, EssNet: 60, EssDischarged: 20},
+		{
+			HourStart: jan.Add(19 * time.Hour), Rdn: floatPtr(12), GridImport: 100,
+			EssNet: 90, EssDischarged: 30, EssToLoad: 30, ImportPrice: 10,
+			EssWithdrawnCostUah: floatPtr(200), EssRealizedProfitUah: floatPtr(90),
+		},
+		{
+			HourStart: feb.Add(20 * time.Hour), Rdn: floatPtr(18), GridImport: 200,
+			EssNet: 60, EssDischarged: 20, EssToLoad: 20, ImportPrice: 9,
+			EssWithdrawnCostUah: floatPtr(100), EssRealizedProfitUah: floatPtr(60),
+		},
 	}
 
 	got := AggregateYear("2026", loc, days, hourly, constTariff(100, 0.6))
@@ -138,7 +146,7 @@ func TestAggregateYearSumsMonthsAndQuarters(t *testing.T) {
 	}
 
 	// Monthly margin heatmap: 12 rows, 24 hours each. Jan hour 19 margin =
-	// essNet/essDischarged = 90/30 = 3; Feb hour 20 = 60/20 = 3.
+	// realized profit / discharged = 90/30 = 3; Feb hour 20 = 60/20 = 3.
 	if len(got.MonthlyMargin) != 12 {
 		t.Fatalf("MonthlyMargin rows = %d, want 12", len(got.MonthlyMargin))
 	}
@@ -146,15 +154,61 @@ func TestAggregateYearSumsMonthsAndQuarters(t *testing.T) {
 	if janRow.Month != "2026-01" || len(janRow.Hours) != 24 {
 		t.Fatalf("Jan margin row = %+v, want 2026-01 with 24 hours", janRow)
 	}
-	if h := janRow.Hours[19]; h == nil || math.Abs(*h-3) > 1e-9 {
-		t.Fatalf("Jan hour19 margin = %v, want 3", h)
+	h19 := janRow.Hours[19]
+	if h19 == nil || math.Abs(h19.Margin-3) > 1e-9 {
+		t.Fatalf("Jan hour19 margin = %v, want 3", h19)
 	}
-	if h := got.MonthlyMargin[1].Hours[20]; h == nil || math.Abs(*h-3) > 1e-9 {
+	// The hover breakdown must reconstruct the headline: revenue 30x10=300,
+	// cost 200, wear the 10 the persisted profit implies.
+	if math.Abs(h19.RevenueUah-300) > 1e-9 || math.Abs(h19.CostUah-200) > 1e-9 ||
+		math.Abs(h19.WearUah-10) > 1e-9 || math.Abs(h19.DischargedKwh-30) > 1e-9 {
+		t.Fatalf("Jan hour19 breakdown = %+v, want 30 кВт·год / 300 / 200 / 10", *h19)
+	}
+	if h := got.MonthlyMargin[1].Hours[20]; h == nil || math.Abs(h.Margin-3) > 1e-9 {
 		t.Fatalf("Feb hour20 margin = %v, want 3", h)
 	}
 	// A no-discharge hour stays nil.
 	if h := janRow.Hours[3]; h != nil {
 		t.Fatalf("Jan hour3 margin = %v, want nil", h)
+	}
+}
+
+// TestAnnualHeatmapSumsHourAcrossDays pins the annual cell to a
+// kWh-weighted month total rather than an average of daily ratios: a
+// small brilliant hour must not outweigh a big mediocre one, and the
+// breakdown has to add up to the number the cell prints.
+func TestAnnualHeatmapSumsHourAcrossDays(t *testing.T) {
+	loc := time.UTC
+	d1 := time.Date(2026, 3, 4, 0, 0, 0, 0, loc)
+	d2 := time.Date(2026, 3, 5, 0, 0, 0, 0, loc)
+
+	days := []DailyRecord{
+		{Day: d1, IsFinal: true, Totals: DailyTotals{Effect: 100, HoursWithData: 24, EssDischarged: 10}},
+		{Day: d2, IsFinal: true, Totals: DailyTotals{Effect: 100, HoursWithData: 24, EssDischarged: 40}},
+	}
+	hourly := []HourlyRecord{
+		{
+			HourStart: d1.Add(18 * time.Hour), EssDischarged: 10, EssToLoad: 10, ImportPrice: 12,
+			EssWithdrawnCostUah: floatPtr(20), EssRealizedProfitUah: floatPtr(90),
+		},
+		{
+			HourStart: d2.Add(18 * time.Hour), EssDischarged: 40, EssToLoad: 40, ImportPrice: 6,
+			EssWithdrawnCostUah: floatPtr(180), EssRealizedProfitUah: floatPtr(30),
+		},
+	}
+
+	got := AggregateYear("2026", loc, days, hourly, constTariff(100, 0.6))
+
+	cell := got.MonthlyMargin[2].Hours[18]
+	if cell == nil {
+		t.Fatalf("March hour18 cell is nil, want the two days summed")
+	}
+	// (90 + 30) / (10 + 40) = 2,4 — not (9 + 0,75) / 2.
+	if math.Abs(cell.Margin-2.4) > 1e-9 || math.Abs(cell.DischargedKwh-50) > 1e-9 {
+		t.Fatalf("March hour18 = %+v, want margin 2.4 over 50 кВт·год", *cell)
+	}
+	if math.Abs(cell.Margin*cell.DischargedKwh-(cell.RevenueUah-cell.CostUah-cell.WearUah)) > 1e-9 {
+		t.Fatalf("breakdown does not add up to the margin: %+v", *cell)
 	}
 }
 

@@ -29,11 +29,11 @@ type QuarterSummary struct {
 }
 
 // MonthMargin is one row of the annual ESS marginality heatmap: 24
-// hourly margins (UAH per kWh discharged) averaged across the month.
-// nil entries are hours with no discharge that month.
+// hour-of-day cells, each summing that hour across every day of the
+// month. nil entries are hours the pack sat out all month.
 type MonthMargin struct {
 	Month string // YYYY-MM
-	Hours []*float64
+	Hours []*MarginHour
 }
 
 // StoredYear is the served annual economics result: the year rollup
@@ -139,7 +139,7 @@ func AggregatePeriod(
 		months = append(months, MonthRollup{Month: monthKey, Totals: mt})
 		monthlyMargin = append(monthlyMargin, MonthMargin{
 			Month: monthKey,
-			Hours: monthHourMargin(hourlyByMonth[monthKey], loc),
+			Hours: monthHourMargin(sm.HourlyMargin),
 		})
 
 		qkey := [2]int{ky, (km-1)/3 + 1}
@@ -300,29 +300,40 @@ func AggregatePeriod(
 	}
 }
 
-// monthHourMargin reduces a month's hourly records into 24 hour-of-day
-// average discharge margins (UAH per kWh), aggregated across every day
-// of the month: margin[h] = Σ ess_net(h) / Σ ess_discharged(h). Hours
-// with no discharge stay nil so the heatmap renders an empty cell.
-func monthHourMargin(hourly []HourlyRecord, loc *time.Location) []*float64 {
-	var net, dis [24]float64
-	for _, h := range hourly {
-		hour := h.HourStart.In(loc).Hour()
-		if hour < 0 || hour >= 24 {
+// monthHourMargin folds a month's daily heatmap rows into 24 hour-of-day
+// cells: margin[h] = Σ realized profit at that hour / Σ kWh discharged at
+// that hour. It reads the cells AggregateMonth already built rather than
+// the raw hourly records, so the annual heatmap shows exactly the trades
+// the monthly page shows — same anomaly filter, same minimum discharge,
+// same cost basis — only summed over the month.
+func monthHourMargin(days []DayMargin) []*MarginHour {
+	out := make([]*MarginHour, 24)
+	for _, d := range days {
+		for h, c := range d.Hours {
+			if c == nil || h < 0 || h >= 24 {
+				continue
+			}
+			acc := out[h]
+			if acc == nil {
+				acc = &MarginHour{}
+				out[h] = acc
+			}
+			acc.DischargedKwh += c.DischargedKwh
+			acc.RevenueUah += c.RevenueUah
+			acc.CostUah += c.CostUah
+			acc.WearUah += c.WearUah
+		}
+	}
+	for h, acc := range out {
+		if acc == nil {
 			continue
 		}
-		net[hour] += h.EssNet
-		dis[hour] += h.EssDischarged
-	}
-	out := make([]*float64, 24)
-	for h := 0; h < 24; h++ {
-		if dis[h] > 0 {
-			m := net[h] / dis[h]
-			if !math.IsInf(m, 0) && !math.IsNaN(m) {
-				v := m
-				out[h] = &v
-			}
+		m := (acc.RevenueUah - acc.CostUah - acc.WearUah) / acc.DischargedKwh
+		if acc.DischargedKwh <= 0 || math.IsInf(m, 0) || math.IsNaN(m) {
+			out[h] = nil
+			continue
 		}
+		acc.Margin = m
 	}
 	return out
 }

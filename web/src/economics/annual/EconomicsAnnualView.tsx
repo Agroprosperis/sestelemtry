@@ -29,7 +29,9 @@ import {
 } from '../monthly/EconomicsMonthlyView'
 import {
   buildAiPanel,
+  HEATMAP_METRIC_TIP,
   HOURS,
+  heatCellTip,
   heatTier,
   type PeriodScope,
   reserveSplit,
@@ -299,11 +301,18 @@ function AnnualTrend({
 
 // --- Month x hour-of-day marginality heatmap (SPEC §3.7) ---
 
-function MonthHourHeatmap({ margins }: { margins: EconomicsAnnualMonthMargin[] }) {
+const HEATMAP_TIP =
+  `${HEATMAP_METRIC_TIP} Клітинка підсумовує цю годину за всі дні місяця, ` +
+  'тому великі дні важать більше за малі. Наведіть — покаже розрахунок.'
+
+export function MonthHourHeatmap({ margins }: { margins: EconomicsAnnualMonthMargin[] }) {
   return (
     <section className="economics-card economics-month-section" aria-label="Маржинальність УЗЕ по місяцях">
       <div className="economics-month-section-head">
-        <h3 className="economics-month-section-title">Heatmap: маржинальність УЗЕ (місяць × година)</h3>
+        <h3 className="economics-month-section-title">
+          Heatmap: маржинальність УЗЕ (місяць × година)
+          <OptimumInfo tip={HEATMAP_TIP} />
+        </h3>
         <span className="economics-month-muted">грн/кВт·год розряду</span>
       </div>
       <div className="economics-heatmap-scroll">
@@ -321,10 +330,21 @@ function MonthHourHeatmap({ margins }: { margins: EconomicsAnnualMonthMargin[] }
               <tr key={row.month}>
                 <th scope="row">{formatMonthShort(row.month)}</th>
                 {HOURS.map((h) => {
-                  const v = row.hours[h] ?? null
+                  const c = row.hours[h] ?? null
                   return (
-                    <td key={h} className={heatTier(v)}>
-                      {v === null ? '' : Math.round(v)}
+                    <td
+                      key={h}
+                      className={heatTier(c === null ? null : c.margin_uah_per_kwh)}
+                      title={
+                        c === null
+                          ? undefined
+                          : heatCellTip(
+                              `${formatMonthTitle(row.month)}, ${String(h).padStart(2, '0')}:00 за всі дні`,
+                              c,
+                            )
+                      }
+                    >
+                      {c === null ? '' : Math.round(c.margin_uah_per_kwh)}
                     </td>
                   )
                 })}
@@ -334,8 +354,10 @@ function MonthHourHeatmap({ margins }: { margins: EconomicsAnnualMonthMargin[] }
         </table>
       </div>
       <p className="economics-month-explain">
-        Колір показує середню маржу розряду УЗЕ за годину доби, усереднену по днях місяця: сірий 0–1,
-        світло-зелений 2–5, зелений 6–11, темно-зелений понад 12 грн/кВт·год.
+        Клітинка — скільки заробила ця година доби за весь місяць на кожній відданій кВт·год: виручка мінус
+        собівартість саме тієї енергії, що була в батареї, мінус знос, поділено на сумарний розряд години.
+        Наведіть на клітинку, щоб побачити цей розрахунок у гривнях. Порожньо там, де УЗЕ не розряджався.
+        Колір: сірий 0–1, світло-зелений 2–5, зелений 6–11, темно-зелений понад 12 грн/кВт·год.
       </p>
     </section>
   )

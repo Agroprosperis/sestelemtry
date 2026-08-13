@@ -647,13 +647,17 @@ type EconomicsMonthlyResponse struct {
 	UzeCycles      []EconomicsUzeCycle         `json:"uze_cycles"`
 }
 
-func marginRowToJSON(m economics.DayMargin) EconomicsMonthlyDayMargin {
-	out := EconomicsMonthlyDayMargin{Date: m.Date, Hours: make([]*EconomicsMonthlyMarginHour, len(m.Hours))}
-	for i, c := range m.Hours {
+// marginCellsToJSON maps a row of heatmap cells. Both grids — the
+// monthly day x hour and the annual month x hour-of-day — carry the same
+// cell, so they serialize through here and the frontend explains them
+// with one tooltip.
+func marginCellsToJSON(cells []*economics.MarginHour) []*EconomicsMonthlyMarginHour {
+	out := make([]*EconomicsMonthlyMarginHour, len(cells))
+	for i, c := range cells {
 		if c == nil {
 			continue
 		}
-		out.Hours[i] = &EconomicsMonthlyMarginHour{
+		out[i] = &EconomicsMonthlyMarginHour{
 			MarginUahPerKwh: c.Margin,
 			DischargedKwh:   c.DischargedKwh,
 			RevenueUah:      c.RevenueUah,
@@ -662,6 +666,10 @@ func marginRowToJSON(m economics.DayMargin) EconomicsMonthlyDayMargin {
 		}
 	}
 	return out
+}
+
+func marginRowToJSON(m economics.DayMargin) EconomicsMonthlyDayMargin {
+	return EconomicsMonthlyDayMargin{Date: m.Date, Hours: marginCellsToJSON(m.Hours)}
 }
 
 // importCostUah reconstructs the money actually spent on grid import.
@@ -848,11 +856,11 @@ type EconomicsAnnualQuarter struct {
 }
 
 // EconomicsAnnualMonthMargin is one heatmap row: 24 hour-of-day ESS
-// margins (UAH per kWh discharged) averaged across the month; null
-// when that hour had no discharge all month.
+// cells, each summing that hour across the month; null when the pack
+// sat that hour out all month.
 type EconomicsAnnualMonthMargin struct {
-	Month string     `json:"month"`
-	Hours []*float64 `json:"hours"`
+	Month string                        `json:"month"`
+	Hours []*EconomicsMonthlyMarginHour `json:"hours"`
 }
 
 // EconomicsAnnualResponse is the body of GET /api/v1/economics/annual.
@@ -966,7 +974,10 @@ func (h *Handlers) economicsAnnual(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	for _, m := range year.MonthlyMargin {
-		resp.MonthlyMargin = append(resp.MonthlyMargin, EconomicsAnnualMonthMargin{Month: m.Month, Hours: m.Hours})
+		resp.MonthlyMargin = append(resp.MonthlyMargin, EconomicsAnnualMonthMargin{
+			Month: m.Month,
+			Hours: marginCellsToJSON(m.Hours),
+		})
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

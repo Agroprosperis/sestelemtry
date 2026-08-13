@@ -2,8 +2,8 @@
 // rollup views. They live outside the component files so React Fast
 // Refresh keeps working (a component module must export only
 // components) and so both views share one source of truth.
-import type { EconomicsMonthlyTotals } from '../../api'
-import { formatMwh, formatPercent, formatPrice, formatUah } from './format'
+import type { EconomicsMonthlyMarginHour, EconomicsMonthlyTotals } from '../../api'
+import { formatKwh, formatMwh, formatPercent, formatPrice, formatUah } from './format'
 
 // signedUah prints an explicit +/− prefix based on the value's sign,
 // using the absolute amount so the sign is never doubled (e.g. a
@@ -331,3 +331,26 @@ export function heatTier(v: number | null): string {
 }
 
 export const HOURS = Array.from({ length: 24 }, (_, h) => h)
+
+// HEATMAP_METRIC_TIP states what both heatmaps measure. The day x hour
+// and month x hour grids read the same cell, so the definition lives in
+// one place and each view appends its own sentence about aggregation.
+export const HEATMAP_METRIC_TIP =
+  'Маржа розряду УЗЕ. Виручка з розряду (у мережу — за ціною експорту, у споживання — за ціною ' +
+  'імпорту) мінус собівартість саме тієї енергії, що була в батареї (заряд із мережі — за ціною ' +
+  'тієї години, від СЕС — нуль), мінус знос; поділено на розряд. Витрати на заряд лишаються в ' +
+  'годині заряду, тому маржу розряду вони не спотворюють.'
+
+// heatCellTip spells out a cell's arithmetic under `title` (a day+hour
+// for the monthly grid, a month+hour for the annual one), so a number
+// that looks surprising can be checked without leaving the page.
+export function heatCellTip(title: string, c: EconomicsMonthlyMarginHour): string {
+  return (
+    `${title} — розряд ${formatKwh(c.discharged_kwh)}\n` +
+    `Виручка ${formatUah(c.revenue_uah)} (віддане в мережу за ціною експорту, у споживання — за ціною імпорту)\n` +
+    `− собівартість збереженої енергії ${formatUah(c.cost_uah)}\n` +
+    `− знос ${formatUah(c.wear_uah)}\n` +
+    `= ${formatUah(c.revenue_uah - c.cost_uah - c.wear_uah)} на ${formatKwh(c.discharged_kwh)} → ` +
+    `${formatPrice(c.margin_uah_per_kwh)} грн/кВт·год`
+  )
+}
