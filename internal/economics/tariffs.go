@@ -45,6 +45,59 @@ type Tariffs struct {
 	RoundtripEfficiency float64
 }
 
+// EssRatings are the УЗЕ nameplate numbers the optimizer, the equivalent
+// cycle metric, and the anomaly filter respect. They are versioned in the
+// tariff schedule because the plant grows: an extra pack or another
+// inverter raises capacity and power from a given day, so the rollups
+// resolve them per day instead of freezing one version for a month.
+type EssRatings struct {
+	CapacityKwh          float64
+	DegradationUahPerKwh float64
+	// PowerLimitKw ≤ 0 means "not configured"; withPowerFallback assumes
+	// the pack can fill itself in an hour (≈ 1C).
+	PowerLimitKw float64
+	RoundtripEff float64
+}
+
+// EssRatings extracts the УЗЕ ratings this tariff version pins.
+func (t Tariffs) EssRatings() EssRatings {
+	return EssRatings{
+		CapacityKwh:          t.EssCapacityKwh,
+		DegradationUahPerKwh: t.DegradationUahPerKwh,
+		PowerLimitKw:         t.EssPowerLimitKw,
+		RoundtripEff:         t.RoundtripEfficiency,
+	}
+}
+
+// withPowerFallback applies the "no nameplate power → ≈ 1C" rule once, so
+// every consumer compares against the same number. It also keeps
+// deriveOptimumParams on its configured branch (SOC window = the full
+// usable pack) instead of the empirical one, which would need a month of
+// history to be meaningful.
+func (r EssRatings) withPowerFallback() EssRatings {
+	if r.PowerLimitKw <= 0 {
+		r.PowerLimitKw = r.CapacityKwh
+	}
+	return r
+}
+
+// EssRatingsFor resolves the ratings in effect on `day`, falling back to
+// the bundled defaults for days the schedule does not cover.
+func (s Schedule) EssRatingsFor(day time.Time) EssRatings {
+	t, ok := s.ResolveForDay(day)
+	if !ok {
+		t = DefaultTariffs
+	}
+	return t.EssRatings()
+}
+
+// constEssRatings adapts one ratings set to the per-day resolver the
+// rollups take — for a single-day scope or a period the schedule never
+// changed across.
+func constEssRatings(r EssRatings) func(time.Time) EssRatings {
+	return func(time.Time) EssRatings { return r }
+}
+
 // SupplierMarginFor returns the supplier margin (UAH/kWh) for an hour
 // whose RDN (market) price is rdn. In percent mode the margin scales
 // with the market price; otherwise the flat UAH/kWh value is used.

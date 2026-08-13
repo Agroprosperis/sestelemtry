@@ -467,22 +467,12 @@ func (s *Service) GetDayPlan(ctx context.Context, orgID, date, tz string) (DayPl
 	}
 
 	schedule, _ := s.backend.TariffSchedule(ctx, orgID)
-	tariffs, ok := schedule.ResolveForDay(dayStart)
-	if !ok {
-		tariffs = DefaultTariffs
-	}
-	capacityKwh := tariffs.EssCapacityKwh
-	// Same defaulting as AggregateMonth: without a nameplate power the
-	// pack is assumed able to fill itself in an hour, which also keeps
-	// deriveOptimumParams on its configured branch (SOC window = the full
-	// usable pack) instead of the empirical one that would need a month of
-	// history to be meaningful.
-	powerLimitKw := tariffs.EssPowerLimitKw
-	if powerLimitKw <= 0 {
-		powerLimitKw = capacityKwh
-	}
+	// One day, one set of ratings — the plan never spans a version change.
+	ratings := schedule.EssRatingsFor(dayStart).withPowerFallback()
+	capacityKwh := ratings.CapacityKwh
+	powerLimitKw := ratings.PowerLimitKw
 
-	badHours, _ := detectEssAnomalies(hourly, loc, powerLimitKw, essAnomalyTolerance)
+	badHours, _ := detectEssAnomalies(hourly, loc, constEssRatings(ratings), essAnomalyTolerance)
 	isBadHour := func(h HourlyRecord) bool { return badHours[h.HourStart.Unix()] }
 
 	// The envelope must come from clean hours only: one corrupt reading
@@ -498,7 +488,7 @@ func (s *Service) GetDayPlan(ctx context.Context, orgID, date, tz string) (DayPl
 			cleanHourly = append(cleanHourly, h)
 		}
 	}
-	params := deriveOptimumParams(cleanHourly, capacityKwh, tariffs.DegradationUahPerKwh, powerLimitKw, tariffs.RoundtripEfficiency)
+	params := deriveOptimumParams(cleanHourly, capacityKwh, ratings.DegradationUahPerKwh, powerLimitKw, ratings.RoundtripEff)
 
 	dayOpts := buildDayOpts(hourly, loc, isBadHour)
 	plan := buildDayPlan(date, dayOpts[date], params, capacityKwh, powerLimitKw, loc)

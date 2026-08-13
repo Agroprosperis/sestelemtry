@@ -209,7 +209,8 @@ type DataQuality struct {
 	PowerLimitKwhPerInterval   float64
 	// MaxIntervalPowerKw is the largest sub-hourly (~5-min) implied ESS
 	// power (kW) seen in the period, from raw telemetry. It is the signal
-	// the per-interval anomaly check compares against powerLimitKw · tol.
+	// the per-interval anomaly check compares against the day's power
+	// limit · tol.
 	MaxIntervalPowerKw float64
 }
 
@@ -238,16 +239,20 @@ const essAnomalyTolerance = 1.5
 // detectEssAnomalies flags individual hours with corrupt ESS telemetry —
 // readings physically impossible for the unit. Two signals trigger the
 // flag: (1) the sub-hourly peak power (EssPeakIntervalKw, from raw ~5-min
-// telemetry) exceeding powerLimitKw · tol, which catches spikes the hourly
-// sum averages away; and (2), as a fallback when no raw signal is present,
-// an hourly charge/discharge above powerLimitKw · 1h · tol. Hours that
-// immediately follow a multi-hour hole in the series are also tagged
-// after_gap (typical after a connection break). It returns the set of
-// anomalous hour starts (Unix seconds) plus a DataQuality summary. When
-// powerLimitKw ≤ 0 the filter is disabled (no hour is excluded).
-func detectEssAnomalies(hourly []HourlyRecord, loc *time.Location, powerLimitKw, tol float64) (map[int64]bool, DataQuality) {
+// telemetry) exceeding the day's power limit · tol, which catches spikes
+// the hourly sum averages away; and (2), as a fallback when no raw signal
+// is present, an hourly charge/discharge above that limit · 1h · tol.
+// Hours that immediately follow a multi-hour hole in the series are also
+// tagged after_gap (typical after a connection break). It returns the set
+// of anomalous hour starts (Unix seconds) plus a DataQuality summary.
+//
+// The ceiling comes from ratingsOn(hour), so a plant that gained a pack
+// mid-period is judged by the power it actually had that day; a day whose
+// ratings resolve to zero power has the filter disabled (no hour of it is
+// excluded).
+func detectEssAnomalies(hourly []HourlyRecord, loc *time.Location, ratingsOn func(time.Time) EssRatings, tol float64) (map[int64]bool, DataQuality) {
 	badHours := make(map[int64]bool)
-	dq := DataQuality{DataOK: true, PowerLimitKwhPerInterval: powerLimitKw}
+	dq := DataQuality{DataOK: true}
 	for _, h := range hourly {
 		if h.EssCharged > dq.MaxChargeKwhPerInterval {
 			dq.MaxChargeKwhPerInterval = h.EssCharged
@@ -259,7 +264,7 @@ func detectEssAnomalies(hourly []HourlyRecord, loc *time.Location, powerLimitKw,
 			dq.MaxIntervalPowerKw = h.EssPeakIntervalKw
 		}
 	}
-	if powerLimitKw <= 0 {
+	if ratingsOn == nil || len(hourly) == 0 {
 		return badHours, dq
 	}
 
@@ -268,11 +273,19 @@ func detectEssAnomalies(hourly []HourlyRecord, loc *time.Location, powerLimitKw,
 		return sorted[i].HourStart.Before(sorted[j].HourStart)
 	})
 
-	limit := powerLimitKw * tol // hourly granularity → 1h interval
+	// The reported ceiling is the one in force at the end of the period, so
+	// a grown plant reports its current rating — the same convention the
+	// year rollup uses when it keeps the latest month's value.
+	dq.PowerLimitKwhPerInterval = ratingsOn(sorted[len(sorted)-1].HourStart).PowerLimitKw
+
 	badDays := make(map[string]bool)
 	reasonCounts := make(map[string]int)
 	anomalies := make([]AnomalyHour, 0)
 	for i, h := range sorted {
+		limit := ratingsOn(h.HourStart).PowerLimitKw * tol // hourly granularity → 1h interval
+		if limit <= 0 {
+			continue
+		}
 		peakOver := h.EssPeakIntervalKw > 0 && h.EssPeakIntervalKw > limit
 		hourlyOver := h.EssCharged > limit || h.EssDischarged > limit
 		var reasons []string
@@ -396,6 +409,37 @@ type StoredMonth struct {
 	Cycles []UzeCycle
 }
 
+// socRun is one stretch of hours the monthly SOC dynamic program can
+// solve as a whole: the days in it share the same УЗЕ ratings, hence the
+// same SOC grid and power ceiling.
+type socRun struct {
+	params   optimumParams
+	hours    []optimumHour
+	startKwh float64
+}
+
+// dailyRatings memoizes the per-day ratings lookup by civil date: the
+// resolver walks the tariff schedule while a month asks for the same day
+// once per hour. The power fallback is applied here, so every consumer
+// sees the same ceiling for a day.
+func dailyRatings(loc *time.Location, ratingsFor func(day time.Time) EssRatings) func(time.Time) EssRatings {
+	cache := make(map[string]EssRatings, 31)
+	return func(t time.Time) EssRatings {
+		local := t.In(loc)
+		key := local.Format("2006-01-02")
+		if r, ok := cache[key]; ok {
+			return r
+		}
+		var r EssRatings
+		if ratingsFor != nil {
+			day := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, loc)
+			r = ratingsFor(day).withPowerFallback()
+		}
+		cache[key] = r
+		return r
+	}
+}
+
 // heatmapMinDischargeKwh is the discharge an hour must show before the
 // marginality heatmap gives it a cell. A pack that gave back a fraction
 // of a kWh was idling, not trading, and its per-kWh ratio says more
@@ -404,14 +448,16 @@ const heatmapMinDischargeKwh = 1.0
 
 // AggregateMonth folds the persisted daily + hourly records of one month
 // into a MonthlyTotals + per-day breakdown + ESS marginality heatmap.
-// capacityKwh is the ESS capacity used for the equivalent-cycle metric;
-// powerLimitKw is the per-interval power ceiling for the ESS anomaly filter
-// (≤ 0 falls back to capacityKwh ≈ 1C).
-func AggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly []HourlyRecord, capacityKwh, degradationUahPerKwh, powerLimitKw, roundtripEff float64) StoredMonth {
-	if powerLimitKw <= 0 {
-		powerLimitKw = capacityKwh
-	}
-	badHours, dq := detectEssAnomalies(hourly, loc, powerLimitKw, essAnomalyTolerance)
+//
+// ratingsFor gives the УЗЕ ratings in effect on a given day. Every УЗЕ
+// number below is judged by the ratings of its own day, because the plant
+// can grow mid-month (an extra pack, more inverters): freezing the
+// 1st-of-month version would flag the new unit's honest power as corrupt
+// telemetry, rate its throughput against the old capacity, and solve the
+// optimum inside an envelope the plant has outgrown.
+func AggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly []HourlyRecord, ratingsFor func(day time.Time) EssRatings) StoredMonth {
+	ratingsOn := dailyRatings(loc, ratingsFor)
+	badHours, dq := detectEssAnomalies(hourly, loc, ratingsOn, essAnomalyTolerance)
 	dq.TotalDays = len(days)
 	isBadHour := func(h HourlyRecord) bool {
 		return badHours[h.HourStart.Unix()]
@@ -502,22 +548,38 @@ func AggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly
 			cleanHourly = append(cleanHourly, h)
 		}
 	}
-	optParams := deriveOptimumParams(cleanHourly, capacityKwh, degradationUahPerKwh, powerLimitKw, roundtripEff)
+	// One envelope per distinct ratings set, derived from the hours that
+	// ran under it: after an expansion the old pack is still judged by the
+	// power and SOC window it had, and the new one by its own.
+	cleanByRatings := make(map[EssRatings][]HourlyRecord)
+	for _, h := range cleanHourly {
+		r := ratingsOn(h.HourStart)
+		cleanByRatings[r] = append(cleanByRatings[r], h)
+	}
+	paramsCache := make(map[EssRatings]optimumParams, len(cleanByRatings))
+	paramsFor := func(r EssRatings) optimumParams {
+		if p, ok := paramsCache[r]; ok {
+			return p
+		}
+		p := deriveOptimumParams(cleanByRatings[r], r.CapacityKwh, r.DegradationUahPerKwh, r.PowerLimitKw, r.RoundtripEff)
+		paramsCache[r] = p
+		return p
+	}
 
 	// computeOptimum solves the 3-run ladder for one day: each relaxation
 	// only adds freedom, so the values are monotonic and the three
 	// reasons are non-negative and sum to the reserve.
-	computeOptimum := func(do *dayOpt, factPv0 float64) optimumResult {
+	computeOptimum := func(do *dayOpt, factPv0 float64, p optimumParams) optimumResult {
 		if do == nil {
 			return optimumResult{fact: factPv0, optimum: factPv0}
 		}
-		start := optParams.socMinKwh
+		start := p.socMinKwh
 		if do.haveStart {
 			start = do.startKwh
 		}
-		fixed := optimizeDay(do.hours[:], start, optParams, modeFixedCharge)
-		noPv := optimizeDay(do.hours[:], start, optParams, modeNoPV)
-		full := optimizeDay(do.hours[:], start, optParams, modeFull)
+		fixed := optimizeDay(do.hours[:], start, p, modeFixedCharge)
+		noPv := optimizeDay(do.hours[:], start, p, modeNoPV)
+		full := optimizeDay(do.hours[:], start, p, modeFull)
 		// Clamp into a monotonic ladder bottomed at the fact.
 		if fixed < factPv0 {
 			fixed = factPv0
@@ -545,18 +607,21 @@ func AggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly
 	outDays := make([]MonthDay, 0, len(days))
 	var uzeCycles []UzeCycle
 
-	// Chronological hour list for the continuous monthly SOC DP (§3.2),
-	// built over non-anomalous days only. monthStart is the residual at the
-	// first usable hour (the month's opening SOC); monthFact sums the
-	// realised EssNet on the same project_net basis.
-	monthHours := make([]optimumHour, 0, len(days)*24)
-	monthStart := optParams.socMinKwh
-	haveMonthStart := false
+	// Chronological hour lists for the continuous monthly SOC DP (§3.2),
+	// built over non-anomalous days only. The DP is solved on one capacity
+	// grid, so a mid-month ratings change starts a new run instead: each
+	// run carries SOC across its own day boundaries and the headline sums
+	// them. A plant that did not change keeps the single continuous DP.
+	var socRuns []*socRun
+	var curRun *socRun
+	var curRatings EssRatings
 	var monthFact float64
 
 	for _, d := range days {
 		t := d.Totals
 		key := d.Day.In(loc).Format("2006-01-02")
+		ratings := ratingsOn(d.Day)
+		params := paramsFor(ratings)
 
 		totals.BaselineCost += t.BaselineCost
 		totals.ActualCost += t.ActualCost
@@ -612,9 +677,10 @@ func AggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly
 			rdnAvg = acc.num / acc.den
 		}
 		var cycles float64
-		if capacityKwh > 0 {
-			cycles = t.EssDischarged / capacityKwh
+		if ratings.CapacityKwh > 0 {
+			cycles = t.EssDischarged / ratings.CapacityKwh
 		}
+		totals.EquivalentCycles += cycles
 
 		// Fact-vs-optimum on the project_net basis: the realised fact is
 		// Σ EssNet over non-anomalous hours (PV charge is already costed at
@@ -625,22 +691,24 @@ func AggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly
 		if do != nil && dq.AnomalousHours > 0 {
 			factEssNet = do.essNet
 		}
-		opt := computeOptimum(do, factEssNet)
+		opt := computeOptimum(do, factEssNet, params)
 		totals.EssPvMissedKwh += opt.pvMissed
 		monthFact += factEssNet
 		if opt.reserve >= cycleReserveThresholdUah {
-			if cyc, ok := buildCycle(key, do, factEssNet, optParams, capacityKwh, powerLimitKw, loc); ok {
+			if cyc, ok := buildCycle(key, do, factEssNet, params, ratings.CapacityKwh, ratings.PowerLimitKw, loc); ok {
 				uzeCycles = append(uzeCycles, cyc)
 			}
 		}
 		if do != nil {
-			if !haveMonthStart {
+			if curRun == nil || ratings != curRatings {
+				curRun = &socRun{params: params, startKwh: params.socMinKwh}
 				if do.haveStart {
-					monthStart = do.startKwh
+					curRun.startKwh = do.startKwh
 				}
-				haveMonthStart = true
+				socRuns = append(socRuns, curRun)
+				curRatings = ratings
 			}
-			monthHours = append(monthHours, do.hours[:]...)
+			curRun.hours = append(curRun.hours, do.hours[:]...)
 		}
 
 		outDays = append(outDays, MonthDay{
@@ -672,18 +740,19 @@ func AggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly
 	totals.RevenueTotal = totals.RevenuePvExport + totals.RevenuePvSelf + totals.RevenueEssExport + totals.RevenueEssSelf
 	totals.ExpenseTotal = totals.ExpenseGridCharge
 	totals.Ebitda = totals.RevenueTotal - totals.ExpenseTotal
-	if capacityKwh > 0 {
-		totals.EquivalentCycles = totals.EssDischarged / capacityKwh
-	}
-	// Authoritative monthly headline: one continuous SOC DP across all
+	// Authoritative monthly headline: a continuous SOC DP across the
 	// non-anomalous hours of the month (SOC carried across day boundaries,
-	// SOC_end ≥ SOC_start). The 3-mode ladder attributes the reserve to its
-	// causes; clamp to a monotonic ladder bottomed at the realised fact so
-	// every component stays ≥ 0. The per-day MonthDay rows above remain a
-	// per-day decomposition for the daily-detail table.
-	monthFixed := optimizeMonth(monthHours, monthStart, optParams, modeFixedCharge)
-	monthNoPv := optimizeMonth(monthHours, monthStart, optParams, modeNoPV)
-	monthFull := optimizeMonth(monthHours, monthStart, optParams, modeFull)
+	// SOC_end ≥ SOC_start), summed over the ratings runs. The 3-mode ladder
+	// attributes the reserve to its causes; clamp to a monotonic ladder
+	// bottomed at the realised fact so every component stays ≥ 0. The
+	// per-day MonthDay rows above remain a per-day decomposition for the
+	// daily-detail table.
+	var monthFixed, monthNoPv, monthFull float64
+	for _, run := range socRuns {
+		monthFixed += optimizeMonth(run.hours, run.startKwh, run.params, modeFixedCharge)
+		monthNoPv += optimizeMonth(run.hours, run.startKwh, run.params, modeNoPV)
+		monthFull += optimizeMonth(run.hours, run.startKwh, run.params, modeFull)
+	}
 	if monthFixed < monthFact {
 		monthFixed = monthFact
 	}
@@ -770,12 +839,8 @@ func (s *Service) GetMonth(ctx context.Context, orgID, month, tz string) (Stored
 	hourly, _ := s.backend.LoadHourlyRange(ctx, orgID, firstDay, nextMonth)
 
 	schedule, _ := s.backend.TariffSchedule(ctx, orgID)
-	tariffs, ok := schedule.ResolveForDay(firstDay)
-	if !ok {
-		tariffs = DefaultTariffs
-	}
 
-	result := AggregateMonth(month, loc, daily, hourly, tariffs.EssCapacityKwh, tariffs.DegradationUahPerKwh, tariffs.EssPowerLimitKw, tariffs.RoundtripEfficiency)
+	result := AggregateMonth(month, loc, daily, hourly, schedule.EssRatingsFor)
 	result.OrganizationID = orgID
 	return result, nil
 }

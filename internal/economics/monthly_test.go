@@ -70,7 +70,7 @@ func TestAggregateMonthSumsAndWeightedPrices(t *testing.T) {
 		},
 	}
 
-	got := AggregateMonth("2026-06", loc, days, hourly, 100, 0.6, 0, 0)
+	got := AggregateMonth("2026-06", loc, days, hourly, fixedRatings(100, 0.6, 0, 0))
 
 	if got.Totals.Effect != 1700 {
 		t.Fatalf("Effect sum = %v, want 1700", got.Totals.Effect)
@@ -158,7 +158,7 @@ func TestHeatmapMarginIgnoresSameHourCharging(t *testing.T) {
 		EssRealizedProfitUah: floatPtr(3), EssWithdrawnCostUah: floatPtr(1.7),
 	}}
 
-	got := AggregateMonth("2026-06", loc, days, hourly, 645, 0.6, 0, 0)
+	got := AggregateMonth("2026-06", loc, days, hourly, fixedRatings(645, 0.6, 0, 0))
 
 	if len(got.HourlyMargin) != 1 {
 		t.Fatalf("HourlyMargin rows = %d, want 1", len(got.HourlyMargin))
@@ -177,7 +177,7 @@ func TestHeatmapMarginIgnoresSameHourCharging(t *testing.T) {
 	hourly[0].EssNet = -2960
 	hourly[0].EssRealizedProfitUah = floatPtr(6)
 	hourly[0].EssWithdrawnCostUah = floatPtr(31.6)
-	got = AggregateMonth("2026-06", loc, days, hourly, 645, 0.6, 0, 0)
+	got = AggregateMonth("2026-06", loc, days, hourly, fixedRatings(645, 0.6, 0, 0))
 	h15 := got.HourlyMargin[0].Hours[15]
 	if h15 == nil || math.Abs(h15.Margin-1.5) > 1e-9 {
 		t.Fatalf("hour15 margin = %v, want 1.5", h15)
@@ -190,6 +190,75 @@ func TestHeatmapMarginIgnoresSameHourCharging(t *testing.T) {
 	}
 	if math.Abs(h15.Margin*h15.DischargedKwh-(h15.RevenueUah-h15.CostUah-h15.WearUah)) > 1e-9 {
 		t.Fatalf("breakdown does not add up to the margin: %+v", *h15)
+	}
+}
+
+// TestAggregateMonthResolvesRatingsPerDay pins the mid-month expansion
+// case: when a second УЗЕ pack comes online on the 15th, the month must
+// judge each day by the plant it had that day. Freezing the 1st-of-month
+// version used to flag the new pack's honest power as corrupt telemetry
+// and rate its throughput against the old capacity.
+func TestAggregateMonthResolvesRatingsPerDay(t *testing.T) {
+	loc := time.UTC
+	small := EssRatings{CapacityKwh: 100, PowerLimitKw: 100}
+	big := EssRatings{CapacityKwh: 200, PowerLimitKw: 200}
+	before := time.Date(2026, 6, 10, 0, 0, 0, 0, loc)
+	after := time.Date(2026, 6, 20, 0, 0, 0, 0, loc)
+
+	days := []DailyRecord{
+		{Day: before, IsFinal: true, Totals: DailyTotals{HoursWithData: 24, EssDischarged: 80}},
+		{Day: after, IsFinal: true, Totals: DailyTotals{HoursWithData: 24, EssDischarged: 180}},
+	}
+	// 180 kWh in one hour is impossible for the old 100 kW pack (limit
+	// 100 · 1.5) but well inside the expanded one.
+	hourly := []HourlyRecord{
+		{
+			HourStart: before.Add(19 * time.Hour), Rdn: floatPtr(10), ImportPrice: 10,
+			EssToLoad: 80, EssNet: 800, EssDischarged: 80, EssPeakIntervalKw: 95,
+			EssRealizedProfitUah: floatPtr(800), EssWithdrawnCostUah: floatPtr(0),
+		},
+		{
+			HourStart: after.Add(19 * time.Hour), Rdn: floatPtr(10), ImportPrice: 10,
+			EssToLoad: 180, EssNet: 1800, EssDischarged: 180, EssPeakIntervalKw: 190,
+			EssRealizedProfitUah: floatPtr(1800), EssWithdrawnCostUah: floatPtr(0),
+		},
+	}
+	ratingsFor := func(day time.Time) EssRatings {
+		if day.Day() < 15 {
+			return small
+		}
+		return big
+	}
+
+	got := AggregateMonth("2026-06", loc, days, hourly, ratingsFor)
+
+	if got.Totals.EssDataQuality.AnomalousHours != 0 {
+		t.Fatalf("AnomalousHours = %d, want 0: %+v",
+			got.Totals.EssDataQuality.AnomalousHours, got.Totals.EssDataQuality.Anomalies)
+	}
+	// The reported ceiling is the one in force at the end of the month.
+	if got.Totals.EssDataQuality.PowerLimitKwhPerInterval != 200 {
+		t.Fatalf("PowerLimitKwhPerInterval = %v, want 200",
+			got.Totals.EssDataQuality.PowerLimitKwhPerInterval)
+	}
+	// Cycles per day against that day's pack: 80/100 + 180/200 = 1.7,
+	// not the 260/100 = 2.6 the frozen capacity produced.
+	if math.Abs(got.Totals.EquivalentCycles-1.7) > 1e-9 {
+		t.Fatalf("EquivalentCycles = %v, want 1.7", got.Totals.EquivalentCycles)
+	}
+	if math.Abs(got.Days[1].EquivalentCycles-0.9) > 1e-9 {
+		t.Fatalf("day 20 cycles = %v, want 0.9", got.Days[1].EquivalentCycles)
+	}
+	// The heatmap keeps the expanded day's cell (1800/180 = 10 UAH/kWh).
+	if h := got.HourlyMargin[1].Hours[19]; h == nil || math.Abs(h.Margin-10) > 1e-9 {
+		t.Fatalf("day 20 hour19 margin = %v, want 10", h)
+	}
+
+	// Control: with the old ratings frozen over the whole month, the
+	// expanded day's hour is thrown out as corrupt.
+	frozen := AggregateMonth("2026-06", loc, days, hourly, constEssRatings(small))
+	if frozen.Totals.EssDataQuality.AnomalousHours != 1 {
+		t.Fatalf("frozen AnomalousHours = %d, want 1", frozen.Totals.EssDataQuality.AnomalousHours)
 	}
 }
 

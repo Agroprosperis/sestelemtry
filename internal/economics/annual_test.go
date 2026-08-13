@@ -7,12 +7,6 @@ import (
 	"time"
 )
 
-// constTariff returns a fixed (capacity, degradation, power-limit, rte)
-// resolver for the annual aggregator tests.
-func constTariff(capacityKwh, degr float64) func(time.Time) (float64, float64, float64, float64) {
-	return func(time.Time) (float64, float64, float64, float64) { return capacityKwh, degr, 0, 0 }
-}
-
 // TestAggregateYearSumsMonthsAndQuarters checks that the year totals are
 // the sum of the per-month rollups, that the equivalent cycles sum, that
 // the quarter cards bucket months correctly, and that the month x hour
@@ -81,7 +75,7 @@ func TestAggregateYearSumsMonthsAndQuarters(t *testing.T) {
 		},
 	}
 
-	got := AggregateYear("2026", loc, days, hourly, constTariff(100, 0.6))
+	got := AggregateYear("2026", loc, days, hourly, fixedRatings(100, 0.6, 0, 0))
 
 	if len(got.Months) != 12 {
 		t.Fatalf("Months len = %d, want 12", len(got.Months))
@@ -197,7 +191,7 @@ func TestAnnualHeatmapSumsHourAcrossDays(t *testing.T) {
 		},
 	}
 
-	got := AggregateYear("2026", loc, days, hourly, constTariff(100, 0.6))
+	got := AggregateYear("2026", loc, days, hourly, fixedRatings(100, 0.6, 0, 0))
 
 	cell := got.MonthlyMargin[2].Hours[18]
 	if cell == nil {
@@ -231,7 +225,7 @@ func TestAggregatePeriodSlidingWindow(t *testing.T) {
 	days := []DailyRecord{mk(oct, 999, 999), mk(nov, 400, 800), mk(jan, 300, 600)}
 
 	keys := []string{"2025-11", "2025-12", "2026-01", "2026-02"}
-	got := AggregatePeriod("2025-11..2026-02", keys, loc, days, nil, constTariff(100, 0.6))
+	got := AggregatePeriod("2025-11..2026-02", keys, loc, days, nil, fixedRatings(100, 0.6, 0, 0))
 
 	if len(got.Months) != 4 || got.From != "2025-11" || got.To != "2026-02" {
 		t.Fatalf("window months=%d from=%q to=%q, want 4 / 2025-11 / 2026-02", len(got.Months), got.From, got.To)

@@ -62,26 +62,25 @@ type StoredYear struct {
 
 // AggregateYear folds a calendar year of persisted daily + hourly
 // records into a year rollup. It buckets the records by calendar month,
-// reuses AggregateMonth for each month (resolving the ESS capacity /
-// degradation per month via resolveTariff so a mid-year tariff change is
-// honored), then sums the twelve MonthlyTotals into the year totals.
+// reuses AggregateMonth for each month, then sums the twelve
+// MonthlyTotals into the year totals.
 //
-// resolveTariff returns the usable ESS capacity (kWh) and degradation
-// cost (UAH/kWh) effective on the given day; AggregateYear calls it with
-// the first day of each month.
+// ratingsFor returns the УЗЕ ratings effective on a given day and is
+// handed straight to AggregateMonth, so a plant that grew mid-month is
+// honored day by day.
 func AggregateYear(
 	period string,
 	loc *time.Location,
 	days []DailyRecord,
 	hourly []HourlyRecord,
-	resolveTariff func(day time.Time) (capacityKwh, degradationUahPerKwh, powerLimitKw, roundtripEff float64),
+	ratingsFor func(day time.Time) EssRatings,
 ) StoredYear {
 	year := parseYear(period)
 	keys := make([]string, 0, 12)
 	for m := 1; m <= 12; m++ {
 		keys = append(keys, fmt.Sprintf("%04d-%02d", year, m))
 	}
-	return AggregatePeriod(period, keys, loc, days, hourly, resolveTariff)
+	return AggregatePeriod(period, keys, loc, days, hourly, ratingsFor)
 }
 
 // AggregatePeriod is the generalized rollup behind AggregateYear: it folds
@@ -96,7 +95,7 @@ func AggregatePeriod(
 	loc *time.Location,
 	days []DailyRecord,
 	hourly []HourlyRecord,
-	resolveTariff func(day time.Time) (capacityKwh, degradationUahPerKwh, powerLimitKw, roundtripEff float64),
+	ratingsFor func(day time.Time) EssRatings,
 ) StoredYear {
 	// Bucket the daily / hourly records by calendar month so each month
 	// is aggregated against exactly its own slice.
@@ -131,10 +130,7 @@ func AggregatePeriod(
 		if _, err := fmt.Sscanf(monthKey, "%4d-%2d", &ky, &km); err != nil || km < 1 || km > 12 {
 			continue
 		}
-		firstDay := time.Date(ky, time.Month(km), 1, 0, 0, 0, 0, loc)
-		capacityKwh, degr, powerLimit, rte := resolveTariff(firstDay)
-
-		sm := AggregateMonth(monthKey, loc, daysByMonth[monthKey], hourlyByMonth[monthKey], capacityKwh, degr, powerLimit, rte)
+		sm := AggregateMonth(monthKey, loc, daysByMonth[monthKey], hourlyByMonth[monthKey], ratingsFor)
 		mt := sm.Totals
 		months = append(months, MonthRollup{Month: monthKey, Totals: mt})
 		monthlyMargin = append(monthlyMargin, MonthMargin{
@@ -374,15 +370,8 @@ func (s *Service) GetYear(ctx context.Context, orgID, period, tz string) (Stored
 	hourly, _ := s.backend.LoadHourlyRange(ctx, orgID, firstDay, nextYear)
 
 	schedule, _ := s.backend.TariffSchedule(ctx, orgID)
-	resolve := func(day time.Time) (float64, float64, float64, float64) {
-		t, ok := schedule.ResolveForDay(day)
-		if !ok {
-			t = DefaultTariffs
-		}
-		return t.EssCapacityKwh, t.DegradationUahPerKwh, t.EssPowerLimitKw, t.RoundtripEfficiency
-	}
 
-	result := AggregateYear(period, loc, daily, hourly, resolve)
+	result := AggregateYear(period, loc, daily, hourly, schedule.EssRatingsFor)
 	result.OrganizationID = orgID
 	if prior, priorMonths, perr := s.backend.SumEbitdaBefore(ctx, orgID, firstDay); perr == nil {
 		result.PriorEbitda = prior
@@ -436,16 +425,9 @@ func (s *Service) GetPeriod(ctx context.Context, orgID, from, to, tz string) (St
 	hourly, _ := s.backend.LoadHourlyRange(ctx, orgID, firstDay, nextAfter)
 
 	schedule, _ := s.backend.TariffSchedule(ctx, orgID)
-	resolve := func(day time.Time) (float64, float64, float64, float64) {
-		t, ok := schedule.ResolveForDay(day)
-		if !ok {
-			t = DefaultTariffs
-		}
-		return t.EssCapacityKwh, t.DegradationUahPerKwh, t.EssPowerLimitKw, t.RoundtripEfficiency
-	}
 
 	label := keys[0] + ".." + keys[len(keys)-1]
-	result := AggregatePeriod(label, keys, loc, daily, hourly, resolve)
+	result := AggregatePeriod(label, keys, loc, daily, hourly, schedule.EssRatingsFor)
 	result.OrganizationID = orgID
 	if prior, priorMonths, perr := s.backend.SumEbitdaBefore(ctx, orgID, firstDay); perr == nil {
 		result.PriorEbitda = prior

@@ -76,7 +76,7 @@ func TestAggregateMonthOptimum(t *testing.T) {
 		GridToLoad: 100, EssDischarged: 40, EssNet: 10, EssRemainingKwhStart: floatPtr(40),
 	}
 
-	got := AggregateMonth("2026-06", loc, days, hourly, 100, 0, 0, 0)
+	got := AggregateMonth("2026-06", loc, days, hourly, fixedRatings(100, 0, 0, 0))
 
 	// Optimum ≈ charge 40 @1 (−40) then discharge 40 to load @20 (+800) = 760.
 	if got.Totals.EssOptimum < 700 {
@@ -114,7 +114,7 @@ func TestDetectEssAnomalies(t *testing.T) {
 		{HourStart: badHour, EssCharged: 400, EssDischarged: 0}, // day 2 hour 5: impossible
 		{HourStart: base.Add(24*time.Hour + 6*time.Hour), EssCharged: 40, EssDischarged: 0},
 	}
-	bad, dq := detectEssAnomalies(hourly, loc, 100, essAnomalyTolerance) // limit 150
+	bad, dq := detectEssAnomalies(hourly, loc, fixedRatings(0, 0, 100, 0), essAnomalyTolerance) // limit 150
 	if len(bad) != 1 || !bad[badHour.Unix()] {
 		t.Fatalf("bad = %v, want {%d}", bad, badHour.Unix())
 	}
@@ -131,7 +131,7 @@ func TestDetectEssAnomalies(t *testing.T) {
 		t.Fatalf("ReasonCounts = %v, want hourly_over_limit=1", dq.ReasonCounts)
 	}
 	// Disabled filter (limit ≤ 0) excludes nothing.
-	if b2, dq2 := detectEssAnomalies(hourly, loc, 0, essAnomalyTolerance); len(b2) != 0 || !dq2.DataOK {
+	if b2, dq2 := detectEssAnomalies(hourly, loc, fixedRatings(0, 0, 0, 0), essAnomalyTolerance); len(b2) != 0 || !dq2.DataOK {
 		t.Fatalf("disabled filter excluded hours: %v / %+v", b2, dq2)
 	}
 }
@@ -153,7 +153,7 @@ func TestDetectEssAnomaliesPeakInterval(t *testing.T) {
 		// Next day: modest hourly sum and a peak within the limit → clean.
 		{HourStart: base.Add(24*time.Hour + 10*time.Hour), EssDischarged: 40, EssPeakIntervalKw: 100},
 	}
-	bad, dq := detectEssAnomalies(hourly, loc, 100, essAnomalyTolerance) // limit 150
+	bad, dq := detectEssAnomalies(hourly, loc, fixedRatings(0, 0, 100, 0), essAnomalyTolerance) // limit 150
 	if len(bad) != 1 || !bad[spikeHour.Unix()] {
 		t.Fatalf("bad = %v, want {%d}", bad, spikeHour.Unix())
 	}
@@ -191,7 +191,7 @@ func TestDetectEssAnomaliesAfterGap(t *testing.T) {
 		}
 		hourly = append(hourly, rec)
 	}
-	bad, dq := detectEssAnomalies(hourly, loc, 100, essAnomalyTolerance) // limit 150
+	bad, dq := detectEssAnomalies(hourly, loc, fixedRatings(0, 0, 100, 0), essAnomalyTolerance) // limit 150
 	if len(bad) != 1 || !bad[spike.Unix()] {
 		t.Fatalf("bad = %v, want spike hour", bad)
 	}
@@ -242,7 +242,7 @@ func TestAggregateMonthExcludesAnomalousHours(t *testing.T) {
 	// Day2 hour 3 charge 1000 ≫ 150 limit; evening EssNet 10 should still count.
 	hourly := append(mk(day1, 40, 10), mk(day2, 1000, 10)...)
 
-	got := AggregateMonth("2026-06", loc, days, hourly, 100, 0, 100, 0)
+	got := AggregateMonth("2026-06", loc, days, hourly, fixedRatings(100, 0, 100, 0))
 
 	if got.Totals.EssDataQuality.AnomalousHours != 1 || got.Totals.EssDataQuality.AnomalousDays != 1 || got.Totals.EssDataQuality.DataOK {
 		t.Fatalf("data quality = %+v, want 1 anomalous hour / 1 day, not ok", got.Totals.EssDataQuality)
@@ -352,7 +352,7 @@ func TestAggregateMonthCycles(t *testing.T) {
 		GridToLoad: 100, EssDischarged: 40, EssNet: 10, EssRemainingKwhStart: floatPtr(40),
 	}
 
-	got := AggregateMonth("2026-06", loc, days, hourly, 100, 0, 0, 0)
+	got := AggregateMonth("2026-06", loc, days, hourly, fixedRatings(100, 0, 0, 0))
 	if len(got.Cycles) != 1 {
 		t.Fatalf("len(Cycles) = %d, want 1", len(got.Cycles))
 	}

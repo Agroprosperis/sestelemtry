@@ -156,6 +156,17 @@ func newKyivBackend(t *testing.T) (*fakeBackend, *time.Location) {
 	}, loc
 }
 
+// fixedRatings is the УЗЕ-ratings resolver the aggregator tests use when
+// the plant does not change across the period.
+func fixedRatings(capacityKwh, degr, powerKw, rte float64) func(time.Time) EssRatings {
+	return constEssRatings(EssRatings{
+		CapacityKwh:          capacityKwh,
+		DegradationUahPerKwh: degr,
+		PowerLimitKw:         powerKw,
+		RoundtripEff:         rte,
+	})
+}
+
 func mustDate(s string) time.Time {
 	d, _ := time.Parse("2006-01-02", s)
 	return d
