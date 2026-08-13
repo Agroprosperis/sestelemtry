@@ -110,6 +110,128 @@ func (h *Handlers) edgeManifestPublish(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, res)
 }
 
+// edgePlanInputs bundles everything the forward DP needs for one site:
+// horizon, ratings, tariffs and the merged hourly forecast series.
+type edgePlanInputs struct {
+	Loc        *time.Location
+	Timezone   string
+	Now        time.Time
+	Start, End time.Time
+
+	Tariffs     economics.Tariffs
+	CapacityKwh float64
+	PowerKw     float64
+	PvRatedKw   float64
+	SocMin      float64
+	SocMax      float64
+	StartSoc    float64
+
+	Hours      []economics.ForwardHour
+	LoadSource string
+	// OperatorHour marks hours (UTC hour start) whose load came from
+	// the operator plan (or the preview draft) rather than the
+	// heuristic profile.
+	OperatorHour map[time.Time]bool
+}
+
+// gatherEdgePlanInputs assembles the DP inputs for a site. draftLoad
+// (UTC hour start → kW) lets the planner UI preview unsaved edits: a
+// draft hour overrides both the stored operator plan and the heuristic
+// profile.
+func (h *Handlers) gatherEdgePlanInputs(ctx context.Context, siteID string, draftLoad map[time.Time]float64) (edgePlanInputs, error) {
+	e := h.edge
+	if e == nil {
+		return edgePlanInputs{}, fmt.Errorf("edge ingest not configured")
+	}
+	tzName := e.PlannerTimezone
+	if tzName == "" {
+		tzName = "Europe/Kyiv"
+	}
+	loc, err := time.LoadLocation(tzName)
+	if err != nil {
+		return edgePlanInputs{}, err
+	}
+	zone := e.PlannerZone
+	if zone == 0 {
+		zone = 2
+	}
+	now := time.Now().In(loc)
+
+	in := edgePlanInputs{Loc: loc, Timezone: tzName, Now: now}
+	in.Tariffs = h.resolveEdgeTariffs(ctx, siteID, now)
+	in.CapacityKwh, in.PowerKw, in.PvRatedKw, err = h.resolveEdgeRatings(ctx, siteID, in.Tariffs)
+	if err != nil {
+		return edgePlanInputs{}, err
+	}
+
+	// Horizon: the current hour → the end of tomorrow (local).
+	in.Start = now.Truncate(time.Hour)
+	in.End = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc).AddDate(0, 0, 2)
+
+	prices, err := h.edgeDAMPrices(ctx, zone, now, loc)
+	if err != nil {
+		return edgePlanInputs{}, fmt.Errorf("dam prices: %w", err)
+	}
+	pv, err := h.edgePvForecast(ctx, siteID, in.Start, in.End, in.PvRatedKw)
+	if err != nil {
+		return edgePlanInputs{}, fmt.Errorf("pv forecast: %w", err)
+	}
+	heuristic, heuristicSource, err := h.edgeLoadProfile(ctx, siteID, tzName)
+	if err != nil {
+		return edgePlanInputs{}, fmt.Errorf("load profile: %w", err)
+	}
+	operator, err := storage.GetEdgeLoadPlan(ctx, e.Pool, siteID, in.Start, in.End)
+	if err != nil {
+		return edgePlanInputs{}, fmt.Errorf("operator load plan: %w", err)
+	}
+
+	in.StartSoc = h.edgeLatestSoc(ctx, siteID)
+	in.SocMin, in.SocMax = 20.0, 90.0
+	if in.StartSoc == 0 {
+		in.StartSoc = (in.SocMin + in.SocMax) / 2
+	}
+
+	in.OperatorHour = map[time.Time]bool{}
+	totalHours, operatorHours := 0, 0
+	for ts := in.Start; ts.Before(in.End); ts = ts.Add(time.Hour) {
+		key := ts.UTC()
+		fh := economics.ForwardHour{TS: ts, PvKw: pv[key]}
+		switch {
+		case draftLoad != nil && hasHour(draftLoad, key):
+			fh.LoadKw = draftLoad[key]
+			in.OperatorHour[key] = true
+			operatorHours++
+		case hasHour(operator, key):
+			fh.LoadKw = operator[key]
+			in.OperatorHour[key] = true
+			operatorHours++
+		default:
+			fh.LoadKw = heuristic[ts.In(loc).Hour()]
+		}
+		if price, ok := prices[key]; ok {
+			p := price
+			fh.RdnUahPerKwh = &p
+		}
+		in.Hours = append(in.Hours, fh)
+		totalHours++
+	}
+
+	switch {
+	case operatorHours == totalHours && totalHours > 0:
+		in.LoadSource = "operator"
+	case operatorHours > 0:
+		in.LoadSource = "operator_partial"
+	default:
+		in.LoadSource = heuristicSource
+	}
+	return in, nil
+}
+
+func hasHour(m map[time.Time]float64, ts time.Time) bool {
+	_, ok := m[ts]
+	return ok
+}
+
 // PublishEdgeManifest builds the forward plan for one site and stores
 // it as a manifest-lite version. The manifest_id is a content hash, so
 // republishing an unchanged plan is a no-op (the edge keeps its cached
@@ -119,70 +241,19 @@ func (h *Handlers) PublishEdgeManifest(ctx context.Context, siteID string) (Edge
 	if e == nil {
 		return EdgePublishResult{}, fmt.Errorf("edge ingest not configured")
 	}
-	tzName := e.PlannerTimezone
-	if tzName == "" {
-		tzName = "Europe/Kyiv"
-	}
-	loc, err := time.LoadLocation(tzName)
+	in, err := h.gatherEdgePlanInputs(ctx, siteID, nil)
 	if err != nil {
 		return EdgePublishResult{}, err
 	}
-	zone := e.PlannerZone
-	if zone == 0 {
-		zone = 2
-	}
-	now := time.Now().In(loc)
+	now, end, loadSource := in.Now, in.End, in.LoadSource
 
-	tariffs := h.resolveEdgeTariffs(ctx, siteID, now)
-	capacityKwh, powerKw, pvRatedKw, err := h.resolveEdgeRatings(ctx, siteID, tariffs)
-	if err != nil {
-		return EdgePublishResult{}, err
-	}
-
-	// Horizon: the current hour → the end of tomorrow (local).
-	start := now.Truncate(time.Hour)
-	end := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc).AddDate(0, 0, 2)
-
-	prices, err := h.edgeDAMPrices(ctx, zone, now, loc)
-	if err != nil {
-		return EdgePublishResult{}, fmt.Errorf("dam prices: %w", err)
-	}
-	pv, err := h.edgePvForecast(ctx, siteID, start, end, pvRatedKw)
-	if err != nil {
-		return EdgePublishResult{}, fmt.Errorf("pv forecast: %w", err)
-	}
-	loadByHour, loadSource, err := h.edgeLoadProfile(ctx, siteID, tzName)
-	if err != nil {
-		return EdgePublishResult{}, fmt.Errorf("load profile: %w", err)
-	}
-	startSoc := h.edgeLatestSoc(ctx, siteID)
-
-	socMin, socMax := 20.0, 90.0
-	if startSoc == 0 {
-		startSoc = (socMin + socMax) / 2
-	}
-
-	var hours []economics.ForwardHour
-	for ts := start; ts.Before(end); ts = ts.Add(time.Hour) {
-		fh := economics.ForwardHour{
-			TS:     ts,
-			PvKw:   pv[ts.UTC()],
-			LoadKw: loadByHour[ts.In(loc).Hour()],
-		}
-		if price, ok := prices[ts.UTC()]; ok {
-			p := price
-			fh.RdnUahPerKwh = &p
-		}
-		hours = append(hours, fh)
-	}
-
-	steps, err := economics.BuildForwardPlan(hours, economics.ForwardParams{
-		Tariffs:     tariffs,
-		CapacityKwh: capacityKwh,
-		PowerKw:     powerKw,
-		SocMinPct:   socMin,
-		SocMaxPct:   socMax,
-		StartSocPct: startSoc,
+	steps, err := economics.BuildForwardPlan(in.Hours, economics.ForwardParams{
+		Tariffs:     in.Tariffs,
+		CapacityKwh: in.CapacityKwh,
+		PowerKw:     in.PowerKw,
+		SocMinPct:   in.SocMin,
+		SocMaxPct:   in.SocMax,
+		StartSocPct: in.StartSoc,
 	})
 	if err != nil {
 		return EdgePublishResult{}, err
@@ -212,11 +283,11 @@ func (h *Handlers) PublishEdgeManifest(ctx context.Context, siteID string) (Edge
 		WriteEnabled:  false,
 		Preset:        "economic_arbitrage",
 	}
-	doc.Limits.EssChargeMaxKw = powerKw
-	doc.Limits.EssDischargeMaxKw = powerKw
-	doc.GridLimits.PvRatedKw = pvRatedKw
-	doc.SocPolicy.MinEconomicPct = socMin
-	doc.SocPolicy.MaxEconomicPct = socMax
+	doc.Limits.EssChargeMaxKw = in.PowerKw
+	doc.Limits.EssDischargeMaxKw = in.PowerKw
+	doc.GridLimits.PvRatedKw = in.PvRatedKw
+	doc.SocPolicy.MinEconomicPct = in.SocMin
+	doc.SocPolicy.MaxEconomicPct = in.SocMax
 	if len(intervals) > 0 {
 		doc.Plan = &edgePlanDoc{
 			Granularity: "1h",

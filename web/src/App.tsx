@@ -3,9 +3,10 @@ import { AlertsPage } from './alerts/AlertsPage'
 import { Dashboard } from './dashboard/Dashboard'
 import { EconomicsPage } from './economics/EconomicsPage'
 import { ImportPage } from './import/ImportPage'
+import { PlannerPage } from './planner/PlannerPage'
 import { StationPage } from './station/StationPage'
 
-type View = 'dashboard' | 'economics' | 'import' | 'station' | 'alerts'
+type View = 'dashboard' | 'economics' | 'import' | 'station' | 'alerts' | 'planner'
 
 // readView reads the `?view=` query parameter on every render and
 // returns the active page id. We deliberately avoid pulling in
@@ -20,6 +21,7 @@ function readView(): View {
   if (view === 'import') return 'import'
   if (view === 'station') return 'station'
   if (view === 'alerts') return 'alerts'
+  if (view === 'planner') return 'planner'
   return 'dashboard'
 }
 
@@ -48,6 +50,9 @@ function App() {
   }
   if (view === 'alerts') {
     return <AlertsPage />
+  }
+  if (view === 'planner') {
+    return <PlannerPage />
   }
   return <Dashboard />
 }

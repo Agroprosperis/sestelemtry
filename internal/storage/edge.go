@@ -100,6 +100,17 @@ func InitEdgeSchema(ctx context.Context, pool *pgxpool.Pool) error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS edge_manifests_site_issued
 			ON edge_manifests (site_id, issued_at DESC)`,
+
+		// Operator-entered hourly load plan (cloud planner UI). One row
+		// per planned hour; the forward planner prefers these hours over
+		// the heuristic median profile (mirrored by 013_edge_load_plans.sql).
+		`CREATE TABLE IF NOT EXISTS edge_load_plans (
+			site_id text NOT NULL,
+			hour timestamptz NOT NULL,
+			load_kw double precision NOT NULL,
+			updated_at timestamptz NOT NULL DEFAULT now(),
+			PRIMARY KEY (site_id, hour)
+		)`,
 	}
 	for _, s := range stmts {
 		if _, err := pool.Exec(ctx, s); err != nil {
@@ -205,12 +216,12 @@ func InsertEdgeTicksAsSamples(ctx context.Context, db DBTX, organizationID, site
 
 // edgeControlRecord mirrors the §9.3 decision document.
 type edgeControlRecord struct {
-	SiteID       string `json:"site_id"`
+	SiteID       string    `json:"site_id"`
 	TS           time.Time `json:"ts"`
-	Mode         string `json:"mode"`
-	Preset       string `json:"preset"`
-	StateMachine string `json:"state_machine"`
-	PlanSource   string `json:"plan_source"`
+	Mode         string    `json:"mode"`
+	Preset       string    `json:"preset"`
+	StateMachine string    `json:"state_machine"`
+	PlanSource   string    `json:"plan_source"`
 	Outputs      struct {
 		PBessVirtualKw    *float64 `json:"p_bess_virtual_kw"`
 		PPVLimitVirtualKw *float64 `json:"p_pv_limit_virtual_kw"`
@@ -352,6 +363,136 @@ func LatestEdgeManifest(ctx context.Context, db DBTX, siteID string) (payload []
 		return nil, "", false, err
 	}
 	return payload, manifestID, true, nil
+}
+
+// EdgeLoadPlanEntry is one operator-planned hour (hour start, UTC).
+type EdgeLoadPlanEntry struct {
+	Hour   time.Time
+	LoadKw float64
+}
+
+// UpsertEdgeLoadPlan stores operator load-plan hours (last writer wins
+// per hour).
+func UpsertEdgeLoadPlan(ctx context.Context, pool *pgxpool.Pool, siteID string, entries []EdgeLoadPlanEntry) error {
+	for _, e := range entries {
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO edge_load_plans (site_id, hour, load_kw)
+			VALUES ($1, $2, $3)
+			ON CONFLICT (site_id, hour) DO UPDATE SET
+				load_kw = EXCLUDED.load_kw,
+				updated_at = now()`,
+			siteID, e.Hour.UTC().Truncate(time.Hour), e.LoadKw); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// DeleteEdgeLoadPlan clears operator hours in [from, to).
+func DeleteEdgeLoadPlan(ctx context.Context, pool *pgxpool.Pool, siteID string, from, to time.Time) (int64, error) {
+	tag, err := pool.Exec(ctx, `
+		DELETE FROM edge_load_plans
+		WHERE site_id = $1 AND hour >= $2 AND hour < $3`,
+		siteID, from.UTC(), to.UTC())
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
+}
+
+// GetEdgeLoadPlan returns the operator hours in [from, to) keyed by the
+// UTC hour start.
+func GetEdgeLoadPlan(ctx context.Context, pool *pgxpool.Pool, siteID string, from, to time.Time) (map[time.Time]float64, error) {
+	rows, err := pool.Query(ctx, `
+		SELECT hour, load_kw FROM edge_load_plans
+		WHERE site_id = $1 AND hour >= $2 AND hour < $3`,
+		siteID, from.UTC(), to.UTC())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[time.Time]float64{}
+	for rows.Next() {
+		var h time.Time
+		var kw float64
+		if err := rows.Scan(&h, &kw); err != nil {
+			return nil, err
+		}
+		out[h.UTC()] = kw
+	}
+	return out, rows.Err()
+}
+
+// EdgeManifestInfo is one journal row for the planner UI: a published
+// manifest version plus its delivery outcome derived from edge events.
+type EdgeManifestInfo struct {
+	ManifestID string
+	IssuedAt   time.Time
+	ValidFrom  time.Time
+	ValidUntil time.Time
+	Preset     string
+	LoadSource string
+	Intervals  int
+	AppliedAt  time.Time // zero = not (yet) confirmed by the edge
+	RejectedAt time.Time // zero = not rejected
+}
+
+// ListEdgeManifests returns the newest manifest versions for a site
+// with per-version delivery status (MANIFEST_APPLIED / _REJECTED events
+// the edge uplinks reference the manifest_id in their context).
+func ListEdgeManifests(ctx context.Context, pool *pgxpool.Pool, siteID string, limit int) ([]EdgeManifestInfo, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	rows, err := pool.Query(ctx, `
+		SELECT m.manifest_id, m.issued_at, m.valid_from, m.valid_until,
+		       COALESCE(m.payload->>'preset', ''),
+		       COALESCE(m.payload->'plan'->>'load_source', ''),
+		       COALESCE(jsonb_array_length(m.payload->'plan'->'intervals'), 0),
+		       a.time, r.time
+		FROM edge_manifests m
+		LEFT JOIN LATERAL (
+			SELECT e.time FROM edge_events e
+			WHERE e.site_id = m.site_id AND e.code = 'MANIFEST_APPLIED'
+			  AND e.context->>'manifest_id' = m.manifest_id
+			ORDER BY e.time ASC LIMIT 1
+		) a ON true
+		LEFT JOIN LATERAL (
+			SELECT e.time FROM edge_events e
+			WHERE e.site_id = m.site_id AND e.code = 'MANIFEST_REJECTED'
+			  AND e.context->>'manifest_id' = m.manifest_id
+			ORDER BY e.time DESC LIMIT 1
+		) r ON true
+		WHERE m.site_id = $1 AND m.published
+		ORDER BY m.issued_at DESC
+		LIMIT $2`, siteID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []EdgeManifestInfo
+	for rows.Next() {
+		var mi EdgeManifestInfo
+		var validFrom, validUntil, appliedAt, rejectedAt *time.Time
+		if err := rows.Scan(&mi.ManifestID, &mi.IssuedAt, &validFrom, &validUntil,
+			&mi.Preset, &mi.LoadSource, &mi.Intervals, &appliedAt, &rejectedAt); err != nil {
+			return nil, err
+		}
+		if validFrom != nil {
+			mi.ValidFrom = *validFrom
+		}
+		if validUntil != nil {
+			mi.ValidUntil = *validUntil
+		}
+		if appliedAt != nil {
+			mi.AppliedAt = *appliedAt
+		}
+		if rejectedAt != nil {
+			mi.RejectedAt = *rejectedAt
+		}
+		out = append(out, mi)
+	}
+	return out, rows.Err()
 }
 
 func nullTime(t time.Time) any {

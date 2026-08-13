@@ -50,18 +50,18 @@ describe('alertsClient', () => {
   // Omitting the password is how the page edits recipients without ever
   // holding the mail credentials.
   it('omits smtp_password when the field was not touched', async () => {
-    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }))
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(null, { status: 204 }))
     vi.stubGlobal('fetch', fetchMock)
     await saveAlertSettings(settings(), null)
-    const body = JSON.parse(String(fetchMock.mock.calls[0][1].body))
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))
     expect('smtp_password' in body).toBe(false)
   })
 
   it('sends an empty smtp_password to clear it', async () => {
-    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }))
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(null, { status: 204 }))
     vi.stubGlobal('fetch', fetchMock)
     await saveAlertSettings(settings(), '')
-    const body = JSON.parse(String(fetchMock.mock.calls[0][1].body))
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))
     expect(body.smtp_password).toBe('')
   })
 
