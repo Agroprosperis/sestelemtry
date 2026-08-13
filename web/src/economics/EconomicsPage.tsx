@@ -89,9 +89,9 @@ const LEGACY_QUERY_KEYS = [
 ]
 
 // PAYBACK_WINDOW_FROM anchors the payback page's all-time fetch. The
-// earliest site went live 2025-01 (see .cursor/rules/elevator-start-dates);
-// months before the first data month come back empty and are skipped.
-const PAYBACK_WINDOW_FROM = '2025-01'
+// earliest imported archive (АСКОЕ Жмеринка) starts 2024-08; months
+// before the first data month come back empty and are skipped.
+const PAYBACK_WINDOW_FROM = '2024-08'
 
 // readRangeFromUrl picks the period granularity (day / month / year).
 // Defaults to 'day' so existing links and the common case stay unchanged.

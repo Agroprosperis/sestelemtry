@@ -1,6 +1,8 @@
 import { useCallback, useRef, useState } from 'react'
 import {
+  runAskoeImport,
   runFusionSolarImport,
+  type AskoeImportResult,
   type FusionSolarImportResult,
   type ImportProgress,
 } from '../api'
@@ -52,11 +54,12 @@ export function ImportPage() {
         </button>
         <div className="import-heading">
           <h1>Імпорт даних</h1>
-          <p className="import-subtitle">Архівна телеметрія FusionSolar</p>
+          <p className="import-subtitle">Архів FusionSolar і комерційний облік АСКОЕ</p>
         </div>
       </header>
 
       <FusionSolarImportCard />
+      <AskoeImportCard />
     </main>
   )
 }
@@ -280,4 +283,204 @@ function FusionSolarImportCard() {
     </section>
   )
 }
+
+function AskoeImportCard() {
+  const { organizationID, options, change: onOrganizationChange } = useOrganizationParam()
+  const [file, setFile] = useState<File | null>(null)
+  const [state, setState] = useState<RunState>('idle')
+  const [error, setError] = useState<string | null>(null)
+  const [cancelled, setCancelled] = useState(false)
+  const [progress, setProgress] = useState<ImportProgress | null>(null)
+  const [result, setResult] = useState<AskoeImportResult | null>(null)
+  const abortRef = useRef<AbortController | null>(null)
+
+  const onCancel = useCallback(() => {
+    abortRef.current?.abort()
+  }, [])
+
+  const onRun = useCallback(async () => {
+    if (!file) {
+      setError('Оберіть файл .xls, .zip або .7z')
+      setState('error')
+      return
+    }
+    const controller = new AbortController()
+    abortRef.current = controller
+    setState('loading')
+    setError(null)
+    setCancelled(false)
+    setProgress(null)
+    setResult(null)
+    try {
+      const res = await runAskoeImport(
+        { organizationID, file },
+        { signal: controller.signal, onProgress: setProgress },
+      )
+      setResult(res)
+      setState('done')
+    } catch (err) {
+      if (isAbortError(err)) {
+        setCancelled(true)
+        setState('idle')
+      } else {
+        setError(err instanceof Error ? err.message : String(err))
+        setState('error')
+      }
+    } finally {
+      abortRef.current = null
+      setProgress(null)
+    }
+  }, [organizationID, file])
+
+  return (
+    <section className="import-card">
+      <span className="import-card-accent import-card-accent-amber" aria-hidden="true" />
+      <div className="import-card-head">
+        <h2 className="import-section-title">Архів АСКОЕ (комерційний облік)</h2>
+        <span className="import-pill import-pill-ok">● Файл з лічильників</span>
+      </div>
+      <p className="import-section-sub">
+        Погодинні вивантаження А+/А− РУ-10 і А− СЕС. Дні з live Modbus або FusionSolar
+        не змінюються — записуються лише порожні дні. Після запису перераховується економіка.
+      </p>
+      <div className="import-controls import-controls-askoe">
+        <OrganizationSelect
+          value={organizationID}
+          options={options}
+          onChange={onOrganizationChange}
+        />
+        <label className="import-field import-field-file">
+          <span>Файл</span>
+          <input
+            type="file"
+            accept=".xls,.zip,.7z,application/vnd.ms-excel,application/zip,application/x-7z-compressed"
+            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+          />
+        </label>
+        <div className="import-actions">
+          {state === 'loading' && (
+            <button type="button" className="import-cancel" onClick={onCancel}>
+              Скасувати
+            </button>
+          )}
+          <button
+            type="button"
+            className="import-run"
+            onClick={onRun}
+            disabled={state === 'loading' || !file}
+          >
+            {state === 'loading' ? (
+              <>
+                <span className="import-spinner" aria-hidden="true" />
+                Імпортуємо…
+              </>
+            ) : (
+              'Імпортувати АСКОЕ'
+            )}
+          </button>
+        </div>
+      </div>
+
+      {state === 'loading' && progress && <ImportProgressBar progress={progress} unit="День" />}
+
+      <p className="import-hint">
+        Кожна година розкладається на 12 пʼятихвилинних сходинок накопичувальних лічильників
+        (ті самі metric_key, що й FusionSolar), тож денний графік потужності читає їх як
+        звичайні дані. Повторний запуск перезаписує лише рядки source=askoe. Live і FusionSolar
+        ніколи не затираються. Неповні дні (немає експорту або СЕС) пропускаються.
+      </p>
+
+      {cancelled && (
+        <div className="import-banner import-banner-info" role="status">
+          Імпорт скасовано.
+        </div>
+      )}
+
+      {state === 'error' && error && (
+        <div className="import-banner import-banner-error" role="alert">
+          Помилка імпорту: {error}
+        </div>
+      )}
+
+      {state === 'done' && result && (
+        <div className="import-result" role="status">
+          <h3>Готово</h3>
+          <dl className="import-summary">
+            <div>
+              <dt>Станція</dt>
+              <dd>{result.organization_id}</dd>
+            </div>
+            <div>
+              <dt>Період</dt>
+              <dd>
+                {result.from || '—'} → {result.to || '—'}
+              </dd>
+            </div>
+            <div>
+              <dt>Файлів</dt>
+              <dd>{result.files_read.toLocaleString('uk-UA')}</dd>
+            </div>
+            <div>
+              <dt>Повних днів</dt>
+              <dd>{result.days_complete.toLocaleString('uk-UA')}</dd>
+            </div>
+            <div>
+              <dt>Записано днів</dt>
+              <dd>{result.days_written.toLocaleString('uk-UA')}</dd>
+            </div>
+            <div>
+              <dt>Пропущено (live / FusionSolar)</dt>
+              <dd>{result.days_skipped_occupied.toLocaleString('uk-UA')}</dd>
+            </div>
+            <div>
+              <dt>Пропущено (неповні)</dt>
+              <dd>{result.days_skipped_incomplete.toLocaleString('uk-UA')}</dd>
+            </div>
+            <div>
+              <dt>Записано рядків</dt>
+              <dd>{result.rows_written.toLocaleString('uk-UA')}</dd>
+            </div>
+            <div>
+              <dt>Економіка (днів ок)</dt>
+              <dd>{(result.economics_days_ok ?? 0).toLocaleString('uk-UA')}</dd>
+            </div>
+          </dl>
+
+          {Object.keys(result.per_metric || {}).length > 0 && (
+            <table className="import-metrics">
+              <thead>
+                <tr>
+                  <th>metric_key</th>
+                  <th>точок</th>
+                </tr>
+              </thead>
+              <tbody>
+                {Object.entries(result.per_metric)
+                  .sort(([a], [b]) => a.localeCompare(b))
+                  .map(([key, count]) => (
+                    <tr key={key}>
+                      <td>{key}</td>
+                      <td>{count.toLocaleString('uk-UA')}</td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          )}
+
+          {result.warnings && result.warnings.length > 0 && (
+            <div className="import-warnings">
+              <h4>Попередження</h4>
+              <ul>
+                {result.warnings.map((w, i) => (
+                  <li key={i}>{w}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+    </section>
+  )
+}
+
 

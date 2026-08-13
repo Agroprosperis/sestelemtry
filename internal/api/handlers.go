@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/nesh/sestelemetry/internal/alerts"
+	"github.com/nesh/sestelemetry/internal/askoe"
 	"github.com/nesh/sestelemetry/internal/economics"
 	"github.com/nesh/sestelemetry/internal/fusionsolar"
 )
@@ -43,6 +44,9 @@ type Handlers struct {
 	// access token (or refresh token) and optional API base in the
 	// request body from the import page.
 	fusionImporter FusionSolarImporter
+	// askoeImporter backs POST /api/v1/askoe/import (commercial-meter
+	// xls/zip/7z upload). Always installed at startup.
+	askoeImporter AskoeImporter
 	// fusionClientID / fusionClientSecret / fusionOAuthBase are the
 	// server-side OAuth client used to exchange a refresh token for an
 	// access token. They let the import page ask for ONLY the refresh
@@ -87,6 +91,10 @@ type FusionSolarImporter func(ctx context.Context, organizationID, accessToken, 
 // the handler can stream a progress feed. nil is passed when no client
 // is listening for progress.
 type FusionProgressFunc func(done, total int)
+
+// AskoeImporter writes commercial-meter workbooks into telemetry_samples
+// for one organization and returns a JSON-serializable summary.
+type AskoeImporter func(ctx context.Context, organizationID string, files []askoe.WorkbookFile, onProgress func(done, total int, label string)) (any, error)
 
 // progressEvent is one line of the NDJSON stream the long-running import
 // handlers emit (Content-Type: application/x-ndjson). Type is one of
@@ -255,6 +263,10 @@ func (h *Handlers) SetFusionSolarImporter(importer FusionSolarImporter) {
 	h.fusionImporter = importer
 }
 
+func (h *Handlers) SetAskoeImporter(importer AskoeImporter) {
+	h.askoeImporter = importer
+}
+
 // SetFusionSolarOAuth configures the server-side OAuth client used to
 // exchange a refresh token for an access token, so the import page can
 // collect only the refresh token. clientID and oauthBase fall back to
@@ -332,6 +344,7 @@ func (h *Handlers) Router() http.Handler {
 	mux.HandleFunc("/api/v1/dam-prices/refresh-range", h.damPricesRefreshRange)
 	mux.HandleFunc("/api/v1/fusionsolar/import", h.fusionSolarImport)
 	mux.HandleFunc("/api/v1/fusionsolar/config", h.fusionSolarConfig)
+	mux.HandleFunc("/api/v1/askoe/import", h.askoeImport)
 	mux.HandleFunc("/api/v1/weather-forecast", h.weatherForecast)
 	mux.HandleFunc("/api/v1/plant-inventory/history", h.plantInventoryHistory)
 	mux.HandleFunc("/api/v1/plant-inventory", h.plantInventory)
@@ -351,6 +364,10 @@ func (h *Handlers) Router() http.Handler {
 	mux.HandleFunc("/api/v1/edge/heartbeat", h.edgeHeartbeat)
 	mux.HandleFunc("/api/v1/edge/manifest", h.edgeManifest)
 	mux.HandleFunc("/api/v1/edge/manifest/publish", h.edgeManifestPublish)
+	mux.HandleFunc("/api/v1/edge/sites", h.edgeSites)
+	mux.HandleFunc("/api/v1/edge/load-plan", h.edgeLoadPlan)
+	mux.HandleFunc("/api/v1/edge/plan/preview", h.edgePlanPreview)
+	mux.HandleFunc("/api/v1/edge/manifests", h.edgeManifestJournal)
 	mux.HandleFunc("/swagger", h.swaggerUI)
 	mux.HandleFunc("/swagger/", h.swaggerUI)
 	mux.HandleFunc("/swagger/openapi.yaml", h.swaggerSpec)

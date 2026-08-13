@@ -55,10 +55,11 @@ export const DASHBOARD_CHART_REFRESH_MS = 60_000
 export const MIN_RELIABLE_DATA_AT = new Date(2026, 3, 30)
 
 // ORGANIZATION_OPERATION_START is the day each site was commissioned —
-// as far back as the FusionSolar archive import reaches, and therefore
-// how far back the dashboard may chart and total. Months of imported
-// archive stay invisible for any site whose entry is missing or too
-// late, which is what MIN_RELIABLE_DATA_AT does to everyone by default.
+// as far back as archive import (FusionSolar or ASKOE) reaches, and
+// therefore how far back the dashboard may chart and total. Months of
+// imported archive stay invisible for any site whose entry is missing
+// or too late, which is what MIN_RELIABLE_DATA_AT does to everyone by
+// default.
 //
 // Local-time constructor on purpose: `new Date('2025-06-20')` is UTC
 // midnight, which east of Greenwich is still 19 June locally and would
@@ -68,7 +69,7 @@ export const MIN_RELIABLE_DATA_AT = new Date(2026, 3, 30)
 // keep the two in step when onboarding a site.
 export const ORGANIZATION_OPERATION_START: Record<string, Date> = {
   ab: new Date(2025, 5, 20),
-  ze: new Date(2025, 0, 29),
+  ze: new Date(2024, 7, 1),
   ke: new Date(2025, 5, 30),
   pe: new Date(2026, 2, 30),
   pde: new Date(2025, 11, 24),

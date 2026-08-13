@@ -100,7 +100,7 @@ export function DashboardHeader({ organizationID, onExportClick }: Props) {
           type="button"
           className="economics-switch-button"
           onClick={goToImportView}
-          title="Імпорт архівних даних із FusionSolar"
+          title="Імпорт архівних даних FusionSolar і АСКОЕ"
         >
           <svg
             aria-hidden="true"

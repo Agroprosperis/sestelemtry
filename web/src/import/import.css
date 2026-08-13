@@ -163,6 +163,15 @@
   grid-template-columns: minmax(130px, 1fr) minmax(130px, 1fr) minmax(90px, 0.55fr);
 }
 
+.import-controls-askoe {
+  grid-template-columns: minmax(180px, 1.1fr) minmax(220px, 1.6fr);
+}
+
+.import-field-file input[type='file'] {
+  padding: 7px 10px;
+  font-size: 0.82rem;
+}
+
 /* The hint sits between the controls and the result inside a card now. */
 .import-card .import-hint {
   margin-top: 14px;

@@ -238,6 +238,13 @@ func (im *Importer) Import(ctx context.Context, client *Client, orgID string, fr
 				return nil, fmt.Errorf("fusionsolar: clear existing archive range: %w", err)
 			}
 			result.DeletedRows += deleted
+			// FusionSolar outranks ASKOE: drop commercial-meter rows in
+			// this window so the two archives never share a slot.
+			extra, err := storage.DeleteArchiveSamplesInRange(ctx, im.pool, orgID, metricKeys, "askoe", windowStart, windowEnd)
+			if err != nil {
+				return nil, fmt.Errorf("fusionsolar: clear askoe range: %w", err)
+			}
+			result.DeletedRows += extra
 
 			for start := 0; start < len(windowSamples); start += insertBatchSize {
 				end := start + insertBatchSize

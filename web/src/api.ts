@@ -1227,6 +1227,23 @@ export type FusionSolarImportResult = {
   warnings?: string[]
 }
 
+export type AskoeImportResult = {
+  organization_id: string
+  from?: string
+  to?: string
+  files_read: number
+  days_complete: number
+  days_written: number
+  days_skipped_occupied: number
+  days_skipped_incomplete: number
+  rows_written: number
+  deleted_rows: number
+  per_metric: Record<string, number>
+  warnings?: string[]
+  economics_days_ok?: number
+  economics_days_failed?: number
+}
+
 // runFusionSolarImport triggers a synchronous server-side backfill of
 // historical FusionSolar telemetry for `organizationID` over the
 // [from, to) window (RFC3339). The backend pulls 5-minute device
@@ -1278,6 +1295,29 @@ export async function runFusionSolarImport(
   } catch (err) {
     if (isAbortError(err)) throw err
     if (err instanceof Error) throw new Error(`fusionsolar import failed: ${err.message}`, { cause: err })
+    throw err
+  }
+}
+
+export async function runAskoeImport(
+  input: { organizationID: string; file: File },
+  opts?: ImportRunOptions,
+): Promise<AskoeImportResult> {
+  const url = buildURL('/api/v1/askoe/import', {
+    organization_id: input.organizationID,
+  })
+  const body = new FormData()
+  body.append('file', input.file)
+  const res = await fetch(url, {
+    method: 'POST',
+    body,
+    signal: opts?.signal,
+  })
+  try {
+    return await consumeImportStream<AskoeImportResult>(res, opts?.onProgress)
+  } catch (err) {
+    if (isAbortError(err)) throw err
+    if (err instanceof Error) throw new Error(`askoe import failed: ${err.message}`, { cause: err })
     throw err
   }
 }

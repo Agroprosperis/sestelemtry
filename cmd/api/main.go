@@ -14,6 +14,7 @@ import (
 
 	"github.com/nesh/sestelemetry/internal/alerts"
 	"github.com/nesh/sestelemetry/internal/api"
+	"github.com/nesh/sestelemetry/internal/askoe"
 	"github.com/nesh/sestelemetry/internal/config"
 	"github.com/nesh/sestelemetry/internal/dam"
 	"github.com/nesh/sestelemetry/internal/economics"
@@ -191,7 +192,9 @@ func main() {
 			sites = append(sites, site)
 		}
 		sort.Strings(sites)
-		go svc.RunEdgePlannerLoop(ctx, sites, 30*time.Minute)
+		// 15 min rolling (spec: planner phase 2) — recompute from the
+		// actual SOC and republish when the plan content changed.
+		go svc.RunEdgePlannerLoop(ctx, sites, 15*time.Minute)
 		log.Info("api_edge_planner_enabled", "sites", strings.Join(sites, ","))
 	}
 
@@ -240,6 +243,14 @@ func main() {
 	svc.SetFusionSolarImporter(func(ctx context.Context, orgID, accessToken, apiBase string, from, to time.Time, onProgress api.FusionProgressFunc) (any, error) {
 		client := fusionsolar.NewClient(apiBase, accessToken, 60*time.Second)
 		return importer.Import(ctx, client, orgID, from, to, onProgress)
+	})
+	askoeHosts := map[string]askoe.OrgHosts{}
+	for id, oh := range hostsByOrg {
+		askoeHosts[id] = askoe.OrgHosts{Default: oh.Default, ByMetricKey: oh.ByMetricKey}
+	}
+	askoeImporter := askoe.NewImporter(pool, log, askoeHosts)
+	svc.SetAskoeImporter(func(ctx context.Context, orgID string, files []askoe.WorkbookFile, onProgress func(done, total int, label string)) (any, error) {
+		return askoeImporter.Import(ctx, orgID, files, onProgress)
 	})
 	// Server-side OAuth client so the import page only needs the
 	// long-lived refresh token; the fixed app secret never leaves the

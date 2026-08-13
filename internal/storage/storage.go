@@ -234,17 +234,10 @@ func HasLiveSamplesInRange(
 }
 
 // LiveSampleBucketsInRange returns the set of fixed-width time slots in the
-// half-open window [from, to) that already hold *live* (non-archive)
-// telemetry — i.e. any row whose `source` label is not the archive value.
-// Slots are keyed by their start instant as a UTC unix-milli, bucketed at
-// `bucketSeconds` (the archive granularity, 5 minutes).
-//
-// The FusionSolar importer uses this for slot-level live-data protection:
-// it writes archive rows only into slots absent from this set, so it fills
-// the empty part of a transition day (when live collection started mid-day)
-// without ever overwriting or interleaving with a slot that already has
-// live data. Returning the set (rather than a bool over the whole day) is
-// what lets a partially-live day still receive archive for its empty slots.
+// half-open window [from, to) that already hold *live* Modbus telemetry
+// (rows with no source label). Other archives are not treated as live, so
+// FusionSolar can still fill a day that only has ASKOE. `source` is the
+// caller's archive tag and is validated but not used in the predicate.
 func LiveSampleBucketsInRange(
 	ctx context.Context,
 	pool *pgxpool.Pool,
@@ -272,13 +265,13 @@ func LiveSampleBucketsInRange(
 		return nil, fmt.Errorf("storage: bucketSeconds must be positive")
 	}
 	rows, err := pool.Query(ctx, `
-		SELECT DISTINCT time_bucket(make_interval(secs => $5), time) AS slot
+		SELECT DISTINCT time_bucket(make_interval(secs => $4), time) AS slot
 		FROM telemetry_samples
 		WHERE organization_id = $1
-			AND labels->>'source' IS DISTINCT FROM $2
-			AND time >= $3
-			AND time < $4
-	`, organizationID, source, from.UTC(), to.UTC(), bucketSeconds)
+			AND labels->>'source' IS NULL
+			AND time >= $2
+			AND time < $3
+	`, organizationID, from.UTC(), to.UTC(), bucketSeconds)
 	if err != nil {
 		return nil, fmt.Errorf("storage: scan live buckets in range: %w", err)
 	}
