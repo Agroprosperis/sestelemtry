@@ -52,12 +52,24 @@ describe('capexResolver', () => {
     const at = capexResolver([{ effectiveFrom: '1970-01-01', capexUah: 0 }, ...STAGES], 0)
     expect(at('2025-11')).toBe(6 * M)
   })
+
+  it('ignores the epoch snapshot even when it carries a bigger CAPEX', () => {
+    // The catch-all version mirrors the tariff form, which may already
+    // hold the full project cost while the dated versions still carry the
+    // first stage. Treating it as a stage would step the target down.
+    const at = capexResolver([{ effectiveFrom: '1970-01-01', capexUah: 53 * M }, ...STAGES], 0)
+    expect(at('2025-11')).toBe(6 * M)
+    expect(at('2026-05')).toBe(6 * M)
+    expect(at('2026-06')).toBe(20 * M)
+  })
 })
 
 describe('buildPaybackModel with a staged CAPEX', () => {
   const staged = buildPaybackModel({
     capexUah: 0,
-    capexSteps: STAGES,
+    // The epoch snapshot rides along in the real payload and must not
+    // register as a third stage.
+    capexSteps: [{ effectiveFrom: '1970-01-01', capexUah: 53 * M }, ...STAGES],
     months: halfYear(2 * M),
     ebitda: 12 * M,
     priorEbitda: 0,

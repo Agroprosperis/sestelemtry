@@ -5,6 +5,7 @@
 
 import type { EconomicsAnnualMonthRollup } from '../api'
 import { formatMonthShort } from './monthly/format'
+import { EPOCH_EFFECTIVE_FROM } from './orgTariffsClient'
 
 // paybackLabel formats fractional years as "N р. M міс." (or just
 // months under a year). Non-positive / non-finite input reads "—".
@@ -107,6 +108,28 @@ function buildSeasonalFactors(monthsWithData: EconomicsAnnualMonthRollup[]): num
 // line, the same way capacity and power do in the schedule table.
 export type CapexStep = { effectiveFrom: string; capexUah: number }
 
+// fundedCapexSteps keeps the versions that describe an actual investment
+// stage, oldest first.
+//
+// The catch-all version at EPOCH_EFFECTIVE_FROM is skipped: the backend
+// seeds (and re-seeds) it by copying whatever the tariff form holds, so
+// it is a machine-made snapshot rather than a stage the operator dated.
+// Its CAPEX can even exceed the real stages — an operator who puts the
+// full project cost in the form while the dated versions still carry the
+// first stage — which would draw a step *down* in 1970 and count one
+// investment stage too many.
+export function fundedCapexSteps(steps: CapexStep[]): CapexStep[] {
+  return steps
+    .filter(
+      (s) =>
+        s.effectiveFrom !== EPOCH_EFFECTIVE_FROM &&
+        /^\d{4}-\d{2}-\d{2}$/.test(s.effectiveFrom) &&
+        Number.isFinite(s.capexUah) &&
+        s.capexUah > 0,
+    )
+    .sort((a, b) => a.effectiveFrom.localeCompare(b.effectiveFrom))
+}
+
 // capexResolver turns the dated schedule into a per-month lookup.
 //
 // Two rules make the numbers behave for real data: a version that takes
@@ -120,9 +143,7 @@ export function capexResolver(
   fallbackUah: number,
 ): (monthKey: string | null) => number {
   const flat = Number.isFinite(fallbackUah) ? fallbackUah : 0
-  const funded = steps
-    .filter((s) => /^\d{4}-\d{2}-\d{2}$/.test(s.effectiveFrom) && Number.isFinite(s.capexUah) && s.capexUah > 0)
-    .sort((a, b) => a.effectiveFrom.localeCompare(b.effectiveFrom))
+  const funded = fundedCapexSteps(steps)
   if (funded.length === 0) return () => flat
   return (monthKey) => {
     if (!monthKey) return funded[0].capexUah
@@ -255,9 +276,7 @@ export function buildPaybackModel({
   // known stage.
   const capexAt = capexResolver(capexSteps ?? [], capexUah)
   const capexNow = capexAt(lastFactMonthKey ?? '9999-12')
-  const capexStages = new Set(
-    (capexSteps ?? []).filter((s) => s.capexUah > 0).map((s) => s.capexUah),
-  ).size
+  const capexStages = new Set(fundedCapexSteps(capexSteps ?? []).map((s) => s.capexUah)).size
 
   const allTimeEbitda = prior + ebitda
   const totalMonthsWithData = monthsWithData.length + priorMonths

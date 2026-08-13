@@ -106,6 +106,14 @@ export type TariffScheduleVersion = {
   tariffs: Tariffs
 }
 
+// EPOCH_EFFECTIVE_FROM dates the catch-all version the backend seeds by
+// copying the tariff form, so days before the operator's first dated
+// version still resolve a tariff (see InitEconomicsSchema). It is a
+// machine-made snapshot rather than an authored version: the UI labels it
+// "Початкова версія" instead of showing 1970, and the payback timeline
+// does not read its CAPEX as an investment stage.
+export const EPOCH_EFFECTIVE_FROM = '1970-01-01'
+
 // fetchTariffSchedule lists the org's date-versioned tariffs (ascending
 // by effective_from). The server resolves the effective version per day
 // when it computes economics; this list lets the operator review/edit

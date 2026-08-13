@@ -1,18 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   deleteTariffScheduleVersion,
+  EPOCH_EFFECTIVE_FROM,
   fetchTariffSchedule,
   saveTariffScheduleVersion,
   type TariffScheduleVersion,
 } from '../orgTariffsClient'
 import type { Tariffs } from '../tariffs'
-
-// EPOCH_EFFECTIVE_FROM is the sentinel date the backend writes for
-// the initial / catch-all tariff version. The UNIX epoch shows up
-// raw and confuses operators ("did I really set tariffs in 1970?"),
-// so we surface it as a labelled badge in the table instead of the
-// literal "1970-01-01" string.
-const EPOCH_EFFECTIVE_FROM = '1970-01-01'
 
 function formatEffectiveFrom(iso: string): { primary: string; secondary?: string } {
   if (iso === EPOCH_EFFECTIVE_FROM) {
@@ -51,7 +45,8 @@ function formatCapex(uah: number): string {
 const CAPEX_TIP =
   'Повні капітальні інвестиції в проєкт, що діють з цієї дати, а не приріст. ' +
   'Для проєкту в кілька етапів піднімайте суму новою версією — сторінка «Окупність проєкту» ' +
-  'порівнює накопичений EBITDA з CAPEX, що діяв у кожному місяці.'
+  'порівнює накопичений EBITDA з CAPEX, що діяв у кожному місяці. ' +
+  'Початкова версія — технічний знімок форми, її сума етапом не вважається.'
 
 type Props = {
   organizationID: string
