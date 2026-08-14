@@ -534,9 +534,10 @@ const COLUMNS = [
   'Експорт (кВт·год)',
   'Самоспож. (%)',
   'УЗЕ цикли (екв.)',
-  'EBITDA (грн)',
+  // EBITDA closes the row the same way it closes the monthly waterfall:
+  // the project effect first, then the bottom line it rolls up into.
   'Ефект (грн)',
-  'УЗЕ ефект (грн)',
+  'EBITDA (грн)',
 ]
 
 function monthRowValues(m: EconomicsAnnualMonthRollup): string[] {
@@ -553,9 +554,8 @@ function monthRowValues(m: EconomicsAnnualMonthRollup): string[] {
     formatKwh(o.grid_export_kwh),
     formatPercent(selfShare),
     formatCycles(o.equivalent_cycles),
-    formatUah(o.ebitda_uah),
     formatUah(o.effect_uah),
-    formatUah(o.ess_net_uah),
+    formatUah(o.ebitda_uah),
   ]
 }
 
@@ -646,9 +646,8 @@ function AnnualMonthlyTable({
                   <td>{formatKwh(o.grid_export_kwh)}</td>
                   <td>{formatPercent(o.pv_kwh > 0 ? (o.pv_to_load_kwh + o.pv_to_ess_kwh) / o.pv_kwh : 0)}</td>
                   <td>{formatCycles(o.equivalent_cycles)}</td>
-                  <td className={signClass(o.ebitda_uah)}>{formatUah(o.ebitda_uah)}</td>
                   <td className={signClass(o.effect_uah)}>{formatUah(o.effect_uah)}</td>
-                  <td>{formatUah(o.ess_net_uah)}</td>
+                  <td className={signClass(o.ebitda_uah)}>{formatUah(o.ebitda_uah)}</td>
                 </tr>
               )
             })}
@@ -662,9 +661,8 @@ function AnnualMonthlyTable({
               <td>{formatKwh(totals.grid_export_kwh)}</td>
               <td>{formatPercent(selfShare)}</td>
               <td>{formatCycles(totals.equivalent_cycles)}</td>
-              <td className={signClass(totals.ebitda_uah)}>{formatUah(totals.ebitda_uah)}</td>
               <td className={signClass(totals.effect_uah)}>{formatUah(totals.effect_uah)}</td>
-              <td>{formatUah(totals.ess_net_uah)}</td>
+              <td className={signClass(totals.ebitda_uah)}>{formatUah(totals.ebitda_uah)}</td>
             </tr>
           </tbody>
         </table>
