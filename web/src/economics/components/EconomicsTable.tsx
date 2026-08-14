@@ -655,6 +655,52 @@ function hourEssNet(row: HourEconomicsRow | null): number | null {
   return row && row.rdnUahPerKwh !== null ? row.economics.essNet : null
 }
 
+// ESS_NET_TIP answers the question the bars provoke: why is a charging
+// hour deeply negative when the battery is doing exactly what it should?
+// Because this metric prices each hour on its own — the purchase lands in
+// the hour it happened, while the money it buys comes back later, in the
+// discharge hours.
+const ESS_NET_TIP =
+  'Кожна година оцінена окремо: витрати на заряд лишаються в годині заряду, а виручка з’являється в годині розряду. Тому години заряду мінусові, розряду — плюсові, а разом вони дають Σ за добу.'
+
+type EssNetTerm = { label: string; detail: string; uah: number }
+
+// essNetTerms rebuilds the legs behind one hour's figure: discharge into
+// consumption is worth the import price it avoided, discharge to the grid
+// the export price it earned, and both charge legs cost what they cost —
+// grid charge at the import price, PV charge at the export revenue given
+// up to store it instead.
+function essNetTerms(row: HourEconomicsRow): EssNetTerm[] {
+  const { flow, economics: e } = row
+  const terms: EssNetTerm[] = []
+  const add = (kwh: number, price: number, sign: 1 | -1, label: string) => {
+    if (!(kwh > 0)) return
+    terms.push({
+      label,
+      detail: `${formatNumber(kwh)} кВт·год × ${priceFmt.format(price)} грн`,
+      uah: sign * kwh * price,
+    })
+  }
+  add(flow.essToLoad, e.importPriceUahPerKwh, 1, 'Розряд у споживання (замість купівлі)')
+  add(flow.essToGrid, e.exportPriceUahPerKwh, 1, 'Розряд у мережу')
+  add(flow.gridToEss, e.importPriceUahPerKwh, -1, 'Заряд із мережі')
+  add(flow.pvToEss, e.exportPriceUahPerKwh, -1, 'Заряд від СЕС (недоотриманий експорт)')
+  // Wear closes the sum. Taking it as the residual — instead of
+  // multiplying by the tariff form's degradation rate — keeps the lines
+  // adding up to the figure the backend computed, which used the
+  // degradation in force on that day rather than whatever the form
+  // currently holds.
+  const wear = e.essNet - terms.reduce((acc, t) => acc + t.uah, 0)
+  if (Math.abs(wear) >= 0.5) {
+    terms.push({
+      label: 'Знос УЗЕ',
+      detail: `${formatNumber(flow.essDischarged)} кВт·год розряду`,
+      uah: wear,
+    })
+  }
+  return terms
+}
+
 // EssEffectStrip is a thin bar row of per-hour ESS net effect rendered
 // directly above the pivot, using the table's measured column widths
 // so each bar sits over its hour column. Bars grow up (positive
@@ -682,6 +728,8 @@ function EssEffectStrip({
   }
   const template = `${cols.metric}px ${cols.sigma}px ${cols.hours.map((w) => `${w}px`).join(' ')}`
   const hoverValue = hover ? values[hover.index] : null
+  const hoverRow = hover ? rows[hover.index] : null
+  const hoverTerms = hoverRow && hoverValue !== null ? essNetTerms(hoverRow) : []
   return (
     <div className="economics-ess-strip" style={{ gridTemplateColumns: template }}>
       <div className="economics-ess-strip-label">Чистий ефект УЗЕ, грн/год</div>
@@ -730,6 +778,24 @@ function EssEffectStrip({
                   {hoverValue === null ? 'немає даних' : formatStripUah(hoverValue)}
                 </b>
               </div>
+              {hoverTerms.length > 0 ? (
+                <>
+                  <div className="economics-ess-strip-tip-terms">
+                    {hoverTerms.map((t) => (
+                      <div className="economics-ess-strip-tip-row" key={t.label}>
+                        <span>
+                          {t.label}
+                          <small>{t.detail}</small>
+                        </span>
+                        <b className={t.uah >= 0 ? 'cell-positive' : 'cell-negative'}>
+                          {t.uah >= 0 ? `+${formatStripUah(t.uah)}` : formatStripUah(t.uah)}
+                        </b>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="economics-ess-strip-tip-note">{ESS_NET_TIP}</p>
+                </>
+              ) : null}
             </div>,
             document.body,
           )

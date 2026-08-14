@@ -901,6 +901,41 @@
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   color: #0f172a;
+  /* The label beside it wraps; the amount never should. */
+  white-space: nowrap;
+}
+
+/* Let the label column shrink so the amount keeps its own line. */
+.economics-ess-strip-tip-row > span {
+  min-width: 0;
+}
+
+/* Per-leg breakdown under the headline: what the hour earned or paid,
+   with the kWh × price behind each line. Capped in width so the
+   closing note wraps into a readable paragraph instead of one long
+   line running off the screen edge. */
+.economics-ess-strip-tip-terms {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid #eef2f7;
+  display: grid;
+  gap: 5px;
+  max-width: 320px;
+}
+
+.economics-ess-strip-tip-row small {
+  display: block;
+  color: #94a3b8;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.economics-ess-strip-tip-note {
+  margin: 7px 0 0;
+  max-width: 320px;
+  color: #64748b;
+  font-size: 11px;
+  line-height: 1.45;
 }
 
 .economics-table {
