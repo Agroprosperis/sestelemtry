@@ -9,6 +9,33 @@ import (
 
 func floatPtr(v float64) *float64 { return &v }
 
+// TestAggregateMonthCountsFlaggedDays pins which day-level quality flags
+// mark a day as approximate in the month rollup: counter-issue flags
+// (import_lag / load_mismatch / reconcile_rejected) count, routine
+// bookkeeping flags (no_scale, load_rebalanced) don't.
+func TestAggregateMonthCountsFlaggedDays(t *testing.T) {
+	loc := time.UTC
+	mk := func(day int, flags ...string) DailyRecord {
+		return DailyRecord{
+			Day:    time.Date(2026, 1, day, 0, 0, 0, 0, loc),
+			Totals: DailyTotals{HoursWithData: 24, QualityFlags: flags},
+		}
+	}
+	days := []DailyRecord{
+		mk(22, "no_scale:grid_export", "load_mismatch:0.5197", "load_rebalanced"),
+		mk(23, "import_lag:512"),
+		mk(24, "no_scale:grid_export", "load_rebalanced"),
+		mk(25),
+	}
+	got := AggregateMonth("2026-01", loc, days, nil, fixedRatings(100, 0.6, 0, 0))
+	if got.Totals.FlaggedDays != 2 {
+		t.Fatalf("FlaggedDays = %d, want 2", got.Totals.FlaggedDays)
+	}
+	if got.Totals.DaysWithData != 4 {
+		t.Fatalf("DaysWithData = %d, want 4", got.Totals.DaysWithData)
+	}
+}
+
 // TestAggregateMonthSumsAndWeightedPrices checks the additive rollup,
 // the kWh-weighted price reconstruction, the EOD-from-last-day snapshot,
 // the best/min-day extremes, and the equivalent-cycle metric.

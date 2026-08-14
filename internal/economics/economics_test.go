@@ -336,6 +336,22 @@ func TestEssFlowsFromCountersNightChargeIsGrid(t *testing.T) {
 	near(t, "gridToEss", flow.GridToEss, 220)
 }
 
+func TestImportLagKwh(t *testing.T) {
+	// A night hour whose whole charge ran on a frozen import counter,
+	// plus a healthy hour — only the uncovered part counts.
+	flows := []*HourFlows{
+		{EssCharged: 220, GridToEss: 220, GridImport: 0},
+		{EssCharged: 200, GridToEss: 120, GridImport: 300},
+		nil,
+	}
+	near(t, "lag", importLagKwh(flows), 220)
+
+	// Boundary skew of a few kWh on a healthy day stays below the
+	// threshold and must not flag the day.
+	healthy := []*HourFlows{{EssCharged: 200, GridToEss: 200, GridImport: 197}}
+	near(t, "healthy", importLagKwh(healthy), 0)
+}
+
 func TestRebalanceDailyLoadRemovesPhantomLoad(t *testing.T) {
 	rdn := 10.0
 	rows := []*HourRow{

@@ -80,7 +80,7 @@ export function EconomicsMonthlyView({ data, organizationID }: Props) {
 // market import price because СЕС and УЗЕ cover part of the load for
 // free. The battery-charging purchase stays in the numerator — that
 // energy reaches the object too, just later.
-function unitCostUahPerKwh(importCostUah: number, loadKwh: number): number {
+export function unitCostUahPerKwh(importCostUah: number, loadKwh: number): number {
   return loadKwh > 0 ? importCostUah / loadKwh : NaN
 }
 
@@ -1110,6 +1110,48 @@ function dayRowValues(d: EconomicsMonthlyDay): string[] {
   ]
 }
 
+// dayQualityTip turns a day's reconciliation flags into one operator
+// sentence: these days ran on frozen / lagging FusionSolar counters, so
+// the hourly flow split — and every price attached to it — is
+// approximate. Routine bookkeeping flags (no_scale, load_rebalanced)
+// don't warrant a mark on their own.
+export function dayQualityTip(flags?: string[]): string | null {
+  if (!flags || flags.length === 0) return null
+  const parts: string[] = []
+  for (const f of flags) {
+    if (f.startsWith('import_lag:')) {
+      const kwh = Number(f.slice('import_lag:'.length))
+      parts.push(
+        Number.isFinite(kwh)
+          ? `Лічильник імпорту відставав від заряду УЗЕ на ~${formatKwhNumber(kwh)} кВт·год.`
+          : 'Лічильник імпорту відставав від заряду УЗЕ.',
+      )
+    } else if (f.startsWith('load_mismatch:')) {
+      const rel = Number(f.slice('load_mismatch:'.length))
+      parts.push(
+        `Енергобаланс дня не зійшовся${Number.isFinite(rel) ? ` на ${Math.round(rel * 100)}%` : ''} — лічильники FusionSolar частину доби не оновлювались.`,
+      )
+    } else if (f.startsWith('reconcile_rejected:')) {
+      parts.push('Добовий еталон FusionSolar неправдоподібний і не застосований.')
+    }
+  }
+  if (parts.length === 0) return null
+  return `${parts.join(' ')} Потоки та ціни цього дня приблизні.`
+}
+
+// DayQualityMark is the small amber "!" beside a flagged day. Native
+// title (not the CSS data-tip bubble) because the daily table lives in
+// an overflow-x scroller that would clip an absolutely-positioned tip.
+function DayQualityMark({ flags }: { flags?: string[] }) {
+  const tip = dayQualityTip(flags)
+  if (!tip) return null
+  return (
+    <span className="economics-info economics-info-warn" title={tip} role="img" aria-label={tip}>
+      !
+    </span>
+  )
+}
+
 function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
@@ -1170,7 +1212,10 @@ function MonthlyDailyTable({
           <tbody>
             {days.map((d) => (
               <tr key={d.date}>
-                <td className="economics-month-table-left">{formatDayLabel(d.date)}</td>
+                <td className="economics-month-table-left">
+                  {formatDayLabel(d.date)}
+                  <DayQualityMark flags={d.quality_flags} />
+                </td>
                 <td>{formatKwhNumber(d.pv_kwh)}</td>
                 <td>{formatKwhNumber(d.load_kwh)}</td>
                 <td>{formatKwhNumber(d.grid_import_kwh)}</td>

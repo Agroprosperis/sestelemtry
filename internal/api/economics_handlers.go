@@ -383,6 +383,9 @@ type EconomicsMonthlyTotals struct {
 	DaysWithData      int     `json:"days_with_data"`
 	HoursWithData     int     `json:"hours_with_data"`
 	HoursMissingPrice int     `json:"hours_missing_price"`
+	// FlaggedDays counts days whose flows are approximate because the
+	// FusionSolar counters froze / lagged (see MonthlyTotals.FlaggedDays).
+	FlaggedDays int `json:"flagged_days"`
 
 	EssFactUah          float64 `json:"ess_fact_uah"`
 	EssOptimumUah       float64 `json:"ess_optimum_uah"`
@@ -498,6 +501,11 @@ type EconomicsMonthlyDay struct {
 
 	HoursWithData     int `json:"hours_with_data"`
 	HoursMissingPrice int `json:"hours_missing_price"`
+
+	// QualityFlags carries the day's reconciliation diagnostics (e.g.
+	// "import_lag:512", "load_mismatch:0.59") so the daily-detail table
+	// can mark days whose flow split is approximate.
+	QualityFlags []string `json:"quality_flags,omitempty"`
 }
 
 // EconomicsMonthlyMarginHour is one heatmap cell: the margin an hour of
@@ -723,6 +731,7 @@ func monthlyTotalsToJSON(t economics.MonthlyTotals) EconomicsMonthlyTotals {
 		DaysWithData:                t.DaysWithData,
 		HoursWithData:               t.HoursWithData,
 		HoursMissingPrice:           t.HoursMissingPrice,
+		FlaggedDays:                 t.FlaggedDays,
 		EssFactUah:                  t.EssFact,
 		EssOptimumUah:               t.EssOptimum,
 		EssReserveUah:               t.EssReserve,
@@ -772,6 +781,7 @@ func monthlyDayToJSON(d economics.MonthDay) EconomicsMonthlyDay {
 		EssToGridKwh:        t.EssToGrid,
 		HoursWithData:       t.HoursWithData,
 		HoursMissingPrice:   t.HoursMissingPrice,
+		QualityFlags:        t.QualityFlags,
 	}
 }
 

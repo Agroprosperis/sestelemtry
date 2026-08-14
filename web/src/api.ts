@@ -673,6 +673,9 @@ export type EconomicsMonthlyTotals = {
   days_with_data: number
   hours_with_data: number
   hours_missing_price: number
+  // Days whose flows are approximate because the FusionSolar counters
+  // froze / lagged (import_lag, load_mismatch, reconcile_rejected).
+  flagged_days: number
 
   ess_fact_uah: number
   ess_optimum_uah: number
@@ -727,6 +730,10 @@ export type EconomicsMonthlyDay = {
 
   hours_with_data: number
   hours_missing_price: number
+
+  // Reconciliation diagnostics for the day (e.g. "import_lag:512",
+  // "load_mismatch:0.59"); present only when the day has any.
+  quality_flags?: string[]
 }
 
 // EconomicsMonthlyMarginHour is one heatmap cell: what an hour of

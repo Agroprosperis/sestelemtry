@@ -2727,6 +2727,16 @@ button.economics-optimum-row.open {
   letter-spacing: normal;
 }
 
+/* Amber variant: marks days / months whose FusionSolar counters froze
+   or lagged, so the flow split behind the row is approximate. Uses the
+   native title tooltip (tables scroll horizontally and would clip the
+   CSS bubble), hence no data-tip. */
+.economics-info-warn {
+  background: #fde68a;
+  color: #92400e;
+  cursor: help;
+}
+
 .economics-info::after {
   content: attr(data-tip);
   position: absolute;

@@ -26,6 +26,7 @@ import {
   MonthlyKpis,
   MonthlyWaterfall,
   OptimumInfo,
+  unitCostUahPerKwh,
 } from '../monthly/EconomicsMonthlyView'
 import {
   buildAiPanel,
@@ -523,6 +524,9 @@ function AnnualAiAnalysis({
 
 const COLUMNS = [
   'Місяць',
+  // Same pair and order as the monthly daily table: the all-in cost of
+  // one consumed kWh first, the market component beside it for context.
+  'Факт. ціна (грн/кВт·год)',
   'РДН сер. (грн/кВт·год)',
   'СЕС (кВт·год)',
   'Споживання (кВт·год)',
@@ -541,6 +545,7 @@ function monthRowValues(m: EconomicsAnnualMonthRollup): string[] {
   const selfShare = o.pv_kwh > 0 ? pvSelf / o.pv_kwh : 0
   return [
     formatMonthName(m.month),
+    formatPrice(unitCostUahPerKwh(o.import_cost_uah, o.load_kwh)),
     formatPrice(o.rdn_avg_uah_per_kwh),
     formatKwh(o.pv_kwh),
     formatKwh(o.load_kwh),
@@ -620,7 +625,20 @@ function AnnualMonthlyTable({
                   onClick={() => onSelectMonth(m.month)}
                   title="Відкрити місяць"
                 >
-                  <td className="economics-month-table-left">{formatMonthName(m.month)}</td>
+                  <td className="economics-month-table-left">
+                    {formatMonthName(m.month)}
+                    {o.flagged_days > 0 && (
+                      <span
+                        className="economics-info economics-info-warn"
+                        title={`${o.flagged_days} дн. із замерзлим або відстаючим лічильником FusionSolar — потоки та ціни цих днів приблизні. Деталі — у денній таблиці місяця.`}
+                        role="img"
+                        aria-label="Місяць містить дні з приблизними даними"
+                      >
+                        !
+                      </span>
+                    )}
+                  </td>
+                  <td>{formatPrice(unitCostUahPerKwh(o.import_cost_uah, o.load_kwh))}</td>
                   <td>{formatPrice(o.rdn_avg_uah_per_kwh)}</td>
                   <td>{formatKwh(o.pv_kwh)}</td>
                   <td>{formatKwh(o.load_kwh)}</td>
@@ -636,6 +654,7 @@ function AnnualMonthlyTable({
             })}
             <tr className="economics-table-summary-row">
               <td className="economics-month-table-left">Разом</td>
+              <td>{formatPrice(unitCostUahPerKwh(totals.import_cost_uah, totals.load_kwh))}</td>
               <td>{formatPrice(totals.rdn_avg_uah_per_kwh)}</td>
               <td>{formatKwh(totals.pv_kwh)}</td>
               <td>{formatKwh(totals.load_kwh)}</td>

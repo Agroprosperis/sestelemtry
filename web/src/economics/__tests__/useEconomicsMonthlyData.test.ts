@@ -60,6 +60,7 @@ function emptyTotals(): EconomicsMonthlyResponse['totals'] {
     days_with_data: 0,
     hours_with_data: 0,
     hours_missing_price: 0,
+    flagged_days: 0,
     ess_fact_uah: 0,
     ess_optimum_uah: 0,
     ess_reserve_uah: 0,

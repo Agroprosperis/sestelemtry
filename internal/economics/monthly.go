@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -115,6 +116,23 @@ type MonthExtreme struct {
 	EffectUah float64
 }
 
+// dayHasCounterIssue reports whether a day's stored quality flags mark
+// its hourly flow split as approximate: the import counter froze or
+// lagged behind the ESS charge (import_lag), the day's energy balance
+// did not close (load_mismatch), or a canonical FusionSolar KPI was
+// rejected as implausible (reconcile_rejected). no_scale and
+// load_rebalanced are routine bookkeeping notes and do not count.
+func dayHasCounterIssue(flags []string) bool {
+	for _, f := range flags {
+		if strings.HasPrefix(f, "import_lag") ||
+			strings.HasPrefix(f, "load_mismatch") ||
+			strings.HasPrefix(f, "reconcile_rejected") {
+			return true
+		}
+	}
+	return false
+}
+
 // MonthlyTotals is the month rollup. Additive fields are plain sums of
 // the daily totals; AvgImport/ExportPrice and RdnAvg are kWh-weighted;
 // the ESS EOD snapshot fields are taken from the last day with data (a
@@ -164,6 +182,12 @@ type MonthlyTotals struct {
 	DaysWithData      int
 	HoursWithData     int
 	HoursMissingPrice int
+
+	// FlaggedDays counts days whose quality flags mark the hourly flow
+	// split as approximate — frozen / lagging FusionSolar counters
+	// (import_lag, load_mismatch) or a rejected canonical KPI. Routine
+	// bookkeeping flags (no_scale, load_rebalanced) do not count.
+	FlaggedDays int
 
 	// ESS fact-vs-optimum rollup (project_net basis: charging from PV
 	// costs the forgone export). EssFact is the realised EssNet; EssOptimum
@@ -662,6 +686,9 @@ func AggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly
 		hasData := t.HoursWithData > 0
 		if hasData {
 			totals.DaysWithData++
+			if dayHasCounterIssue(t.QualityFlags) {
+				totals.FlaggedDays++
+			}
 			if !bestSet || t.Effect > totals.BestDay.EffectUah {
 				totals.BestDay = MonthExtreme{Date: key, EffectUah: t.Effect}
 				bestSet = true

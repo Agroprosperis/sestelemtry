@@ -1,6 +1,7 @@
 package economics
 
 import (
+	"fmt"
 	"math"
 	"time"
 )
@@ -258,7 +259,39 @@ func AssembleDay(in DayInput) ([]*HourRow, ReconcileResult) {
 	if rebalanceDailyLoad(out) {
 		recon.Flags = append(recon.Flags, "load_rebalanced")
 	}
+	if lag := importLagKwh(flows); lag > 0 {
+		recon.Flags = append(recon.Flags, fmt.Sprintf("import_lag:%.0f", lag))
+	}
 	return out, recon
+}
+
+// importLagKwh sums the hourly grid-attributed ESS charge the hour's own
+// import counter did not cover. The FusionSolar purchased-energy counter
+// freezes or lags for hours at a time (archive data especially) while the
+// BMS charge counter keeps ticking; the allocator books the uncovered
+// charge to the grid (see energyflow.Allocate), which is the right money
+// but means the hourly flow split — and every price attached to it — is
+// approximate. A material day total is surfaced as an import_lag quality
+// flag so the dashboards can mark the day instead of leaving operators
+// to spot impossible-looking shares.
+func importLagKwh(flows []*HourFlows) float64 {
+	var lag, charged float64
+	for _, f := range flows {
+		if f == nil {
+			continue
+		}
+		charged += f.EssCharged
+		if over := f.GridToEss - f.GridImport; over > 0 {
+			lag += over
+		}
+	}
+	// Boundary skew between 5-min samples produces a few kWh of apparent
+	// lag on perfectly healthy days; only a material share of the day's
+	// charge is worth an operator's attention.
+	if lag < 5 || lag < 0.02*charged {
+		return 0
+	}
+	return lag
 }
 
 // hourHistoryRecord is one hour of pre-today data: flow envelope, RDN
