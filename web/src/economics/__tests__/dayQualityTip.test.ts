@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { dayQualityTip } from '../monthly/EconomicsMonthlyView'
+import { dayQualityTip } from '../monthly/rollup'
 
 // dayQualityTip renders the operator sentence behind the amber "!" mark
 // in the daily / monthly detail tables. The flag strings come verbatim

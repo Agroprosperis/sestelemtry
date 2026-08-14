@@ -3,7 +3,7 @@
 // Refresh keeps working (a component module must export only
 // components) and so both views share one source of truth.
 import type { EconomicsMonthlyMarginHour, EconomicsMonthlyTotals } from '../../api'
-import { formatKwh, formatMwh, formatPercent, formatPrice, formatUah } from './format'
+import { formatKwh, formatKwhNumber, formatMwh, formatPercent, formatPrice, formatUah } from './format'
 
 // signedUah prints an explicit +/− prefix based on the value's sign,
 // using the absolute amount so the sign is never doubled (e.g. a
@@ -340,6 +340,54 @@ export const HEATMAP_METRIC_TIP =
   'імпорту) мінус собівартість саме тієї енергії, що була в батареї (заряд із мережі — за ціною ' +
   'тієї години, від СЕС — нуль), мінус знос; поділено на розряд. Витрати на заряд лишаються в ' +
   'годині заряду, тому маржу розряду вони не спотворюють.'
+
+// unitCostUahPerKwh is what one consumed kWh actually cost: everything
+// bought from the grid spread over the whole load. It lands below the
+// market import price because СЕС and УЗЕ cover part of the load for
+// free. The battery-charging purchase stays in the numerator — that
+// energy reaches the object too, just later.
+export function unitCostUahPerKwh(importCostUah: number, loadKwh: number): number {
+  return loadKwh > 0 ? importCostUah / loadKwh : NaN
+}
+
+// importPriceUahPerKwh is the all-in delivered price of one imported kWh:
+// the РДН column plus distribution, transmission, supplier margin, other
+// fees and VAT when enabled. The backend builds import_cost_uah as that
+// kWh-weighted price times the imported volume, so dividing it back
+// recovers the price exactly — which is why the cost column never equals
+// РДН × kWh.
+export function importPriceUahPerKwh(importCostUah: number, gridImportKwh: number): number {
+  return gridImportKwh > 0 ? importCostUah / gridImportKwh : NaN
+}
+
+// dayQualityTip turns a day's reconciliation flags into one operator
+// sentence: these days ran on frozen / lagging FusionSolar counters, so
+// the hourly flow split — and every price attached to it — is
+// approximate. Routine bookkeeping flags (no_scale, load_rebalanced)
+// don't warrant a mark on their own.
+export function dayQualityTip(flags?: string[]): string | null {
+  if (!flags || flags.length === 0) return null
+  const parts: string[] = []
+  for (const f of flags) {
+    if (f.startsWith('import_lag:')) {
+      const kwh = Number(f.slice('import_lag:'.length))
+      parts.push(
+        Number.isFinite(kwh)
+          ? `Лічильник імпорту відставав від заряду УЗЕ на ~${formatKwhNumber(kwh)} кВт·год.`
+          : 'Лічильник імпорту відставав від заряду УЗЕ.',
+      )
+    } else if (f.startsWith('load_mismatch:')) {
+      const rel = Number(f.slice('load_mismatch:'.length))
+      parts.push(
+        `Енергобаланс дня не зійшовся${Number.isFinite(rel) ? ` на ${Math.round(rel * 100)}%` : ''} — лічильники FusionSolar частину доби не оновлювались.`,
+      )
+    } else if (f.startsWith('reconcile_rejected:')) {
+      parts.push('Добовий еталон FusionSolar неправдоподібний і не застосований.')
+    }
+  }
+  if (parts.length === 0) return null
+  return `${parts.join(' ')} Потоки та ціни цього дня приблизні.`
+}
 
 // heatCellTip spells out a cell's arithmetic under `title` (a day+hour
 // for the monthly grid, a month+hour for the annual one), so a number

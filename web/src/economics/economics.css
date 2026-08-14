@@ -1674,12 +1674,12 @@
 
 /* Both classes sit on the same <table>, so chaining them outranks the
    generic `.economics-table thead th` padding — the rule above, matching
-   only `.economics-month-table th`, loses to it. Fourteen columns of
-   numbers clear a 1180px window only if each gives back a couple of
-   pixels of gutter; the vertical rhythm stays as the shared rule set it. */
+   only `.economics-month-table th`, loses to it. Thirteen columns of
+   numbers clear a 1024px window only if each gives back a few pixels of
+   gutter; the vertical rhythm stays as the shared rule set it. */
 .economics-table.economics-month-table thead th,
 .economics-table.economics-month-table tbody td {
-  padding: 6px;
+  padding: 6px 5px;
 }
 
 .cell-neutral {

@@ -551,23 +551,14 @@ const METRIC_GROUPS: Array<{ id: string; label: string; rows: MetricRow[] }> = [
     ],
   },
   {
-    // Економіка carries the two project-level deltas (Ефект,
-    // УЗЕ нетто) — Базова / Фактична були прибрані, бо їх повна
-    // розкладка вже видима у групі "Дохід та витрати" вище. Перший
-    // рядок цього блоку позначений як summary щоб у місці переходу
-    // від EBITDA до економіки виник чіткий візуальний роздільник.
+    // Економіка carries the УЗЕ cash view. Базова / Фактична / Ефект
+    // були прибрані, бо їх повна розкладка вже видима у групі "Дохід
+    // та витрати" вище. Перший рядок цього блоку позначений як summary
+    // щоб у місці переходу від EBITDA до економіки виник чіткий
+    // візуальний роздільник.
     id: 'economics',
     label: 'Економіка',
     rows: [
-      {
-        id: 'effect',
-        label: 'Ефект',
-        unit: 'грн',
-        kind: 'uah_signed',
-        summary: true,
-        pickHourValue: pickWhenPriced((r) => r.economics.effect),
-        total: (rows) => sumOver(rows, pickWhenPriced((r) => r.economics.effect)),
-      },
       {
         // Реалізований ефект УЗЕ — cash, який батарея заробила
         // саме цієї години після зведення з її ж собівартістю.
@@ -580,6 +571,7 @@ const METRIC_GROUPS: Array<{ id: string; label: string; rows: MetricRow[] }> = [
         label: 'Реалізований ефект УЗЕ',
         unit: 'грн',
         kind: 'uah_signed',
+        summary: true,
         pickHourValue: (row) => row?.essRealizedProfitUah ?? null,
         total: (rows) => sumOver(rows, (r) => r?.essRealizedProfitUah ?? null),
       },

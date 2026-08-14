@@ -26,7 +26,6 @@ import {
   MonthlyKpis,
   MonthlyWaterfall,
   OptimumInfo,
-  unitCostUahPerKwh,
 } from '../monthly/EconomicsMonthlyView'
 import {
   buildAiPanel,
@@ -38,19 +37,22 @@ import {
   reserveSplit,
   signClass,
   uahShort,
+  unitCostUahPerKwh,
 } from '../monthly/rollup'
 import {
   formatCycles,
-  formatKwh,
+  formatKwhNumber,
   formatMonthName,
   formatMonthShort,
   formatMonthTitle,
   formatMwh,
   formatMwhNumber,
   formatPercent,
+  formatPercentNumber,
   formatPeriodTitle,
   formatPrice,
   formatUah,
+  formatUahNumber,
   formatYearTitle,
 } from '../monthly/format'
 
@@ -522,22 +524,25 @@ function AnnualAiAnalysis({
 
 // --- Per-month detail table + Excel export (SPEC §3.8) ---
 
-const COLUMNS = [
-  'Місяць',
+// As in the monthly daily table, the unit lives on a second header line
+// rather than in every cell — spelling out "кВт·год"/"грн" per row costs
+// more width than the numbers and pushed the last column off screen.
+const COLUMNS: { label: string; unit?: string }[] = [
+  { label: 'Місяць' },
   // Same pair and order as the monthly daily table: the all-in cost of
   // one consumed kWh first, the market component beside it for context.
-  'Факт. ціна (грн/кВт·год)',
-  'РДН сер. (грн/кВт·год)',
-  'СЕС (кВт·год)',
-  'Споживання (кВт·год)',
-  'Імпорт (кВт·год)',
-  'Експорт (кВт·год)',
-  'Самоспож. (%)',
-  'УЗЕ цикли (екв.)',
-  // EBITDA closes the row the same way it closes the monthly waterfall:
-  // the project effect first, then the bottom line it rolls up into.
-  'Ефект (грн)',
-  'EBITDA (грн)',
+  { label: 'Факт. ціна', unit: 'грн/кВт·год' },
+  { label: 'РДН сер.', unit: 'грн/кВт·год' },
+  { label: 'СЕС', unit: 'кВт·год' },
+  { label: 'Споживання', unit: 'кВт·год' },
+  { label: 'Імпорт', unit: 'кВт·год' },
+  { label: 'Експорт', unit: 'кВт·год' },
+  { label: 'Самоспож.', unit: '%' },
+  { label: 'УЗЕ цикли', unit: 'екв.' },
+  // EBITDA closes the row the way it closes the monthly waterfall. The
+  // project effect it used to sit beside stays in the quarter cards and
+  // the finance breakdown above.
+  { label: 'EBITDA', unit: 'грн' },
 ]
 
 function monthRowValues(m: EconomicsAnnualMonthRollup): string[] {
@@ -548,14 +553,13 @@ function monthRowValues(m: EconomicsAnnualMonthRollup): string[] {
     formatMonthName(m.month),
     formatPrice(unitCostUahPerKwh(o.import_cost_uah, o.load_kwh)),
     formatPrice(o.rdn_avg_uah_per_kwh),
-    formatKwh(o.pv_kwh),
-    formatKwh(o.load_kwh),
-    formatKwh(o.grid_import_kwh),
-    formatKwh(o.grid_export_kwh),
-    formatPercent(selfShare),
+    formatKwhNumber(o.pv_kwh),
+    formatKwhNumber(o.load_kwh),
+    formatKwhNumber(o.grid_import_kwh),
+    formatKwhNumber(o.grid_export_kwh),
+    formatPercentNumber(selfShare),
     formatCycles(o.equivalent_cycles),
-    formatUah(o.effect_uah),
-    formatUah(o.ebitda_uah),
+    formatUahNumber(o.ebitda_uah),
   ]
 }
 
@@ -564,7 +568,7 @@ function escapeHtml(s: string): string {
 }
 
 function exportToExcel(months: EconomicsAnnualMonthRollup[], slug: string) {
-  const head = `<tr>${COLUMNS.map((c) => `<th>${escapeHtml(c)}</th>`).join('')}</tr>`
+  const head = `<tr>${COLUMNS.map((c) => `<th>${escapeHtml(c.unit ? `${c.label}, ${c.unit}` : c.label)}</th>`).join('')}</tr>`
   const body = months
     .map((m) => `<tr>${monthRowValues(m).map((v) => `<td>${escapeHtml(v)}</td>`).join('')}</tr>`)
     .join('')
@@ -611,7 +615,10 @@ function AnnualMonthlyTable({
           <thead>
             <tr>
               {COLUMNS.map((c) => (
-                <th key={c}>{c}</th>
+                <th key={c.label}>
+                  {c.label}
+                  {c.unit ? <small>{c.unit}</small> : null}
+                </th>
               ))}
             </tr>
           </thead>
@@ -640,14 +647,13 @@ function AnnualMonthlyTable({
                   </td>
                   <td>{formatPrice(unitCostUahPerKwh(o.import_cost_uah, o.load_kwh))}</td>
                   <td>{formatPrice(o.rdn_avg_uah_per_kwh)}</td>
-                  <td>{formatKwh(o.pv_kwh)}</td>
-                  <td>{formatKwh(o.load_kwh)}</td>
-                  <td>{formatKwh(o.grid_import_kwh)}</td>
-                  <td>{formatKwh(o.grid_export_kwh)}</td>
-                  <td>{formatPercent(o.pv_kwh > 0 ? (o.pv_to_load_kwh + o.pv_to_ess_kwh) / o.pv_kwh : 0)}</td>
+                  <td>{formatKwhNumber(o.pv_kwh)}</td>
+                  <td>{formatKwhNumber(o.load_kwh)}</td>
+                  <td>{formatKwhNumber(o.grid_import_kwh)}</td>
+                  <td>{formatKwhNumber(o.grid_export_kwh)}</td>
+                  <td>{formatPercentNumber(o.pv_kwh > 0 ? (o.pv_to_load_kwh + o.pv_to_ess_kwh) / o.pv_kwh : 0)}</td>
                   <td>{formatCycles(o.equivalent_cycles)}</td>
-                  <td className={signClass(o.effect_uah)}>{formatUah(o.effect_uah)}</td>
-                  <td className={signClass(o.ebitda_uah)}>{formatUah(o.ebitda_uah)}</td>
+                  <td className={signClass(o.ebitda_uah)}>{formatUahNumber(o.ebitda_uah)}</td>
                 </tr>
               )
             })}
@@ -655,14 +661,13 @@ function AnnualMonthlyTable({
               <td className="economics-month-table-left">Разом</td>
               <td>{formatPrice(unitCostUahPerKwh(totals.import_cost_uah, totals.load_kwh))}</td>
               <td>{formatPrice(totals.rdn_avg_uah_per_kwh)}</td>
-              <td>{formatKwh(totals.pv_kwh)}</td>
-              <td>{formatKwh(totals.load_kwh)}</td>
-              <td>{formatKwh(totals.grid_import_kwh)}</td>
-              <td>{formatKwh(totals.grid_export_kwh)}</td>
-              <td>{formatPercent(selfShare)}</td>
+              <td>{formatKwhNumber(totals.pv_kwh)}</td>
+              <td>{formatKwhNumber(totals.load_kwh)}</td>
+              <td>{formatKwhNumber(totals.grid_import_kwh)}</td>
+              <td>{formatKwhNumber(totals.grid_export_kwh)}</td>
+              <td>{formatPercentNumber(selfShare)}</td>
               <td>{formatCycles(totals.equivalent_cycles)}</td>
-              <td className={signClass(totals.effect_uah)}>{formatUah(totals.effect_uah)}</td>
-              <td className={signClass(totals.ebitda_uah)}>{formatUah(totals.ebitda_uah)}</td>
+              <td className={signClass(totals.ebitda_uah)}>{formatUahNumber(totals.ebitda_uah)}</td>
             </tr>
           </tbody>
         </table>
