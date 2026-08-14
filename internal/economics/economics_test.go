@@ -298,12 +298,42 @@ func TestEssFlowsFromCountersUsesMeteredMagnitudes(t *testing.T) {
 		FlowRow{EssCharged: 200, EssDischarged: 100, PVToEss: 50, GridToEss: 150, EssToLoad: 80, EssToGrid: 20},
 		true, 148,
 		true, 95,
-		10, 5, 0,
+		40, 5, 0,
 	)
 	near(t, "essCharged", flow.EssCharged, 148)
 	near(t, "essDischarged", flow.EssDischarged, 95)
 	near(t, "pvToEss", flow.PVToEss, 50*(148.0/200.0))
 	near(t, "gridToEss", flow.GridToEss, 150*(148.0/200.0))
+}
+
+// The metered-counter rescale can inflate the allocator's PV share past
+// the hour's actual generation; the excess must land on the grid side so
+// PVToEss ≤ PV always holds and the charge gets priced as import.
+func TestEssFlowsFromCountersCapsPvShareByHourPv(t *testing.T) {
+	flow := essFlowsFromCounters(
+		FlowRow{EssCharged: 100, PVToEss: 100},
+		true, 200,
+		false, 0,
+		30, 0, 0,
+	)
+	near(t, "essCharged", flow.EssCharged, 200)
+	near(t, "pvToEss", flow.PVToEss, 30)
+	near(t, "gridToEss", flow.GridToEss, 170)
+}
+
+// Night charge through the counter-only fallback (no allocator split,
+// lagging import counter): with zero PV nothing may be booked as solar —
+// the whole charge is grid even though the hour's import delta is zero.
+func TestEssFlowsFromCountersNightChargeIsGrid(t *testing.T) {
+	flow := essFlowsFromCounters(
+		FlowRow{},
+		true, 220,
+		false, 0,
+		0, 0, 0,
+	)
+	near(t, "essCharged", flow.EssCharged, 220)
+	near(t, "pvToEss", flow.PVToEss, 0)
+	near(t, "gridToEss", flow.GridToEss, 220)
 }
 
 func TestRebalanceDailyLoadRemovesPhantomLoad(t *testing.T) {

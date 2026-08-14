@@ -115,9 +115,18 @@ func Allocate(prev, curr Sample, opts Options) Result {
 	//   pv_surplus     = max(delta_pv - delta_appliances, 0)
 	//   pv_to_ess      = min(delta_ess_charged, pv_surplus)
 	//   grid_to_ess    = delta_ess_charged - pv_to_ess
-	//   if grid_to_ess > delta_grid_import:
-	//     grid_to_ess  = delta_grid_import
-	//     pv_to_ess    = max(delta_ess_charged - grid_to_ess, 0)
+	//
+	// pv_to_ess is capped by the PV the interval actually produced;
+	// everything else stays on the grid even when it exceeds
+	// delta_grid_import. The purchased-energy accumulator routinely lags
+	// the ESS charge counter by minutes to hours (FusionSolar refreshes
+	// it sporadically), so an earlier version of this rule — which
+	// reassigned the uncovered remainder to PV — booked whole nights of
+	// grid charging as solar. The charge physically came through the
+	// grid connection (PV cannot exceed its own yield and export is
+	// metered separately); the late import deltas land in later
+	// intervals and the daily reconciliation against the canonical
+	// import KPI absorbs the residual skew.
 	pvSurplus := deltaPVYield - deltaAppliances
 	if pvSurplus < 0 {
 		pvSurplus = 0
@@ -125,8 +134,7 @@ func Allocate(prev, curr Sample, opts Options) Result {
 	pvToEss := math.Min(deltaEssCharged, pvSurplus)
 	gridToEss := deltaEssCharged - pvToEss
 	if gridToEss > deltaGridImport {
-		gridToEss = deltaGridImport
-		pvToEss = math.Max(deltaEssCharged-gridToEss, 0)
+		res.Warnings = append(res.Warnings, fmt.Sprintf("grid_to_ess=%.3f kWh exceeds delta_grid_import=%.3f kWh (lagging import counter)", gridToEss, deltaGridImport))
 	}
 
 	// §Розряд УЗЕ

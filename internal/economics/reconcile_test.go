@@ -75,6 +75,27 @@ func TestReconcileScalesToCanonical(t *testing.T) {
 	}
 }
 
+// Independent charge/PV factors must not manufacture solar charge: when
+// fChg outruns fPV, the scaled PVToEss is clamped to the hour's scaled
+// PV and the excess moves to GridToEss, keeping pvToEss+gridToEss equal
+// to the scaled charge.
+func TestReconcileKeepsPvToEssWithinPv(t *testing.T) {
+	flows := hourFlowPtrs(1, HourFlows{
+		PV: 10, GridImport: 4,
+		EssCharged: 12, PVToEss: 8, GridToEss: 4,
+	})
+	canonical := &CanonicalDaily{PV: 10, GridImport: 4, EssCharged: 24}
+	res := reconcileFlows(flows, canonical)
+	if !res.Applied {
+		t.Fatal("Applied should be true")
+	}
+	f := flows[0]
+	near(t, "essCharged", f.EssCharged, 24)
+	near(t, "pvToEss", f.PVToEss, 10)
+	near(t, "gridToEss", f.GridToEss, 14)
+	near(t, "pvToEss+gridToEss", f.PVToEss+f.GridToEss, f.EssCharged)
+}
+
 func TestReconcileZeroSumFlags(t *testing.T) {
 	// Computed PV sum is zero -> cannot scale, must flag and not divide.
 	flows := hourFlowPtrs(2, HourFlows{PV: 0, GridImport: 5, EssCharged: 0})

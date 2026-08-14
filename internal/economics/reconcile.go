@@ -117,6 +117,15 @@ func reconcileFlows(flows []*HourFlows, canonical *CanonicalDaily) ReconcileResu
 		f.GridToEss *= fChg
 		f.EssToLoad *= fDis
 		f.EssToGrid *= fDis
+		// fChg and fPV are independent, so scaling alone can leave the
+		// hour with more "solar" charge than its scaled PV. Shift the
+		// excess to the grid side: pvToEss+gridToEss = essCharged stays
+		// intact and the PVToEss ≤ PV invariant the allocator guarantees
+		// pre-scale survives reconciliation.
+		if f.PVToEss > f.PV {
+			f.GridToEss += f.PVToEss - f.PV
+			f.PVToEss = f.PV
+		}
 	}
 
 	// Derived load (energy balance of the scaled counters) vs use_power.

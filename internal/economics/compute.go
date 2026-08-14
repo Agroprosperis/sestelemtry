@@ -84,6 +84,17 @@ func essFlowsFromCounters(
 		f.GridToEss = g
 		f.PVToEss = charged - g
 	}
+	// PV cannot charge the battery with more than the hour generated.
+	// Both branches can overshoot: the ratio k inflates the allocator's
+	// PVToEss when the metered charge counter reads higher than the
+	// allocator's sum, and the counter-only fallback dumps everything the
+	// hour's import delta did not cover on PV — at night that booked whole
+	// grid charges as solar. The excess came through the (lagging) grid
+	// meter, so it belongs to GridToEss and gets priced as import.
+	if maxPv := math.Max(pv, 0); f.PVToEss > maxPv {
+		f.GridToEss += f.PVToEss - maxPv
+		f.PVToEss = maxPv
+	}
 
 	switch {
 	case a.EssDischarged > eps:

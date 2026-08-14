@@ -339,19 +339,55 @@ func TestAllocate_DischargeClampToGridExport(t *testing.T) {
 	})
 }
 
-// Charge clamp: when the algorithm would otherwise pull more ESS
-// charge from grid than the measured grid import, the excess is
-// reattributed to PV.
-func TestAllocate_ChargeClampToGridImport(t *testing.T) {
-	// PV=0, purchased=0.5, ess_charged=2 ⇒ initial pv_to_ess=0,
-	// grid_to_ess=2 → clamp to 0.5; pv_to_ess becomes max(2-0.5,0)=1.5.
+// Lagging import counter: the charge exceeding the interval's import
+// delta stays on the grid instead of being reattributed to PV — with
+// zero PV yield there is physically nothing solar to book. A warning
+// records the local imbalance.
+func TestAllocate_ChargeBeyondGridImportStaysOnGrid(t *testing.T) {
+	// PV=0, purchased=0.5, ess_charged=2 ⇒ pv_surplus=0, pv_to_ess=0,
+	// grid_to_ess=2 even though the import delta only covered 0.5.
 	prev := mkSample(t0, 0, 0, 0, 0, 0)
 	curr := mkSample(t1, 0, 0.5, 0, 2, 0)
 	got := Allocate(prev, curr, Options{})
 	assertResult(t, got, Result{
-		PVToESSKwh:    1.5,
-		GridToESSKwh:  0.5,
+		GridToESSKwh:  2,
 		EssChargedKwh: 2,
+	})
+	if !containsAny(got.Warnings, "lagging import counter") {
+		t.Errorf("expected lagging-import warning, got %v", got.Warnings)
+	}
+}
+
+// Night charge with a fully lagging import counter (the FusionSolar
+// purchased accumulator often lands its deltas hours late): all of the
+// charge is grid, none of it PV. The old rule booked all 2.2 kWh as
+// solar here.
+func TestAllocate_NightChargeZeroImportDeltaIsGrid(t *testing.T) {
+	prev := mkSample(t0, 0, 0, 0, 0, 0)
+	curr := mkSample(t1, 0, 0, 0, 2.2, 0)
+	got := Allocate(prev, curr, Options{})
+	assertResult(t, got, Result{
+		GridToESSKwh:  2.2,
+		EssChargedKwh: 2.2,
+	})
+	if !containsAny(got.Warnings, "lagging import counter") {
+		t.Errorf("expected lagging-import warning, got %v", got.Warnings)
+	}
+}
+
+// Daylight charge with a lagging import counter: PV keeps only what it
+// actually generated beyond the appliances; the uncovered remainder is
+// grid, not solar.
+func TestAllocate_ChargeBeyondImportCappedByPvYield(t *testing.T) {
+	// PV=1, purchased=0, ess_charged=3 ⇒ appliances=max(1+0+0-0-3,0)=0,
+	// pv_surplus=1, pv_to_ess=1, grid_to_ess=2 despite zero import delta.
+	prev := mkSample(t0, 0, 0, 0, 0, 0)
+	curr := mkSample(t1, 1, 0, 0, 3, 0)
+	got := Allocate(prev, curr, Options{})
+	assertResult(t, got, Result{
+		PVToESSKwh:    1,
+		GridToESSKwh:  2,
+		EssChargedKwh: 3,
 	})
 }
 
