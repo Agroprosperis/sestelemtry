@@ -129,7 +129,12 @@ const ANNUAL_COLUMNS: XlsxColumn[] = [
   col('Дні з приблизними даними', undefined, 'int'),
 ]
 
-function annualMonthValues(o: EconomicsMonthlyTotals, label: string) {
+// cycles is passed in rather than read off the totals because the Разом
+// row leaves it empty: a month's cycles are normalised by the pack
+// installed that month, so summing them across a capacity change
+// describes neither pack. The screen shows a dash there for the same
+// reason.
+function annualMonthValues(o: EconomicsMonthlyTotals, label: string, cycles: number | null) {
   const pvSelf = o.pv_to_load_kwh + o.pv_to_ess_kwh
   return [
     label,
@@ -140,7 +145,7 @@ function annualMonthValues(o: EconomicsMonthlyTotals, label: string) {
     o.grid_import_kwh,
     o.grid_export_kwh,
     o.pv_kwh > 0 ? pvSelf / o.pv_kwh : null,
-    o.equivalent_cycles,
+    cycles,
     o.ebitda_uah,
     o.flagged_days > 0 ? o.flagged_days : null,
   ]
@@ -160,8 +165,10 @@ export function annualDetailSheet(
     freeze: { columns: 1, rows: 1 },
     autoFilter: true,
     rows: [
-      ...months.map((m) => ({ values: annualMonthValues(m.totals, formatMonthName(m.month)) })),
-      { bold: true, values: annualMonthValues(totals, 'Разом') },
+      ...months.map((m) => ({
+        values: annualMonthValues(m.totals, formatMonthName(m.month), m.totals.equivalent_cycles),
+      })),
+      { bold: true, values: annualMonthValues(totals, 'Разом', null) },
     ],
   }
 }

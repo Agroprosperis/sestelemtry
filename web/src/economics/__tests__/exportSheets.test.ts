@@ -110,6 +110,10 @@ describe('annualDetailSheet', () => {
     const last = sheet.rows[sheet.rows.length - 1]
     expect(last.bold).toBe(true)
     expect(last.values[0]).toBe('Разом')
+    // Cycles are per-pack, so the period total stays empty while the
+    // months keep theirs.
+    expect(sheet.rows[0].values[8]).toBe(1.6)
+    expect(last.values[8]).toBeNull()
   })
 })
 

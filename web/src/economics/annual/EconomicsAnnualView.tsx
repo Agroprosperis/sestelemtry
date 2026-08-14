@@ -548,6 +548,13 @@ const COLUMNS: { label: string; unit?: string }[] = [
   { label: 'EBITDA', unit: 'грн' },
 ]
 
+// A month's equivalent cycles are its discharge divided by the pack that
+// was installed that month. Adding them up spans packs of different size
+// — this plant's battery more than doubled mid-year — so the sum is not
+// a wear figure for any one pack and not an intensity figure either.
+const CYCLES_TOTAL_TIP =
+  'Цикли за період не підсумовуються: кожен місяць нормований на ємність УЗЕ, що діяла тоді, а вона змінювалась. Дивіться цикли по окремих місяцях.'
+
 function AnnualMonthlyTable({
   months,
   totals,
@@ -641,7 +648,9 @@ function AnnualMonthlyTable({
               <td>{formatKwhNumber(totals.grid_import_kwh)}</td>
               <td>{formatKwhNumber(totals.grid_export_kwh)}</td>
               <td>{formatPercentNumber(selfShare)}</td>
-              <td>{formatCycles(totals.equivalent_cycles)}</td>
+              <td className="cell-empty" title={CYCLES_TOTAL_TIP}>
+                —
+              </td>
               <td className={signClass(totals.ebitda_uah)}>{formatUahNumber(totals.ebitda_uah)}</td>
             </tr>
           </tbody>
