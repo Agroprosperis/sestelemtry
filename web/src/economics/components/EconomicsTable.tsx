@@ -3,6 +3,8 @@ import { createPortal } from 'react-dom'
 import type { ReactElement } from 'react'
 import { formatOrganizationLabel } from '../../dashboard/config'
 import type { HourEconomicsRow } from '../compute'
+import { dayPivotSheet, exportFileName, type HourMetric } from '../exportSheets'
+import { downloadXlsx, type XlsxFormat } from '../xlsx'
 
 type Props = {
   rows: Array<HourEconomicsRow | null>
@@ -611,6 +613,29 @@ function renderCell(
 
 const HOUR_COUNT = 24
 
+// XLSX_FORMAT keeps the exported cells reading like the screen: prices
+// with two decimals, energy with one, money whole. The sign coloring the
+// UI adds has no spreadsheet equivalent, so signed money exports as
+// plain money and Excel's own negative styling takes over.
+const XLSX_FORMAT: Record<MetricKind, XlsxFormat> = {
+  price: 'price',
+  price_with_zero: 'price',
+  energy: 'decimal1',
+  uah: 'money',
+  uah_signed: 'money',
+}
+
+function exportDay(rows: Array<HourEconomicsRow | null>, organizationID: string, date: string) {
+  const metrics: HourMetric[] = METRIC_GROUPS.flatMap((group) => group.rows).map((metric) => ({
+    label: metric.label,
+    unit: metric.unit,
+    format: XLSX_FORMAT[metric.kind],
+    total: metric.total(rows),
+    hours: rows.map((row) => metric.pickHourValue(row)),
+  }))
+  downloadXlsx(exportFileName(date, organizationID), dayPivotSheet(metrics, date, organizationID))
+}
+
 const stripUahFmt = new Intl.NumberFormat('uk-UA', {
   style: 'decimal',
   useGrouping: true,
@@ -763,10 +788,19 @@ export function EconomicsTable({ rows, organizationID, date }: Props) {
 
   return (
     <section className="economics-table-wrap" aria-label="Погодинна деталізація">
-      <h3>
-        Погодинна деталізація
-        <span className="economics-table-context"> · {orgLabel} · {dateLabel}</span>
-      </h3>
+      <div className="economics-month-section-head">
+        <h3>
+          Погодинна деталізація
+          <span className="economics-table-context"> · {orgLabel} · {dateLabel}</span>
+        </h3>
+        <button
+          type="button"
+          className="economics-export-btn"
+          onClick={() => exportDay(rows, organizationID, date)}
+        >
+          Вивантажити в Excel
+        </button>
+      </div>
       <div className="economics-table-scroll">
         <EssEffectStrip rows={rows} cols={cols} />
         <table ref={tableRef} className="economics-table economics-table-pivot">

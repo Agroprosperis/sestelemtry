@@ -52,6 +52,8 @@ import {
   signedUah,
   unitCostUahPerKwh,
 } from './rollup'
+import { exportFileName, monthDetailSheet } from '../exportSheets'
+import { downloadXlsx } from '../xlsx'
 
 type Props = {
   data: EconomicsMonthlyResponse
@@ -1074,25 +1076,6 @@ const COLUMNS: { label: string; unit?: string }[] = [
   { label: 'EBITDA', unit: 'грн' },
 ]
 
-function dayRowValues(d: EconomicsMonthlyDay): string[] {
-  const pvSelf = d.pv_to_load_kwh + d.pv_to_ess_kwh
-  const selfShare = d.pv_kwh > 0 ? pvSelf / d.pv_kwh : 0
-  return [
-    formatDayLabel(d.date),
-    formatKwhNumber(d.pv_kwh),
-    formatKwhNumber(d.load_kwh),
-    formatKwhNumber(d.grid_import_kwh),
-    formatUahNumber(d.import_cost_uah),
-    formatPrice(importPriceUahPerKwh(d.import_cost_uah, d.grid_import_kwh)),
-    formatPrice(unitCostUahPerKwh(d.import_cost_uah, d.load_kwh)),
-    formatPrice(d.rdn_avg_uah_per_kwh),
-    formatKwhNumber(d.grid_export_kwh),
-    formatPercentNumber(selfShare),
-    formatCycles(d.equivalent_cycles),
-    formatUahNumber(d.ebitda_uah),
-  ]
-}
-
 // DayQualityMark is the small amber "!" beside a flagged day. Native
 // title (not the CSS data-tip bubble) because the daily table lives in
 // an overflow-x scroller that would clip an absolutely-positioned tip.
@@ -1104,27 +1087,6 @@ function DayQualityMark({ flags }: { flags?: string[] }) {
       !
     </span>
   )
-}
-
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-}
-
-function exportToExcel(days: EconomicsMonthlyDay[], month: string) {
-  const head = `<tr>${COLUMNS.map((c) => `<th>${escapeHtml(c.unit ? `${c.label}, ${c.unit}` : c.label)}</th>`).join('')}</tr>`
-  const body = days
-    .map((d) => `<tr>${dayRowValues(d).map((v) => `<td>${escapeHtml(v)}</td>`).join('')}</tr>`)
-    .join('')
-  const html = `<!doctype html><html><head><meta charset="utf-8"></head><body><table>${head}${body}</table></body></html>`
-  const blob = new Blob([html], { type: 'application/vnd.ms-excel;charset=utf-8' })
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = `economics-monthly-${month}.xls`
-  document.body.appendChild(link)
-  link.click()
-  link.remove()
-  URL.revokeObjectURL(url)
 }
 
 function MonthlyDailyTable({
@@ -1147,7 +1109,16 @@ function MonthlyDailyTable({
           Денна деталізація місяця
           <span className="economics-table-context"> · {formatOrganizationLabel(organizationID)}</span>
         </h3>
-        <button type="button" className="economics-export-btn" onClick={() => exportToExcel(days, month)}>
+        <button
+          type="button"
+          className="economics-export-btn"
+          onClick={() =>
+            downloadXlsx(
+              exportFileName(month, organizationID),
+              monthDetailSheet(days, totals, month, organizationID, dayQualityTip),
+            )
+          }
+        >
           Вивантажити в Excel
         </button>
       </div>

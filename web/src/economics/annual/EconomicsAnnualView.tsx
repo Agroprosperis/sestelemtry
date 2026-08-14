@@ -39,6 +39,8 @@ import {
   uahShort,
   unitCostUahPerKwh,
 } from '../monthly/rollup'
+import { annualDetailSheet, exportFileName } from '../exportSheets'
+import { downloadXlsx } from '../xlsx'
 import {
   formatCycles,
   formatKwhNumber,
@@ -103,6 +105,7 @@ export function EconomicsAnnualView({ data, organizationID, onSelectMonth }: Pro
         totals={t}
         organizationID={organizationID}
         exportSlug={exportSlug}
+        periodLabel={periodTitle}
         onSelectMonth={onSelectMonth}
       />
     </>
@@ -545,56 +548,19 @@ const COLUMNS: { label: string; unit?: string }[] = [
   { label: 'EBITDA', unit: 'грн' },
 ]
 
-function monthRowValues(m: EconomicsAnnualMonthRollup): string[] {
-  const o = m.totals
-  const pvSelf = o.pv_to_load_kwh + o.pv_to_ess_kwh
-  const selfShare = o.pv_kwh > 0 ? pvSelf / o.pv_kwh : 0
-  return [
-    formatMonthName(m.month),
-    formatPrice(unitCostUahPerKwh(o.import_cost_uah, o.load_kwh)),
-    formatPrice(o.rdn_avg_uah_per_kwh),
-    formatKwhNumber(o.pv_kwh),
-    formatKwhNumber(o.load_kwh),
-    formatKwhNumber(o.grid_import_kwh),
-    formatKwhNumber(o.grid_export_kwh),
-    formatPercentNumber(selfShare),
-    formatCycles(o.equivalent_cycles),
-    formatUahNumber(o.ebitda_uah),
-  ]
-}
-
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-}
-
-function exportToExcel(months: EconomicsAnnualMonthRollup[], slug: string) {
-  const head = `<tr>${COLUMNS.map((c) => `<th>${escapeHtml(c.unit ? `${c.label}, ${c.unit}` : c.label)}</th>`).join('')}</tr>`
-  const body = months
-    .map((m) => `<tr>${monthRowValues(m).map((v) => `<td>${escapeHtml(v)}</td>`).join('')}</tr>`)
-    .join('')
-  const html = `<!doctype html><html><head><meta charset="utf-8"></head><body><table>${head}${body}</table></body></html>`
-  const blob = new Blob([html], { type: 'application/vnd.ms-excel;charset=utf-8' })
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = `economics-annual-${slug}.xls`
-  document.body.appendChild(link)
-  link.click()
-  link.remove()
-  URL.revokeObjectURL(url)
-}
-
 function AnnualMonthlyTable({
   months,
   totals,
   organizationID,
   exportSlug,
+  periodLabel,
   onSelectMonth,
 }: {
   months: EconomicsAnnualMonthRollup[]
   totals: EconomicsMonthlyTotals
   organizationID: string
   exportSlug: string
+  periodLabel: string
   onSelectMonth: (month: string) => void
 }) {
   const pvSelf = totals.pv_to_load_kwh + totals.pv_to_ess_kwh
@@ -606,7 +572,16 @@ function AnnualMonthlyTable({
           Помісячна деталізація року
           <span className="economics-table-context"> · {formatOrganizationLabel(organizationID)}</span>
         </h3>
-        <button type="button" className="economics-export-btn" onClick={() => exportToExcel(months, exportSlug)}>
+        <button
+          type="button"
+          className="economics-export-btn"
+          onClick={() =>
+            downloadXlsx(
+              exportFileName(exportSlug, organizationID),
+              annualDetailSheet(months, totals, periodLabel, organizationID),
+            )
+          }
+        >
           Вивантажити в Excel
         </button>
       </div>
