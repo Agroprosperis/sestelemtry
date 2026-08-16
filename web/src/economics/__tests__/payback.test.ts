@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import type { EconomicsAnnualMonthRollup, EconomicsMonthlyTotals } from '../../api'
-import { buildPaybackModel, capexResolver, type CapexStep } from '../payback'
+import {
+  axisTickLabel,
+  buildPaybackModel,
+  capexResolver,
+  type CapexStep,
+  moneyAxis,
+  moneyAxisPair,
+} from '../payback'
 
 const M = 1_000_000
 
@@ -139,5 +146,51 @@ describe('buildPaybackModel without a CAPEX schedule', () => {
     expect(flat.paybackT).not.toBeNull()
     expect(withFutureStage.paybackT).not.toBeNull()
     expect(withFutureStage.paybackT!).toBeGreaterThan(flat.paybackT!)
+  })
+})
+
+describe('moneyAxisPair', () => {
+  // Агродар Бар: monthly EBITDA peaks near 440 тис. with one negative
+  // winter month, while the cumulative line runs to 5,2 млн.
+  const { left, right } = moneyAxisPair(
+    { min: -7_903, max: 439_632 },
+    { min: 0, max: 5_200_000 },
+  )
+
+  it('puts zero at the same height on both scales', () => {
+    const zeroShare = (a: { domain: [number, number] }) =>
+      -a.domain[0] / (a.domain[1] - a.domain[0])
+    expect(zeroShare(left)).toBeCloseTo(zeroShare(right), 9)
+    // One small negative month must not hand a quarter of the plot to
+    // the area below zero, the way a "nice" auto domain does.
+    expect(zeroShare(left)).toBeLessThan(0.05)
+  })
+
+  it('covers the data with round ticks on each side', () => {
+    expect(left.domain[1]).toBeGreaterThanOrEqual(439_632)
+    expect(right.domain[1]).toBeGreaterThanOrEqual(5_200_000)
+    expect(left.ticks).toContain(0)
+    expect(right.ticks).toContain(0)
+    const step = (t: number[]) => t[1] - t[0]
+    expect(left.ticks.every((v, i, t) => i === 0 || v - t[i - 1] === step(t))).toBe(true)
+  })
+
+  it('names each scale in its own unit', () => {
+    expect(left.unit).toBe('тис. грн')
+    expect(right.unit).toBe('млн грн')
+    expect(axisTickLabel(left, 400_000)).toBe('400 тис.')
+    expect(axisTickLabel(right, 1_200_000)).toBe('1,2 млн')
+    expect(axisTickLabel(right, 0)).toBe('0')
+  })
+
+  it('keeps an all-positive chart anchored at zero', () => {
+    const flat = moneyAxisPair({ min: 0, max: 300_000 }, { min: 0, max: 900_000 })
+    expect(flat.left.domain[0]).toBe(0)
+    expect(flat.right.domain[0]).toBe(0)
+  })
+
+  it('leaves the single-scale helper alone', () => {
+    expect(moneyAxis(2_000_000).unit).toBe('млн грн')
+    expect(moneyAxis(500).unit).toBe('тис. грн')
   })
 })

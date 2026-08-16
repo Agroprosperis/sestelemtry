@@ -24,10 +24,12 @@ import {
 } from '../monthly/format'
 import {
   addMonths,
+  axisTickLabel,
   buildPaybackModel,
   type CapexPaybackRow,
   type CapexStep,
   moneyAxis,
+  moneyAxisPair,
   paybackAxis,
   paybackLabel,
 } from '../payback'
@@ -372,8 +374,7 @@ export function EconomicsPaybackView({ data, capexUah, capexSteps, plannedPaybac
   const axis = moneyAxis(yMax)
   // Main-chart Y ticks carry the unit right in the label ("15 млн"),
   // like the final design.
-  const axisUnitWord = axis.unit.split(' ')[0]
-  const mainTick = (v: number) => (v === 0 ? '0' : `${axis.tick(v)} ${axisUnitWord}`)
+  const mainTick = (v: number) => axisTickLabel(axis, v)
   const startRow = paybackRows.find((r) => r.kind === 'start') ?? null
 
   // "Дані оновлено": the last day of the last fact month, capped at
@@ -452,10 +453,12 @@ export function EconomicsPaybackView({ data, capexUah, capexSteps, plannedPaybac
     })
   }, [monthsWithData, lastFactMonthKey, paidOff, monthlyPace, seasonalFactors, grain, prior])
 
-  const effectAxis = moneyAxis(
-    Math.max(...effectRows.map((r) => Math.abs(r.periodFact ?? 0) + Math.abs(r.periodForecast ?? 0)), 0),
+  const periodValues = effectRows.map((r) => (r.periodFact ?? 0) + (r.periodForecast ?? 0))
+  const cumValues = effectRows.map((r) => r.cum)
+  const { left: effectAxis, right: cumAxis } = moneyAxisPair(
+    { min: Math.min(0, ...periodValues), max: Math.max(0, ...periodValues) },
+    { min: Math.min(0, ...cumValues), max: Math.max(0, ...cumValues) },
   )
-  const cumAxis = moneyAxis(Math.max(...effectRows.map((r) => Math.abs(r.cum)), 0))
 
   const paybackDurationLabel = paidOff ? 'окуплено' : paybackLabel(paybackYears)
   // A finite forecast without a crossing month means the projection runs
@@ -741,8 +744,10 @@ export function EconomicsPaybackView({ data, capexUah, capexSteps, plannedPaybac
           <div className="economics-capex-chart-head">
             <span className="economics-capex-chart-title">
               Щомісячний економічний ефект
-              <span className="economics-capex-chart-unit">{effectAxis.unit}</span>
-              <OptimumInfo tip="Стовпці — EBITDA за період: сині — факт, фіолетові — сезонний прогноз до кінця поточного року. Лінія — накопичений EBITDA від початку експлуатації (права шкала), факт + прогноз." />
+              {/* Two scales with two different multipliers, so the unit
+                  lives on each axis; the caption only names the currency. */}
+              <span className="economics-capex-chart-unit">грн</span>
+              <OptimumInfo tip="Стовпці — EBITDA за період (ліва шкала): сині — факт, фіолетові — сезонний прогноз до кінця поточного року. Лінія — накопичений EBITDA від початку експлуатації (права шкала), факт + прогноз. Мінусовий стовпець — місяць, у якому витрати на купівлю електроенергії перевищили ефект (типово взимку, коли СЕС майже не виробляє)." />
             </span>
             <div className="economics-payback-effect-tools">
               <span className="economics-month-legend">
@@ -773,20 +778,27 @@ export function EconomicsPaybackView({ data, capexUah, capexSteps, plannedPaybac
               <YAxis
                 yAxisId="period"
                 tick={{ fontSize: 11, fill: '#98a2b3' }}
-                width={40}
+                width={72}
                 tickLine={false}
                 axisLine={false}
-                tickFormatter={effectAxis.tick}
+                domain={effectAxis.domain}
+                ticks={effectAxis.ticks}
+                tickFormatter={(v: number) => axisTickLabel(effectAxis, v)}
               />
               <YAxis
                 yAxisId="cum"
                 orientation="right"
                 tick={{ fontSize: 11, fill: '#98a2b3' }}
-                width={40}
+                width={72}
                 tickLine={false}
                 axisLine={false}
-                tickFormatter={cumAxis.tick}
+                domain={cumAxis.domain}
+                ticks={cumAxis.ticks}
+                tickFormatter={(v: number) => axisTickLabel(cumAxis, v)}
               />
+              {effectAxis.domain[0] < 0 ? (
+                <ReferenceLine yAxisId="period" y={0} stroke="#cbd5e1" strokeWidth={1} />
+              ) : null}
               <Tooltip content={<EffectTooltip />} cursor={{ fill: 'rgba(148, 163, 184, 0.12)' }} />
               <Bar
                 yAxisId="period"

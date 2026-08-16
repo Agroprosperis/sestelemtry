@@ -24,13 +24,75 @@ export function paybackLabel(years: number): string {
 const axisDecimalFmt = new Intl.NumberFormat('uk-UA', { maximumFractionDigits: 1 })
 const axisIntegerFmt = new Intl.NumberFormat('uk-UA', { maximumFractionDigits: 0 })
 
+export type MoneyAxis = {
+  // unit names the scale in full ("млн грн") for a chart caption; word is
+  // the bare multiplier ("млн") for a tick label that already sits next
+  // to a number.
+  unit: string
+  word: string
+  tick: (v: number) => string
+}
+
 // moneyAxis picks one unit so Y ticks stay short ("3,6"); the unit is
 // named once in the chart caption.
-export function moneyAxis(max: number): { unit: string; tick: (v: number) => string } {
+export function moneyAxis(max: number): MoneyAxis {
   if (Math.abs(max) >= 1_000_000) {
-    return { unit: 'млн грн', tick: (v) => axisDecimalFmt.format(v / 1_000_000) }
+    return { unit: 'млн грн', word: 'млн', tick: (v) => axisDecimalFmt.format(v / 1_000_000) }
   }
-  return { unit: 'тис. грн', tick: (v) => axisIntegerFmt.format(v / 1_000) }
+  return { unit: 'тис. грн', word: 'тис.', tick: (v) => axisIntegerFmt.format(v / 1_000) }
+}
+
+// axisTickLabel writes the multiplier into the tick itself ("450 тис."),
+// so a chart carrying two different scales says on each axis what that
+// axis counts in. Zero needs no unit.
+export function axisTickLabel(axis: MoneyAxis, v: number): string {
+  return v === 0 ? '0' : `${axis.tick(v)} ${axis.word}`
+}
+
+// NICE_STEPS is the ladder an axis step rounds up to, so gridlines land
+// on numbers a reader can add up in their head.
+const NICE_STEPS = [1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10]
+
+function niceStep(raw: number): number {
+  if (!(raw > 0) || !Number.isFinite(raw)) return 1
+  const magnitude = 10 ** Math.floor(Math.log10(raw))
+  const step = NICE_STEPS.find((s) => raw / magnitude <= s + 1e-9) ?? 10
+  return step * magnitude
+}
+
+export type ScaledAxis = MoneyAxis & { domain: [number, number]; ticks: number[] }
+
+// moneyAxisPair builds the two Y scales of a bars + line combo chart so
+// their zero lines land on the same row of pixels. Left to themselves the
+// scales disagree about where zero is: the line's scale starts at the
+// floor of the plot while the bars' scale keeps a band below zero for one
+// negative month, and the line then appears to open far in the red. Each
+// side keeps its own unit and round ticks; only the share of the plot
+// spent below zero is shared.
+export function moneyAxisPair(
+  left: { min: number; max: number },
+  right: { min: number; max: number },
+  intervals = 5,
+): { left: ScaledAxis; right: ScaledAxis } {
+  const top = (range: { min: number; max: number }) => {
+    const step = niceStep(Math.max(range.max, 0) / intervals)
+    return { step, hi: Math.max(Math.ceil(Math.max(range.max, 0) / step), 1) * step }
+  }
+  const l = top(left)
+  const r = top(right)
+  // Whichever side dips deeper below zero — measured against its own top,
+  // so the two stay comparable — sets the band for both. The margin keeps
+  // the lowest bar off the frame.
+  const share =
+    Math.min(Math.min(left.min, 0) / l.hi, Math.min(right.min, 0) / r.hi) * 1.08
+  const build = ({ hi, step }: { hi: number; step: number }): ScaledAxis => {
+    const lo = hi * share
+    const ticks: number[] = []
+    const first = Math.ceil(lo / step)
+    for (let i = first; i * step <= hi + step * 1e-9; i += 1) ticks.push(i * step)
+    return { ...moneyAxis(hi), domain: [lo, hi], ticks }
+  }
+  return { left: build(l), right: build(r) }
 }
 
 export function addMonths(yyyyMm: string, n: number): string {
