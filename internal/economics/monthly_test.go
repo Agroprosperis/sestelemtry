@@ -26,13 +26,14 @@ func TestAggregateMonthCountsFlaggedDays(t *testing.T) {
 		mk(23, "import_lag:512"),
 		mk(24, "no_scale:grid_export", "load_rebalanced"),
 		mk(25),
+		mk(26, "counter_step:pv:0.0313"),
 	}
 	got := AggregateMonth("2026-01", loc, days, nil, fixedRatings(100, 0.6, 0, 0))
-	if got.Totals.FlaggedDays != 2 {
-		t.Fatalf("FlaggedDays = %d, want 2", got.Totals.FlaggedDays)
+	if got.Totals.FlaggedDays != 3 {
+		t.Fatalf("FlaggedDays = %d, want 3", got.Totals.FlaggedDays)
 	}
-	if got.Totals.DaysWithData != 4 {
-		t.Fatalf("DaysWithData = %d, want 4", got.Totals.DaysWithData)
+	if got.Totals.DaysWithData != 5 {
+		t.Fatalf("DaysWithData = %d, want 5", got.Totals.DaysWithData)
 	}
 }
 

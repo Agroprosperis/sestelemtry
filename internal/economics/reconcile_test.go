@@ -160,6 +160,71 @@ func TestReconcileRejectsImplausibleFactor(t *testing.T) {
 	}
 }
 
+// TestReconcileScalesCounterStepOntoCanonical pins the mirror case of
+// TestReconcileRejectsImplausibleFactor, taken from Жмеринка 27.06.2025:
+// the site switched from FusionSolar archive backfill to live Modbus and
+// the step between the two lifetime registers — 80 MWh of "generation",
+// 27 MWh of "import" — landed in the 18:00 hour. The daily meter says
+// the plant made 2518 kWh that day, so the computed side is the corrupt
+// one and the day must be scaled onto the meter, not left as is.
+func TestReconcileScalesCounterStepOntoCanonical(t *testing.T) {
+	flows := []*HourFlows{
+		{PV: 3, GridImport: 2},
+		{PV: 80320, GridImport: 26860},
+	}
+	canonical := &CanonicalDaily{PV: 2518, GridImport: 92.63, Load: 536}
+	res := reconcileFlows(flows, canonical)
+
+	var pv, imp float64
+	for _, f := range flows {
+		pv += f.PV
+		imp += f.GridImport
+	}
+	near(t, "pv scaled onto the daily meter", pv, 2518)
+	near(t, "import scaled onto the daily meter", imp, 92.63)
+
+	var steps []string
+	for _, fl := range res.Flags {
+		if strings.HasPrefix(fl, "counter_step:") {
+			steps = append(steps, fl)
+		}
+		if strings.HasPrefix(fl, "reconcile_rejected:") {
+			t.Errorf("a counter step must not be rejected: %s", fl)
+		}
+	}
+	if len(steps) != 2 {
+		t.Errorf("expected a counter_step flag for pv and grid_import, got %v", res.Flags)
+	}
+}
+
+// TestReconcileKeepsComputedAgainstZeroCanonical guards the ambiguous
+// corner of the same rule: a canonical zero may mean the plant really
+// did nothing or that the KPI is missing from the day's record. Scaling
+// to zero would erase real energy on the second reading, so the computed
+// value stays and the day is flagged for review instead.
+func TestReconcileKeepsComputedAgainstZeroCanonical(t *testing.T) {
+	flows := hourFlowPtrs(2, HourFlows{GridImport: 500})
+	res := reconcileFlows(flows, &CanonicalDaily{GridImport: 0})
+
+	var imp float64
+	for _, f := range flows {
+		imp += f.GridImport
+	}
+	near(t, "import kept at its computed total", imp, 1000)
+	var rejected bool
+	for _, fl := range res.Flags {
+		if strings.HasPrefix(fl, "reconcile_rejected:grid_import:") {
+			rejected = true
+		}
+		if strings.HasPrefix(fl, "counter_step:") {
+			t.Errorf("a zero canonical must not be treated as the sane side: %s", fl)
+		}
+	}
+	if !rejected {
+		t.Errorf("expected reconcile_rejected for grid_import, got %v", res.Flags)
+	}
+}
+
 func TestReconcileLoadMismatchFlag(t *testing.T) {
 	// Derived load = pv+import+dis-export-charged per hour.
 	// One hour: pv=0,import=100,export=0,charged=0,discharged=0 -> load=100.

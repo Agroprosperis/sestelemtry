@@ -381,6 +381,10 @@ export function dayQualityTip(flags?: string[]): string | null {
       parts.push(
         `Енергобаланс дня не зійшовся${Number.isFinite(rel) ? ` на ${Math.round(rel * 100)}%` : ''} — лічильники FusionSolar частину доби не оновлювались.`,
       )
+    } else if (f.startsWith('counter_step:')) {
+      parts.push(
+        'Лічильник стрибнув (стик двох джерел даних) — добу приведено до добового еталону FusionSolar, але розподіл по годинах умовний.',
+      )
     } else if (f.startsWith('reconcile_rejected:')) {
       parts.push('Добовий еталон FusionSolar неправдоподібний і не застосований.')
     }

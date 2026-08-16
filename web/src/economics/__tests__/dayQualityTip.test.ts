@@ -12,6 +12,12 @@ describe('dayQualityTip', () => {
     expect(tip).toContain('приблизні')
   })
 
+  it('explains a counter step scaled onto the daily meter', () => {
+    const tip = dayQualityTip(['counter_step:pv:0.0313', 'counter_step:grid_import:0.0034'])
+    expect(tip).toContain('стрибнув')
+    expect(tip).toContain('приблизні')
+  })
+
   it('ignores routine bookkeeping flags', () => {
     expect(dayQualityTip(['no_scale:grid_export', 'load_rebalanced'])).toBeNull()
     expect(dayQualityTip([])).toBeNull()

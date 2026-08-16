@@ -23,6 +23,13 @@ import (
 // time between the two consecutive buckets, so genuine multi-hour gap
 // recovery is preserved — is treated as spurious and dropped. 10 MW
 // sits far above any real site (elevator BESS/PV are well under 2 MW).
+//
+// Deliberately blunt: the ceiling judges each counter on its own, so a
+// threshold low enough to catch a counter step at the seam between two
+// data sources would drop one counter and keep another, leaving the
+// day's energy balance broken. Steps like that are caught a layer up,
+// where the day is measured against its canonical FusionSolar KPI as a
+// whole (see reconcileFlows / counter_step).
 const maxCounterDeltaPowerKw = 10000
 
 // counterResetZeroTolKwh treats a lifetime accumulator reading at/below this

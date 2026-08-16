@@ -14,12 +14,22 @@ const reconcileTolerance = 0.02
 
 // maxReconcileFactor / minReconcileFactor bound the scaling applied to a
 // counter when matching its canonical KPI. A healthy FusionSolar daily
-// value and the allocator agree to within a small correction, so a
-// factor far outside this range means the canonical KPI is corrupted
-// (e.g. a single bad getKpiStationDay value of 24958 kWh against a
-// computed 67 kWh — factor ~369). Rather than let that scale the day's
-// flows into a multi-MWh artifact, the metric is left at its computed
-// value and surfaced via a reconcile_rejected flag.
+// value and the allocator agree to within a small correction, so a factor
+// far outside this range means one of the two sides is corrupted — and
+// which one depends on the direction.
+//
+// Above maxReconcileFactor the canonical KPI is the suspect: a single bad
+// getKpiStationDay value of 24958 kWh against a computed 67 kWh (factor
+// ~369) would scale the day's flows into a multi-MWh artifact, so the
+// metric keeps its computed value and raises reconcile_rejected.
+//
+// Below minReconcileFactor it is the other way round: the hourly counter
+// deltas claim many times more energy than the plant's own daily meter
+// recorded, which no plant can do. That is the signature of a counter
+// step — the seam between two data sources (FusionSolar archive backfill
+// and live Modbus) whose lifetime registers start from different origins,
+// booked as one hour of energy. There the canonical KPI is the sane side:
+// the metric is scaled onto it and raises counter_step.
 const (
 	maxReconcileFactor = 10.0
 	minReconcileFactor = 0.1
@@ -87,10 +97,24 @@ func reconcileFlows(flows []*HourFlows, canonical *CanonicalDaily) ReconcileResu
 			res.Flags = append(res.Flags, "no_scale:"+name)
 		default:
 			fac = target / computed
-			if fac > maxReconcileFactor || fac < minReconcileFactor {
-				// Canonical KPI implausibly diverges from the computed
-				// total — treat it as corrupted and keep the computed
-				// flows rather than scaling the day into garbage.
+			switch {
+			case fac > maxReconcileFactor:
+				// Canonical KPI implausibly above the computed total —
+				// treat it as corrupted and keep the computed flows
+				// rather than scaling the day into garbage.
+				res.Flags = append(res.Flags, fmt.Sprintf("reconcile_rejected:%s:%.2f", name, fac))
+				fac = 1.0
+			case fac < minReconcileFactor && target > 0:
+				// Computed total implausibly above the canonical KPI —
+				// a counter step. Scale onto the daily meter, which is
+				// the only sane figure left for the day.
+				res.Flags = append(res.Flags, fmt.Sprintf("counter_step:%s:%.4f", name, fac))
+			case fac < minReconcileFactor:
+				// Canonical zero against a large computed total is
+				// ambiguous: the KPI may be genuinely zero or simply
+				// absent from the day's FusionSolar record, and scaling
+				// to zero would erase real energy on the second reading.
+				// Keep the computed value and flag it for review.
 				res.Flags = append(res.Flags, fmt.Sprintf("reconcile_rejected:%s:%.2f", name, fac))
 				fac = 1.0
 			}

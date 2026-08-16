@@ -119,13 +119,15 @@ type MonthExtreme struct {
 // dayHasCounterIssue reports whether a day's stored quality flags mark
 // its hourly flow split as approximate: the import counter froze or
 // lagged behind the ESS charge (import_lag), the day's energy balance
-// did not close (load_mismatch), or a canonical FusionSolar KPI was
-// rejected as implausible (reconcile_rejected). no_scale and
+// did not close (load_mismatch), a counter stepped and the day had to be
+// scaled onto its daily meter (counter_step), or a canonical FusionSolar
+// KPI was rejected as implausible (reconcile_rejected). no_scale and
 // load_rebalanced are routine bookkeeping notes and do not count.
 func dayHasCounterIssue(flags []string) bool {
 	for _, f := range flags {
 		if strings.HasPrefix(f, "import_lag") ||
 			strings.HasPrefix(f, "load_mismatch") ||
+			strings.HasPrefix(f, "counter_step") ||
 			strings.HasPrefix(f, "reconcile_rejected") {
 			return true
 		}
