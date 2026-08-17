@@ -355,6 +355,76 @@ export function dailyTotals(rows: Array<HourEconomicsRow | null>): DailyTotals {
   return acc
 }
 
+// pvEssArbitrageGain is the УЗЕ add-on to `pvExportPotential`: how much
+// more the day's PV yield would earn if a perfect-foresight schedule
+// stored part of it in the battery (charging from PV only, within the
+// configured capacity / power / ККД, paying wear per discharged kWh)
+// and sold at the day's priciest hours instead of as produced. Mirrors
+// the backend merchant DP (pvEssArbitrageGain in monthly.go) at day
+// scope: SOC starts empty, hours without an RDN price are idle, and
+// charging is costed at the forgone export of its own hour, so the
+// result is a pure gain — ≥ 0, since idling is always feasible.
+const merchantSocLevels = 101
+
+export function pvEssArbitrageGain(
+  rows: Array<HourEconomicsRow | null>,
+  tariffs: Tariffs,
+): number {
+  const capacity = tariffs.essCapacityKwh
+  if (capacity <= 0) return 0
+  const power = tariffs.essPowerLimitKw > 0 ? tariffs.essPowerLimitKw : capacity
+  // Same clamps as the backend optimizer: a configured round-trip
+  // efficiency is bounded to a sane band, no config falls back to 0.9.
+  const rte =
+    tariffs.roundtripEfficiency > 0
+      ? Math.min(0.99, Math.max(0.5, tariffs.roundtripEfficiency))
+      : 0.9
+  const eta = Math.sqrt(rte)
+  const wear = tariffs.degradationUahPerKwh
+  const levels = merchantSocLevels
+  const step = capacity / (levels - 1)
+  const reach = Math.max(1, Math.ceil((power * eta) / step))
+
+  let f = new Array<number>(levels).fill(-Infinity)
+  f[0] = 0
+  for (const row of rows) {
+    if (!row || row.rdnUahPerKwh === null) continue
+    const exportPrice = row.economics.exportPriceUahPerKwh
+    // Prices below 0.1 грн snap to free, mirroring pvChargePriceFor:
+    // storing PV when the market is ~worthless is not penalised.
+    const chargePrice = exportPrice < 0.1 ? 0 : exportPrice
+    const pvCap = row.flow.pv
+    const nf = new Array<number>(levels).fill(-Infinity)
+    for (let s = 0; s < levels; s++) {
+      const base = f[s]
+      if (base === -Infinity) continue
+      if (base > nf[s]) nf[s] = base
+      for (let d = 1; d <= reach; d++) {
+        const ns = s + d
+        if (ns >= levels) break
+        const chargeAc = (d * step) / eta
+        if (chargeAc > power + 1e-9 || chargeAc > pvCap + 1e-9) break
+        const v = base - chargeAc * chargePrice
+        if (v > nf[ns]) nf[ns] = v
+      }
+      for (let d = 1; d <= reach; d++) {
+        const ns = s - d
+        if (ns < 0) break
+        const dischargeAc = d * step * eta
+        if (dischargeAc > power + 1e-9) break
+        const v = base + dischargeAc * (exportPrice - wear)
+        if (v > nf[ns]) nf[ns] = v
+      }
+    }
+    f = nf
+  }
+  let best = 0
+  for (const v of f) {
+    if (v > best) best = v
+  }
+  return best
+}
+
 // HourEconomicsRow couples one hour's input flows with its computed
 // economics so the table / charts can render both columns from the
 // same data structure. `rdnUahPerKwh` may be null when the DAM

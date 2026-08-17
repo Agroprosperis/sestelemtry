@@ -205,6 +205,73 @@ func TestAggregateMonthPvExportPotential(t *testing.T) {
 	}
 }
 
+// TestAggregateMonthPvEssExportPotential checks the merchant-with-battery
+// yardstick: rte 0.81 gives exact half-cycle efficiencies (√0.81 = 0.9),
+// so storing the whole 90 kWh midday yield and selling it at the evening
+// price is worth exactly 90 · 0.81 · 10 = 729 — more than the 549 gained
+// over selling as produced (90 · 2 = 180), and the DP must find it.
+func TestAggregateMonthPvEssExportPotential(t *testing.T) {
+	loc := time.UTC
+	day := time.Date(2026, 6, 1, 0, 0, 0, 0, loc)
+	days := []DailyRecord{{Day: day, IsFinal: true, Totals: DailyTotals{HoursWithData: 24, PV: 90}}}
+	hourly := []HourlyRecord{
+		{
+			HourStart: day.Add(12 * time.Hour), Rdn: floatPtr(2), ImportPrice: 7, ExportPrice: 2,
+			PV: 90, PVToGrid: 90,
+		},
+		{
+			HourStart: day.Add(20 * time.Hour), Rdn: floatPtr(10), ImportPrice: 15, ExportPrice: 10,
+		},
+	}
+
+	got := AggregateMonth("2026-06", loc, days, hourly, fixedRatings(100, 0, 100, 0.81))
+
+	if math.Abs(got.Totals.PvExportPotential-180) > 1e-6 {
+		t.Fatalf("PvExportPotential = %v, want 180", got.Totals.PvExportPotential)
+	}
+	if math.Abs(got.Totals.PvEssExportPotential-729) > 1e-6 {
+		t.Fatalf("PvEssExportPotential = %v, want 729", got.Totals.PvEssExportPotential)
+	}
+}
+
+// TestPvEssExportPotentialDegenerateCases pins the two ways the battery
+// add-on must collapse to the bare potential: prices that fall over the
+// day (nothing to shift forward to) and wear that eats the whole spread.
+// A plant with no battery configured must also stay at the bare number.
+func TestPvEssExportPotentialDegenerateCases(t *testing.T) {
+	loc := time.UTC
+	day := time.Date(2026, 6, 1, 0, 0, 0, 0, loc)
+	days := []DailyRecord{{Day: day, IsFinal: true, Totals: DailyTotals{HoursWithData: 24, PV: 90}}}
+	mk := func(p1, p2 float64) []HourlyRecord {
+		return []HourlyRecord{
+			{HourStart: day.Add(12 * time.Hour), Rdn: floatPtr(p1), ImportPrice: p1 + 5, ExportPrice: p1, PV: 90, PVToGrid: 90},
+			{HourStart: day.Add(20 * time.Hour), Rdn: floatPtr(p2), ImportPrice: p2 + 5, ExportPrice: p2},
+		}
+	}
+
+	// Falling prices: the yield is already sold at the day's best hour.
+	got := AggregateMonth("2026-06", loc, days, mk(10, 2), fixedRatings(100, 0, 100, 0.81))
+	if math.Abs(got.Totals.PvEssExportPotential-got.Totals.PvExportPotential) > 1e-6 {
+		t.Fatalf("falling prices: merchant %v != potential %v",
+			got.Totals.PvEssExportPotential, got.Totals.PvExportPotential)
+	}
+
+	// Wear above the spread: shifting 1 kWh gains 0.81·10 − 2 = 6.1 but
+	// costs 0.81·10 of degradation — idling wins.
+	got = AggregateMonth("2026-06", loc, days, mk(2, 10), fixedRatings(100, 10, 100, 0.81))
+	if math.Abs(got.Totals.PvEssExportPotential-got.Totals.PvExportPotential) > 1e-6 {
+		t.Fatalf("wear: merchant %v != potential %v",
+			got.Totals.PvEssExportPotential, got.Totals.PvExportPotential)
+	}
+
+	// No battery at all.
+	got = AggregateMonth("2026-06", loc, days, mk(2, 10), fixedRatings(0, 0, 0, 0))
+	if math.Abs(got.Totals.PvEssExportPotential-got.Totals.PvExportPotential) > 1e-6 {
+		t.Fatalf("no ESS: merchant %v != potential %v",
+			got.Totals.PvEssExportPotential, got.Totals.PvExportPotential)
+	}
+}
+
 // TestHeatmapMarginIgnoresSameHourCharging pins the fix for the cells
 // that used to read minus thousands of UAH/kWh: an hour that charges a
 // full pack while trickling a little back out must be judged on what

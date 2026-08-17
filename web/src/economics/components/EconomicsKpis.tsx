@@ -4,6 +4,9 @@ import type { Tariffs } from '../tariffs'
 type Props = {
   totals: DailyTotals
   tariffs: Tariffs
+  // The merchant-with-battery yardstick: pvExportPotential plus the
+  // perfect-foresight УЗЕ arbitrage gain (see pvEssArbitrageGain).
+  pvEssPotential: number
 }
 
 const uahFormatter = new Intl.NumberFormat('uk-UA', {
@@ -73,7 +76,8 @@ function formatEodSubtitle(avgUahPerKwh: number, residualKwh: number, costUah: n
   return `на завтра — ${formatPriceUahPerKwh(avgUahPerKwh)} · ${formatKwh(residualKwh)} (${formatUah(costUah)})`
 }
 
-export function EconomicsKpis({ totals, tariffs }: Props) {
+export function EconomicsKpis({ totals, tariffs, pvEssPotential }: Props) {
+  const essArbitrageGain = pvEssPotential - totals.pvExportPotential
   const pvSelfConsumed = totals.pvToLoad + totals.pvToEss
   const pvSelfConsumptionShare = totals.pv > 0 ? pvSelfConsumed / totals.pv : 0
   const equivalentCycles = tariffs.essCapacityKwh > 0 ? totals.essDischarged / tariffs.essCapacityKwh : 0
@@ -140,6 +144,25 @@ export function EconomicsKpis({ totals, tariffs }: Props) {
           <span className="kpi-label">Потенціал СЕС</span>
           <span className="kpi-value">{formatUah(totals.pvExportPotential)}</span>
           <span className="kpi-sub">весь виробіток у мережу · {formatKwh(totals.pv)}</span>
+        </div>
+        <div
+          className="kpi-card"
+          title={
+            'Те саме «все в мережу», але УЗЕ працює максимально ефективно:' +
+            ' заряджається лише від СЕС і продає накопичене в найдорожчі години' +
+            ' (ідеальний графік із знанням цін наперед, у межах ємності та' +
+            ' потужності, з урахуванням ККД і зносу).' +
+            ' Різниця з «Потенціал СЕС» — максимум, який арбітраж УЗЕ здатен' +
+            ' додати до простого продажу в мережу.'
+          }
+        >
+          <span className="kpi-label">Потенціал СЕС + УЗЕ</span>
+          <span className="kpi-value">{formatUah(pvEssPotential)}</span>
+          <span className="kpi-sub">
+            {Number.isFinite(essArbitrageGain)
+              ? `УЗЕ додає +${formatUah(essArbitrageGain)}`
+              : 'перенесення продажу на пік'}
+          </span>
         </div>
       </div>
 

@@ -239,6 +239,11 @@ func TestAggregateYearSumsPvExportPotential(t *testing.T) {
 	if math.Abs(got.Months[3].Totals.PvExportPotential-450) > 1e-6 {
 		t.Fatalf("April PvExportPotential = %v, want 450", got.Months[3].Totals.PvExportPotential)
 	}
+	// One priced hour per month leaves the battery nothing to shift to,
+	// so the merchant-with-УЗЕ figure must collapse to the bare one.
+	if math.Abs(got.Totals.PvEssExportPotential-want) > 1e-6 {
+		t.Fatalf("PvEssExportPotential = %v, want %v", got.Totals.PvEssExportPotential, want)
+	}
 }
 
 // TestAggregatePeriodSlidingWindow checks that an arbitrary month window

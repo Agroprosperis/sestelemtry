@@ -371,6 +371,12 @@ type EconomicsMonthlyTotals struct {
 	// dashboard, not a revenue leg.
 	PvExportPotentialUah float64 `json:"pv_export_potential_uah"`
 
+	// PvEssExportPotentialUah is the same merchant world with the battery
+	// allowed to time-shift the yield to pricier hours (PV charging only,
+	// perfect foresight, ККД and wear applied). Always ≥ the bare
+	// potential above.
+	PvEssExportPotentialUah float64 `json:"pv_ess_export_potential_uah"`
+
 	// ImportCostUah is what the grid import actually cost over the
 	// period. It is deliberately NOT an EBITDA expense line: the part
 	// consumed directly is already priced in through the
@@ -727,6 +733,7 @@ func monthlyTotalsToJSON(t economics.MonthlyTotals) EconomicsMonthlyTotals {
 		ExpenseTotalUah:             t.ExpenseTotal,
 		EbitdaUah:                   t.Ebitda,
 		PvExportPotentialUah:        t.PvExportPotential,
+		PvEssExportPotentialUah:     t.PvEssExportPotential,
 		ImportCostUah:               importCostUah(t.AvgImportPrice, t.GridImport),
 		EssWithdrawnCostUah:         t.EssWithdrawnCost,
 		EssRealizedProfitUah:        t.EssRealizedProfit,

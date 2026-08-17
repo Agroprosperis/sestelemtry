@@ -50,6 +50,7 @@ function emptyTotals(): EconomicsMonthlyResponse['totals'] {
     expense_total_uah: 0,
     ebitda_uah: 0,
     pv_export_potential_uah: 0,
+    pv_ess_export_potential_uah: 0,
     import_cost_uah: 0,
     ess_withdrawn_cost_uah: 0,
     ess_realized_profit_uah: 0,

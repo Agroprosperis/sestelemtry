@@ -187,6 +187,14 @@ type MonthlyTotals struct {
 	// daily average would price midday yield at evening rates.
 	PvExportPotential float64
 
+	// PvEssExportPotential is the same everything-to-grid world with the
+	// battery in play: a perfect-foresight schedule may divert part of the
+	// yield into the УЗЕ (within the capacity, power, ККД and wear of its
+	// day's ratings — no grid charging) and sell it at the priciest hours
+	// instead. Always ≥ PvExportPotential; the spread between them is the
+	// most the УЗЕ could add on top of bare merchant sales.
+	PvEssExportPotential float64
+
 	EssWithdrawnCost   float64
 	EssRealizedProfit  float64
 	EssDegradationCost float64
@@ -486,6 +494,67 @@ func dailyRatings(loc *time.Location, ratingsFor func(day time.Time) EssRatings)
 // about the divisor than about the hour.
 const heatmapMinDischargeKwh = 1.0
 
+// pvEssArbitrageGain is the УЗЕ add-on to PvExportPotential: how much
+// more the whole PV yield would earn if a perfect-foresight schedule
+// stored part of it and sold at pricier hours. It reuses the reserve
+// optimizer with the merchant world encoded in the hours: no load, so
+// nothing to displace (every discharge sells at the export price), the
+// whole yield is storable, and the grid may not charge the pack
+// (modeFixedCharge with a zero grid cap). Charging is costed at the
+// forgone export of its own hour, so the result is a pure gain — ≥ 0 by
+// construction, since idling is always feasible.
+//
+// The DP runs continuously across the month (SOC carried over day
+// boundaries) and restarts empty when the ratings change mid-month, the
+// same convention the fact-vs-optimum headline uses.
+func pvEssArbitrageGain(
+	hourly []HourlyRecord,
+	ratingsOn func(time.Time) EssRatings,
+	paramsFor func(EssRatings) optimumParams,
+) float64 {
+	if len(hourly) == 0 {
+		return 0
+	}
+	sorted := append([]HourlyRecord(nil), hourly...)
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i].HourStart.Before(sorted[j].HourStart)
+	})
+
+	var gain float64
+	var run []optimumHour
+	var runParams optimumParams
+	var curRatings EssRatings
+	haveRun := false
+	flush := func() {
+		if len(run) > 0 {
+			gain += math.Max(0, optimizeMonth(run, runParams.socMinKwh, runParams, modeFixedCharge))
+		}
+		run = run[:0]
+	}
+	for _, h := range sorted {
+		r := ratingsOn(h.HourStart)
+		if !haveRun || r != curRatings {
+			flush()
+			curRatings = r
+			runParams = paramsFor(r)
+			haveRun = true
+		}
+		run = append(run, optimumHour{
+			tradable:    h.Rdn != nil,
+			importPrice: h.ImportPrice,
+			exportPrice: h.ExportPrice,
+			// Merchant world: the whole yield is available to store
+			// (actualPvChargeKwh is the PV cap under modeFixedCharge) and
+			// actualGridChargeKwh stays 0 — no grid charging. No load
+			// either, so displaceableKwh is 0 and every discharge earns
+			// the export price.
+			actualPvChargeKwh: h.PV,
+		})
+	}
+	flush()
+	return gain
+}
+
 // AggregateMonth folds the persisted daily + hourly records of one month
 // into a MonthlyTotals + per-day breakdown + ESS marginality heatmap.
 //
@@ -784,6 +853,7 @@ func AggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly
 	}
 	totals.RdnMaxUahPerKwh = monthRdnMax
 	totals.PvExportPotential = pvExportPotential
+	totals.PvEssExportPotential = pvExportPotential + pvEssArbitrageGain(hourly, ratingsOn, paramsFor)
 	totals.RevenueTotal = totals.RevenuePvExport + totals.RevenuePvSelf + totals.RevenueEssExport + totals.RevenueEssSelf
 	totals.ExpenseTotal = totals.ExpenseGridCharge
 	totals.Ebitda = totals.RevenueTotal - totals.ExpenseTotal

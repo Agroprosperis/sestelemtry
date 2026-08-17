@@ -116,6 +116,11 @@ export function MonthlyKpis({ totals, scope = 'month' }: { totals: EconomicsMont
     `Увесь виробіток СЕС ${w.per} (${formatMwh(totals.pv_kwh)}), оцінений ціною експорту тієї самої години — РДН мінус знижка, з ПДВ. ` +
     'Це орієнтир «якби продавали все в мережу»: без УЗЕ і без власного споживання. ' +
     `Фактично проєкт дає ${formatUah(totals.ebitda_uah)}, бо кіловат-година, залишена на об’єкті, заміщає дорожчий імпорт, а УЗЕ переносить її на дорожчі години.`
+  const essArbitrageGain = totals.pv_ess_export_potential_uah - totals.pv_export_potential_uah
+  const essPotentialTip =
+    'Те саме «все в мережу», але УЗЕ працює максимально ефективно: заряджається лише від СЕС і продає накопичене в найдорожчі години ' +
+    '(ідеальний графік із знанням цін наперед, у межах ємності та потужності своєї доби, з урахуванням ККД і зносу). ' +
+    'Різниця з «Потенціал СЕС» — максимум, який арбітраж УЗЕ здатен додати до простого продажу в мережу.'
 
   return (
     <section className="economics-kpis" aria-label={`Ключові показники ${w.of}`}>
@@ -149,6 +154,18 @@ export function MonthlyKpis({ totals, scope = 'month' }: { totals: EconomicsMont
           <span className="kpi-value">{formatUah(totals.pv_export_potential_uah)}</span>
           <span className="kpi-sub">
             весь виробіток у мережу · {formatMwh(totals.pv_kwh)}
+          </span>
+        </div>
+        <div className="kpi-card">
+          <span className="kpi-label">
+            Потенціал СЕС + УЗЕ
+            <OptimumInfo tip={essPotentialTip} />
+          </span>
+          <span className="kpi-value">{formatUah(totals.pv_ess_export_potential_uah)}</span>
+          <span className="kpi-sub">
+            {Number.isFinite(essArbitrageGain)
+              ? `УЗЕ додає +${formatUah(essArbitrageGain)}`
+              : 'перенесення продажу на пік'}
           </span>
         </div>
       </div>

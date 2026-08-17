@@ -177,6 +177,7 @@ func AggregatePeriod(
 		totals.RevenueEssExport += mt.RevenueEssExport
 		totals.RevenueEssSelf += mt.RevenueEssSelf
 		totals.PvExportPotential += mt.PvExportPotential
+		totals.PvEssExportPotential += mt.PvEssExportPotential
 		totals.ExpenseGridCharge += mt.ExpenseGridCharge
 		totals.EssWithdrawnCost += mt.EssWithdrawnCost
 		totals.EssRealizedProfit += mt.EssRealizedProfit

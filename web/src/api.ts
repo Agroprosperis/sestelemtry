@@ -663,6 +663,11 @@ export type EconomicsMonthlyTotals = {
   // everything to the grid. A yardstick, not a revenue leg.
   pv_export_potential_uah: number
 
+  // The same merchant world with the battery allowed to time-shift the
+  // yield to pricier hours (PV charging only, perfect foresight, ККД and
+  // wear applied). Always ≥ pv_export_potential_uah.
+  pv_ess_export_potential_uah: number
+
   // What the grid import actually cost. Not an EBITDA expense line —
   // only the battery-charging part (expense_grid_charge_uah) is.
   import_cost_uah: number

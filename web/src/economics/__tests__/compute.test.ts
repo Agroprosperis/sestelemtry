@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { dailyTotals, hourEconomics, deriveDerivedFlows, type HourEconomicsRow, type HourFlows } from '../compute'
+import {
+  dailyTotals,
+  hourEconomics,
+  deriveDerivedFlows,
+  pvEssArbitrageGain,
+  type HourEconomicsRow,
+  type HourFlows,
+} from '../compute'
 import { rollHour, ZERO_ESS_STATE, type EssState } from '../costBasis'
 import { DEFAULT_TARIFFS } from '../tariffs'
 
@@ -536,5 +543,64 @@ describe('dailyTotals (cost-basis aggregates)', () => {
     // EOD must read hour 21's End, not silently coalesce to 0.
     expect(totals.essAvgCostBasisUahPerKwhEod).toBeCloseTo(4, 6)
     expect(totals.essResidualKwhEod).toBeCloseTo(100, 6)
+  })
+})
+
+describe('pvEssArbitrageGain', () => {
+  // Merchant tariffs mirroring the Go test: no export discount and no
+  // VAT so export price == RDN, rte 0.81 giving exact half-cycle
+  // efficiencies (√0.81 = 0.9).
+  const merchantTariffs = {
+    ...DEFAULT_TARIFFS,
+    exportDiscount: 0,
+    includeVat: false,
+    degradationUahPerKwh: 0,
+    essCapacityKwh: 100,
+    essPowerLimitKw: 100,
+    roundtripEfficiency: 0.81,
+  }
+
+  function mkRow(hour: number, rdn: number | null, pv: number): HourEconomicsRow {
+    const flow: HourFlows = { ...emptyFlow, pv }
+    return {
+      hour,
+      hourStart: `2026-06-01T${String(hour).padStart(2, '0')}:00:00+03:00`,
+      rdnUahPerKwh: rdn,
+      flow,
+      economics: hourEconomics(rdn ?? 0, flow, merchantTariffs),
+      essRemainingKwhStart: null,
+      essCostBasisUahStart: null,
+      essAvgCostUahPerKwhStart: null,
+      essWithdrawnCostUah: null,
+      essRealizedProfitUah: null,
+      essCostBasisUahEnd: null,
+      essAvgCostUahPerKwhEnd: null,
+      essResidualKwhEnd: null,
+    }
+  }
+
+  it('shifts the cheap midday yield to the expensive evening', () => {
+    // 90 kWh at export 2, evening at export 10: storing everything is
+    // worth 90·0.81·10 = 729 against 90·2 = 180 sold as produced.
+    const rows = [mkRow(12, 2, 90), mkRow(20, 10, 0)]
+    expect(pvEssArbitrageGain(rows, merchantTariffs)).toBeCloseTo(549, 6)
+  })
+
+  it('stays at zero when prices fall over the day', () => {
+    const rows = [mkRow(12, 10, 90), mkRow(20, 2, 0)]
+    expect(pvEssArbitrageGain(rows, merchantTariffs)).toBe(0)
+  })
+
+  it('stays at zero when wear eats the whole spread', () => {
+    const rows = [mkRow(12, 2, 90), mkRow(20, 10, 0)]
+    const wornOut = { ...merchantTariffs, degradationUahPerKwh: 10 }
+    expect(pvEssArbitrageGain(rows, wornOut)).toBe(0)
+  })
+
+  it('is zero without a battery and ignores priceless hours', () => {
+    const rows = [mkRow(12, 2, 90), mkRow(20, 10, 0)]
+    expect(pvEssArbitrageGain(rows, { ...merchantTariffs, essCapacityKwh: 0 })).toBe(0)
+    const priceless = [mkRow(12, 2, 90), mkRow(20, null, 0)]
+    expect(pvEssArbitrageGain(priceless, merchantTariffs)).toBe(0)
   })
 })

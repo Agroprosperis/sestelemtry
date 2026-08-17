@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { refreshDAMPrices } from '../api'
 import { useOrganizationParam } from '../dashboard/hooks/useOrganizationParam'
-import { dailyTotals } from './compute'
+import { dailyTotals, pvEssArbitrageGain } from './compute'
 import { EconomicsDamPricesModal } from './components/EconomicsDamPricesModal'
 import { EconomicsHeader, type EconomicsRange } from './components/EconomicsHeader'
 import { EconomicsKpis } from './components/EconomicsKpis'
@@ -200,6 +200,10 @@ export function EconomicsPage() {
   })
 
   const totals = useMemo(() => dailyTotals(data.rows), [data.rows])
+  const pvEssPotential = useMemo(
+    () => totals.pvExportPotential + pvEssArbitrageGain(data.rows, tariffs),
+    [totals, data.rows, tariffs],
+  )
 
   // month is the YYYY-MM derived from the day anchor.
   const month = date.slice(0, 7)
@@ -441,7 +445,7 @@ export function EconomicsPage() {
             <p className="economics-loading">Завантаження…</p>
           ) : (
             <>
-              <EconomicsKpis totals={totals} tariffs={tariffs} />
+              <EconomicsKpis totals={totals} tariffs={tariffs} pvEssPotential={pvEssPotential} />
               <EconomicsTable rows={data.rows} organizationID={organizationID} date={date} />
             </>
           )}

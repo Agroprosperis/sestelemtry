@@ -628,11 +628,11 @@
   gap: 12px;
 }
 
-/* Five headline cards on one line: the floor is what fits them side by
+/* Six headline cards on one line: the floor is what fits them side by
    side on a 1280-wide laptop without wrapping a card onto its own row. */
 .kpi-strip {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(196px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
   gap: 12px;
 }
 
