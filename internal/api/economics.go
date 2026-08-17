@@ -190,6 +190,7 @@ func (b *economicsBackend) LoadHourlyRange(ctx context.Context, orgID string, fr
 			ImportPrice:          row.ImportPrice,
 			ExportPrice:          row.ExportPrice,
 			GridImport:           row.ImportTotal,
+			PV:                   row.PVGeneration,
 			PVToLoad:             row.PVToLoad,
 			PVToGrid:             row.PVToGrid,
 			PVToEss:              row.PVToEss,

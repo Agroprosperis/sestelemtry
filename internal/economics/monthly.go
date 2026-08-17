@@ -29,6 +29,11 @@ type HourlyRecord struct {
 	ExportPrice float64
 	GridImport  float64
 
+	// PV is the hour's generation counter. It is not the sum of the three
+	// PV split fields below: a day with phantom load has PVToLoad scaled
+	// down by rebalanceDailyLoad while the counter stays as measured.
+	PV float64
+
 	PVToLoad   float64
 	PVToGrid   float64
 	PVToEss    float64
@@ -541,7 +546,7 @@ func AggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly
 		if h.Rdn != nil {
 			// Priceless hours are skipped here as everywhere else: without
 			// an RDN there is no export price to value the yield at.
-			pvExportPotential += (h.PVToLoad + h.PVToGrid + h.PVToEss) * h.ExportPrice
+			pvExportPotential += h.PV * h.ExportPrice
 			acc := dayRdn[key]
 			if acc == nil {
 				acc = &rdnAcc{}

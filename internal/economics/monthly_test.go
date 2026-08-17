@@ -184,14 +184,17 @@ func TestAggregateMonthPvExportPotential(t *testing.T) {
 		// potential must sit far above the exported leg.
 		{
 			HourStart: day.Add(12 * time.Hour), Rdn: floatPtr(4), ImportPrice: 9, ExportPrice: 4,
-			PVToLoad: 100, PVToEss: 40, PVToGrid: 10,
+			PV: 150, PVToLoad: 100, PVToEss: 40, PVToGrid: 10,
 		},
+		// A rebalanced hour: PVToLoad was scaled down for phantom load, so
+		// the split sums to 90 while the counter still reads 100. The
+		// counter is what the plant could have sold.
 		{
 			HourStart: day.Add(16 * time.Hour), Rdn: floatPtr(6), ImportPrice: 11, ExportPrice: 6,
-			PVToLoad: 80, PVToGrid: 20,
+			PV: 100, PVToLoad: 70, PVToGrid: 20,
 		},
 		// No RDN: nothing to value this hour's yield at.
-		{HourStart: day.Add(17 * time.Hour), PVToLoad: 10},
+		{HourStart: day.Add(17 * time.Hour), PV: 10, PVToLoad: 10},
 	}
 
 	got := AggregateMonth("2026-06", loc, days, hourly, fixedRatings(100, 0.6, 0, 0))

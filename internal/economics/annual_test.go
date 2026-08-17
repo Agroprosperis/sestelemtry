@@ -222,11 +222,11 @@ func TestAggregateYearSumsPvExportPotential(t *testing.T) {
 	hourly := []HourlyRecord{
 		{
 			HourStart: apr.Add(12 * time.Hour), Rdn: floatPtr(5), ImportPrice: 10, ExportPrice: 5,
-			PVToLoad: 60, PVToGrid: 30,
+			PV: 90, PVToLoad: 60, PVToGrid: 30,
 		},
 		{
 			HourStart: jul.Add(13 * time.Hour), Rdn: floatPtr(3), ImportPrice: 8, ExportPrice: 3,
-			PVToLoad: 120, PVToEss: 50, PVToGrid: 30,
+			PV: 200, PVToLoad: 120, PVToEss: 50, PVToGrid: 30,
 		},
 	}
 
