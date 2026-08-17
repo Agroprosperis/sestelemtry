@@ -658,6 +658,11 @@ export type EconomicsMonthlyTotals = {
   expense_total_uah: number
   ebitda_uah: number
 
+  // The whole PV yield valued at the export price of the hour that
+  // produced it: the plant with no battery and no on-site load, selling
+  // everything to the grid. A yardstick, not a revenue leg.
+  pv_export_potential_uah: number
+
   // What the grid import actually cost. Not an EBITDA expense line —
   // only the battery-charging part (expense_grid_charge_uah) is.
   import_cost_uah: number

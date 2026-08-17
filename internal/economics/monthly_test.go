@@ -170,6 +170,38 @@ func TestAggregateMonthSumsAndWeightedPrices(t *testing.T) {
 	}
 }
 
+// TestAggregateMonthPvExportPotential checks the "sell everything to the
+// grid" yardstick: the whole PV yield priced at the export price of the
+// hour that produced it, regardless of where the energy actually went.
+// Hours without an RDN carry no export price and are skipped, as
+// everywhere else in the rollup.
+func TestAggregateMonthPvExportPotential(t *testing.T) {
+	loc := time.UTC
+	day := time.Date(2026, 6, 1, 0, 0, 0, 0, loc)
+	days := []DailyRecord{{Day: day, IsFinal: true, Totals: DailyTotals{HoursWithData: 24, PV: 260}}}
+	hourly := []HourlyRecord{
+		// Midday: only a sliver of the 150 kWh went to the grid, so the
+		// potential must sit far above the exported leg.
+		{
+			HourStart: day.Add(12 * time.Hour), Rdn: floatPtr(4), ImportPrice: 9, ExportPrice: 4,
+			PVToLoad: 100, PVToEss: 40, PVToGrid: 10,
+		},
+		{
+			HourStart: day.Add(16 * time.Hour), Rdn: floatPtr(6), ImportPrice: 11, ExportPrice: 6,
+			PVToLoad: 80, PVToGrid: 20,
+		},
+		// No RDN: nothing to value this hour's yield at.
+		{HourStart: day.Add(17 * time.Hour), PVToLoad: 10},
+	}
+
+	got := AggregateMonth("2026-06", loc, days, hourly, fixedRatings(100, 0.6, 0, 0))
+
+	want := 150*4.0 + 100*6.0
+	if math.Abs(got.Totals.PvExportPotential-want) > 1e-6 {
+		t.Fatalf("PvExportPotential = %v, want %v", got.Totals.PvExportPotential, want)
+	}
+}
+
 // TestHeatmapMarginIgnoresSameHourCharging pins the fix for the cells
 // that used to read minus thousands of UAH/kWh: an hour that charges a
 // full pack while trickling a little back out must be judged on what

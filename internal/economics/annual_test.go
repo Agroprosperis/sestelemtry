@@ -206,6 +206,41 @@ func TestAnnualHeatmapSumsHourAcrossDays(t *testing.T) {
 	}
 }
 
+// TestAggregateYearSumsPvExportPotential checks that the "sell
+// everything to the grid" yardstick carries into the year: each month
+// prices its own yield at its own hourly export prices, and the year is
+// the plain sum.
+func TestAggregateYearSumsPvExportPotential(t *testing.T) {
+	loc := time.UTC
+	apr := time.Date(2026, 4, 10, 0, 0, 0, 0, loc)
+	jul := time.Date(2026, 7, 10, 0, 0, 0, 0, loc)
+
+	days := []DailyRecord{
+		{Day: apr, IsFinal: true, Totals: DailyTotals{HoursWithData: 24, PV: 90}},
+		{Day: jul, IsFinal: true, Totals: DailyTotals{HoursWithData: 24, PV: 200}},
+	}
+	hourly := []HourlyRecord{
+		{
+			HourStart: apr.Add(12 * time.Hour), Rdn: floatPtr(5), ImportPrice: 10, ExportPrice: 5,
+			PVToLoad: 60, PVToGrid: 30,
+		},
+		{
+			HourStart: jul.Add(13 * time.Hour), Rdn: floatPtr(3), ImportPrice: 8, ExportPrice: 3,
+			PVToLoad: 120, PVToEss: 50, PVToGrid: 30,
+		},
+	}
+
+	got := AggregateYear("2026", loc, days, hourly, fixedRatings(100, 0.6, 0, 0))
+
+	want := 90*5.0 + 200*3.0
+	if math.Abs(got.Totals.PvExportPotential-want) > 1e-6 {
+		t.Fatalf("PvExportPotential = %v, want %v", got.Totals.PvExportPotential, want)
+	}
+	if math.Abs(got.Months[3].Totals.PvExportPotential-450) > 1e-6 {
+		t.Fatalf("April PvExportPotential = %v, want 450", got.Months[3].Totals.PvExportPotential)
+	}
+}
+
 // TestAggregatePeriodSlidingWindow checks that an arbitrary month window
 // crossing a year boundary buckets quarters by (year, quarter) in order
 // and sums the totals over only the windowed months.

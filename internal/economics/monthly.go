@@ -173,6 +173,15 @@ type MonthlyTotals struct {
 	ExpenseTotal      float64
 	Ebitda            float64
 
+	// PvExportPotential values the whole PV yield at the export price of
+	// the hour that produced it — what the plant would have earned selling
+	// everything to the grid, with no battery and no on-site load. It is
+	// the yardstick the project is measured against, not a revenue leg:
+	// RevenuePvExport covers only the part that physically went to the
+	// grid. Summed per hour because the export price follows the RDN, so a
+	// daily average would price midday yield at evening rates.
+	PvExportPotential float64
+
 	EssWithdrawnCost   float64
 	EssRealizedProfit  float64
 	EssDegradationCost float64
@@ -500,7 +509,7 @@ func AggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly
 	// same DP schedule.
 	dayOpts := buildDayOpts(hourly, loc, isBadHour)
 	margins := make(map[string][]*MarginHour)
-	var monthRdnNum, monthRdnDen, monthRdnMax float64
+	var monthRdnNum, monthRdnDen, monthRdnMax, pvExportPotential float64
 	haveRdnMax := false
 
 	for _, h := range hourly {
@@ -530,6 +539,9 @@ func AggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly
 			}
 		}
 		if h.Rdn != nil {
+			// Priceless hours are skipped here as everywhere else: without
+			// an RDN there is no export price to value the yield at.
+			pvExportPotential += (h.PVToLoad + h.PVToGrid + h.PVToEss) * h.ExportPrice
 			acc := dayRdn[key]
 			if acc == nil {
 				acc = &rdnAcc{}
@@ -766,6 +778,7 @@ func AggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly
 		totals.RdnAvgUahPerKwh = monthRdnNum / monthRdnDen
 	}
 	totals.RdnMaxUahPerKwh = monthRdnMax
+	totals.PvExportPotential = pvExportPotential
 	totals.RevenueTotal = totals.RevenuePvExport + totals.RevenuePvSelf + totals.RevenueEssExport + totals.RevenueEssSelf
 	totals.ExpenseTotal = totals.ExpenseGridCharge
 	totals.Ebitda = totals.RevenueTotal - totals.ExpenseTotal

@@ -365,6 +365,12 @@ type EconomicsMonthlyTotals struct {
 	ExpenseTotalUah      float64 `json:"expense_total_uah"`
 	EbitdaUah            float64 `json:"ebitda_uah"`
 
+	// PvExportPotentialUah values the whole PV yield at the export price
+	// of the hour that produced it — the plant with no battery and no
+	// on-site load, selling everything to the grid. A yardstick for the
+	// dashboard, not a revenue leg.
+	PvExportPotentialUah float64 `json:"pv_export_potential_uah"`
+
 	// ImportCostUah is what the grid import actually cost over the
 	// period. It is deliberately NOT an EBITDA expense line: the part
 	// consumed directly is already priced in through the
@@ -720,6 +726,7 @@ func monthlyTotalsToJSON(t economics.MonthlyTotals) EconomicsMonthlyTotals {
 		ExpenseGridChargeUah:        t.ExpenseGridCharge,
 		ExpenseTotalUah:             t.ExpenseTotal,
 		EbitdaUah:                   t.Ebitda,
+		PvExportPotentialUah:        t.PvExportPotential,
 		ImportCostUah:               importCostUah(t.AvgImportPrice, t.GridImport),
 		EssWithdrawnCostUah:         t.EssWithdrawnCost,
 		EssRealizedProfitUah:        t.EssRealizedProfit,

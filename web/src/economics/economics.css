@@ -628,14 +628,16 @@
   gap: 12px;
 }
 
+/* Five headline cards on one line: the floor is what fits them side by
+   side on a 1280-wide laptop without wrapping a card onto its own row. */
 .kpi-strip {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(196px, 1fr));
   gap: 12px;
 }
 
 /* The secondary row carries six metrics that belong on one line, so its
-   track floor is tighter than the primary strip's four headline cards. */
+   track floor is tighter than the primary strip's headline cards. */
 .kpi-secondary-strip {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(176px, 1fr));

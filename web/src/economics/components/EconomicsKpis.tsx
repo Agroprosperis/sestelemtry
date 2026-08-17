@@ -127,6 +127,20 @@ export function EconomicsKpis({ totals, tariffs }: Props) {
             )}
           </span>
         </div>
+        <div
+          className="kpi-card"
+          title={
+            'Увесь виробіток СЕС за добу, оцінений ціною експорту тієї самої години' +
+            ' (РДН мінус знижка, з ПДВ): скільки б заробили, продавши все в мережу —' +
+            ' без УЗЕ і без власного споживання.' +
+            ' Орієнтир для порівняння з EBITDA: кіловат-година, залишена на об’єкті,' +
+            ' заміщає дорожчий імпорт, а УЗЕ переносить її на дорожчі години.'
+          }
+        >
+          <span className="kpi-label">Потенціал СЕС</span>
+          <span className="kpi-value">{formatUah(totals.pvExportPotential)}</span>
+          <span className="kpi-sub">весь виробіток у мережу · {formatKwh(totals.pv)}</span>
+        </div>
       </div>
 
       <div className="kpi-secondary-strip">

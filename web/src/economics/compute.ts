@@ -186,6 +186,12 @@ export type DailyTotals = {
   expenseGridCharge: number
   expenseTotal: number
   ebitda: number
+  // The whole PV yield valued at the export price of the hour that
+  // produced it: what a bare plant with no battery and no on-site load
+  // would have earned selling everything to the grid. A yardstick, not
+  // a revenue leg — `revenuePvExport` covers only the part that
+  // physically went to the grid.
+  pvExportPotential: number
   // Cost-basis aggregates from `costBasis.rollHour`. They are
   // independent of the EBITDA framing above (which uses spot
   // prices everywhere) and represent the ESS-only cash effect
@@ -247,6 +253,7 @@ export function dailyTotals(rows: Array<HourEconomicsRow | null>): DailyTotals {
     expenseGridCharge: 0,
     expenseTotal: 0,
     ebitda: 0,
+    pvExportPotential: 0,
     essWithdrawnCostUah: 0,
     essRealizedProfitUah: 0,
     essDegradationCostUah: 0,
@@ -290,6 +297,7 @@ export function dailyTotals(rows: Array<HourEconomicsRow | null>): DailyTotals {
     acc.revenueEssExport += row.flow.essToGrid * exportPrice
     acc.revenueEssSelf += row.flow.essToLoad * importPrice
     acc.expenseGridCharge += row.flow.gridToEss * importPrice
+    acc.pvExportPotential += row.flow.pv * exportPrice
 
     importLoadKwh += row.flow.gridImport
     exportKwh += row.flow.gridExport

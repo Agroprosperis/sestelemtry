@@ -226,6 +226,24 @@ describe('dailyTotals (spec calibration)', () => {
     expect(totals.hoursMissingPrice).toBe(2)
   })
 
+  it('values the whole PV yield at the export price, not just the exported part', () => {
+    const rows = buildSpecCalibrationProfile()
+    const totals = dailyTotals(rows)
+    const exportPrice = rows[0]!.economics.exportPriceUahPerKwh
+    // The profile exports 917.6 of 2660.4 kWh, so the potential has to
+    // sit well above the revenuePvExport leg it is often confused with.
+    expect(totals.pvExportPotential).toBeCloseTo(totals.pv * exportPrice, 6)
+    expect(totals.pvExportPotential).toBeGreaterThan(totals.revenuePvExport)
+  })
+
+  it('skips priceless hours in the PV potential', () => {
+    const rows = buildSpecCalibrationProfile()
+    const full = dailyTotals(rows).pvExportPotential
+    rows[5] = { ...rows[5]!, rdnUahPerKwh: null }
+    const partial = dailyTotals(rows).pvExportPotential
+    expect(partial).toBeCloseTo((full * 23) / 24, 6)
+  })
+
   it('EBITDA equals revenueTotal − expenseTotal by construction', () => {
     const totals = dailyTotals(buildSpecCalibrationProfile())
     expect(totals.ebitda).toBeCloseTo(totals.revenueTotal - totals.expenseTotal, 6)

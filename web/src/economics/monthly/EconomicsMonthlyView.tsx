@@ -107,6 +107,15 @@ export function MonthlyKpis({ totals, scope = 'month' }: { totals: EconomicsMont
     `Уся куплена з мережі електроенергія (${formatUah(totals.import_cost_uah)}), поділена на все споживання ${w.of} (${formatMwh(totals.load_kwh)}). ` +
     'Виходить дешевше за ринкову ціну імпорту, бо частину споживання безкоштовно закривають СЕС та УЗЕ. ' +
     'Для порівняння наведено ціну без проєкту — якби всі кіловат-години купували з мережі.'
+  // The counterfactual the project is judged against: a bare PV plant
+  // selling everything at the spot export price. It normally comes out
+  // below EBITDA, because a kWh kept on site displaces the import price,
+  // which carries distribution, transmission, margin and VAT on top of
+  // the same RDN the export price is discounted from.
+  const potentialTip =
+    `Увесь виробіток СЕС ${w.per} (${formatMwh(totals.pv_kwh)}), оцінений ціною експорту тієї самої години — РДН мінус знижка, з ПДВ. ` +
+    'Це орієнтир «якби продавали все в мережу»: без УЗЕ і без власного споживання. ' +
+    `Фактично проєкт дає ${formatUah(totals.ebitda_uah)}, бо кіловат-година, залишена на об’єкті, заміщає дорожчий імпорт, а УЗЕ переносить її на дорожчі години.`
 
   return (
     <section className="economics-kpis" aria-label={`Ключові показники ${w.of}`}>
@@ -131,6 +140,16 @@ export function MonthlyKpis({ totals, scope = 'month' }: { totals: EconomicsMont
           <span className="kpi-label">Реалізований ефект УЗЕ</span>
           <span className="kpi-value">{formatUah(totals.ess_net_uah)}</span>
           <span className="kpi-sub">арбітраж РДН, пік, зменшення імпорту</span>
+        </div>
+        <div className="kpi-card">
+          <span className="kpi-label">
+            Потенціал СЕС
+            <OptimumInfo tip={potentialTip} />
+          </span>
+          <span className="kpi-value">{formatUah(totals.pv_export_potential_uah)}</span>
+          <span className="kpi-sub">
+            весь виробіток у мережу · {formatMwh(totals.pv_kwh)}
+          </span>
         </div>
       </div>
 
