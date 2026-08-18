@@ -714,9 +714,13 @@
   left: 0;
   z-index: 30;
   display: none;
-  grid-template-columns: 1.5fr 1fr;
+  grid-template-columns: 1.05fr 1fr;
   gap: 18px;
-  min-width: 320px;
+  /* Wide enough for «СЕС → споживання 150 859 грн» and «Заряд УЗЕ із
+     мережі» on one line each: the host card shrank to ~170px when the
+     strip grew to six cards, and a popover sized off it wrapped every
+     second row. */
+  min-width: 442px;
   padding: 12px 14px;
   background: #ffffff;
   border: 1px solid #e4e9f0;
@@ -734,6 +738,7 @@
 .economics-ebitda-col-head {
   display: flex;
   justify-content: space-between;
+  align-items: baseline;
   gap: 12px;
   font-size: 12px;
   font-weight: 700;
@@ -747,10 +752,19 @@
 .economics-ebitda-line {
   display: flex;
   justify-content: space-between;
+  align-items: baseline;
   gap: 12px;
   font-size: 12px;
   padding: 3px 0;
   color: #475569;
+}
+
+/* Amounts never break: «57 079 грн» split across two lines reads like
+   two different numbers. The label is the flexible side — it may wrap,
+   its value stays whole and right-aligned under the column head. */
+.economics-ebitda-col-head span:last-child,
+.economics-ebitda-line b {
+  white-space: nowrap;
 }
 
 .economics-ebitda-line b {
