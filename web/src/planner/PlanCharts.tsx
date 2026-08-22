@@ -1,8 +1,11 @@
+import type { ReactNode } from 'react'
 import {
   Bar,
   Cell,
   ComposedChart,
+  LabelList,
   Line,
+  ReferenceArea,
   ReferenceLine,
   ResponsiveContainer,
   Tooltip,
@@ -14,13 +17,14 @@ import type { PlanDayEffect, PlanPreview, PlanPreviewHour } from './plannerClien
 const COLORS = {
   rdn: '#94a3b8',
   pv: '#f59e0b',
-  load: '#0ea5e9',
+  load: '#ea580c',
   discharge: '#16a34a',
   chargePv: '#f59e0b',
   chargeGrid: '#8b5cf6',
   soc: '#0f172a',
   reserve: '#dc2626',
   tomorrow: '#8b5cf6',
+  todayZone: '#fbbf24',
   positive: '#16a34a',
   negative: '#dc2626',
   total: '#2563eb',
@@ -38,28 +42,35 @@ function firstTomorrowTs(hours: PlanPreviewHour[]): string | undefined {
   return hours.find((h) => h.tomorrow)?.ts
 }
 
-const fmt1 = (v: number) => (Math.round(v * 10) / 10).toLocaleString('uk-UA')
-const fmtUah = (v: number) =>
-  `${Math.round(v).toLocaleString('uk-UA')} грн`
+function lastTodayTs(hours: PlanPreviewHour[]): string | undefined {
+  const today = hours.filter((h) => !h.tomorrow)
+  return today.length > 0 ? today[today.length - 1].ts : undefined
+}
 
-// ContextChart — «РДН + прогноз СЕС + план-load» (spec step-context):
+const fmt1 = (v: number) => (Math.round(v * 10) / 10).toLocaleString('uk-UA')
+const fmtUah = (v: number) => `${Math.round(v).toLocaleString('uk-UA')} грн`
+
+// ContextChart — «РДН + прогноз СЕС + load» (mockup plan-forecast-card):
 // price columns on the right axis, PV forecast and planned load lines
-// on the kW axis, with the «завтра» divider.
-export function ContextChart({ preview }: { preview: PlanPreview }) {
+// on the kW axis, the amber «решта сьогодні» zone and the violet
+// «завтра» divider. Children render inside the card (weather strip,
+// legend/stats line).
+export function ContextChart({ preview, children }: { preview: PlanPreview; children?: ReactNode }) {
   const data = preview.hours.map((h) => ({
     ts: h.ts,
-    label: hourLabel(h.ts, preview.timezone),
     rdn: h.rdn_uah_per_kwh ?? null,
     pv: h.pv_kw,
     load: h.load_kw,
   }))
   const divider = firstTomorrowTs(preview.hours)
+  const todayEnd = lastTodayTs(preview.hours)
+  const tickOf = (ts: string) => hourLabel(ts, preview.timezone)
   return (
     <div className="planner-card">
-      <h2>Контекст: ціни РДН, прогноз СЕС і план споживання</h2>
+      <h2>РДН + прогноз СЕС + load · від зараз до кінця завтра</h2>
       <ResponsiveContainer width="100%" height={230}>
         <ComposedChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
-          <XAxis dataKey="label" tick={{ fontSize: 10 }} interval={1} />
+          <XAxis dataKey="ts" tick={{ fontSize: 10 }} interval={1} tickFormatter={tickOf} />
           <YAxis
             yAxisId="kw"
             tick={{ fontSize: 10 }}
@@ -79,29 +90,24 @@ export function ContextChart({ preview }: { preview: PlanPreview }) {
               if (name === 'РДН') return [`${fmt1(v)} грн/кВт·год`, name]
               return [`${fmt1(v)} кВт`, name]
             }}
-            labelFormatter={(l) => `${l}:00`}
+            labelFormatter={(ts) => `${tickOf(String(ts))}:00`}
           />
+          {todayEnd && (
+            <ReferenceArea
+              yAxisId="kw"
+              x1={data[0].ts}
+              x2={todayEnd}
+              fill={COLORS.todayZone}
+              fillOpacity={0.08}
+            />
+          )}
           <Bar yAxisId="uah" dataKey="rdn" name="РДН" fill={COLORS.rdn} opacity={0.45} />
-          <Line
-            yAxisId="kw"
-            dataKey="pv"
-            name="СЕС (прогноз)"
-            stroke={COLORS.pv}
-            strokeWidth={2}
-            dot={false}
-          />
-          <Line
-            yAxisId="kw"
-            dataKey="load"
-            name="Load (план)"
-            stroke={COLORS.load}
-            strokeWidth={2}
-            dot={false}
-          />
+          <Line yAxisId="kw" dataKey="pv" name="СЕС (прогноз)" stroke={COLORS.pv} strokeWidth={2} dot={false} />
+          <Line yAxisId="kw" dataKey="load" name="Load (план)" stroke={COLORS.load} strokeWidth={2} dot={false} />
           {divider && (
             <ReferenceLine
               yAxisId="kw"
-              x={hourLabel(divider, preview.timezone)}
+              x={divider}
               stroke={COLORS.tomorrow}
               strokeDasharray="5 4"
               label={{ value: 'завтра', fontSize: 11, fill: COLORS.tomorrow, position: 'top' }}
@@ -109,6 +115,7 @@ export function ContextChart({ preview }: { preview: PlanPreview }) {
           )}
         </ComposedChart>
       </ResponsiveContainer>
+      {children}
     </div>
   )
 }
@@ -141,8 +148,9 @@ export function WeatherStrip({ preview }: { preview: PlanPreview }) {
 }
 
 // PlanChart — step 3: hourly ESS dispatch (discharge up, charge down,
-// grid/PV charge split), the SOC line with the reserve floor and the
-// RDN price backdrop.
+// grid/PV charge split), income labels above meaningful discharge
+// hours, the SOC line with the reserve floor, the RDN price backdrop
+// and the amber «решта сьогодні» zone.
 export function PlanChart({
   preview,
   onHourClick,
@@ -152,32 +160,35 @@ export function PlanChart({
 }) {
   const data = preview.hours.map((h) => ({
     ts: h.ts,
-    label: hourLabel(h.ts, preview.timezone),
     rdn: h.rdn_uah_per_kwh ?? null,
     discharge: h.discharge_kwh,
     chargePv: -h.charge_pv_kwh,
     chargeGrid: -h.charge_grid_kwh,
     soc: h.soc_end_pct,
+    incomeUah: h.discharge_kwh * h.import_uah_per_kwh,
   }))
+  const maxIncome = Math.max(...data.map((d) => d.incomeUah), 0)
   const divider = firstTomorrowTs(preview.hours)
+  const todayEnd = lastTodayTs(preview.hours)
+  const tickOf = (ts: string) => hourLabel(ts, preview.timezone)
   return (
     <div className="planner-card">
-      <h2>Крок 3 — план заряд/розряд УЗЕ та SOC</h2>
+      <h2>План заряд/розряд УЗЕ та SOC</h2>
       <p className="planner-card-sub">
-        Зелений — розряд на споживання; бурштиновий — заряд від СЕС; фіолетовий — заряд з мережі.
-        Чорна лінія — SOC, червона пунктирна — економічний резерв.
+        Зелений — розряд на споживання (підписи — дохід години); бурштиновий — заряд від СЕС; фіолетовий —
+        заряд з мережі. Чорна лінія — SOC, червона пунктирна — економічний резерв. Клік по годині — деталі.
       </p>
-      <ResponsiveContainer width="100%" height={280}>
+      <ResponsiveContainer width="100%" height={290}>
         <ComposedChart
           data={data}
-          margin={{ top: 8, right: 8, bottom: 0, left: 0 }}
+          margin={{ top: 16, right: 8, bottom: 0, left: 0 }}
           stackOffset="sign"
           onClick={(state) => {
             const idx = (state as { activeTooltipIndex?: number } | null)?.activeTooltipIndex
             if (onHourClick && idx != null && preview.hours[idx]) onHourClick(preview.hours[idx])
           }}
         >
-          <XAxis dataKey="label" tick={{ fontSize: 10 }} interval={1} />
+          <XAxis dataKey="ts" tick={{ fontSize: 10 }} interval={1} tickFormatter={tickOf} />
           <YAxis
             yAxisId="kw"
             tick={{ fontSize: 10 }}
@@ -193,10 +204,50 @@ export function PlanChart({
               if (name === 'РДН') return [`${fmt1(v)} грн/кВт·год`, name]
               return [`${fmt1(Math.abs(v))} кВт·год`, name]
             }}
-            labelFormatter={(l) => `${l}:00`}
+            labelFormatter={(ts) => `${tickOf(String(ts))}:00`}
           />
+          {todayEnd && (
+            <ReferenceArea
+              yAxisId="kw"
+              x1={data[0].ts}
+              x2={todayEnd}
+              fill={COLORS.todayZone}
+              fillOpacity={0.08}
+            />
+          )}
           <Bar yAxisId="rdn" dataKey="rdn" name="РДН" fill={COLORS.rdn} opacity={0.18} />
-          <Bar yAxisId="kw" dataKey="discharge" name="Розряд" stackId="ess" fill={COLORS.discharge} />
+          <Bar yAxisId="kw" dataKey="discharge" name="Розряд" stackId="ess" fill={COLORS.discharge}>
+            <LabelList
+              dataKey="incomeUah"
+              position="top"
+              content={(props) => {
+                const { x, y, width, value, index } = props as {
+                  x?: number
+                  y?: number
+                  width?: number
+                  value?: number
+                  index?: number
+                }
+                // Підписуємо лише вагомі години (≥ 25% максимального
+                // доходу), інакше графік перетворюється на шум.
+                if (!value || value < Math.max(200, maxIncome * 0.25)) return null
+                const row = index != null ? data[index] : null
+                if (!row || row.discharge <= 0) return null
+                return (
+                  <text
+                    x={(x ?? 0) + (width ?? 0) / 2}
+                    y={(y ?? 0) - 4}
+                    textAnchor="middle"
+                    fontSize={9}
+                    fill="#15803d"
+                    fontWeight={700}
+                  >
+                    +{Math.round(value).toLocaleString('uk-UA')}₴
+                  </text>
+                )
+              }}
+            />
+          </Bar>
           <Bar yAxisId="kw" dataKey="chargePv" name="Заряд від СЕС" stackId="ess" fill={COLORS.chargePv} />
           <Bar yAxisId="kw" dataKey="chargeGrid" name="Заряд з мережі" stackId="ess" fill={COLORS.chargeGrid} />
           <Line yAxisId="soc" dataKey="soc" name="SOC" stroke={COLORS.soc} strokeWidth={2} dot={false} />
@@ -215,7 +266,7 @@ export function PlanChart({
           {divider && (
             <ReferenceLine
               yAxisId="kw"
-              x={hourLabel(divider, preview.timezone)}
+              x={divider}
               stroke={COLORS.tomorrow}
               strokeDasharray="5 4"
               label={{ value: 'завтра', fontSize: 11, fill: COLORS.tomorrow, position: 'top' }}

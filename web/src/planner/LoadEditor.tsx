@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { PlanPreviewHour } from './plannerClient'
 
 type Props = {
@@ -14,9 +14,16 @@ type Props = {
   busy?: boolean
 }
 
-// LoadEditor is step 1 of the planner: one column per future hour
-// (spec: value above the bar, hour below, amber = «решта сьогодні»,
-// dashed violet divider = midnight into tomorrow).
+function effectiveKw(h: PlanPreviewHour, draft: Map<string, number>): number {
+  const d = draft.get(h.ts)
+  return d !== undefined ? d : h.load_kw
+}
+
+// LoadEditor is step 1 of the planner, styled after the mockup's
+// load-profile-editor: one column per future hour, the kW value above
+// every bar, the hour below (multiples of 3 accented), amber columns =
+// «решта сьогодні», a violet divider at midnight, and a detail row for
+// the selected hour with ←/→ navigation.
 export function LoadEditor({
   hours,
   timezone,
@@ -27,123 +34,186 @@ export function LoadEditor({
   onClear,
   busy,
 }: Props) {
-  const [editingTs, setEditingTs] = useState<string | null>(null)
-  const [editValue, setEditValue] = useState('')
+  const [selectedTs, setSelectedTs] = useState<string | null>(null)
   const [uniformKw, setUniformKw] = useState('280')
+  const [tab, setTab] = useState<'kw' | 'tasks'>('kw')
+  const detailInput = useRef<HTMLInputElement>(null)
+
+  // Keep the selection valid across preview refreshes.
+  useEffect(() => {
+    if (selectedTs && !hours.some((h) => h.ts === selectedTs)) setSelectedTs(hours[0]?.ts ?? null)
+  }, [hours, selectedTs])
 
   const maxKw = Math.max(100, ...hours.map((h) => effectiveKw(h, draft)))
-  const hourFmt = new Intl.DateTimeFormat('uk-UA', {
+  const hourFmt = new Intl.DateTimeFormat('uk-UA', { timeZone: timezone, hour: '2-digit', hour12: false })
+  const nowLabel = new Intl.DateTimeFormat('uk-UA', {
     timeZone: timezone,
     hour: '2-digit',
-    hour12: false,
-  })
+    minute: '2-digit',
+  }).format(new Date())
+  const firstTomorrow = hours.find((h) => h.tomorrow)
+  const tomorrowLabel = firstTomorrow
+    ? new Intl.DateTimeFormat('uk-UA', { timeZone: timezone, day: '2-digit', month: '2-digit' }).format(
+        new Date(firstTomorrow.ts),
+      )
+    : ''
 
-  const commitEdit = (ts: string) => {
-    const v = Number(editValue.replace(',', '.'))
-    if (Number.isFinite(v) && v >= 0) onEdit(ts, Math.round(v * 10) / 10)
-    setEditingTs(null)
+  const selected = hours.find((h) => h.ts === selectedTs) ?? null
+  const selectedIdx = selected ? hours.findIndex((h) => h.ts === selected.ts) : -1
+
+  const moveSelection = (delta: number) => {
+    if (selectedIdx < 0) return
+    const next = hours[selectedIdx + delta]
+    if (next) setSelectedTs(next.ts)
   }
 
-  let firstTomorrowSeen = false
+  const selectedLabel = selected
+    ? `${selected.tomorrow ? 'завтра' : 'сьогодні'} ${hourFmt.format(new Date(selected.ts))}:00`
+    : '—'
+
   return (
     <div className="planner-card">
-      <h2>Крок 1 — план споживання</h2>
-      <p className="planner-card-sub">
-        Клікніть на годину, щоб задати кВт. Бурштинові стовпці — решта сьогодні (контекст),
-        фіолетовий поділ — початок завтра. Синім — операторські години, блакитним — heuristic-профіль.
-      </p>
-
-      <div className="planner-editor-toolbar">
-        <button type="button" className="planner-button" onClick={onFillYesterday} disabled={busy}>
-          Заповнити з учора (факт)
-        </button>
-        <span>
-          Рівномірно{' '}
-          <input
-            type="number"
-            min="0"
-            value={uniformKw}
-            onChange={(e) => setUniformKw(e.target.value)}
-            aria-label="кВт для рівномірного заповнення"
-          />{' '}
-          кВт
-        </span>
+      <div className="planner-subtabs">
         <button
           type="button"
-          className="planner-button"
-          disabled={busy || !Number.isFinite(Number(uniformKw))}
-          onClick={() => onFillUniform(Number(uniformKw))}
+          className={'planner-subtab' + (tab === 'kw' ? ' active' : '')}
+          onClick={() => setTab('kw')}
         >
-          Застосувати
+          По годинах (кВт)
         </button>
-        <button type="button" className="planner-button" onClick={onClear} disabled={busy}>
-          Очистити (повернути heuristic)
+        <button
+          type="button"
+          className={'planner-subtab' + (tab === 'tasks' ? ' active' : '')}
+          onClick={() => setTab('tasks')}
+        >
+          За роботами <span className="planner-chip operator">beta</span>
         </button>
       </div>
 
-      <div className="planner-editor-scroll">
-        <div className="planner-editor-grid">
-          {hours.map((h, i) => {
-            const kw = effectiveKw(h, draft)
-            const isOperator = draft.has(h.ts) || h.operator_load
-            const tomorrowFirst = h.tomorrow && !firstTomorrowSeen
-            if (tomorrowFirst) firstTomorrowSeen = true
-            const classes = ['planner-hour-col']
-            if (!h.tomorrow) classes.push('today')
-            if (tomorrowFirst) classes.push('tomorrow-first')
-            if (i === 0) classes.push('now-first')
-            const label = hourFmt.format(new Date(h.ts))
-            return (
-              <div
-                key={h.ts}
-                className={classes.join(' ')}
-                onClick={() => {
-                  if (editingTs !== h.ts) {
-                    setEditingTs(h.ts)
-                    setEditValue(String(kw))
-                  }
-                }}
-              >
-                <span className={'planner-hour-kw' + (isOperator ? ' operator' : '')}>
-                  {editingTs === h.ts ? (
-                    <input
-                      autoFocus
-                      value={editValue}
-                      onChange={(e) => setEditValue(e.target.value)}
-                      onBlur={() => commitEdit(h.ts)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') commitEdit(h.ts)
-                        if (e.key === 'Escape') setEditingTs(null)
-                      }}
-                      aria-label={`Навантаження о ${label}`}
-                    />
-                  ) : (
-                    Math.round(kw)
-                  )}
-                </span>
-                <div className="planner-hour-bar-track">
-                  <div
-                    className={'planner-hour-bar' + (isOperator ? ' operator' : '')}
-                    style={{ height: `${Math.min(100, (kw / maxKw) * 100)}%` }}
-                  />
-                </div>
-                <span
-                  className={
-                    'planner-hour-label' + (Number(label) % 3 === 0 ? ' accent' : '')
-                  }
+      {tab === 'tasks' && (
+        <p className="planner-card-sub" style={{ margin: 0 }}>
+          Планування від робіт елеватора (сушка, перевалка → розкладання по годинах) — наступний етап
+          планувальника. Поки що задавайте споживання по годинах.
+        </p>
+      )}
+
+      {tab === 'kw' && (
+        <>
+          <div className="planner-editor-toolbar">
+            <button type="button" className="planner-button" onClick={onFillYesterday} disabled={busy}>
+              Заповнити з учора (факт)
+            </button>
+            <span>
+              Рівномірно{' '}
+              <input
+                type="number"
+                min="0"
+                value={uniformKw}
+                onChange={(e) => setUniformKw(e.target.value)}
+                aria-label="кВт для рівномірного заповнення"
+              />{' '}
+              кВт
+            </span>
+            <button
+              type="button"
+              className="planner-button"
+              disabled={busy || !Number.isFinite(Number(uniformKw))}
+              onClick={() => onFillUniform(Number(uniformKw))}
+            >
+              Застосувати
+            </button>
+            <button type="button" className="planner-button" onClick={onClear} disabled={busy}>
+              Очистити (повернути heuristic)
+            </button>
+          </div>
+
+          <div className="planner-load-legend">
+            <span className="seg">
+              <span className="chip-now">● зараз {nowLabel}</span> · <b>решта сьогодні</b> (контекст)
+            </span>
+            <span className="seg">
+              <span className="chip-tom">┃ Завтра {tomorrowLabel}</span> — цільова доба ▶
+            </span>
+          </div>
+
+          <div
+            className="planner-load-grid"
+            style={{ gridTemplateColumns: `repeat(${hours.length}, minmax(0, 1fr))` }}
+            role="group"
+            aria-label="План навантаження по годинах: від зараз до кінця завтра"
+          >
+            {hours.map((h) => {
+              const kw = effectiveKw(h, draft)
+              const isOperator = draft.has(h.ts) || h.operator_load
+              const label = hourFmt.format(new Date(h.ts))
+              const isSelected = h.ts === selectedTs
+              const classes = ['planner-load-bar']
+              if (!h.tomorrow) classes.push('today')
+              if (isSelected) classes.push('selected')
+              if (h.tomorrow && firstTomorrow && h.ts === firstTomorrow.ts) classes.push('tomorrow-first')
+              return (
+                <button
+                  type="button"
+                  key={h.ts}
+                  className={classes.join(' ')}
+                  onClick={() => {
+                    setSelectedTs(h.ts)
+                    window.setTimeout(() => detailInput.current?.select(), 0)
+                  }}
+                  title={`${label}:00 — ${Math.round(kw)} кВт${isOperator ? ' (оператор)' : ' (heuristic)'}`}
                 >
-                  {label}
-                </span>
-              </div>
-            )
-          })}
-        </div>
-      </div>
+                  <span className="bar-val">{Math.round(kw)}</span>
+                  <span className="bar-track">
+                    <span
+                      className={'bar-fill' + (isOperator ? ' operator' : '')}
+                      style={{ height: `${Math.min(100, (kw / maxKw) * 100)}%` }}
+                    />
+                  </span>
+                  <span className={'bar-h' + (Number(label) % 3 === 0 ? ' major' : '')}>{label}</span>
+                </button>
+              )
+            })}
+          </div>
+
+          <div className="planner-load-detail">
+            <label htmlFor="planner-load-input">
+              <strong>{selectedLabel}</strong>
+            </label>
+            <button type="button" className="planner-button" onClick={() => moveSelection(-1)} disabled={selectedIdx <= 0}>
+              ←
+            </button>
+            <input
+              id="planner-load-input"
+              ref={detailInput}
+              type="number"
+              min="0"
+              step="5"
+              value={selected ? Math.round(effectiveKw(selected, draft)) : 0}
+              disabled={!selected}
+              onChange={(e) => {
+                if (!selected) return
+                const v = Number(e.target.value)
+                if (Number.isFinite(v) && v >= 0) onEdit(selected.ts, v)
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'ArrowLeft') {
+                  e.preventDefault()
+                  moveSelection(-1)
+                }
+                if (e.key === 'ArrowRight') {
+                  e.preventDefault()
+                  moveSelection(1)
+                }
+              }}
+            />
+            <span style={{ color: '#64748b' }}>кВт</span>
+            <button type="button" className="planner-button" onClick={() => moveSelection(1)} disabled={selectedIdx < 0 || selectedIdx >= hours.length - 1}>
+              →
+            </button>
+            <span className="planner-load-hint">Клік на стовпчик · ← → між годинами · минуле — в аналітиці</span>
+          </div>
+        </>
+      )}
     </div>
   )
-}
-
-function effectiveKw(h: PlanPreviewHour, draft: Map<string, number>): number {
-  const d = draft.get(h.ts)
-  return d !== undefined ? d : h.load_kw
 }
