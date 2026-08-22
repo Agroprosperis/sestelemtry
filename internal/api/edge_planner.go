@@ -9,6 +9,7 @@ import (
 	"math"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/nesh/sestelemetry/internal/economics"
@@ -461,11 +462,55 @@ func (h *Handlers) edgePvForecast(ctx context.Context, orgID string, from, to ti
 	return out, rows.Err()
 }
 
+// edgeLoadProfileCache holds the per-site heuristic profile. Zero value
+// ready to use; guarded by its own mutex because the planner loop and
+// HTTP handlers (publish, preview) share one EdgeIngest.
+type edgeLoadProfileCache struct {
+	mu sync.Mutex
+	m  map[string]cachedLoadProfile
+}
+
+type cachedLoadProfile struct {
+	byHour map[int]float64
+	source string
+	at     time.Time
+}
+
+// loadProfileTTL is how long a computed heuristic profile stays warm.
+// The profile moves slowly (a 14-day median), so an hour of staleness
+// is invisible — while recomputing it on a large site scans tens of
+// millions of 1 s samples and takes minutes.
+const loadProfileTTL = time.Hour
+
 // edgeLoadProfile builds the heuristic load forecast: the median load
 // per local hour over the trailing 14 days (spec: until the operator
-// plan UI exists, shadow calibration uses this marked-as-heuristic
-// profile).
+// plan enters via the UI, shadow calibration uses this
+// marked-as-heuristic profile). Results are cached per site; the
+// 15-minute planner loop keeps the cache warm so interactive callers
+// never wait for the heavy scan.
 func (h *Handlers) edgeLoadProfile(ctx context.Context, orgID, tzName string) (map[int]float64, string, error) {
+	cache := &h.edge.loadProfiles
+	cache.mu.Lock()
+	if ent, ok := cache.m[orgID]; ok && time.Since(ent.at) < loadProfileTTL {
+		cache.mu.Unlock()
+		return ent.byHour, ent.source, nil
+	}
+	cache.mu.Unlock()
+
+	byHour, source, err := h.queryEdgeLoadProfile(ctx, orgID, tzName)
+	if err != nil {
+		return nil, "", err
+	}
+	cache.mu.Lock()
+	if cache.m == nil {
+		cache.m = map[string]cachedLoadProfile{}
+	}
+	cache.m[orgID] = cachedLoadProfile{byHour: byHour, source: source, at: time.Now()}
+	cache.mu.Unlock()
+	return byHour, source, nil
+}
+
+func (h *Handlers) queryEdgeLoadProfile(ctx context.Context, orgID, tzName string) (map[int]float64, string, error) {
 	rows, err := h.edge.Pool.Query(ctx, `
 		SELECT extract(hour FROM bucket AT TIME ZONE $2)::int AS h,
 		       percentile_cont(0.5) WITHIN GROUP (ORDER BY v) AS load_kw

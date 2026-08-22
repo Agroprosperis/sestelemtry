@@ -39,6 +39,13 @@ type EdgeIngest struct {
 	// civil time (default Europe/Kyiv).
 	PlannerZone     int
 	PlannerTimezone string
+
+	// loadProfiles caches the heuristic load profile per site. The
+	// 14-day median over 1 s telemetry takes minutes to compute on a
+	// large site, far beyond the HTTP write timeout — the planner loop
+	// recomputes it in the background and every publish/preview call
+	// reuses the warm copy.
+	loadProfiles edgeLoadProfileCache
 }
 
 // SetEdgeIngest wires the edge endpoints; nil disables them (503).
