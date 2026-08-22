@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { LoadEditor } from './LoadEditor'
 import { ManifestJournal } from './ManifestJournal'
-import { ContextChart, EffectWaterfall, PlanChart, WeatherStrip } from './PlanCharts'
+import { ContextChart, EffectWaterfall, PlanChart } from './PlanCharts'
 import {
   clearLoadPlan,
   fetchEdgeSites,
@@ -441,7 +441,6 @@ export function PlannerPage() {
             </div>
           </aside>
           <ContextChart preview={preview}>
-            <WeatherStrip preview={preview} />
             <div className="planner-context-stats">
               Load <b>{fmtMwh(tomorrowLoadKwh)} МВт·год</b> (завтра)
               {loadPeak && (

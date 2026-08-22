@@ -50,11 +50,48 @@ function lastTodayTs(hours: PlanPreviewHour[]): string | undefined {
 const fmt1 = (v: number) => (Math.round(v * 10) / 10).toLocaleString('uk-UA')
 const fmtUah = (v: number) => `${Math.round(v).toLocaleString('uk-UA')} грн`
 
+function weatherIcon(h: PlanPreviewHour | undefined): string {
+  const w = h?.weather
+  if (!w) return ''
+  if (!w.is_day) return '🌙'
+  const cloud = w.cloud_pct ?? 0
+  if (cloud < 25) return '☀️'
+  if (cloud < 60) return '🌤️'
+  return '☁️'
+}
+
+// weatherTick renders the context chart's X ticks as a three-line
+// column — hour, weather icon, temperature — so the hourly weather
+// strip is part of the chart itself and stays pixel-aligned with the
+// bars (mockup: погодна смуга всередині forecast-графіка).
+function makeWeatherTick(preview: PlanPreview) {
+  const byTs = new Map(preview.hours.map((h) => [h.ts, h]))
+  return function WeatherTick(props: unknown) {
+    const { x, y, payload } = props as { x?: number; y?: number; payload?: { value?: string } }
+    const ts = payload?.value ?? ''
+    const h = byTs.get(ts)
+    const temp = h?.weather?.temp_c != null ? `${Math.round(h.weather.temp_c)}°` : ''
+    return (
+      <g transform={`translate(${x ?? 0},${y ?? 0})`}>
+        <text y={10} textAnchor="middle" fontSize={10} fill="#64748b">
+          {hourLabel(ts, preview.timezone)}
+        </text>
+        <text y={26} textAnchor="middle" fontSize={11}>
+          {weatherIcon(h)}
+        </text>
+        <text y={40} textAnchor="middle" fontSize={9} fill="#475569">
+          {temp}
+        </text>
+      </g>
+    )
+  }
+}
+
 // ContextChart — «РДН + прогноз СЕС + load» (mockup plan-forecast-card):
 // price columns on the right axis, PV forecast and planned load lines
-// on the kW axis, the amber «решта сьогодні» zone and the violet
-// «завтра» divider. Children render inside the card (weather strip,
-// legend/stats line).
+// on the kW axis, the amber «решта сьогодні» zone, the violet «завтра»
+// divider and the hourly weather baked into the X axis. Children render
+// inside the card (legend/stats line).
 export function ContextChart({ preview, children }: { preview: PlanPreview; children?: ReactNode }) {
   const data = preview.hours.map((h) => ({
     ts: h.ts,
@@ -64,13 +101,20 @@ export function ContextChart({ preview, children }: { preview: PlanPreview; chil
   }))
   const divider = firstTomorrowTs(preview.hours)
   const todayEnd = lastTodayTs(preview.hours)
-  const tickOf = (ts: string) => hourLabel(ts, preview.timezone)
+  const hasWeather = preview.hours.some((h) => h.weather)
   return (
     <div className="planner-card">
       <h2>РДН + прогноз СЕС + load · від зараз до кінця завтра</h2>
-      <ResponsiveContainer width="100%" height={230}>
+      <ResponsiveContainer width="100%" height={hasWeather ? 262 : 230}>
         <ComposedChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
-          <XAxis dataKey="ts" tick={{ fontSize: 10 }} interval={1} tickFormatter={tickOf} />
+          <XAxis
+            dataKey="ts"
+            interval={1}
+            height={hasWeather ? 48 : 30}
+            tick={hasWeather ? makeWeatherTick(preview) : { fontSize: 10 }}
+            tickFormatter={hasWeather ? undefined : (ts) => hourLabel(String(ts), preview.timezone)}
+            tickLine={false}
+          />
           <YAxis
             yAxisId="kw"
             tick={{ fontSize: 10 }}
@@ -90,7 +134,7 @@ export function ContextChart({ preview, children }: { preview: PlanPreview; chil
               if (name === 'РДН') return [`${fmt1(v)} грн/кВт·год`, name]
               return [`${fmt1(v)} кВт`, name]
             }}
-            labelFormatter={(ts) => `${tickOf(String(ts))}:00`}
+            labelFormatter={(ts) => `${hourLabel(String(ts), preview.timezone)}:00`}
           />
           {todayEnd && (
             <ReferenceArea
@@ -116,33 +160,6 @@ export function ContextChart({ preview, children }: { preview: PlanPreview; chil
         </ComposedChart>
       </ResponsiveContainer>
       {children}
-    </div>
-  )
-}
-
-// WeatherStrip — hourly icon + temperature aligned with the plan hours
-// (spec §4: «погодна смуга — погодинна»).
-export function WeatherStrip({ preview }: { preview: PlanPreview }) {
-  const anyWeather = preview.hours.some((h) => h.weather)
-  if (!anyWeather) return null
-  const icon = (h: PlanPreviewHour) => {
-    const w = h.weather
-    if (!w) return ''
-    if (!w.is_day) return '🌙'
-    const cloud = w.cloud_pct ?? 0
-    if (cloud < 25) return '☀️'
-    if (cloud < 60) return '🌤️'
-    return '☁️'
-  }
-  return (
-    <div className="planner-weather-strip">
-      {preview.hours.map((h) => (
-        <div key={h.ts} className="planner-wx" title={hourLabel(h.ts, preview.timezone) + ':00'}>
-          <span className="ico">{icon(h)}</span>
-          {h.weather?.temp_c != null ? Math.round(h.weather.temp_c) + '°' : '—'}
-          <div style={{ color: '#94a3b8' }}>{hourLabel(h.ts, preview.timezone)}</div>
-        </div>
-      ))}
     </div>
   )
 }
