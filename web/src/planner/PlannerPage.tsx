@@ -68,6 +68,7 @@ export function PlannerPage() {
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [detailHour, setDetailHour] = useState<PlanPreviewHour | null>(null)
+  const [previewLoading, setPreviewLoading] = useState(false)
   const previewTimer = useRef<number | null>(null)
 
   useEffect(() => {
@@ -90,8 +91,13 @@ export function PlannerPage() {
   }, [])
 
   const refreshPreview = useCallback(async (siteID: string, draftMap: Map<string, number>) => {
-    const p = await fetchPlanPreview(siteID, draftToEntries(draftMap))
-    setPreview(p)
+    setPreviewLoading(true)
+    try {
+      const p = await fetchPlanPreview(siteID, draftToEntries(draftMap))
+      setPreview(p)
+    } finally {
+      setPreviewLoading(false)
+    }
   }, [])
 
   const refreshJournal = useCallback(async (siteID: string) => {
@@ -105,23 +111,32 @@ export function PlannerPage() {
     setNotice('')
     setPreview(null)
     setDetailHour(null)
+    setPreviewLoading(true)
     ;(async () => {
       try {
-        const stored = await fetchLoadPlan(site)
+        // All three are independent: the preview without a draft uses
+        // the stored operator plan server-side, so it can run in
+        // parallel with fetching that plan for the editor.
+        const [stored, p, j] = await Promise.all([
+          fetchLoadPlan(site),
+          fetchPlanPreview(site, []),
+          fetchManifestJournal(site),
+        ])
         if (cancelled) return
-        const d = new Map(stored.map((e) => [e.ts, e.load_kw]))
-        setDraft(d)
+        setDraft(new Map(stored.map((e) => [e.ts, e.load_kw])))
         setDirty(false)
-        await refreshPreview(site, d)
-        await refreshJournal(site)
+        setPreview(p)
+        setJournal(j)
       } catch (e) {
         if (!cancelled) setError(String(e))
+      } finally {
+        if (!cancelled) setPreviewLoading(false)
       }
     })()
     return () => {
       cancelled = true
     }
-  }, [site, refreshPreview, refreshJournal])
+  }, [site])
 
   useEffect(() => {
     if (!site) return
@@ -133,9 +148,13 @@ export function PlannerPage() {
 
   const schedulePreview = useCallback(
     (siteID: string, draftMap: Map<string, number>) => {
+      setPreviewLoading(true) // видно одразу, ще до дебаунса
       if (previewTimer.current) window.clearTimeout(previewTimer.current)
       previewTimer.current = window.setTimeout(() => {
-        refreshPreview(siteID, draftMap).catch((e) => setError(String(e)))
+        refreshPreview(siteID, draftMap).catch((e) => {
+          setError(String(e))
+          setPreviewLoading(false)
+        })
       }, 500)
     },
     [refreshPreview],
@@ -314,7 +333,31 @@ export function PlannerPage() {
 
       {error && <div className="planner-error">{error}</div>}
       {notice && !error && <div className="planner-card planner-card-sub">{notice}</div>}
-      {loading && <div className="planner-empty">Завантаження…</div>}
+      {loading && (
+        <div className="planner-loading">
+          <span className="planner-spinner" /> Підключаюсь до сервера…
+        </div>
+      )}
+
+      {!loading && !preview && site && !error && (
+        <div className="planner-loading planner-card">
+          <span className="planner-spinner" />
+          <div>
+            <b>Розраховую план…</b>
+            <div className="planner-card-sub">
+              Збираю ціни РДН, прогноз СЕС, профіль споживання і поточний SOC, потім прогін DP.
+              Одразу після рестарту сервера перший розрахунок може тривати до кількох хвилин
+              (прогрів профілю споживання) — далі буде миттєво.
+            </div>
+          </div>
+        </div>
+      )}
+
+      {preview && previewLoading && (
+        <div className="planner-refresh-chip">
+          <span className="planner-spinner small" /> перераховую план…
+        </div>
+      )}
 
       {!loading && sites.length === 0 && !error && (
         <div className="planner-card">

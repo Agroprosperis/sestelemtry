@@ -479,8 +479,10 @@ func (h *Handlers) edgePvForecast(ctx context.Context, orgID string, from, to ti
 // ready to use; guarded by its own mutex because the planner loop and
 // HTTP handlers (publish, preview) share one EdgeIngest.
 type edgeLoadProfileCache struct {
-	mu sync.Mutex
-	m  map[string]cachedLoadProfile
+	mu         sync.Mutex
+	m          map[string]cachedLoadProfile
+	inflight   map[string]chan struct{} // cold-start: collapse concurrent scans
+	refreshing map[string]bool          // stale: one background refresh at a time
 }
 
 type cachedLoadProfile struct {
@@ -489,38 +491,101 @@ type cachedLoadProfile struct {
 	at     time.Time
 }
 
-// loadProfileTTL is how long a computed heuristic profile stays warm.
-// The profile moves slowly (a 14-day median), so an hour of staleness
-// is invisible — while recomputing it on a large site scans tens of
+// loadProfileTTL is how long a computed heuristic profile counts as
+// fresh. The profile moves slowly (a 14-day median), so staleness is
+// invisible — while recomputing it on a large site scans tens of
 // millions of 1 s samples and takes minutes.
 const loadProfileTTL = time.Hour
 
 // edgeLoadProfile builds the heuristic load forecast: the median load
 // per local hour over the trailing 14 days (spec: until the operator
 // plan enters via the UI, shadow calibration uses this
-// marked-as-heuristic profile). Results are cached per site; the
-// 15-minute planner loop keeps the cache warm so interactive callers
-// never wait for the heavy scan.
+// marked-as-heuristic profile).
+//
+// Caching policy keeps interactive callers fast:
+//   - fresh entry → return it;
+//   - stale entry → return it immediately (stale-while-revalidate) and
+//     kick one background refresh;
+//   - no entry (first call after boot) → compute synchronously, but
+//     concurrent callers share a single scan instead of stacking up.
 func (h *Handlers) edgeLoadProfile(ctx context.Context, orgID, tzName string) (map[int]float64, string, error) {
 	cache := &h.edge.loadProfiles
+
 	cache.mu.Lock()
-	if ent, ok := cache.m[orgID]; ok && time.Since(ent.at) < loadProfileTTL {
+	ent, has := cache.m[orgID]
+	if has && time.Since(ent.at) < loadProfileTTL {
 		cache.mu.Unlock()
 		return ent.byHour, ent.source, nil
 	}
+	if has {
+		if cache.refreshing == nil {
+			cache.refreshing = map[string]bool{}
+		}
+		if !cache.refreshing[orgID] {
+			cache.refreshing[orgID] = true
+			go h.refreshEdgeLoadProfile(orgID, tzName)
+		}
+		cache.mu.Unlock()
+		return ent.byHour, ent.source, nil
+	}
+	ch, joined := cache.inflight[orgID]
+	if !joined {
+		if cache.inflight == nil {
+			cache.inflight = map[string]chan struct{}{}
+		}
+		ch = make(chan struct{})
+		cache.inflight[orgID] = ch
+	}
 	cache.mu.Unlock()
 
+	if joined {
+		select {
+		case <-ch:
+			cache.mu.Lock()
+			ent, has := cache.m[orgID]
+			cache.mu.Unlock()
+			if has {
+				return ent.byHour, ent.source, nil
+			}
+			return nil, "", fmt.Errorf("load profile: initial computation failed")
+		case <-ctx.Done():
+			return nil, "", ctx.Err()
+		}
+	}
+
 	byHour, source, err := h.queryEdgeLoadProfile(ctx, orgID, tzName)
+	cache.mu.Lock()
+	if err == nil {
+		if cache.m == nil {
+			cache.m = map[string]cachedLoadProfile{}
+		}
+		cache.m[orgID] = cachedLoadProfile{byHour: byHour, source: source, at: time.Now()}
+	}
+	delete(cache.inflight, orgID)
+	close(ch)
+	cache.mu.Unlock()
 	if err != nil {
 		return nil, "", err
 	}
+	return byHour, source, nil
+}
+
+// refreshEdgeLoadProfile recomputes one site's profile detached from
+// any request context (the caller already got the stale copy).
+func (h *Handlers) refreshEdgeLoadProfile(orgID, tzName string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	byHour, source, err := h.queryEdgeLoadProfile(ctx, orgID, tzName)
+
+	cache := &h.edge.loadProfiles
 	cache.mu.Lock()
-	if cache.m == nil {
-		cache.m = map[string]cachedLoadProfile{}
+	defer cache.mu.Unlock()
+	delete(cache.refreshing, orgID)
+	if err != nil {
+		h.edge.Log.Warn("edge_load_profile_refresh", "site_id", orgID, "err", err)
+		return
 	}
 	cache.m[orgID] = cachedLoadProfile{byHour: byHour, source: source, at: time.Now()}
-	cache.mu.Unlock()
-	return byHour, source, nil
 }
 
 func (h *Handlers) queryEdgeLoadProfile(ctx context.Context, orgID, tzName string) (map[int]float64, string, error) {

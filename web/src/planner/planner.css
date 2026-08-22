@@ -492,3 +492,51 @@
 .planner-hour-detail b {
   color: #0f172a;
 }
+
+/* --- loading states --- */
+
+.planner-loading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: #475569;
+  font-size: 13px;
+  padding: 14px;
+}
+
+.planner-spinner {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  border: 3px solid #dbeafe;
+  border-top-color: #2563eb;
+  border-radius: 50%;
+  animation: planner-spin 0.8s linear infinite;
+}
+
+.planner-spinner.small {
+  width: 12px;
+  height: 12px;
+  border-width: 2px;
+}
+
+@keyframes planner-spin {
+  to { transform: rotate(360deg); }
+}
+
+.planner-refresh-chip {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 30;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: #ffffff;
+  border: 1px solid #bfdbfe;
+  border-radius: 999px;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.12);
+  padding: 8px 14px;
+  font-size: 12.5px;
+  color: #1e40af;
+}
