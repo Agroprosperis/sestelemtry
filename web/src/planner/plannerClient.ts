@@ -65,6 +65,7 @@ export type PlanPreview = {
   horizon_end: string
   tomorrow_start: string
   load_source: string
+  pv_source: string
   params: {
     capacity_kwh: number
     power_kw: number

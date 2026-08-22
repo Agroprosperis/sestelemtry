@@ -209,6 +209,7 @@ type edgePlanPreviewResponse struct {
 	HorizonEnd    time.Time `json:"horizon_end"`
 	TomorrowStart time.Time `json:"tomorrow_start"`
 	LoadSource    string    `json:"load_source"`
+	PvSource      string    `json:"pv_source"`
 
 	Params struct {
 		CapacityKwh          float64 `json:"capacity_kwh"`
@@ -282,6 +283,7 @@ func buildEdgePlanPreview(siteID string, in edgePlanInputs, steps []economics.Fo
 		HorizonStart: in.Start,
 		HorizonEnd:   in.End,
 		LoadSource:   in.LoadSource,
+		PvSource:     in.PvSource,
 	}
 	resp.TomorrowStart = time.Date(in.Now.Year(), in.Now.Month(), in.Now.Day(), 0, 0, 0, 0, in.Loc).AddDate(0, 0, 1)
 	resp.Params.CapacityKwh = in.CapacityKwh

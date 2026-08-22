@@ -46,6 +46,8 @@ type EdgeIngest struct {
 	// recomputes it in the background and every publish/preview call
 	// reuses the warm copy.
 	loadProfiles edgeLoadProfileCache
+	// pvPlans caches the n8n generation forecast per site-day.
+	pvPlans edgePvPlanCache
 }
 
 // SetEdgeIngest wires the edge endpoints; nil disables them (503).

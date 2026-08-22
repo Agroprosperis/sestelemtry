@@ -148,6 +148,38 @@ func TestBuildEdgePlanPreviewShape(t *testing.T) {
 	}
 }
 
+func TestAggregatePvPlanRows(t *testing.T) {
+	rows := []map[string]any{
+		// Two orientations in hour_ending 12 → summed.
+		{"hour_ending": float64(12), "orientation_idx": float64(0), "planned_kwh": float64(120)},
+		{"hour_ending": float64(12), "orientation_idx": float64(1), "planned_kwh": float64(80)},
+		// A duplicate (hour, orientation) pair → the last record wins.
+		{"hour_ending": float64(13), "orientation_idx": float64(0), "planned_kwh": float64(50)},
+		{"hour_ending": float64(13), "orientation_idx": float64(0), "planned_kwh": float64(70)},
+		// String-typed numbers (the webhook is not strict about types).
+		{"hour_ending": "14", "orientation_idx": "1", "planned_kwh": "33.5"},
+		// Garbage rows are skipped.
+		{"hour_ending": float64(99), "orientation_idx": float64(0), "planned_kwh": float64(10)},
+		{"hour_ending": float64(15), "orientation_idx": float64(0), "planned_kwh": "not-a-number"},
+	}
+	got := aggregatePvPlanRows(rows)
+	if v := got[11]; v != 200 {
+		t.Errorf("hour 11 = %v, want 200 (two orientations summed)", v)
+	}
+	if v := got[12]; v != 70 {
+		t.Errorf("hour 12 = %v, want 70 (duplicate orientation, last wins)", v)
+	}
+	if v := got[13]; v != 33.5 {
+		t.Errorf("hour 13 = %v, want 33.5 (string-typed row)", v)
+	}
+	if _, ok := got[98]; ok {
+		t.Error("hour_ending 99 must be dropped")
+	}
+	if _, ok := got[14]; ok {
+		t.Error("NaN planned_kwh must be dropped")
+	}
+}
+
 func TestEdgeDayEffectsAccounting(t *testing.T) {
 	in, steps := planPreviewFixture(t)
 	resp := buildEdgePlanPreview("ab", in, steps)

@@ -549,7 +549,7 @@ export function PlannerPage() {
           <h2>Вхідні дані для розрахунку</h2>
           <div className="planner-inputs-strip">
             <div className="planner-input-kpi"><div className="k">План load</div><div className="v">{fmtMwh(tomorrowLoadKwh)}</div><div className="sub">МВт·год · завтра</div></div>
-            <div className="planner-input-kpi"><div className="k">Прогноз PV</div><div className="v">{fmtMwh(tomorrowPvKwh)}</div><div className="sub">МВт·год · завтра</div></div>
+            <div className="planner-input-kpi"><div className="k">Прогноз PV</div><div className="v">{fmtMwh(tomorrowPvKwh)}</div><div className="sub">{preview.pv_source === 'generation_forecast' ? 'денний прогноз генерації' : 'оцінка з GTI'} · завтра</div></div>
             <div className="planner-input-kpi"><div className="k">РДН</div><div className="v">{pricedHours > 0 ? '✓' : '—'}</div><div className="sub">{pricedHours} з {preview.hours.length} годин</div></div>
             <div className="planner-input-kpi"><div className="k">SOC зараз</div><div className="v">{preview.params.start_soc_pct.toFixed(0)}%</div><div className="sub">факт (замір), старт плану</div></div>
             <div className="planner-input-kpi"><div className="k">Режим</div><div className="v" style={{ fontSize: 14 }}>Авто</div><div className="sub">макс. профіт</div></div>
