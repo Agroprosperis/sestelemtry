@@ -49,6 +49,8 @@ services:
       # has typed the mail password into it (same secret the watchdog
       # uses). A password saved on the page takes precedence.
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      EDGE_SITE_TOKENS: ${EDGE_SITE_TOKENS:-}
+      EDGE_ORG_SUFFIX: ${EDGE_ORG_SUFFIX:--edge}
     # Mount the same YAML the collector reads so the API can populate
     # /api/v1/organizations (org id, display name, location). Without
     # the mount + -config flag the endpoint returns an empty list and

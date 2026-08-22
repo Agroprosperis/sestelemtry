@@ -108,6 +108,8 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: ${SESTELEMETRY_DATABASE_URL}
+      EDGE_SITE_TOKENS: ${EDGE_SITE_TOKENS:-}
+      EDGE_ORG_SUFFIX: ${EDGE_ORG_SUFFIX:--edge}
     entrypoint: ["/usr/local/bin/api"]
     command: ["-listen", ":8080", "-allow-origin", "${SESTELEMETRY_API_ALLOW_ORIGIN}", "-fusionsolar-config", "/etc/sestelemetry/fusionsolar.yaml"]
     volumes:
