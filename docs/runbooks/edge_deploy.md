@@ -95,6 +95,10 @@ sudo sqlite3 /var/lib/ems-edge/blackbox.db \
   "SELECT COUNT(*) FROM telemetry_raw; SELECT COUNT(*) FROM control_decisions;"
 ```
 
+Локальна веб-консоль (стан, діагностика, manifest, emergency override):
+`http://<ip-пристрою>:8081` — доступна тільки з LAN обʼєкта; порт і
+вимкнення — секція `local_ui` конфіга.
+
 На хмарі:
 
 - `edge_heartbeats` має свіжий рядок сайту (heartbeat кожні 30 с);

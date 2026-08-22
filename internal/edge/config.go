@@ -119,6 +119,19 @@ type ControlConfig struct {
 	Interval time.Duration `yaml:"interval"`
 }
 
+// LocalUIConfig is the on-device web console (spec ems_ui_edge_vs_cloud
+// §2: стан + діагностика + emergency override; не повний планувальник).
+// Enabled by default on :8081 — LAN-only by network design, no auth
+// (mirrors the mockup; the device sits on the site OT network).
+type LocalUIConfig struct {
+	Enabled *bool  `yaml:"enabled"`
+	Listen  string `yaml:"listen"`
+}
+
+// On reports whether the console should run (default true when the
+// config omits the section).
+func (l LocalUIConfig) On() bool { return l.Enabled == nil || *l.Enabled }
+
 type GridLimits struct {
 	ImportLimitKw  float64 `yaml:"import_limit_kw"`
 	TargetImportKw float64 `yaml:"target_import_kw"`
@@ -153,6 +166,7 @@ type Config struct {
 	Manifest        ManifestConfig `yaml:"manifest"`
 	Control         ControlConfig  `yaml:"control"`
 	Limits          Limits         `yaml:"limits"`
+	LocalUI         LocalUIConfig  `yaml:"local_ui"`
 
 	// EssDischargeSign overrides the convention that raw
 	// active_ess_power_kw > 0 means "discharging". Set to -1 for
@@ -246,6 +260,10 @@ func (c *Config) applyDefaults() {
 
 	if strings.TrimSpace(c.Edge.Platform) == "" {
 		c.Edge.Platform = "siemens_iot2050"
+	}
+
+	if strings.TrimSpace(c.LocalUI.Listen) == "" {
+		c.LocalUI.Listen = ":8081"
 	}
 
 	bb := &c.Blackbox

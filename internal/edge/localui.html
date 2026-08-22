@@ -1,0 +1,446 @@
+<!doctype html>
+<html lang="uk">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>EMS Edge Console</title>
+  <style>
+    :root {
+      --bg: #eef1f5; --panel: #fff; --line: #dde3ea; --soft: #edf1f5;
+      --text: #182230; --muted: #667085; --green: #16a34a; --blue: #2563eb;
+      --violet: #7c3aed; --amber: #d97706; --red: #dc2626; --teal: #0d9488;
+      font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text); font-size: 14px; }
+    .shell { display: grid; grid-template-columns: 220px 1fr; min-height: 100vh; }
+    @media (max-width: 900px) { .shell { grid-template-columns: 1fr; } .sidebar { display: none; } }
+    .sidebar { background: #1a2332; color: #c8d0dc; padding: 20px 0; display: flex; flex-direction: column; }
+    .sidebar .brand { padding: 0 18px 20px; border-bottom: 1px solid #2d3a4d; margin-bottom: 12px; }
+    .sidebar .brand strong { display: block; color: #fff; font-size: 15px; }
+    .sidebar .brand span { font-size: 11px; color: #8b95a5; }
+    .nav-item { padding: 10px 18px; cursor: pointer; font-size: 13px; border-left: 3px solid transparent; display: block; color: inherit; text-decoration: none; }
+    .nav-item:hover { background: #243044; }
+    .nav-item.active { background: #243044; border-left-color: var(--blue); color: #fff; }
+    .sidebar-foot { margin-top: auto; padding: 16px 18px; font-size: 11px; color: #6b7789; line-height: 1.6; }
+    .main { padding: 20px 24px 40px; }
+    .topbar { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; }
+    h1 { margin: 0; font-size: 22px; font-weight: 780; }
+    h2 { margin: 0 0 14px; font-size: 15px; font-weight: 700; }
+    .subtitle { color: var(--muted); font-size: 13px; margin-top: 4px; }
+    .live-tag { background: var(--teal); color: #fff; font-size: 10px; padding: 2px 8px; border-radius: 4px; vertical-align: middle; }
+    .panel { display: none; } .panel.active { display: block; }
+    .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px 20px; margin-bottom: 16px; }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .grid2 > * { min-width: 0; }
+    @media (max-width: 900px) { .grid2 { grid-template-columns: 1fr; } }
+    .status-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+    .chip { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; font-size: 12px; }
+    .chip .lbl { color: var(--muted); margin-right: 4px; }
+    .chip.ok strong { color: var(--green); }
+    .chip.warn strong { color: var(--amber); }
+    .chip.err strong { color: var(--red); }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+    .badge.green { background: #dcfce7; color: #166534; }
+    .badge.amber { background: #fef3c7; color: #92400e; }
+    .badge.red { background: #fee2e2; color: #991b1b; }
+    .badge.gray { background: var(--soft); color: var(--muted); }
+    .badge.blue { background: #dbeafe; color: #1e40af; }
+    .badge.pv { background: #fef3c7; color: #92400e; }
+    .badge.ess { background: #dbeafe; color: #1e40af; }
+    table.data { width: 100%; font-size: 12px; border-collapse: collapse; }
+    table.data th { color: var(--muted); font-weight: 600; text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+    table.data td { padding: 7px 8px; border-bottom: 1px solid var(--soft); vertical-align: middle; }
+    table.data tr.now-row { background: #f0fdf4; }
+    .kpi-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-bottom: 16px; }
+    .kpi-card { border-radius: 10px; padding: 12px 14px; border: 1px solid transparent; display: flex; flex-direction: column; gap: 2px; min-height: 72px; }
+    .kpi-card .k { font-size: 11px; font-weight: 600; opacity: 0.85; }
+    .kpi-card .v { font-size: 22px; font-weight: 800; line-height: 1.1; font-variant-numeric: tabular-nums; }
+    .kpi-card .sub { font-size: 10px; opacity: 0.75; margin-top: 2px; }
+    .kpi-card.soc { background: linear-gradient(135deg, #ede9fe, #ddd6fe); border-color: #c4b5fd; color: #5b21b6; }
+    .kpi-card.grid { background: linear-gradient(135deg, #e0f2fe, #bae6fd); border-color: #7dd3fc; color: #0369a1; }
+    .kpi-card.pv { background: linear-gradient(135deg, #fef3c7, #fde68a); border-color: #fcd34d; color: #92400e; }
+    .kpi-card.ess { background: linear-gradient(135deg, #dbeafe, #bfdbfe); border-color: #93c5fd; color: #1e40af; }
+    .kpi-card.ess .v.pos { color: #15803d; }
+    .kpi-card.ess .v.neg { color: #1d4ed8; }
+    .kpi-card.bb { background: linear-gradient(135deg, #f1f5f9, #e2e8f0); border-color: #cbd5e1; color: #334155; }
+    .info-box { padding: 12px 14px; border-radius: 8px; font-size: 13px; margin-bottom: 14px; background: #eff6ff; border-left: 4px solid var(--blue); }
+    .info-box.warn { background: #fffbeb; border-left-color: var(--amber); }
+    .info-box.err { background: #fef2f2; border-left-color: var(--red); }
+    label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+    input, select { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; font-size: 13px; font-family: inherit; }
+    .field { margin-bottom: 12px; }
+    .btn { padding: 8px 14px; border-radius: 8px; border: 1px solid var(--line); background: var(--soft); font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; }
+    .btn-primary { background: var(--blue); color: #fff; border-color: var(--blue); }
+    .btn-danger { background: #fff; color: var(--red); border-color: #fecaca; }
+    .btn-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .log-box { font-family: ui-monospace, monospace; font-size: 11px; background: #0f172a; color: #e2e8f0; padding: 12px; border-radius: 8px; max-height: 380px; overflow: auto; line-height: 1.55; white-space: pre-wrap; }
+    .log-tabs { display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; }
+    .log-tabs .btn { font-size: 12px; padding: 6px 12px; }
+    .log-tabs .btn.active { background: var(--blue); color: #fff; border-color: var(--blue); }
+    .manifest-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 16px; }
+    .manifest-tile { background: var(--soft); border-radius: 8px; padding: 12px 14px; border: 1px solid var(--line); }
+    .manifest-tile .lbl { font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+    .manifest-tile .val { font-size: 14px; font-weight: 700; }
+    .manifest-tile .val code { font-size: 12px; font-weight: 600; }
+    details.manifest-raw summary { cursor: pointer; font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+    .manifest-pre { font-family: ui-monospace, monospace; font-size: 11px; background: var(--soft); padding: 12px; border-radius: 8px; overflow: auto; max-height: 320px; white-space: pre-wrap; }
+    .plan-table-wrap { overflow-x: auto; max-height: 420px; overflow-y: auto; border: 1px solid var(--line); border-radius: 8px; }
+    .mobile-tabs { display: none; gap: 6px; margin-bottom: 14px; flex-wrap: wrap; }
+    @media (max-width: 900px) { .mobile-tabs { display: flex; } .mobile-tabs .btn.active { background: var(--blue); color: #fff; } }
+  </style>
+</head>
+<body>
+<div class="shell">
+  <aside class="sidebar">
+    <div class="brand">
+      <strong>EMS Edge</strong>
+      <span id="brand-sub">…</span>
+    </div>
+    <a class="nav-item active" href="#status" data-panel="status">📡 Стан</a>
+    <a class="nav-item" href="#diag" data-panel="diag">🔧 Діагностика</a>
+    <a class="nav-item" href="#override" data-panel="override">🎛️ Override</a>
+    <a class="nav-item" href="#manifest" data-panel="manifest">📦 Manifest</a>
+    <div class="sidebar-foot" id="side-foot">—</div>
+  </aside>
+
+  <main class="main">
+    <div class="topbar">
+      <div>
+        <h1>Edge Console <span class="live-tag">LOCAL</span></h1>
+        <p class="subtitle">Локальний UI · стан, діагностика, emergency override · планувальник — у хмарі</p>
+      </div>
+      <div class="status-chips">
+        <div class="chip" id="chip-proc"><span class="lbl">Процес EMS</span><strong>…</strong></div>
+        <div class="chip" id="chip-uplink"><span class="lbl">Uplink</span><strong>…</strong></div>
+        <div class="chip" id="chip-manifest"><span class="lbl">Manifest</span><strong>…</strong></div>
+        <div class="chip" id="chip-mode"><span class="lbl">Режим</span><strong>…</strong></div>
+      </div>
+    </div>
+
+    <div class="mobile-tabs">
+      <button class="btn active" data-panel="status">Стан</button>
+      <button class="btn" data-panel="diag">Діагностика</button>
+      <button class="btn" data-panel="override">Override</button>
+      <button class="btn" data-panel="manifest">Manifest</button>
+    </div>
+
+    <section class="panel active" id="panel-status">
+      <div class="info-box err" id="override-banner" hidden></div>
+      <div class="info-box warn" id="expired-banner" hidden>
+        <strong>Manifest прострочений.</strong> Діє fallback <code>self_consumption_safe</code>, доки хмара не опублікує новий план.
+      </div>
+
+      <div class="kpi-strip">
+        <div class="kpi-card soc"><div class="k">SOC зараз</div><div class="v" id="kpi-soc">—</div><div class="sub" id="kpi-soc-sub">—</div></div>
+        <div class="kpi-card grid"><div class="k">P grid</div><div class="v" id="kpi-grid">—</div><div class="sub" id="kpi-grid-sub">—</div></div>
+        <div class="kpi-card pv"><div class="k">P СЕС</div><div class="v" id="kpi-pv">—</div><div class="sub" id="kpi-pv-sub">—</div></div>
+        <div class="kpi-card ess"><div class="k">P УЗЕ (віртуально)</div><div class="v" id="kpi-ess">—</div><div class="sub" id="kpi-ess-sub">shadow-рішення</div></div>
+        <div class="kpi-card bb"><div class="k">Black box</div><div class="v" id="kpi-bb">—</div><div class="sub">pending uplink</div></div>
+      </div>
+
+      <div class="grid2">
+        <div class="card">
+          <h2>Здоровʼя пристрою</h2>
+          <table class="data" id="health-table"></table>
+        </div>
+        <div class="card">
+          <h2>SmartLogger</h2>
+          <table class="data" id="sl-table"></table>
+          <p style="font-size:12px;color:var(--muted);margin:12px 0 0">Write у SL: <span class="badge amber">shadow (вимкнено)</span> — рішення лише віртуальні (<code>would_write_*</code>).</p>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="btn-row" style="justify-content:space-between;margin-bottom:12px;flex-wrap:wrap">
+          <h2 style="margin:0">План УЗЕ (з manifest)</h2>
+          <span class="badge blue" id="plan-horizon-badge">—</span>
+        </div>
+        <div class="plan-table-wrap">
+          <table class="data">
+            <thead><tr><th>Година</th><th>Дія</th><th>P УЗЕ</th><th>SOC ціль</th><th>РДН</th></tr></thead>
+            <tbody id="plan-body"><tr><td colspan="5" style="color:var(--muted)">Немає плану — очікування manifest з хмари.</td></tr></tbody>
+          </table>
+        </div>
+        <p style="font-size:12px;color:var(--muted);margin:10px 0 0">Редагування плану — у хмарній консолі («Планувальник»).</p>
+      </div>
+    </section>
+
+    <section class="panel" id="panel-diag">
+      <div class="card">
+        <h2>Журнали</h2>
+        <div class="log-tabs">
+          <button type="button" class="btn active" data-log="decisions">Рішення (control_decisions)</button>
+          <button type="button" class="btn" data-log="events">Події</button>
+        </div>
+        <div class="log-box" id="log-view">…</div>
+      </div>
+      <div class="card">
+        <h2>Black box</h2>
+        <table class="data" id="bb-table"></table>
+      </div>
+    </section>
+
+    <section class="panel" id="panel-override">
+      <div class="info-box warn">
+        <strong>Emergency override.</strong> Діє локально до TTL: <code>fallback_safe</code> — двигун ігнорує manifest і працює за безпечним пресетом (без арбітражу, без заряду з мережі); <code>monitor</code> — лише телеметрія, без рішень. Повний ручний погодинний розклад зʼявиться на етапі керованого запису (MVP-3).
+      </div>
+      <div class="grid2">
+        <div class="card">
+          <h2>Режим на пристрої</h2>
+          <div class="field">
+            <label>Режим</label>
+            <select id="ov-mode">
+              <option value="auto">З manifest (авто)</option>
+              <option value="fallback_safe">Fallback: self_consumption_safe</option>
+              <option value="monitor">Monitor — без рішень</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>TTL, хвилин (для fallback/monitor)</label>
+            <input type="number" id="ov-ttl" value="60" min="5" max="1440">
+          </div>
+          <div class="btn-row">
+            <button class="btn btn-primary" id="btn-ov-apply">Застосувати</button>
+            <button class="btn btn-danger" id="btn-ov-reset">Скинути → manifest</button>
+          </div>
+          <p id="ov-result" style="font-size:12px;color:var(--muted);margin-top:10px"></p>
+        </div>
+        <div class="card">
+          <h2>Поточний стан</h2>
+          <table class="data" id="ov-table"></table>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel" id="panel-manifest">
+      <div class="card">
+        <div class="btn-row" style="justify-content:space-between;margin-bottom:12px;flex-wrap:wrap">
+          <h2 style="margin:0">Manifest з хмари</h2>
+          <span id="manifest-state-badge" class="badge gray">—</span>
+        </div>
+        <p style="font-size:13px;color:var(--muted);margin:0 0 16px">Edge застосовує без перезапуску — atomic swap кеш-файла + reload. Опитування хмари раз на хвилину (ETag).</p>
+        <div class="manifest-grid" id="manifest-summary"></div>
+        <details class="manifest-raw">
+          <summary>Показати повний JSON (технічний)</summary>
+          <pre class="manifest-pre" id="manifest-json">—</pre>
+        </details>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script>
+const ACTION_LABELS = { hold: 'Утримання', charge: 'Заряд мережа', pv_charge: 'Заряд СЕС', discharge: 'Розряд', export: 'Експорт' };
+const ACTION_BADGE = { hold: 'gray', charge: 'blue', pv_charge: 'pv', discharge: 'green', export: 'amber' };
+let activeLog = 'decisions';
+let lastStatus = null;
+
+const $ = (id) => document.getElementById(id);
+const fmtKw = (v) => v == null ? '—' : (Math.round(v * 10) / 10).toLocaleString('uk-UA') + ' кВт';
+const fmtTime = (iso) => iso ? new Date(iso).toLocaleString('uk-UA', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—';
+const fmtClock = (iso) => iso ? new Date(iso).toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' }) : '—';
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+function setChip(id, text, cls) {
+  const chip = $(id);
+  chip.className = 'chip' + (cls ? ' ' + cls : '');
+  chip.querySelector('strong').textContent = text;
+}
+
+function uptimeStr(s) {
+  if (s == null) return '—';
+  const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60);
+  return (d ? d + ' д ' : '') + h + ' год ' + m + ' хв';
+}
+
+function renderStatus(st) {
+  lastStatus = st;
+  $('brand-sub').textContent = (st.edge_id || '—') + ' · ' + (st.site_id || '').toUpperCase();
+  $('side-foot').innerHTML = 'v' + esc(st.version || '—') + '<br>' + esc(st.topology || '') + ' · ' + esc(st.mode || '') + '<br>Uplink: ' + (st.uplink && st.uplink.last_ok ? 'online' : '—');
+
+  setChip('chip-proc', 'running', 'ok');
+  const up = st.uplink || {};
+  if (!up.enabled) setChip('chip-uplink', 'вимкнено', 'warn');
+  else if (up.last_ok && Date.now() - new Date(up.last_ok).getTime() < 5 * 60e3) setChip('chip-uplink', 'OK · ' + fmtClock(up.last_ok), 'ok');
+  else if (up.last_ok) setChip('chip-uplink', 'збій · ' + fmtClock(up.last_ok), 'err');
+  else setChip('chip-uplink', 'ще не було', 'warn');
+
+  const m = st.manifest;
+  if (m) setChip('chip-manifest', m.manifest_id.slice(-12) + (m.expired ? ' · прострочений' : ''), m.expired ? 'warn' : 'ok');
+  else setChip('chip-manifest', 'немає', 'warn');
+
+  const ov = st.override;
+  if (ov) setChip('chip-mode', 'OVERRIDE · ' + ov.mode, 'err');
+  else setChip('chip-mode', (st.mode || '') + ' · ' + (m && !m.expired && m.preset ? m.preset : st.preset), '');
+
+  $('override-banner').hidden = !ov;
+  if (ov) $('override-banner').innerHTML = '<strong>Активний локальний override: ' + esc(ov.mode) + '</strong> до ' + fmtTime(ov.until) + '. Manifest ігнорується.';
+  $('expired-banner').hidden = !(m && m.expired && !ov);
+
+  const t = st.tick || {};
+  $('kpi-soc').textContent = t.soc_percent != null ? Math.round(t.soc_percent) + '%' : '—';
+  $('kpi-soc-sub').textContent = 'зона ' + (st.limits.soc_min_pct || 0) + '–' + (st.limits.soc_max_pct || 0) + '%';
+  $('kpi-grid').textContent = fmtKw(t.grid_power_kw);
+  $('kpi-grid-sub').textContent = (t.grid_power_kw || 0) >= 0 ? 'імпорт · ліміт ' + st.limits.grid_import_kw : 'експорт';
+  $('kpi-pv').textContent = fmtKw(t.pv_power_kw);
+  $('kpi-pv-sub').textContent = 'rated ' + st.limits.pv_rated_kw + ' кВт';
+  const dec = st.decision;
+  const p = dec && dec.outputs ? dec.outputs.p_bess_virtual_kw : null;
+  const essEl = $('kpi-ess');
+  essEl.textContent = p == null ? '—' : (p > 0 ? '+' : '') + fmtKw(p).replace(' кВт', '') + ' кВт';
+  essEl.className = 'v ' + (p > 0 ? 'pos' : p < 0 ? 'neg' : '');
+  $('kpi-ess-sub').textContent = dec ? (dec.reason_code || 'shadow-рішення') : 'shadow-рішення';
+  const bb = st.blackbox || {};
+  const pend = bb.pending || {};
+  const totalPending = Object.values(pend).reduce((a, b) => a + b, 0);
+  $('kpi-bb').textContent = totalPending >= 1000 ? (totalPending / 1000).toFixed(1) + 'k' : String(totalPending);
+
+  $('health-table').innerHTML = [
+    ['Uptime EMS', uptimeStr(st.uptime_s)],
+    ['Версія', esc(st.version || '—')],
+    ['Режим · пресет', esc(st.mode) + ' · <code>' + esc(ov ? 'override:' + ov.mode : (dec ? dec.preset : st.preset)) + '</code>'],
+    ['Manifest', m ? '<code>' + esc(m.manifest_id) + '</code> · ' + (m.expired ? '<span class="badge amber">прострочений</span>' : '<span class="badge green">активний</span>') : '<span class="badge gray">немає</span>'],
+    ['Дійсний до', m ? fmtTime(m.valid_until) : '—'],
+    ['Data quality', t.data_quality ? '<span class="badge ' + (t.data_quality === 'ok' ? 'green' : 'amber') + '">' + esc(t.data_quality) + '</span>' : '—'],
+  ].map(([k, v]) => '<tr><td style="color:var(--muted)">' + k + '</td><td>' + v + '</td></tr>').join('');
+
+  $('sl-table').innerHTML = '<tr><th>Роль</th><th>Хост</th><th>Останній poll</th><th>Статус</th></tr>' +
+    (st.devices || []).map((d) => '<tr><td><span class="badge ' + (d.role === 'pv' ? 'pv' : d.role === 'ess' ? 'ess' : 'blue') + '">' + esc(d.role) + '</span></td><td>' + esc(d.host) + ':' + d.port + '</td><td>' + fmtClock(d.last_ok) + '</td><td>' + (d.ok ? '<span class="badge green">OK</span>' : '<span class="badge red">немає звʼязку</span>') + '</td></tr>').join('');
+
+  const bbRows = [['SQLite', esc(bb.path || '—')], ['Розмір', bb.size_bytes != null ? (bb.size_bytes / 1048576).toFixed(1) + ' MB' : '—']];
+  for (const [tbl, n] of Object.entries(pend)) bbRows.push(['Pending · ' + tbl, String(n)]);
+  $('bb-table').innerHTML = bbRows.map(([k, v]) => '<tr><td style="color:var(--muted)">' + k + '</td><td>' + v + '</td></tr>').join('');
+
+  $('ov-table').innerHTML = [
+    ['Override', ov ? '<span class="badge red">' + esc(ov.mode) + '</span> до ' + fmtTime(ov.until) : '<span class="badge green">немає (працює manifest)</span>'],
+    ['Активний пресет', '<code>' + esc(dec ? dec.preset : st.preset) + '</code>'],
+    ['Останнє рішення', dec ? fmtClock(dec.ts) + ' · ' + esc(dec.reason_code || '') : '—'],
+  ].map(([k, v]) => '<tr><td style="color:var(--muted)">' + k + '</td><td>' + v + '</td></tr>').join('');
+}
+
+async function refreshStatus() {
+  try {
+    const st = await (await fetch('/api/status')).json();
+    renderStatus(st);
+  } catch (e) {
+    setChip('chip-proc', 'немає звʼязку', 'err');
+  }
+}
+
+async function refreshManifestPanel() {
+  try {
+    const raw = await (await fetch('/api/manifest')).json();
+    $('manifest-json').textContent = JSON.stringify(raw, null, 2);
+    const m = raw || {};
+    const plan = m.plan || {};
+    const intervals = plan.intervals || [];
+    const expired = lastStatus && lastStatus.manifest ? lastStatus.manifest.expired : false;
+    $('manifest-state-badge').className = 'badge ' + (expired ? 'amber' : 'green');
+    $('manifest-state-badge').textContent = expired ? 'прострочений' : 'застосований';
+    $('manifest-summary').innerHTML = [
+      ['Версія', '<code>' + esc(m.manifest_id || '—') + '</code>'],
+      ['Режим', esc(m.mode || '—') + ' · <code>' + esc(m.preset || '—') + '</code>'],
+      ['Дійсний', fmtTime(m.valid_from) + ' → ' + fmtTime(m.valid_until)],
+      ['Write на SL', '<span class="badge amber">shadow</span>'],
+      ['Ліміт УЗЕ', '±' + ((m.limits || {}).ess_discharge_max_kw || '—') + ' кВт'],
+      ['SOC політика', ((m.soc_policy || {}).min_economic_pct || '—') + '–' + ((m.soc_policy || {}).max_economic_pct || '—') + '%'],
+      ['План', intervals.length + ' інтервалів · load: ' + esc(plan.load_source || '—')],
+    ].map(([k, v]) => '<div class="manifest-tile"><div class="lbl">' + k + '</div><div class="val">' + v + '</div></div>').join('');
+    renderPlanTable(intervals);
+  } catch (e) {
+    $('manifest-json').textContent = 'Manifest ще не отримано з хмари.';
+  }
+}
+
+function renderPlanTable(intervals) {
+  if (!intervals.length) return;
+  const nowH = new Date(); nowH.setMinutes(0, 0, 0);
+  $('plan-horizon-badge').textContent = fmtTime(intervals[0].ts) + ' → ' + fmtTime(intervals[intervals.length - 1].ts);
+  $('plan-body').innerHTML = intervals.map((iv) => {
+    const d = new Date(iv.ts);
+    const isNow = d.getTime() === nowH.getTime();
+    const action = iv.action || (iv.ess_kw > 0 ? 'discharge' : iv.ess_kw < 0 ? 'charge' : 'hold');
+    return '<tr class="' + (isNow ? 'now-row' : '') + '"><td><strong>' + fmtTime(iv.ts) + '</strong>' + (isNow ? ' <span class="badge green">зараз</span>' : '') + '</td>' +
+      '<td><span class="badge ' + (ACTION_BADGE[action] || 'gray') + '">' + (ACTION_LABELS[action] || action) + '</span></td>' +
+      '<td><strong>' + (iv.ess_kw > 0 ? '+' : '') + (iv.ess_kw || 0) + '</strong> кВт</td>' +
+      '<td>' + (iv.soc_target_pct != null ? iv.soc_target_pct + '%' : '—') + '</td>' +
+      '<td>' + (iv.rdn_uah_per_kwh != null ? iv.rdn_uah_per_kwh.toFixed(2) + ' ₴' : '—') + '</td></tr>';
+  }).join('');
+}
+
+async function refreshLogs() {
+  const url = activeLog === 'decisions' ? '/api/decisions?limit=60' : '/api/events?limit=60';
+  try {
+    const body = await (await fetch(url)).json();
+    const rows = body.decisions || body.events || [];
+    $('log-view').textContent = rows.map((r) => {
+      if (activeLog === 'decisions') {
+        const o = r.outputs || {};
+        return (r.ts || '') + '  [' + (r.plan_source || '') + '] p_bess=' + (o.p_bess_virtual_kw != null ? o.p_bess_virtual_kw : '—') +
+          ' kW  reason=' + (r.reason_code || '') + '  soc=' + ((r.inputs || {}).soc_percent != null ? r.inputs.soc_percent + '%' : '—') + '  ' + (r.rationale || '');
+      }
+      return (r.ts || '') + '  [' + (r.severity || '') + '] ' + (r.code || '') + '  ' + (r.message || '');
+    }).join('\n') || 'Порожньо.';
+  } catch (e) {
+    $('log-view').textContent = 'Помилка читання журналу: ' + e;
+  }
+}
+
+function showPanel(panel) {
+  document.querySelectorAll('.nav-item, .mobile-tabs .btn').forEach((n) => n.classList.toggle('active', n.dataset.panel === panel));
+  document.querySelectorAll('.panel').forEach((p) => p.classList.toggle('active', p.id === 'panel-' + panel));
+  if (location.hash !== '#' + panel) history.replaceState(null, '', '#' + panel);
+  if (panel === 'diag') refreshLogs();
+  if (panel === 'manifest') refreshManifestPanel();
+}
+
+document.querySelectorAll('.nav-item, .mobile-tabs .btn').forEach((el) => {
+  el.addEventListener('click', (e) => { if (el.tagName === 'A') e.preventDefault(); showPanel(el.dataset.panel); });
+});
+document.querySelectorAll('.log-tabs .btn').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.log-tabs .btn').forEach((b) => b.classList.remove('active'));
+    btn.classList.add('active');
+    activeLog = btn.dataset.log;
+    refreshLogs();
+  });
+});
+
+async function postOverride(mode, ttl) {
+  const res = await fetch('/api/override', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mode, ttl_minutes: ttl }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+$('btn-ov-apply').onclick = async () => {
+  const mode = $('ov-mode').value;
+  try {
+    await postOverride(mode, Number($('ov-ttl').value) || 60);
+    $('ov-result').textContent = mode === 'auto' ? 'Повернуто до manifest.' : 'Override застосовано: ' + mode + '.';
+    refreshStatus();
+  } catch (e) { $('ov-result').textContent = 'Помилка: ' + e.message; }
+};
+$('btn-ov-reset').onclick = async () => {
+  try {
+    await postOverride('auto', 0);
+    $('ov-mode').value = 'auto';
+    $('ov-result').textContent = 'Повернуто до manifest.';
+    refreshStatus();
+  } catch (e) { $('ov-result').textContent = 'Помилка: ' + e.message; }
+};
+
+const initPanel = (location.hash || '#status').replace('#', '') || 'status';
+if (['status', 'diag', 'override', 'manifest'].includes(initPanel)) showPanel(initPanel);
+refreshStatus();
+refreshManifestPanel();
+setInterval(refreshStatus, 2000);
+setInterval(() => { if (document.querySelector('#panel-diag.active')) refreshLogs(); }, 5000);
+setInterval(() => { if (document.querySelector('#panel-manifest.active')) refreshManifestPanel(); }, 30000);
+</script>
+</body>
+</html>

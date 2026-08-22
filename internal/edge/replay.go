@@ -19,8 +19,8 @@ import (
 // telemetry rows in, control decisions out. No Modbus, no black box,
 // no uplink — the exact same Decide() the live loop uses.
 type ReplayOptions struct {
-	InputCSV    string
-	OutputCSV   string
+	InputCSV     string
+	OutputCSV    string
 	ManifestFile string // optional manifest-lite JSON with a plan
 }
 

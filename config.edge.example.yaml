@@ -61,6 +61,13 @@ control:
   preset: economic_arbitrage        # fallback preset when no manifest is active
   interval: 1s
 
+# On-device web console (state, diagnostics, manifest view, emergency
+# override). LAN-only by network design; omit the section to keep the
+# defaults below.
+local_ui:
+  enabled: true
+  listen: ":8081"
+
 # Passport limits used when the manifest carries none and the
 # SmartLogger limit registers (40490/40492) are unavailable.
 limits:

@@ -11,6 +11,12 @@ export type LoadPlanEntry = {
   load_kw: number
 }
 
+export type HourWeather = {
+  temp_c?: number
+  cloud_pct?: number
+  is_day: boolean
+}
+
 export type PlanPreviewHour = {
   ts: string
   local_hour: number
@@ -22,6 +28,7 @@ export type PlanPreviewHour = {
   pv_kw: number
   load_kw: number
   operator_load: boolean
+  weather?: HourWeather
   ess_kw: number
   charge_pv_kwh: number
   charge_grid_kwh: number

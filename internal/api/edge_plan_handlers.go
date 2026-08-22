@@ -165,6 +165,8 @@ type edgePlanPreviewHour struct {
 	LoadKw       float64 `json:"load_kw"`
 	OperatorLoad bool    `json:"operator_load"`
 
+	Weather *edgeHourWeather `json:"weather,omitempty"`
+
 	EssKw         float64 `json:"ess_kw"` // + розряд / − заряд
 	ChargePvKwh   float64 `json:"charge_pv_kwh"`
 	ChargeGridKwh float64 `json:"charge_grid_kwh"`
@@ -316,6 +318,10 @@ func buildEdgePlanPreview(siteID string, in edgePlanInputs, steps []economics.Fo
 			imp, exp := economics.ImportExportPrices(in.Tariffs, *fh.RdnUahPerKwh)
 			hr.ImportUah = round3(imp)
 			hr.ExportUah = round3(exp)
+		}
+		if wx, ok := in.Weather[fh.TS.UTC()]; ok {
+			w := wx
+			hr.Weather = &w
 		}
 		// Planned grid draw: local deficit minus battery help plus
 		// grid charging (never negative — export is not planned).

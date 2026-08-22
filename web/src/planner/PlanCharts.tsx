@@ -113,10 +113,43 @@ export function ContextChart({ preview }: { preview: PlanPreview }) {
   )
 }
 
+// WeatherStrip — hourly icon + temperature aligned with the plan hours
+// (spec §4: «погодна смуга — погодинна»).
+export function WeatherStrip({ preview }: { preview: PlanPreview }) {
+  const anyWeather = preview.hours.some((h) => h.weather)
+  if (!anyWeather) return null
+  const icon = (h: PlanPreviewHour) => {
+    const w = h.weather
+    if (!w) return ''
+    if (!w.is_day) return '🌙'
+    const cloud = w.cloud_pct ?? 0
+    if (cloud < 25) return '☀️'
+    if (cloud < 60) return '🌤️'
+    return '☁️'
+  }
+  return (
+    <div className="planner-weather-strip">
+      {preview.hours.map((h) => (
+        <div key={h.ts} className="planner-wx" title={hourLabel(h.ts, preview.timezone) + ':00'}>
+          <span className="ico">{icon(h)}</span>
+          {h.weather?.temp_c != null ? Math.round(h.weather.temp_c) + '°' : '—'}
+          <div style={{ color: '#94a3b8' }}>{hourLabel(h.ts, preview.timezone)}</div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 // PlanChart — step 3: hourly ESS dispatch (discharge up, charge down,
 // grid/PV charge split), the SOC line with the reserve floor and the
 // RDN price backdrop.
-export function PlanChart({ preview }: { preview: PlanPreview }) {
+export function PlanChart({
+  preview,
+  onHourClick,
+}: {
+  preview: PlanPreview
+  onHourClick?: (h: PlanPreviewHour) => void
+}) {
   const data = preview.hours.map((h) => ({
     ts: h.ts,
     label: hourLabel(h.ts, preview.timezone),
@@ -135,7 +168,15 @@ export function PlanChart({ preview }: { preview: PlanPreview }) {
         Чорна лінія — SOC, червона пунктирна — економічний резерв.
       </p>
       <ResponsiveContainer width="100%" height={280}>
-        <ComposedChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: 0 }} stackOffset="sign">
+        <ComposedChart
+          data={data}
+          margin={{ top: 8, right: 8, bottom: 0, left: 0 }}
+          stackOffset="sign"
+          onClick={(state) => {
+            const idx = (state as { activeTooltipIndex?: number } | null)?.activeTooltipIndex
+            if (onHourClick && idx != null && preview.hours[idx]) onHourClick(preview.hours[idx])
+          }}
+        >
           <XAxis dataKey="label" tick={{ fontSize: 10 }} interval={1} />
           <YAxis
             yAxisId="kw"

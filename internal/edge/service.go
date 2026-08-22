@@ -16,6 +16,12 @@ import (
 
 const EvManifestRejected = "MANIFEST_REJECTED"
 
+// Local-console override events.
+const (
+	EvOverrideSet     = "OVERRIDE_SET"
+	EvOverrideCleared = "OVERRIDE_CLEARED"
+)
+
 // uplinkBacklogThreshold triggers the UPLINK_BACKLOG event (spec §8).
 const uplinkBacklogThreshold = 10000
 
@@ -36,10 +42,34 @@ type Service struct {
 	manifest   atomic.Pointer[Manifest]
 	lastPollOK atomic.Int64 // unix seconds of the last successful poll
 
+	// Local-console state (read by the HTTP goroutine, written by the
+	// core loop / uplink — hence atomics and sync.Map).
+	startedAt    time.Time
+	lastTick     atomic.Pointer[Tick]
+	lastDecision atomic.Pointer[Decision]
+	lastUplinkOK atomic.Int64 // unix seconds of the last accepted batch
+	devPollOK    sync.Map     // host → unix seconds of its last reading
+	override     atomic.Pointer[overrideState]
+	events       chan Event // core-loop event channel (console sends too)
+
 	// Core-loop state (no locks: touched only from the core loop).
 	lastManifestID   string
 	manifestExpired  bool
 	eventLastWritten map[string]time.Time
+}
+
+// overrideState is the local emergency override (spec ems_ui_edge_vs
+// _cloud §2: локальний UI = стан + логи + emergency override). While
+// active the shadow engine ignores the manifest: "fallback_safe" runs
+// the self_consumption_safe preset, "monitor" suspends decisions
+// entirely. Expires automatically at Until.
+type overrideState struct {
+	Mode  string    `json:"mode"` // fallback_safe | monitor
+	Until time.Time `json:"until"`
+}
+
+func (o *overrideState) activeAt(now time.Time) bool {
+	return o != nil && o.Mode != "" && now.Before(o.Until)
 }
 
 // Run starts the edge service and blocks until ctx is cancelled.
@@ -61,6 +91,7 @@ func Run(ctx context.Context, cfg *Config, log *slog.Logger, version string) err
 		version:          version,
 		bb:               bb,
 		norm:             NewNormalizer(cfg),
+		startedAt:        time.Now(),
 		eventLastWritten: map[string]time.Time{},
 	}
 	if cfg.Uplink.Enabled {
@@ -78,6 +109,7 @@ func Run(ctx context.Context, cfg *Config, log *slog.Logger, version string) err
 
 	readings := make(chan reading, 16)
 	events := make(chan Event, 128)
+	s.events = events
 
 	var wg sync.WaitGroup
 	for _, dev := range cfg.SmartLogger.Devices {
@@ -98,6 +130,10 @@ func Run(ctx context.Context, cfg *Config, log *slog.Logger, version string) err
 	}
 	wg.Add(1)
 	go func() { defer wg.Done(); s.runMaintenance(ctx) }()
+	if cfg.LocalUI.On() {
+		wg.Add(1)
+		go func() { defer wg.Done(); s.runLocalUI(ctx) }()
+	}
 
 	log.Info("edge_start",
 		"site_id", cfg.SiteID, "edge_id", cfg.Edge.EdgeID,
@@ -116,6 +152,7 @@ func Run(ctx context.Context, cfg *Config, log *slog.Logger, version string) err
 		case r := <-readings:
 			s.norm.Observe(r)
 			s.lastPollOK.Store(r.at.Unix())
+			s.devPollOK.Store(r.host, r.at.Unix())
 		case ev := <-events:
 			s.writeEventDeduped(ctx, ev)
 		case now := <-t.C:
@@ -153,6 +190,7 @@ func resolveDeviceEntries(cfg *Config) (map[DeviceRole][]registers.ResolvedEntry
 // onTick is the 1 s heart of the edge: normalize → black box → shadow.
 func (s *Service) onTick(ctx context.Context, now time.Time) {
 	tick := s.norm.BuildTick(now)
+	s.lastTick.Store(&tick)
 	if err := s.bb.WriteTick(ctx, tick); err != nil {
 		s.log.Error("edge_blackbox_tick", "err", err)
 	}
@@ -176,10 +214,42 @@ func (s *Service) onTick(ctx context.Context, now time.Time) {
 		})
 	}
 
+	// Local emergency override (set from the on-device console). It
+	// expires on its own; the transition back to the manifest is logged
+	// once.
+	ov := s.override.Load()
+	if ov != nil && !ov.activeAt(now) {
+		s.override.Store(nil)
+		ov = nil
+		s.writeEventDeduped(ctx, Event{
+			TS: now, Severity: SevInfo, Code: EvOverrideCleared,
+			Message: "local override expired — back to manifest",
+		})
+	}
+
 	if s.cfg.Control.Mode != ModeShadow {
 		return
 	}
-	decision, evs := Decide(tick, cur, s.cfg)
+	if ov.activeAt(now) && ov.Mode == "monitor" {
+		return // monitor override: telemetry only, no decisions
+	}
+	effective := cur
+	if ov.activeAt(now) && ov.Mode == "fallback_safe" {
+		// A synthetic expired manifest routes resolveParams onto the
+		// standard fallback path: self_consumption_safe with site
+		// limits intact — exactly the emergency behaviour.
+		effective = &Manifest{
+			ManifestID: "local-override",
+			SiteID:     s.cfg.SiteID,
+			Mode:       ModeShadow,
+			ValidUntil: now.Add(-time.Second),
+		}
+	}
+	decision, evs := Decide(tick, effective, s.cfg)
+	if ov.activeAt(now) {
+		decision.PlanSource = "override"
+	}
+	s.lastDecision.Store(&decision)
 	if err := s.bb.WriteDecision(ctx, decision); err != nil {
 		s.log.Error("edge_blackbox_decision", "err", err)
 	}
@@ -300,6 +370,7 @@ func (s *Service) sendOneBatch(ctx context.Context) (bool, error) {
 	if err := s.bb.MarkUploaded(ctx, "telemetry_raw", ticks.IDs); err != nil {
 		return true, err
 	}
+	s.lastUplinkOK.Store(time.Now().Unix())
 	s.log.Info("edge_uplink_ok", "events", len(evs.IDs), "decisions", len(decs.IDs), "ticks", len(ticks.IDs))
 	return true, nil
 }

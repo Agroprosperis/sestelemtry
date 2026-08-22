@@ -241,6 +241,64 @@ func (b *Blackbox) MarkUploaded(ctx context.Context, table string, ids []int64) 
 	return err
 }
 
+// RecentDecisions returns the newest `limit` decision records (full
+// canonical JSON documents, newest first) for the local console.
+func (b *Blackbox) RecentDecisions(ctx context.Context, limit int) ([]json.RawMessage, error) {
+	return b.recentJSON(ctx, `SELECT record_json FROM control_decisions ORDER BY id DESC LIMIT ?`, limit)
+}
+
+// RecentEvents returns the newest `limit` events (newest first) for
+// the local console.
+func (b *Blackbox) RecentEvents(ctx context.Context, limit int) ([]json.RawMessage, error) {
+	return b.recentJSON(ctx, `
+		SELECT json_object(
+			'ts', ts_utc, 'severity', severity, 'code', code,
+			'message', message, 'context', json(context_json))
+		FROM events ORDER BY id DESC LIMIT ?`, limit)
+}
+
+func (b *Blackbox) recentJSON(ctx context.Context, q string, limit int) ([]json.RawMessage, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 50
+	}
+	rows, err := b.db.QueryContext(ctx, q, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []json.RawMessage
+	for rows.Next() {
+		var doc string
+		if err := rows.Scan(&doc); err != nil {
+			return nil, err
+		}
+		out = append(out, json.RawMessage(doc))
+	}
+	return out, rows.Err()
+}
+
+// Stats summarizes the black box for the local console: per-table
+// pending-upload counts plus the database file size.
+func (b *Blackbox) Stats(ctx context.Context) (map[string]int64, int64, error) {
+	pending := map[string]int64{}
+	for table := range blackboxTables {
+		var n int64
+		if err := b.db.QueryRowContext(ctx,
+			`SELECT count(*) FROM `+table+` WHERE uploaded = 0`).Scan(&n); err != nil {
+			return nil, 0, err
+		}
+		pending[table] = n
+	}
+	var size int64
+	if fi, err := os.Stat(b.path); err == nil {
+		size = fi.Size()
+	}
+	return pending, size, nil
+}
+
+// Path reports the database file location (console display).
+func (b *Blackbox) Path() string { return b.path }
+
 // PendingCount reports the total backlog across all tables (heartbeat's
 // buffer_pending field).
 func (b *Blackbox) PendingCount(ctx context.Context) (int64, error) {

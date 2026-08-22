@@ -133,6 +133,8 @@ type edgePlanInputs struct {
 	// the operator plan (or the preview draft) rather than the
 	// heuristic profile.
 	OperatorHour map[time.Time]bool
+	// Weather carries the display forecast (temp/clouds) for the UI.
+	Weather map[time.Time]edgeHourWeather
 }
 
 // gatherEdgePlanInputs assembles the DP inputs for a site. draftLoad
@@ -173,10 +175,11 @@ func (h *Handlers) gatherEdgePlanInputs(ctx context.Context, siteID string, draf
 	if err != nil {
 		return edgePlanInputs{}, fmt.Errorf("dam prices: %w", err)
 	}
-	pv, err := h.edgePvForecast(ctx, siteID, in.Start, in.End, in.PvRatedKw)
+	pv, weather, err := h.edgePvForecast(ctx, siteID, in.Start, in.End, in.PvRatedKw)
 	if err != nil {
 		return edgePlanInputs{}, fmt.Errorf("pv forecast: %w", err)
 	}
+	in.Weather = weather
 	heuristic, heuristicSource, err := h.edgeLoadProfile(ctx, siteID, tzName)
 	if err != nil {
 		return edgePlanInputs{}, fmt.Errorf("load profile: %w", err)
@@ -430,36 +433,46 @@ func (h *Handlers) edgeDAMPrices(ctx context.Context, zone int, now time.Time, l
 	return out, rows.Err()
 }
 
+// edgeHourWeather is one hour of the stored Open-Meteo forecast used by
+// the planner UI's weather strip.
+type edgeHourWeather struct {
+	TempC    *float64 `json:"temp_c,omitempty"`
+	CloudPct *float64 `json:"cloud_pct,omitempty"`
+	IsDay    bool     `json:"is_day"`
+}
+
 // edgePvForecast converts stored irradiance forecasts into AC kW keyed
-// by UTC hour start: GTI when available, plane-agnostic shortwave
-// otherwise, scaled by the rated PV power and a fixed performance ratio.
-func (h *Handlers) edgePvForecast(ctx context.Context, orgID string, from, to time.Time, pvRatedKw float64) (map[time.Time]float64, error) {
+// by UTC hour start (GTI when available, plane-agnostic shortwave
+// otherwise, scaled by the rated PV power and a fixed performance
+// ratio) and also returns the display weather for the same hours.
+func (h *Handlers) edgePvForecast(ctx context.Context, orgID string, from, to time.Time, pvRatedKw float64) (map[time.Time]float64, map[time.Time]edgeHourWeather, error) {
 	out := map[time.Time]float64{}
-	if pvRatedKw <= 0 {
-		return out, nil
-	}
+	weather := map[time.Time]edgeHourWeather{}
 	rows, err := h.edge.Pool.Query(ctx, `
-		SELECT hour, COALESCE(gti_instant_wm2, shortwave_wm2)
+		SELECT hour, COALESCE(gti_instant_wm2, shortwave_wm2),
+		       temperature_2m_c, cloud_cover_pct, COALESCE(is_day, true)
 		FROM weather_forecast_hourly
 		WHERE organization_id = $1 AND hour >= $2 AND hour < $3`,
 		orgID, from.UTC(), to.UTC())
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var hour time.Time
-		var wm2 *float64
-		if err := rows.Scan(&hour, &wm2); err != nil {
-			return nil, err
+		var wm2, tempC, cloudPct *float64
+		var isDay bool
+		if err := rows.Scan(&hour, &wm2, &tempC, &cloudPct, &isDay); err != nil {
+			return nil, nil, err
 		}
-		if wm2 == nil || *wm2 <= 0 {
+		key := hour.UTC()
+		weather[key] = edgeHourWeather{TempC: tempC, CloudPct: cloudPct, IsDay: isDay}
+		if wm2 == nil || *wm2 <= 0 || pvRatedKw <= 0 {
 			continue
 		}
-		kw := math.Min(pvRatedKw, *wm2/1000*pvRatedKw*pvPerformanceRatio)
-		out[hour.UTC()] = kw
+		out[key] = math.Min(pvRatedKw, *wm2/1000*pvRatedKw*pvPerformanceRatio)
 	}
-	return out, rows.Err()
+	return out, weather, rows.Err()
 }
 
 // edgeLoadProfileCache holds the per-site heuristic profile. Zero value
