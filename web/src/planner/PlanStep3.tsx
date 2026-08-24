@@ -172,6 +172,9 @@ export function PlanChartSvg({
     </g>,
   )
 
+  // Zero line goes under the bars (mockup draws it before the groups).
+  texts.push(<line key="zero" x1={ix0} y1={zeroY} x2={ix1} y2={zeroY} stroke={C.zero} strokeWidth={1} />)
+
   // Axis gridlines and scale labels.
   ;[maxUp, maxUp / 2].forEach((v, idx) => {
     const y = zeroY - v * k
@@ -295,13 +298,22 @@ export function PlanChartSvg({
   }
 
   const tipHour = tip ? hours[tip.i] : null
-  const legend: { s: Series; label: string; swatch: React.CSSProperties }[] = [
-    { s: 'load', label: 'Розряд → споживання', swatch: { background: C.disLoad } },
-    { s: 'sun', label: 'Заряд від сонця', swatch: { background: C.chgPv } },
-    { s: 'grid', label: 'Заряд від мережі', swatch: { background: C.chgGrid } },
-    { s: 'soc', label: 'SOC план · резерв', swatch: { borderTop: `2px solid ${C.socOpt}`, background: 'none', height: 0 } },
-    { s: 'rdn', label: 'Ціна РДН', swatch: { background: C.rdn, opacity: 0.5 } },
-  ]
+  // Mirror the mockup's has.* checks: legend hides series with no data.
+  const has = {
+    load: hours.some((h) => h.discharge_kwh > 0.5),
+    sun: hours.some((h) => h.charge_pv_kwh > 0.5),
+    grid: hours.some((h) => h.charge_grid_kwh > 0.5),
+  }
+  const legend: { s: Series; label: string; swatch: React.CSSProperties }[] = []
+  if (has.load) legend.push({ s: 'load', label: 'Розряд → споживання', swatch: { background: C.disLoad } })
+  if (has.sun) legend.push({ s: 'sun', label: 'Заряд від сонця', swatch: { background: C.chgPv } })
+  if (has.grid) legend.push({ s: 'grid', label: 'Заряд від мережі', swatch: { background: C.chgGrid } })
+  legend.push({
+    s: 'soc',
+    label: `SOC план · резерв ${Math.round(preview.params.soc_min_pct)}%`,
+    swatch: { borderTop: `2px solid ${C.socOpt}`, background: 'none', height: 0 },
+  })
+  legend.push({ s: 'rdn', label: 'Ціна РДН', swatch: { background: C.rdn, opacity: 0.5 } })
 
   return (
     <div className="uze-right">
@@ -312,7 +324,6 @@ export function PlanChartSvg({
       <div className="uze-chart-canvas" style={{ position: 'relative' }}>
         <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="План УЗЕ на добу">
           {texts}
-          <line x1={ix0} y1={zeroY} x2={ix1} y2={zeroY} stroke={C.zero} strokeWidth={1} />
           {hours.map((h, i) => (
             <rect
               key={'h' + i}
@@ -327,7 +338,8 @@ export function PlanChartSvg({
                 const rect = host?.getBoundingClientRect()
                 if (!rect) return
                 const px = ((ix0 + (i + 0.5) * slot) / W) * rect.width
-                setTip({ i, x: px, y: 40 })
+                // Clamp so the ~190px tip never leaves the canvas.
+                setTip({ i, x: Math.min(Math.max(px, 100), rect.width - 100), y: 40 })
               }}
               onMouseLeave={() => setTip(null)}
               onClick={() => onHourClick?.(h)}

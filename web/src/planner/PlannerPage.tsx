@@ -602,6 +602,7 @@ export function PlannerPage() {
                   Ефект завтра: {tomorrow.net_effect_uah >= 0 ? '+' : ''}{fmtUah(tomorrow.net_effect_uah)}
                 </span>
               )}
+              <span className="planner-chip heuristic">AI only</span>
               {latestManifest && (
                 <span className={'planner-chip ' + latestManifest.status}>
                   На edge: {latestManifest.status === 'applied' ? 'застосовано' : latestManifest.status === 'rejected' ? 'відхилено' : 'очікує'}
@@ -612,6 +613,11 @@ export function PlannerPage() {
 
           <div className="planner-card">
             <h2>План заряд/розряд УЗЕ та SOC</h2>
+            <p className="planner-card-sub" style={{ margin: 0 }}>
+              План вперед: погодинний розклад заряд/розряд УЗЕ, фон РДН, траєкторія SOC та порівняння{' '}
+              <strong>без оптимізації vs з AI-планом</strong>. <strong>Горизонт — від «зараз» до кінця завтра</strong>{' '}
+              (SOC тече через опівніч; минуле — в аналітиці). Очікуваний ефект — подобово, за завтра.
+            </p>
             <div className="uze-layout">
               {tomorrow && <EffectPanel day={tomorrow} dateLabel={tomorrowLabel} preview={preview} />}
               <PlanChartSvg preview={preview} onHourClick={setDetailHour} />
