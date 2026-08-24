@@ -49,6 +49,7 @@ export type PlanDayEffect = {
   soc_open_pct: number
   soc_close_pct: number
   soc_carry_uah: number
+  shadow_price_uah: number
   net_effect_uah: number
   baseline_cost_uah: number
   plan_cost_uah: number

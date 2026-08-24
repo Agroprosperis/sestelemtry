@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { LoadEditor } from './LoadEditor'
 import { ManifestJournal } from './ManifestJournal'
-import { ContextChart, EffectWaterfall, PlanChart } from './PlanCharts'
+import { ContextChart } from './PlanCharts'
+import { EffectPanel, PlanChartSvg } from './PlanStep3'
 import {
   clearLoadPlan,
   fetchEdgeSites,
@@ -442,6 +443,11 @@ export function PlannerPage() {
           </aside>
           <ContextChart preview={preview}>
             <div className="planner-context-stats">
+              <span className="planner-forecast-legend" style={{ marginRight: 14 }}>
+                <span><i className="rdn" /> Ціна РДН</span>
+                <span><i className="pv" /> Прогноз СЕС</span>
+                <span><i className="load" /> План load</span>
+              </span>
               Load <b>{fmtMwh(tomorrowLoadKwh)} МВт·год</b> (завтра)
               {loadPeak && (
                 <>
@@ -604,7 +610,13 @@ export function PlannerPage() {
             </span>
           </div>
 
-          <PlanChart preview={preview} onHourClick={setDetailHour} />
+          <div className="planner-card">
+            <h2>План заряд/розряд УЗЕ та SOC</h2>
+            <div className="uze-layout">
+              {tomorrow && <EffectPanel day={tomorrow} dateLabel={tomorrowLabel} preview={preview} />}
+              <PlanChartSvg preview={preview} onHourClick={setDetailHour} />
+            </div>
+          </div>
           {detailHour && (
             <div className="planner-hour-detail">
               <span><b>{new Date(detailHour.ts).toLocaleString('uk-UA', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</b>{detailHour.tomorrow ? ' · завтра' : ' · сьогодні'}</span>
@@ -617,7 +629,6 @@ export function PlannerPage() {
               <span style={{ color: '#94a3b8' }}>Ручне коригування години — етап керованого запису (MVP-3)</span>
             </div>
           )}
-          {tomorrow && <EffectWaterfall day={tomorrow} dateLabel={tomorrowLabel} />}
           {journal && <ManifestJournal journal={journal} />}
         </>
       )}

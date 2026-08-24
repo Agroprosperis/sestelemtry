@@ -191,6 +191,9 @@ type edgePlanDayEffect struct {
 	SocOpenPct  float64 `json:"soc_open_pct"`
 	SocClosePct float64 `json:"soc_close_pct"`
 	SocCarryUah float64 `json:"soc_carry_uah"`
+	// ShadowPriceUah is the day's cheapest all-in import price — the
+	// rate the SOC carry-over is valued at (spec §3 «shadow»).
+	ShadowPriceUah float64 `json:"shadow_price_uah"`
 
 	NetEffectUah    float64 `json:"net_effect_uah"`
 	BaselineCostUah float64 `json:"baseline_cost_uah"`
@@ -395,6 +398,7 @@ func computeEdgeDayEffects(in edgePlanInputs, steps []economics.ForwardStep, tom
 		d.SocOpenPct = round1(socOpen[day])
 		d.SocClosePct = round1(socClose[day])
 		d.SocCarryUah = (socClose[day] - socOpen[day]) / 100 * in.CapacityKwh * shadow[day]
+		d.ShadowPriceUah = round3(shadow[day])
 		d.NetEffectUah = d.FlowsUah + d.SocCarryUah
 		// «Без УЗЕ vs з планом»: consistent by construction.
 		d.PlanCostUah = d.BaselineCostUah - d.FlowsUah
