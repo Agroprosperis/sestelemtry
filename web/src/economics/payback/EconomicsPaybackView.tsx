@@ -461,13 +461,6 @@ export function EconomicsPaybackView({ data, capexUah, capexSteps, plannedPaybac
   )
 
   const paybackDurationLabel = paidOff ? 'окуплено' : paybackLabel(paybackYears)
-  // A finite forecast without a crossing month means the projection runs
-  // past the drawn horizon — the estimate exists, just no exact date.
-  const paybackDateNote = paybackMonthKey
-    ? monthTitleLower(paybackMonthKey)
-    : Number.isFinite(paybackYears)
-      ? 'за поточним темпом EBITDA'
-      : 'недостатньо даних'
 
   // Share of the fact window actually covered by telemetry hours; below
   // ~95% the forecast is built on partial months.
@@ -532,13 +525,6 @@ export function EconomicsPaybackView({ data, capexUah, capexSteps, plannedPaybac
           value={formatPercent(coveredShare)}
           note="від CAPEX"
           valueClass="good"
-        />
-        <KpiCard
-          icon="calendar"
-          tone="blue"
-          label="Прогноз окупності"
-          value={paybackDurationLabel}
-          note={paidOff ? 'інвестиції повернуто' : paybackDateNote}
         />
       </section>
 
