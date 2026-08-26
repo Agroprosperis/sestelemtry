@@ -1,6 +1,5 @@
 import { useId } from 'react'
 import { PeriodPicker } from '../../dashboard/components/PeriodPicker'
-import { formatOrganizationLabel } from '../../dashboard/config'
 import { EconomicsPeriodPicker } from './EconomicsPeriodPicker'
 import { DEFAULT_TARIFFS, type Tariffs } from '../tariffs'
 import type { OrgTariffsStatus } from '../useOrgTariffs'
@@ -31,8 +30,8 @@ function formatDateString(d: Date): string {
 // all-objects portfolio rollup.
 export type EconomicsRange = 'day' | 'month' | 'year' | 'payback' | 'portfolio'
 
-// rangeTitle / rangeSubtitle pick the header copy for the active period
-// granularity so the day/month/year/portfolio views read consistently.
+// rangeTitle picks the header copy for the active period granularity
+// so the day/month/year/portfolio views read consistently.
 function rangeTitle(range: EconomicsRange): string {
   switch (range) {
     case 'portfolio':
@@ -48,25 +47,6 @@ function rangeTitle(range: EconomicsRange): string {
   }
 }
 
-function rangeSubtitle(range: EconomicsRange, monthsWithData?: number): string {
-  switch (range) {
-    case 'portfolio':
-      return 'порівняння резерву по всіх об\'єктах на базі цін РДН і тарифів.'
-    case 'payback':
-      return monthsWithData && monthsWithData > 0
-        ? `інвестиційний звіт за весь період експлуатації · ${monthsWithData} міс. телеметрії`
-        : 'інвестиційний звіт за весь період експлуатації.'
-    case 'year':
-      return monthsWithData && monthsWithData > 0
-        ? `управлінський звіт за рік · ${monthsWithData} міс. телеметрії`
-        : 'управлінський звіт за рік на базі цін РДН і тарифів.'
-    case 'month':
-      return 'управлінський звіт за місяць на базі цін РДН і тарифів.'
-    default:
-      return 'розрахунок ефекту за обраний день на базі цін РДН і тарифів.'
-  }
-}
-
 type Props = {
   organizationID: string
   range: EconomicsRange
@@ -76,9 +56,6 @@ type Props = {
   // month picker, a year picker, or the sliding-window picker so it tracks
   // the portfolio's own Місяць/Рік/Період toggle.
   portfolioScope?: 'month' | 'year' | 'period'
-  // Months of telemetry in the active year (year view only), surfaced
-  // in the subtitle per SPEC §3.1.
-  monthsWithData?: number
   // Sliding-period window (year view only), both YYYY-MM. onWindowChange
   // with empty strings resets to the calendar year of the anchor.
   windowFrom: string
@@ -235,7 +212,6 @@ export function EconomicsHeader({
   range,
   onRangeChange,
   portfolioScope = 'month',
-  monthsWithData,
   windowFrom,
   windowTo,
   onWindowChange,
@@ -253,16 +229,10 @@ export function EconomicsHeader({
     <header className="economics-header">
       <div className="economics-header-row">
         {/* The logo and the object picker live in the shared ModeTopBar
-            above; this header keeps only the range-specific title. */}
+            above; this header keeps only the range-specific title (no
+            subtitle — the row stays a single line next to the switch). */}
         <div className="economics-header-brand">
-          <div className="economics-header-titles">
-            <h2>{rangeTitle(range)}</h2>
-            <p>
-              {range === 'portfolio'
-                ? rangeSubtitle(range, monthsWithData)
-                : `${formatOrganizationLabel(organizationID)} · ${rangeSubtitle(range, monthsWithData)}`}
-            </p>
-          </div>
+          <h2>{rangeTitle(range)}</h2>
         </div>
         {/* Two fixed rows (switch / tools): the payback view drops the
             period picker, and a single wrapping row would change height

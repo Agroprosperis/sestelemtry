@@ -26,30 +26,16 @@
   white-space: nowrap;
 }
 
-.economics-header p {
-  margin: 2px 0 0;
-  color: #475569;
-  font-size: 13px;
-}
-
 .economics-header-brand {
   display: inline-flex;
   align-items: center;
-  gap: 12px;
-  min-width: 0;
-}
-
-.economics-header-titles {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
   min-width: 0;
 }
 
 .economics-header-row {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
+  align-items: center;
   gap: 16px;
   flex-wrap: wrap;
 }

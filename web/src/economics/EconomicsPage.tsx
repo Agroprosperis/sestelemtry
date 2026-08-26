@@ -321,13 +321,6 @@ export function EconomicsPage() {
         range={range}
         onRangeChange={setRange}
         portfolioScope={portfolioScope}
-        monthsWithData={
-          range === 'year'
-            ? annual.year?.months_with_data
-            : range === 'payback' && payback.year
-              ? payback.year.months_with_data + payback.year.prior_months_with_data
-              : undefined
-        }
         windowFrom={windowFrom || (range === 'year' || range === 'portfolio' ? `${period}-01` : '')}
         windowTo={windowTo || (range === 'year' || range === 'portfolio' ? `${period}-12` : '')}
         onWindowChange={(nextFrom, nextTo) => {
