@@ -55,10 +55,21 @@
 }
 
 .economics-header-controls {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.economics-header-tools {
   display: inline-flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 10px;
   flex-wrap: wrap;
+  /* Reserve one control row even when the payback view drops the
+     period picker, so switching ranges never bounces the page. */
+  min-height: 36px;
 }
 
 /* The "Оновити ціни РДН" button hover state uses a subtle violet

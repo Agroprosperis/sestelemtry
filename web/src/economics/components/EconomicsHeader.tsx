@@ -311,6 +311,9 @@ export function EconomicsHeader({
             </p>
           </div>
         </div>
+        {/* Two fixed rows (switch / tools): the payback view drops the
+            period picker, and a single wrapping row would change height
+            and bounce the whole page below. */}
         <div className="economics-header-controls">
           <div className="economics-range-switch" role="group" aria-label="Гранулярність періоду">
             <button
@@ -354,48 +357,50 @@ export function EconomicsHeader({
               Портфель
             </button>
           </div>
-          {range === 'payback' ? null : range === 'year' ||
-            (range === 'portfolio' && portfolioScope === 'period') ? (
-            <EconomicsPeriodPicker from={windowFrom} to={windowTo} onChange={onWindowChange} />
-          ) : (
-            <PeriodPicker
-              preset={range === 'portfolio' ? (portfolioScope === 'year' ? 'year' : 'month') : range}
-              anchor={parseDateString(date)}
-              onChange={(next) => onDateChange(formatDateString(next))}
-            />
-          )}
-          <button
-            type="button"
-            className={
-              damRefreshState === 'error'
-                ? 'economics-refresh-dam economics-refresh-dam-error'
-                : 'economics-refresh-dam'
-            }
-            onClick={() => {
-              void onRefreshDam()
-            }}
-            disabled={damRefreshState === 'loading'}
-            title={damButtonTitle}
-            aria-live="polite"
-          >
-            {damRefreshLabel(damRefreshState)}
-          </button>
-          <button
-            type="button"
-            className="economics-recompute-btn"
-            onClick={onOpenDamImport}
-            title="Завантажити архів цін РДН з OREE за діапазон дат"
-          >
-            Імпорт цін РДН
-          </button>
-          <button
-            type="button"
-            className="economics-recompute-btn"
-            onClick={onOpenRecompute}
-            title="Перерахувати погодинну економіку за діапазон дат і зберегти в базі"
-          >
-            Перерахунок економіки
-          </button>
+          <div className="economics-header-tools">
+            {range === 'payback' ? null : range === 'year' ||
+              (range === 'portfolio' && portfolioScope === 'period') ? (
+              <EconomicsPeriodPicker from={windowFrom} to={windowTo} onChange={onWindowChange} />
+            ) : (
+              <PeriodPicker
+                preset={range === 'portfolio' ? (portfolioScope === 'year' ? 'year' : 'month') : range}
+                anchor={parseDateString(date)}
+                onChange={(next) => onDateChange(formatDateString(next))}
+              />
+            )}
+            <button
+              type="button"
+              className={
+                damRefreshState === 'error'
+                  ? 'economics-refresh-dam economics-refresh-dam-error'
+                  : 'economics-refresh-dam'
+              }
+              onClick={() => {
+                void onRefreshDam()
+              }}
+              disabled={damRefreshState === 'loading'}
+              title={damButtonTitle}
+              aria-live="polite"
+            >
+              {damRefreshLabel(damRefreshState)}
+            </button>
+            <button
+              type="button"
+              className="economics-recompute-btn"
+              onClick={onOpenDamImport}
+              title="Завантажити архів цін РДН з OREE за діапазон дат"
+            >
+              Імпорт цін РДН
+            </button>
+            <button
+              type="button"
+              className="economics-recompute-btn"
+              onClick={onOpenRecompute}
+              title="Перерахувати погодинну економіку за діапазон дат і зберегти в базі"
+            >
+              Перерахунок економіки
+            </button>
+          </div>
         </div>
       </div>
 

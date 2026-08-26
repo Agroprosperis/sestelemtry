@@ -10,9 +10,9 @@
 .ctl-topbar {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   flex-wrap: wrap;
-  padding: 10px 14px;
+  padding: 10px 12px;
   background: #ffffff;
   border: 1px solid #e2e8f0;
   border-radius: 12px;
@@ -22,9 +22,8 @@
 .ctl-topbar-brand {
   display: inline-flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   min-width: 0;
-  margin-right: 6px;
 }
 
 .ctl-topbar-logo {
@@ -68,7 +67,7 @@
   min-width: 210px;
   /* A <select> auto-sizes to its widest option; cap it so one long
      org name can't blow the bar onto a second line. */
-  max-width: 300px;
+  max-width: 260px;
   text-overflow: ellipsis;
 }
 
@@ -89,7 +88,7 @@
 .ctl-mode-switch button {
   border: none;
   background: transparent;
-  padding: 7px 14px;
+  padding: 7px 12px;
   border-radius: 8px;
   font-size: 13px;
   font-weight: 600;
@@ -241,7 +240,7 @@
   background: #ffffff;
   border: 1px solid #e2e8f0;
   border-radius: 10px;
-  padding: 6px 12px;
+  padding: 6px 10px;
   font: inherit;
   font-size: 13px;
   font-weight: 600;
