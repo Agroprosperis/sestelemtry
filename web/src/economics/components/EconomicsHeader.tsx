@@ -30,23 +30,6 @@ function formatDateString(d: Date): string {
 // all-objects portfolio rollup.
 export type EconomicsRange = 'day' | 'month' | 'year' | 'payback' | 'portfolio'
 
-// rangeTitle picks the header copy for the active period granularity
-// so the day/month/year/portfolio views read consistently.
-function rangeTitle(range: EconomicsRange): string {
-  switch (range) {
-    case 'portfolio':
-      return 'Зведений дашборд СЕС + УЗЕ'
-    case 'payback':
-      return 'Окупність проєкту СЕС + УЗЕ'
-    case 'year':
-      return 'Річний дашборд СЕС + УЗЕ'
-    case 'month':
-      return 'Місячний дашборд СЕС + УЗЕ'
-    default:
-      return 'Добовий дашборд СЕС + УЗЕ'
-  }
-}
-
 type Props = {
   organizationID: string
   range: EconomicsRange
@@ -228,71 +211,58 @@ export function EconomicsHeader({
   return (
     <header className="economics-header">
       <div className="economics-header-row">
-        {/* The logo and the object picker live in the shared ModeTopBar
-            above; this header keeps only the range-specific title (no
-            subtitle — the row stays a single line next to the switch). */}
-        <div className="economics-header-brand">
-          <h2>{rangeTitle(range)}</h2>
+        <div className="economics-range-switch" role="group" aria-label="Гранулярність періоду">
+          <button
+            type="button"
+            className={range === 'day' ? 'active' : ''}
+            aria-pressed={range === 'day'}
+            onClick={() => onRangeChange('day')}
+          >
+            День
+          </button>
+          <button
+            type="button"
+            className={range === 'month' ? 'active' : ''}
+            aria-pressed={range === 'month'}
+            onClick={() => onRangeChange('month')}
+          >
+            Місяць
+          </button>
+          <button
+            type="button"
+            className={range === 'year' ? 'active' : ''}
+            aria-pressed={range === 'year'}
+            onClick={() => onRangeChange('year')}
+          >
+            Рік
+          </button>
+          <button
+            type="button"
+            className={range === 'payback' ? 'active' : ''}
+            aria-pressed={range === 'payback'}
+            onClick={() => onRangeChange('payback')}
+          >
+            Окупність
+          </button>
+          <button
+            type="button"
+            className={range === 'portfolio' ? 'active' : ''}
+            aria-pressed={range === 'portfolio'}
+            onClick={() => onRangeChange('portfolio')}
+          >
+            Портфель
+          </button>
         </div>
-        {/* Two fixed rows (switch / tools): the payback view drops the
-            period picker, and a single wrapping row would change height
-            and bounce the whole page below. */}
-        <div className="economics-header-controls">
-          <div className="economics-range-switch" role="group" aria-label="Гранулярність періоду">
-            <button
-              type="button"
-              className={range === 'day' ? 'active' : ''}
-              aria-pressed={range === 'day'}
-              onClick={() => onRangeChange('day')}
-            >
-              День
-            </button>
-            <button
-              type="button"
-              className={range === 'month' ? 'active' : ''}
-              aria-pressed={range === 'month'}
-              onClick={() => onRangeChange('month')}
-            >
-              Місяць
-            </button>
-            <button
-              type="button"
-              className={range === 'year' ? 'active' : ''}
-              aria-pressed={range === 'year'}
-              onClick={() => onRangeChange('year')}
-            >
-              Рік
-            </button>
-            <button
-              type="button"
-              className={range === 'payback' ? 'active' : ''}
-              aria-pressed={range === 'payback'}
-              onClick={() => onRangeChange('payback')}
-            >
-              Окупність
-            </button>
-            <button
-              type="button"
-              className={range === 'portfolio' ? 'active' : ''}
-              aria-pressed={range === 'portfolio'}
-              onClick={() => onRangeChange('portfolio')}
-            >
-              Портфель
-            </button>
-          </div>
-          <div className="economics-header-tools">
-            {range === 'payback' ? null : range === 'year' ||
-              (range === 'portfolio' && portfolioScope === 'period') ? (
-              <EconomicsPeriodPicker from={windowFrom} to={windowTo} onChange={onWindowChange} />
-            ) : (
-              <PeriodPicker
-                preset={range === 'portfolio' ? (portfolioScope === 'year' ? 'year' : 'month') : range}
-                anchor={parseDateString(date)}
-                onChange={(next) => onDateChange(formatDateString(next))}
-              />
-            )}
-          </div>
-        </div>
+        {range === 'payback' ? null : range === 'year' ||
+          (range === 'portfolio' && portfolioScope === 'period') ? (
+          <EconomicsPeriodPicker from={windowFrom} to={windowTo} onChange={onWindowChange} />
+        ) : (
+          <PeriodPicker
+            preset={range === 'portfolio' ? (portfolioScope === 'year' ? 'year' : 'month') : range}
+            anchor={parseDateString(date)}
+            onChange={(next) => onDateChange(formatDateString(next))}
+          />
+        )}
       </div>
 
       {/* Tariffs belong to one organization, but the portfolio compares
