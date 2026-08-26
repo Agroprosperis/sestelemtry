@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { refreshDAMPrices } from '../api'
 import { useOrganizationParam } from '../dashboard/hooks/useOrganizationParam'
+import { ModeTopBar } from '../shell/ModeTopBar'
 import { dailyTotals, pvEssArbitrageGain } from './compute'
 import { EconomicsDamPricesModal } from './components/EconomicsDamPricesModal'
 import { EconomicsHeader, type EconomicsRange } from './components/EconomicsHeader'
@@ -282,23 +283,18 @@ export function EconomicsPage() {
     [onOrganizationChange, portfolioScope, month],
   )
 
-  const onBackToDashboard = useCallback(() => {
-    if (typeof window === 'undefined') return
-    const url = new URL(window.location.href)
-    url.searchParams.delete('view')
-    // We deliberately leave the date in the URL: returning to the
-    // economics page later restores the operator's last working day
-    // without forcing them to retype it.
-    window.history.pushState({}, '', url.toString())
-    window.dispatchEvent(new PopStateEvent('popstate'))
-  }, [])
-
   return (
     <main className="economics-page">
+      <ModeTopBar
+        mode="economics"
+        organizationID={organizationID}
+        options={options}
+        onOrganizationChange={onOrganizationChange}
+        title="Економіка СЕС + УЗЕ"
+      />
+
       <EconomicsHeader
         organizationID={organizationID}
-        organizationOptions={options}
-        onOrganizationChange={onOrganizationChange}
         range={range}
         onRangeChange={setRange}
         portfolioScope={portfolioScope}
@@ -321,7 +317,6 @@ export function EconomicsPage() {
         onTariffsChange={setTariffs}
         tariffsStatus={tariffsStatus}
         tariffsError={tariffsError}
-        onBackToDashboard={onBackToDashboard}
         onRefreshDam={onRefreshDam}
         damRefreshState={damRefreshState}
         damRefreshError={damRefreshError}

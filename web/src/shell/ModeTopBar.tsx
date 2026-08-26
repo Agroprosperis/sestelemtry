@@ -8,13 +8,13 @@ import { fetchEdgeFleet, type EdgeSiteStatus } from '../control/controlClient'
 import { formatOrganizationLabel } from '../dashboard/config'
 import './shell.css'
 
-// 'none' is for the service pages (station, import): neither mode is
-// highlighted, both buttons navigate.
-export type ConsoleMode = 'analytics' | 'control' | 'none'
+// 'none' is for the service pages (station, import): no mode is
+// highlighted, every button navigates.
+export type ConsoleMode = 'analytics' | 'economics' | 'control' | 'none'
 
-// navigateView switches between the two modes without a full reload,
+// navigateView switches between the modes without a full reload,
 // preserving the rest of the query string (organization_id etc).
-export function navigateView(view: 'dashboard' | 'control', tab?: string) {
+export function navigateView(view: 'dashboard' | 'economics' | 'control', tab?: string) {
   const url = new URL(window.location.href)
   if (view === 'dashboard') url.searchParams.delete('view')
   else url.searchParams.set('view', view)
@@ -146,6 +146,15 @@ export function ModeTopBar({
             onClick={() => mode !== 'analytics' && navigateView('dashboard')}
           >
             Аналітика<span className="ctl-mode-tail"> та моніторинг</span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mode === 'economics'}
+            className={mode === 'economics' ? 'active' : ''}
+            onClick={() => mode !== 'economics' && navigateView('economics')}
+          >
+            Економіка
           </button>
           <button
             type="button"

@@ -1,5 +1,4 @@
 import { useId } from 'react'
-import { OrganizationSelect } from '../../dashboard/components/OrganizationSelect'
 import { PeriodPicker } from '../../dashboard/components/PeriodPicker'
 import { formatOrganizationLabel } from '../../dashboard/config'
 import { EconomicsPeriodPicker } from './EconomicsPeriodPicker'
@@ -76,8 +75,6 @@ function rangeSubtitle(range: EconomicsRange, monthsWithData?: number): string {
 
 type Props = {
   organizationID: string
-  organizationOptions: string[]
-  onOrganizationChange: (next: string) => void
   range: EconomicsRange
   onRangeChange: (next: EconomicsRange) => void
   // Portfolio granularity (month / year / custom window). Only meaningful
@@ -99,10 +96,6 @@ type Props = {
   onTariffsChange: (next: Tariffs) => void
   tariffsStatus: OrgTariffsStatus
   tariffsError: string | null
-  // Render a "back to main dashboard" link that drops `?view=economics`
-  // and pushes a new history entry. Kept as a callback so the page
-  // file can decide whether to use pushState or hard navigate.
-  onBackToDashboard: () => void
   // Operator-driven "fetch DAM prices from OREE right now" hook.
   // The handler is async; the button reflects the supplied state
   // (loading / idle / error) so the page owns the lifecycle. When
@@ -277,8 +270,6 @@ function damRefreshLabel(state: DamRefreshState): string {
 
 export function EconomicsHeader({
   organizationID,
-  organizationOptions,
-  onOrganizationChange,
   range,
   onRangeChange,
   portfolioScope = 'month',
@@ -292,7 +283,6 @@ export function EconomicsHeader({
   onTariffsChange,
   tariffsStatus,
   tariffsError,
-  onBackToDashboard,
   onRefreshDam,
   damRefreshState,
   damRefreshError,
@@ -309,14 +299,11 @@ export function EconomicsHeader({
   return (
     <header className="economics-header">
       <div className="economics-header-row">
+        {/* The logo and the object picker live in the shared ModeTopBar
+            above; this header keeps only the range-specific title. */}
         <div className="economics-header-brand">
-          <img
-            src="/logo_agroprosperis.png"
-            alt="Агропросперіс"
-            className="economics-header-logo"
-          />
           <div className="economics-header-titles">
-            <h1>{rangeTitle(range)}</h1>
+            <h2>{rangeTitle(range)}</h2>
             <p>
               {range === 'portfolio'
                 ? rangeSubtitle(range, monthsWithData)
@@ -325,13 +312,6 @@ export function EconomicsHeader({
           </div>
         </div>
         <div className="economics-header-controls">
-          {range !== 'portfolio' && (
-            <OrganizationSelect
-              value={organizationID}
-              options={organizationOptions}
-              onChange={onOrganizationChange}
-            />
-          )}
           <div className="economics-range-switch" role="group" aria-label="Гранулярність періоду">
             <button
               type="button"
@@ -415,14 +395,6 @@ export function EconomicsHeader({
             title="Перерахувати погодинну економіку за діапазон дат і зберегти в базі"
           >
             Перерахунок економіки
-          </button>
-          <button
-            type="button"
-            className="economics-back-link"
-            onClick={onBackToDashboard}
-            title="Повернутися до основного дашборду"
-          >
-            ← Дашборд
           </button>
         </div>
       </div>

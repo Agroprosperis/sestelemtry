@@ -18,9 +18,9 @@
   min-width: 0;
 }
 
-.economics-header h1 {
+.economics-header h2 {
   margin: 0;
-  font-size: 22px;
+  font-size: 20px;
   line-height: 1.2;
   color: #0f172a;
   white-space: nowrap;
@@ -46,13 +46,6 @@
   min-width: 0;
 }
 
-.economics-header-logo {
-  height: 36px;
-  width: auto;
-  display: block;
-  flex-shrink: 0;
-}
-
 .economics-header-row {
   display: flex;
   justify-content: space-between;
@@ -68,26 +61,11 @@
   flex-wrap: wrap;
 }
 
-.economics-back-link {
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
-  border-radius: 10px;
-  padding: 6px 12px;
-  cursor: pointer;
-  color: #334155;
-  font-size: 13px;
-}
-
-.economics-back-link:hover {
-  background: #f1f5f9;
-}
-
-/* The "Оновити ціни РДН" button mirrors the back-link's chrome so
-   the header reads as one toolbar, but its hover state uses a
-   subtle violet wash to hint at "this triggers a network refresh"
-   without being a primary CTA. Disabled state during the in-flight
-   POST drops opacity to .7 — Safari ignores the standard
-   `disabled` styling on buttons inside flex containers otherwise. */
+/* The "Оновити ціни РДН" button hover state uses a subtle violet
+   wash to hint at "this triggers a network refresh" without being a
+   primary CTA. Disabled state during the in-flight POST drops
+   opacity to .7 — Safari ignores the standard `disabled` styling on
+   buttons inside flex containers otherwise. */
 .economics-refresh-dam {
   background: #ffffff;
   border: 1px solid #e2e8f0;
