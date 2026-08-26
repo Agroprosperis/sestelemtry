@@ -1,7 +1,7 @@
 import { useState } from 'react'
-import { OrganizationSelect } from '../dashboard/components/OrganizationSelect'
 import { formatOrganizationLabel } from '../dashboard/config'
 import { useOrganizationParam } from '../dashboard/hooks/useOrganizationParam'
+import { ModeTopBar } from '../shell/ModeTopBar'
 import type { PlantInventory, PlantInventoryChange, PlantInventoryHistory } from '../types'
 import { StationIcon } from './StationIcon'
 import './station.css'
@@ -20,14 +20,6 @@ import {
 } from './stationParams'
 import { usePlantInventory } from './usePlantInventory'
 import { usePlantInventoryHistory } from './usePlantInventoryHistory'
-
-function backToDashboard() {
-  if (typeof window === 'undefined') return
-  const url = new URL(window.location.href)
-  url.searchParams.delete('view')
-  window.history.pushState({}, '', url.toString())
-  window.dispatchEvent(new PopStateEvent('popstate'))
-}
 
 function formatSnapshotTime(iso: string): string {
   const d = new Date(iso)
@@ -224,10 +216,14 @@ export function StationPage() {
 
   return (
     <main className="station-page">
+      <ModeTopBar
+        mode="none"
+        organizationID={organizationID}
+        options={options}
+        onOrganizationChange={onOrganizationChange}
+      />
+
       <header className="station-header">
-        <button type="button" className="station-back" onClick={backToDashboard}>
-          ← Дашборд
-        </button>
         <div className="station-heading">
           <h1>Паспорт станції</h1>
           <p className="station-subtitle">
@@ -236,14 +232,6 @@ export function StationPage() {
           </p>
         </div>
       </header>
-
-      <div className="station-toolbar">
-        <OrganizationSelect
-          value={organizationID}
-          options={options}
-          onChange={onOrganizationChange}
-        />
-      </div>
 
       {error ? (
         <div className="station-error" role="alert">

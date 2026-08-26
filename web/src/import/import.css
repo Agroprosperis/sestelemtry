@@ -5,6 +5,10 @@
   color: #0f172a;
 }
 
+.import-page .ctl-topbar {
+  margin-bottom: 20px;
+}
+
 .import-header {
   display: flex;
   align-items: flex-start;
@@ -23,23 +27,6 @@
   margin: 4px 0 0;
   font-size: 0.85rem;
   color: #64748b;
-}
-
-.import-back {
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
-  color: #0f172a;
-  border-radius: 8px;
-  padding: 7px 13px;
-  cursor: pointer;
-  font-size: 0.85rem;
-  white-space: nowrap;
-  transition: border-color 0.15s ease, background 0.15s ease;
-}
-
-.import-back:hover {
-  border-color: #cbd5e1;
-  background: #f1f5f9;
 }
 
 .import-card {
@@ -154,7 +141,7 @@
 
 .import-controls {
   display: grid;
-  grid-template-columns: minmax(180px, 1.4fr) repeat(2, minmax(130px, 1fr));
+  grid-template-columns: repeat(2, minmax(150px, 1fr));
   align-items: end;
   gap: 14px 16px;
 }
@@ -164,7 +151,7 @@
 }
 
 .import-controls-askoe {
-  grid-template-columns: minmax(180px, 1.1fr) minmax(220px, 1.6fr);
+  grid-template-columns: minmax(260px, 1fr);
 }
 
 .import-field-file input[type='file'] {
@@ -177,8 +164,7 @@
   margin-top: 14px;
 }
 
-.import-field,
-.import-controls .org-select {
+.import-field {
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -187,8 +173,7 @@
   min-width: 0;
 }
 
-.import-field > span,
-.import-controls .org-select > span {
+.import-field > span {
   font-weight: 600;
   letter-spacing: 0.02em;
   text-transform: uppercase;
@@ -197,8 +182,7 @@
 }
 
 .import-field input,
-.import-field select,
-.import-controls .org-select select {
+.import-field select {
   background: #ffffff;
   color: #0f172a;
   border: 1px solid #e2e8f0;
@@ -211,8 +195,7 @@
 }
 
 .import-field input:focus,
-.import-field select:focus,
-.import-controls .org-select select:focus {
+.import-field select:focus {
   outline: none;
   border-color: #6366f1;
   box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.18);

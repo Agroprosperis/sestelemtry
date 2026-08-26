@@ -1,6 +1,6 @@
 import { lazy, Suspense, useState } from 'react'
 import './dashboard.css'
-import { ModeTopBar } from '../control/ModeTopBar'
+import { ModeTopBar } from '../shell/ModeTopBar'
 import { DashboardControls } from './components/DashboardControls'
 import { DashboardHeader } from './components/DashboardHeader'
 import { EnergyChart } from './components/EnergyChart'

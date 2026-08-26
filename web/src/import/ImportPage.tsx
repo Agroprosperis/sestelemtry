@@ -6,8 +6,8 @@ import {
   type FusionSolarImportResult,
   type ImportProgress,
 } from '../api'
-import { OrganizationSelect } from '../dashboard/components/OrganizationSelect'
 import { useOrganizationParam } from '../dashboard/hooks/useOrganizationParam'
+import { ModeTopBar } from '../shell/ModeTopBar'
 import './import.css'
 import { ImportProgressBar, isAbortError, type RunState } from './shared'
 
@@ -37,37 +37,37 @@ function kyivDate(offsetDays = 0): string {
   return `${y}-${m}-${d}`
 }
 
-function backToDashboard() {
-  if (typeof window === 'undefined') return
-  const url = new URL(window.location.href)
-  url.searchParams.delete('view')
-  window.history.pushState({}, '', url.toString())
-  window.dispatchEvent(new PopStateEvent('popstate'))
-}
-
 export function ImportPage() {
+  // One page-level object picker (in the shared top bar); both import
+  // cards receive the same organization, so they can no longer drift
+  // apart like the two per-card selects used to.
+  const { organizationID, options, change: onOrganizationChange } = useOrganizationParam()
+
   return (
     <main className="import-page">
+      <ModeTopBar
+        mode="none"
+        organizationID={organizationID}
+        options={options}
+        onOrganizationChange={onOrganizationChange}
+      />
+
       <header className="import-header">
-        <button type="button" className="import-back" onClick={backToDashboard}>
-          ← Дашборд
-        </button>
         <div className="import-heading">
           <h1>Імпорт даних</h1>
           <p className="import-subtitle">Архів FusionSolar і комерційний облік АСКОЕ</p>
         </div>
       </header>
 
-      <FusionSolarImportCard />
-      <AskoeImportCard />
+      <FusionSolarImportCard organizationID={organizationID} />
+      <AskoeImportCard organizationID={organizationID} />
     </main>
   )
 }
 
 // ---- FusionSolar archive telemetry --------------------------------------
 
-function FusionSolarImportCard() {
-  const { organizationID, options, change: onOrganizationChange } = useOrganizationParam()
+function FusionSolarImportCard({ organizationID }: { organizationID: string }) {
   const [fromDate, setFromDate] = useState<string>(() => kyivDate(-1))
   const [toDate, setToDate] = useState<string>(() => kyivDate(-1))
   const [state, setState] = useState<RunState>('idle')
@@ -138,11 +138,6 @@ function FusionSolarImportCard() {
         пропускаються автоматично — архів заповнює лише дні без live-даних.
       </p>
       <div className="import-controls">
-        <OrganizationSelect
-          value={organizationID}
-          options={options}
-          onChange={onOrganizationChange}
-        />
         <label className="import-field">
           <span>Від</span>
           <input
@@ -284,8 +279,7 @@ function FusionSolarImportCard() {
   )
 }
 
-function AskoeImportCard() {
-  const { organizationID, options, change: onOrganizationChange } = useOrganizationParam()
+function AskoeImportCard({ organizationID }: { organizationID: string }) {
   const [file, setFile] = useState<File | null>(null)
   const [state, setState] = useState<RunState>('idle')
   const [error, setError] = useState<string | null>(null)
@@ -344,11 +338,6 @@ function AskoeImportCard() {
         не змінюються — записуються лише порожні дні. Після запису перераховується економіка.
       </p>
       <div className="import-controls import-controls-askoe">
-        <OrganizationSelect
-          value={organizationID}
-          options={options}
-          onChange={onOrganizationChange}
-        />
         <label className="import-field import-field-file">
           <span>Файл</span>
           <input

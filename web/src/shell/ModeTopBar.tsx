@@ -1,13 +1,16 @@
-// ModeTopBar is the shared strip above both the analytics dashboard and
-// the «Керування» view: object picker + mode switch + edge status chips
-// (IOT2050 online, active mode, manifest delivery state).
+// ModeTopBar is the app-wide strip above the analytics dashboard, the
+// «Керування» view and the service pages (station passport, import):
+// the single object picker + mode switch + edge status chips (IOT2050
+// online, active mode, manifest delivery state).
 
 import { useEffect, useState } from 'react'
+import { fetchEdgeFleet, type EdgeSiteStatus } from '../control/controlClient'
 import { formatOrganizationLabel } from '../dashboard/config'
-import { fetchEdgeFleet, type EdgeSiteStatus } from './controlClient'
-import './control.css'
+import './shell.css'
 
-export type ConsoleMode = 'analytics' | 'control'
+// 'none' is for the service pages (station, import): neither mode is
+// highlighted, both buttons navigate.
+export type ConsoleMode = 'analytics' | 'control' | 'none'
 
 // navigateView switches between the two modes without a full reload,
 // preserving the rest of the query string (organization_id etc).
@@ -26,8 +29,8 @@ type Props = {
   organizationID: string
   options: string[]
   onOrganizationChange: (next: string) => void
-  // status lets the control page share its own poll; when omitted
-  // (analytics) the bar quietly polls the fleet itself.
+  // status lets the control page share its own poll; when omitted the
+  // bar quietly polls the fleet itself.
   status?: EdgeSiteStatus | null
 }
 
@@ -44,8 +47,8 @@ function shortManifestID(id: string): string {
 export function ModeTopBar({ mode, organizationID, options, onOrganizationChange, status }: Props) {
   const [fleetStatus, setFleetStatus] = useState<EdgeSiteStatus | null>(null)
 
-  // Analytics mode has no other edge data source — poll the fleet to
-  // know whether the selected object has an edge device at all.
+  // Without a shared poll the bar checks the fleet itself, so any page
+  // can show whether the selected object has an edge device online.
   useEffect(() => {
     if (status !== undefined) return
     let cancelled = false
@@ -53,7 +56,7 @@ export function ModeTopBar({ mode, organizationID, options, onOrganizationChange
       fetchEdgeFleet()
         .then((f) => {
           if (cancelled) return
-          setFleetStatus(f.sites.find((s) => s.site_id === organizationID) ?? null)
+          setFleetStatus((f.sites ?? []).find((s) => s.site_id === organizationID) ?? null)
         })
         .catch(() => !cancelled && setFleetStatus(null))
     void load()
