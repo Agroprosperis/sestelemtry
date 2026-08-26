@@ -1257,7 +1257,12 @@ func (s *Store) EnergyFlowSources(
 	if lookback < 0 {
 		lookback = 0
 	}
-	rows, err := s.pool.Query(ctx, `
+	// An open window (to in the future = "today") can contain a full
+	// day of 1 Hz collector rows × ~10 metrics. Pulling that raw for
+	// GET /economics/daily exceeds the API write timeout. The allocator
+	// already buckets at 60 s, so the last sample per minute is enough.
+	// Closed (historical) days keep the 1 Hz scan for recompute fidelity.
+	query := `
 		SELECT
 			time,
 			metric_key,
@@ -1269,7 +1274,31 @@ func (s *Store) EnergyFlowSources(
 			AND time >= $3
 			AND time < $4
 		ORDER BY time ASC, metric_key ASC
-	`, organizationID, EnergyFlowRecomputeSourceMetrics, from.UTC().Add(-lookback), to.UTC())
+	`
+	if to.After(time.Now()) {
+		query = `
+			SELECT DISTINCT ON (bkt, metric_key, device_host)
+				time,
+				metric_key,
+				value,
+				device_host
+			FROM (
+				SELECT
+					time,
+					time_bucket('1 minute', time) AS bkt,
+					metric_key,
+					value,
+					COALESCE(labels->>'device_host', '') AS device_host
+				FROM telemetry_samples
+				WHERE organization_id = $1
+					AND metric_key = ANY($2)
+					AND time >= $3
+					AND time < $4
+			) s
+			ORDER BY bkt, metric_key, device_host, time DESC
+		`
+	}
+	rows, err := s.pool.Query(ctx, query, organizationID, EnergyFlowRecomputeSourceMetrics, from.UTC().Add(-lookback), to.UTC())
 	if err != nil {
 		return nil, fmt.Errorf("energy_flow sources: %w", err)
 	}

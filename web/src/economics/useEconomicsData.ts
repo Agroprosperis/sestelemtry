@@ -73,9 +73,14 @@ export function useEconomicsData(input: Input): EconomicsData {
     const controller = new AbortController()
     setData((prev) => ({ ...prev, loading: true, error: null }))
 
+    // The live today recompute can exceed the API write timeout; fail
+    // the spinner instead of hanging until the browser gives up.
+    const timeout = AbortSignal.timeout(20_000)
+    const signal = AbortSignal.any([controller.signal, timeout])
+
     fetchEconomicsDaily(
       { organizationID: input.organizationID, date: input.date, tz: LOCAL_TZ },
-      controller.signal,
+      signal,
     )
       .then((resp) => {
         const rows = resp.hours.map((h) => (h ? mapHourRow(h) : null))
@@ -90,13 +95,16 @@ export function useEconomicsData(input: Input): EconomicsData {
         })
       })
       .catch((err: unknown) => {
-        if ((err as DOMException)?.name === 'AbortError') return
+        if (controller.signal.aborted) return
+        const name = (err as DOMException)?.name
         const message =
-          err instanceof Error
-            ? err.message
-            : typeof err === 'string'
-              ? err
-              : 'failed to load economics data'
+          name === 'TimeoutError' || name === 'AbortError'
+            ? 'Денний розрахунок не відповів за 20 с. Оновіть сторінку або відкрийте вчорашній день.'
+            : err instanceof Error
+              ? err.message
+              : typeof err === 'string'
+                ? err
+                : 'failed to load economics data'
         setData((prev) => ({ ...prev, loading: false, error: message }))
       })
 

@@ -99,13 +99,9 @@ type Backend interface {
 // (final days from cache, non-final days recomputed on read).
 type Service struct {
 	backend Backend
-	// freshTodayWindow, when > 0, lets GetDay serve a cached non-final
-	// day (i.e. today) from storage instead of recomputing it live, as
-	// long as it was written within this window. It is set when the
-	// economics-recompute daemon keeps the current day warm, so the
-	// dashboard reads the cache instead of paying the slow live
-	// recompute on every request. 0 (the default) preserves the
-	// always-recompute-non-final behaviour.
+	// freshTodayWindow is retained for the API process (the recompute
+	// daemon interval). GetDay no longer gates the open-day cache on
+	// it — a stored non-final row is always served.
 	freshTodayWindow time.Duration
 }
 
@@ -150,10 +146,11 @@ func (s *Service) ComputeDay(ctx context.Context, orgID, date, tz string) (Store
 	if err != nil {
 		return StoredDay{}, fmt.Errorf("hourly flows: %w", err)
 	}
-	// History flows degrade gracefully — a fresh org / collector gap
-	// just means the cost-basis anchor falls back to ZERO state.
-	yesterdayFlows, _ := s.backend.HourlyFlows(ctx, orgID, dayStart.AddDate(0, 0, -1))
-	dayBeforeFlows, _ := s.backend.HourlyFlows(ctx, orgID, dayStart.AddDate(0, 0, -2))
+	// Yesterday / day-before directional flows only refine the WAC
+	// lookback. Each call walks raw 1 Hz samples for a full day and is
+	// what made GET /economics/daily hang past the API write timeout.
+	// Hourly timeseries deltas below still seed lookback magnitudes.
+	var yesterdayFlows, dayBeforeFlows []FlowRow
 
 	deltaPoints, err := s.backend.Timeseries(ctx, orgID, deltaMetricKeys, dayStart, dayEnd, "1 hour", tz, "delta")
 	if err != nil {
@@ -241,17 +238,13 @@ func (s *Service) GetDay(ctx context.Context, orgID, date, tz string) (StoredDay
 	if ok && stored.IsFinal && stored.Totals.HoursMissingPrice == 0 {
 		return stored, nil
 	}
-	// A still-open day is normally recomputed on read so the dashboard
-	// never shows stale intraday numbers. But when the
-	// economics-recompute daemon keeps today warm, serve its recent
-	// cache instead — that turns the slow live recompute into a fast
-	// cache hit. We only trust the cache inside freshTodayWindow so a
-	// stopped daemon transparently falls back to live recompute, and
-	// only when every hour is priced — a cache computed before the day's
-	// RDN prices landed would otherwise pin the "ціни РДН відсутні"
-	// warning until the nightly finalize pass.
-	if ok && stored.Totals.HoursMissingPrice == 0 && s.freshTodayWindow > 0 &&
-		!stored.ComputedAt.IsZero() && time.Since(stored.ComputedAt) < s.freshTodayWindow {
+	// A still-open day is too expensive to recompute on the HTTP path
+	// (1 Hz samples × several days exceeds the API write timeout, so
+	// the dashboard spun on «Завантаження…»). Serve whatever the
+	// economics-recompute daemon last wrote — including a cache with
+	// missing RDN hours. Live recompute stays for a missing row or
+	// for a final day that still needs a price self-heal.
+	if ok && !stored.IsFinal {
 		return stored, nil
 	}
 	return s.ComputeDay(ctx, orgID, date, tz)

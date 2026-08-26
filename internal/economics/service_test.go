@@ -304,56 +304,40 @@ func TestServiceGetDayFinalMissingPriceRecomputes(t *testing.T) {
 	}
 }
 
-// TestServiceGetDayFreshTodayWindow covers the read-through behaviour
-// for a still-open (non-final) day that the economics-recompute daemon
-// keeps warm: with no window it always recomputes; with a window it
-// serves a recent cache but recomputes a stale one.
-func TestServiceGetDayFreshTodayWindow(t *testing.T) {
+// TestServiceGetDayServesOpenDayCache: a still-open day is always
+// served from storage when a row exists. Live recompute on the HTTP
+// path walks 1 Hz samples and exceeds the API write timeout.
+func TestServiceGetDayServesOpenDayCache(t *testing.T) {
 	b, loc := newKyivBackend(t)
 	svc := NewService(b)
 	now := time.Now().In(loc)
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
 	todayStr := today.Format("2006-01-02")
 
-	seed := func(computedAt time.Time) {
+	seed := func() {
 		b.saved = map[string]StoredDay{
 			todayStr: {
 				OrganizationID: "org1",
 				Day:            today,
 				Tz:             loc.String(),
 				IsFinal:        false,
-				ComputedAt:     computedAt,
+				ComputedAt:     now.Add(-3 * time.Hour),
+				Totals:         DailyTotals{HoursMissingPrice: 6},
 			},
 		}
 		b.saveCount = 0
 	}
 
-	// 1. Default (window 0): a non-final day always recomputes on read.
-	seed(now)
-	if _, err := svc.GetDay(context.Background(), "org1", todayStr, "Europe/Kyiv"); err != nil {
-		t.Fatalf("GetDay: %v", err)
-	}
-	if b.saveCount == 0 {
-		t.Error("with no fresh window, a non-final day must recompute (save)")
-	}
-
-	// 2. Fresh window + recently-written cache: serve cache, no recompute.
-	svc.SetFreshTodayWindow(time.Hour)
-	seed(now)
-	if _, err := svc.GetDay(context.Background(), "org1", todayStr, "Europe/Kyiv"); err != nil {
+	seed()
+	got, err := svc.GetDay(context.Background(), "org1", todayStr, "Europe/Kyiv")
+	if err != nil {
 		t.Fatalf("GetDay: %v", err)
 	}
 	if b.saveCount != 0 {
-		t.Errorf("fresh non-final day should be cache-served, got %d saves", b.saveCount)
+		t.Errorf("open day with a stored row must not recompute, got %d saves", b.saveCount)
 	}
-
-	// 3. Fresh window + stale cache: fall back to recompute.
-	seed(now.Add(-2 * time.Hour))
-	if _, err := svc.GetDay(context.Background(), "org1", todayStr, "Europe/Kyiv"); err != nil {
-		t.Fatalf("GetDay: %v", err)
-	}
-	if b.saveCount == 0 {
-		t.Error("stale non-final cache should recompute (save)")
+	if got.Totals.HoursMissingPrice != 6 {
+		t.Errorf("served cache HoursMissingPrice=%d, want 6", got.Totals.HoursMissingPrice)
 	}
 }
 
