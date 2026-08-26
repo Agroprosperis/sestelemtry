@@ -113,23 +113,112 @@ export function ControlPage() {
         status={status}
       />
 
-      <header className="ctl-header">
-        <div>
-          <h1>Керування СЕС + УЗЕ</h1>
-          <p className="ctl-header-sub">{formatOrganizationLabel(organizationID)}</p>
+      {/* The same brand strip as the analytics dashboard (same classes,
+          same logo position) so switching modes doesn't shift layout. */}
+      <header className="dashboard-header">
+        <div className="dashboard-header-brand">
+          <img
+            src="/logo_agroprosperis.png"
+            alt="Агропросперіс"
+            className="dashboard-header-logo"
+          />
+          <div className="dashboard-header-titles">
+            <h1>Керування СЕС + УЗЕ</h1>
+            <p>{formatOrganizationLabel(organizationID)}</p>
+          </div>
         </div>
-        <div className="ctl-header-actions">
-          <button type="button" className="ctl-btn" onClick={() => switchTab('plan')}>
-            Планувальник
+        <div className="dashboard-header-actions">
+          <button
+            type="button"
+            className="economics-switch-button"
+            onClick={() => switchTab('plan')}
+            title="План на добу: споживання, диспатч УЗЕ, публікація на edge"
+          >
+            <svg
+              aria-hidden="true"
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <rect x="3" y="4" width="18" height="18" rx="2" />
+              <path d="M16 2v4" />
+              <path d="M8 2v4" />
+              <path d="M3 10h18" />
+              <path d="M8 15h3l2 3 2-5 1 2h1" />
+            </svg>
+            <span>Планувальник</span>
           </button>
-          <button type="button" className="ctl-btn" onClick={() => goTo('station')}>
-            Паспорт станції
+          <button
+            type="button"
+            className="economics-switch-button"
+            onClick={() => goTo('station')}
+            title="Паспортні параметри станції зі SmartLogger"
+          >
+            <svg
+              aria-hidden="true"
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <rect x="3" y="3" width="18" height="18" rx="2" />
+              <path d="M3 9h18" />
+              <path d="M9 21V9" />
+            </svg>
+            <span>Паспорт станції</span>
           </button>
-          <button type="button" className="ctl-btn" onClick={() => goTo('alerts')}>
-            Сповіщення
+          <button
+            type="button"
+            className="economics-switch-button"
+            onClick={() => goTo('alerts')}
+            title="Налаштування сповіщень про втрату звʼязку"
+          >
+            <svg
+              aria-hidden="true"
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
+              <path d="M13.7 21a2 2 0 0 1-3.4 0" />
+            </svg>
+            <span>Сповіщення</span>
           </button>
-          <button type="button" className="ctl-btn" onClick={() => switchTab('journal')}>
-            Аудит команд
+          <button
+            type="button"
+            className="economics-switch-button"
+            onClick={() => switchTab('journal')}
+            title="Журнал manifest-ів і подій edge-пристрою"
+          >
+            <svg
+              aria-hidden="true"
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+              <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+            </svg>
+            <span>Аудит команд</span>
           </button>
         </div>
       </header>

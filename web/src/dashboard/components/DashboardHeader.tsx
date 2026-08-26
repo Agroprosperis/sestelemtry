@@ -31,14 +31,6 @@ function goToAlertsView() {
   window.dispatchEvent(new PopStateEvent('popstate'))
 }
 
-function goToPlannerView() {
-  if (typeof window === 'undefined') return
-  const url = new URL(window.location.href)
-  url.searchParams.set('view', 'planner')
-  window.history.pushState({}, '', url.toString())
-  window.dispatchEvent(new PopStateEvent('popstate'))
-}
-
 // DashboardHeader is the page-wide brand strip: logo + product name on
 // the left, and the global actions (archive import, data export) pinned
 // to the right. Range/period/org controls live in `DashboardControls`
@@ -59,31 +51,6 @@ export function DashboardHeader({ organizationID, onExportClick }: Props) {
       </div>
 
       <div className="dashboard-header-actions">
-        <button
-          type="button"
-          className="economics-switch-button"
-          onClick={goToPlannerView}
-          title="План на добу: споживання, диспатч УЗЕ, публікація на edge"
-        >
-          <svg
-            aria-hidden="true"
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <rect x="3" y="4" width="18" height="18" rx="2" />
-            <path d="M16 2v4" />
-            <path d="M8 2v4" />
-            <path d="M3 10h18" />
-            <path d="M8 15h3l2 3 2-5 1 2h1" />
-          </svg>
-          <span>Планувальник</span>
-        </button>
         <button
           type="button"
           className="economics-switch-button"

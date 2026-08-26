@@ -134,33 +134,7 @@
   color: #4338ca;
 }
 
-/* --- page header + tabs --- */
-
-.ctl-header {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  flex-wrap: wrap;
-}
-
-.ctl-header h1 {
-  margin: 0;
-  font-size: 22px;
-  line-height: 1.2;
-}
-
-.ctl-header-sub {
-  margin: 2px 0 0;
-  font-size: 13px;
-  color: #64748b;
-}
-
-.ctl-header-actions {
-  display: inline-flex;
-  gap: 8px;
-  margin-left: auto;
-  flex-wrap: wrap;
-}
+/* --- tabs and buttons (page header reuses .dashboard-header) --- */
 
 .ctl-btn {
   display: inline-flex;
