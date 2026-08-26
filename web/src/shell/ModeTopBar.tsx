@@ -112,6 +112,10 @@ export function ModeTopBar({
   const manifest = st?.manifest
 
   return (
+    // The wrapper is a CSS container: compaction steps in shell.css key
+    // on the bar's real width (the page caps at 1400px, so viewport
+    // media queries would lie on wide monitors).
+    <div className="ctl-topbar-wrap">
     <div className="ctl-topbar">
       {title && (
         <div className="ctl-topbar-brand">
@@ -126,7 +130,11 @@ export function ModeTopBar({
 
       <label className="ctl-topbar-object">
         <span className="ctl-topbar-label">Об'єкт</span>
-        <select value={organizationID} onChange={(e) => onOrganizationChange(e.target.value)}>
+        <select
+          aria-label="Об'єкт"
+          value={organizationID}
+          onChange={(e) => onOrganizationChange(e.target.value)}
+        >
           {options.map((id) => (
             <option key={id} value={id}>
               {formatOrganizationLabel(id)} · {id.toUpperCase()}
@@ -145,7 +153,7 @@ export function ModeTopBar({
             className={mode === 'analytics' ? 'active' : ''}
             onClick={() => mode !== 'analytics' && navigateView('dashboard')}
           >
-            Аналітика<span className="ctl-mode-tail"> та моніторинг</span>
+            Аналітика
           </button>
           <button
             type="button"
@@ -251,6 +259,7 @@ export function ModeTopBar({
           )}
         </div>
       )}
+    </div>
     </div>
   )
 }

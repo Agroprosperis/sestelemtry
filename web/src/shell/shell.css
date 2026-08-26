@@ -2,6 +2,11 @@
    the analytics dashboard, the «Керування» mode and the service pages.
    Visual language matches the light dashboard theme. */
 
+.ctl-topbar-wrap {
+  container-type: inline-size;
+  min-width: 0;
+}
+
 .ctl-topbar {
   display: flex;
   align-items: center;
@@ -61,6 +66,10 @@
   border-radius: 8px;
   background: #f8fafc;
   min-width: 210px;
+  /* A <select> auto-sizes to its widest option; cap it so one long
+     org name can't blow the bar onto a second line. */
+  max-width: 300px;
+  text-overflow: ellipsis;
 }
 
 .ctl-topbar-mode {
@@ -94,17 +103,11 @@
   color: #ffffff;
 }
 
-/* Drop the « та моніторинг» tail when the row gets tight, so the bar
-   (brand + picker + switch + chips + menu) stays on one line. */
-@media (max-width: 1450px) {
-  .ctl-mode-tail {
-    display: none;
-  }
-}
-
-/* Tighter still: the uppercase field labels are decorative — hide them
-   and shrink paddings so the whole shell survives ~1024px in one row. */
-@media (max-width: 1150px) {
+/* Compaction keys on the bar's own width (container queries), because
+   the page is capped at 1400px and viewport media queries would never
+   fire on wide monitors. Step 1: drop the decorative field labels and
+   shrink paddings. */
+@container (max-width: 1300px) {
   .ctl-topbar {
     gap: 10px;
   }
@@ -115,6 +118,7 @@
 
   .ctl-topbar-object select {
     min-width: 175px;
+    max-width: 230px;
     font-size: 13px;
   }
 
@@ -139,6 +143,27 @@
 
   .ctl-topbar-logo {
     height: 28px;
+  }
+}
+
+/* Step 2: the logo alone carries the brand; the mode switch already
+   names where you are. */
+@container (max-width: 1120px) {
+  .ctl-topbar-brand h1 {
+    display: none;
+  }
+
+  .ctl-topbar-brand {
+    margin-right: 0;
+  }
+
+  .ctl-chip {
+    font-size: 10.5px;
+    padding: 3px 6px;
+  }
+
+  .ctl-topbar-chips {
+    gap: 4px;
   }
 }
 
