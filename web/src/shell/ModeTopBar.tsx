@@ -145,7 +145,7 @@ export function ModeTopBar({
             className={mode === 'analytics' ? 'active' : ''}
             onClick={() => mode !== 'analytics' && navigateView('dashboard')}
           >
-            Аналітика та моніторинг
+            Аналітика<span className="ctl-mode-tail"> та моніторинг</span>
           </button>
           <button
             type="button"
@@ -173,9 +173,9 @@ export function ModeTopBar({
               'ctl-chip ' +
               (manifest.state === 'applied' ? 'ok' : manifest.state === 'expired' ? 'err' : 'warn')
             }
-            title={manifest.manifest_id}
+            title={`Manifest ${manifest.manifest_id}`}
           >
-            Manifest {shortManifestID(manifest.manifest_id)}{' '}
+            {shortManifestID(manifest.manifest_id)}{' '}
             {manifest.state === 'applied'
               ? 'applied'
               : manifest.state === 'expired'

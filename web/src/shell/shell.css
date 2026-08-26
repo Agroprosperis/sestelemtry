@@ -5,7 +5,7 @@
 .ctl-topbar {
   display: flex;
   align-items: center;
-  gap: 18px;
+  gap: 12px;
   flex-wrap: wrap;
   padding: 10px 14px;
   background: #ffffff;
@@ -60,7 +60,7 @@
   border: 1px solid #e2e8f0;
   border-radius: 8px;
   background: #f8fafc;
-  min-width: 260px;
+  min-width: 210px;
 }
 
 .ctl-topbar-mode {
@@ -94,10 +94,58 @@
   color: #ffffff;
 }
 
+/* Drop the « та моніторинг» tail when the row gets tight, so the bar
+   (brand + picker + switch + chips + menu) stays on one line. */
+@media (max-width: 1450px) {
+  .ctl-mode-tail {
+    display: none;
+  }
+}
+
+/* Tighter still: the uppercase field labels are decorative — hide them
+   and shrink paddings so the whole shell survives ~1024px in one row. */
+@media (max-width: 1150px) {
+  .ctl-topbar {
+    gap: 10px;
+  }
+
+  .ctl-topbar-label {
+    display: none;
+  }
+
+  .ctl-topbar-object select {
+    min-width: 175px;
+    font-size: 13px;
+  }
+
+  .ctl-mode-switch button {
+    padding: 7px 10px;
+    font-size: 12.5px;
+  }
+
+  .ctl-chip {
+    font-size: 11px;
+    padding: 3px 7px;
+  }
+
+  .ctl-topbar-menu-btn {
+    padding: 6px 10px;
+    font-size: 12.5px;
+  }
+
+  .ctl-topbar-brand h1 {
+    font-size: 15px;
+  }
+
+  .ctl-topbar-logo {
+    height: 28px;
+  }
+}
+
 .ctl-topbar-chips {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   margin-left: auto;
   flex-wrap: wrap;
 }
@@ -108,7 +156,7 @@
   gap: 6px;
   font-size: 12px;
   font-weight: 600;
-  padding: 4px 10px;
+  padding: 4px 8px;
   border-radius: 999px;
   border: 1px solid #e2e8f0;
   background: #f8fafc;
