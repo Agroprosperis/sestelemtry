@@ -1,6 +1,5 @@
 import { Bug } from '@phosphor-icons/react'
 import type { RangePreset } from '../range'
-import { OrganizationSelect } from './OrganizationSelect'
 import { PeriodPicker } from './PeriodPicker'
 import { RangeSwitch } from './RangeSwitch'
 
@@ -17,9 +16,6 @@ function goToEconomicsView() {
 }
 
 type Props = {
-  organizationID: string
-  organizationOptions: string[]
-  onOrganizationChange: (next: string) => void
   preset: RangePreset
   onPresetChange: (next: RangePreset) => void
   anchor: Date
@@ -29,15 +25,10 @@ type Props = {
 }
 
 // DashboardControls is the strip of interactive widgets that sits
-// above the right-hand charts column. Splitting it out from the
-// brand header lets the controls "live next to" the data they
-// affect (range / period drive the charts; organization toggles the
-// whole pane) while keeping the page-title bar as a clean,
-// full-width brand strip.
+// above the right-hand charts column: range / period drive the charts.
+// The object (organization) picker lives once, in the mode top bar —
+// it switches the whole page, not just this pane.
 export function DashboardControls({
-  organizationID,
-  organizationOptions,
-  onOrganizationChange,
   preset,
   onPresetChange,
   anchor,
@@ -47,7 +38,6 @@ export function DashboardControls({
 }: Props) {
   return (
     <div className="dashboard-controls">
-      <OrganizationSelect value={organizationID} options={organizationOptions} onChange={onOrganizationChange} />
       <RangeSwitch value={preset} onChange={onPresetChange} />
       <PeriodPicker preset={preset} anchor={anchor} onChange={onAnchorChange} />
       <button

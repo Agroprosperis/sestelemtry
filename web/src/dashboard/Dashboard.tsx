@@ -108,9 +108,6 @@ export function Dashboard() {
 
         <div className="dashboard-charts">
           <DashboardControls
-            organizationID={organizationID}
-            organizationOptions={options}
-            onOrganizationChange={onOrganizationChange}
             preset={preset}
             onPresetChange={setPreset}
             anchor={anchor}
