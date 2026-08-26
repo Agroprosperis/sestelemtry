@@ -3,7 +3,7 @@
    language follows the light dashboard theme (white cards, #e2e8f0
    borders, 12px radius). */
 
-/* --- tabs and buttons (page header reuses .dashboard-header) --- */
+/* --- tabs and buttons --- */
 
 .ctl-btn {
   display: inline-flex;

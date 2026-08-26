@@ -11,7 +11,7 @@ import { useOrganizationParam } from '../dashboard/hooks/useOrganizationParam'
 import { fetchEdgeSites } from '../planner/plannerClient'
 import { fetchEdgeStatus, type EdgeSiteStatus } from './controlClient'
 import { JournalTab } from './JournalTab'
-import { ModeTopBar } from '../shell/ModeTopBar'
+import { ModeTopBar, type TopBarMenuItem } from '../shell/ModeTopBar'
 import { ModesTab } from './ModesTab'
 import { SettingsTab } from './SettingsTab'
 import { StateTab } from './StateTab'
@@ -102,6 +102,13 @@ export function ControlPage() {
 
   const siteOptions = useMemo(() => (sites.length > 0 ? sites : [organizationID]), [sites, organizationID])
 
+  // Cross-page navigation only; the planner and the journal live in
+  // the tabs, so no menu entries for them.
+  const serviceMenu: TopBarMenuItem[] = [
+    { id: 'station', label: 'Паспорт станції', onSelect: () => goTo('station') },
+    { id: 'alerts', label: 'Сповіщення', onSelect: () => goTo('alerts') },
+  ]
+
   return (
     <main className="dashboard-page">
       <ModeTopBar
@@ -110,60 +117,9 @@ export function ControlPage() {
         options={siteOptions}
         onOrganizationChange={changeOrganization}
         title="Керування СЕС + УЗЕ"
+        menu={serviceMenu}
         status={status}
       />
-
-      {/* Only cross-page navigation here; the planner and the journal
-          live in the tabs right below, so no buttons for them. */}
-      <header className="dashboard-header">
-        <div className="dashboard-header-actions">
-          <button
-            type="button"
-            className="economics-switch-button"
-            onClick={() => goTo('station')}
-            title="Паспортні параметри станції зі SmartLogger"
-          >
-            <svg
-              aria-hidden="true"
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <rect x="3" y="3" width="18" height="18" rx="2" />
-              <path d="M3 9h18" />
-              <path d="M9 21V9" />
-            </svg>
-            <span>Паспорт станції</span>
-          </button>
-          <button
-            type="button"
-            className="economics-switch-button"
-            onClick={() => goTo('alerts')}
-            title="Налаштування сповіщень про втрату звʼязку"
-          >
-            <svg
-              aria-hidden="true"
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
-              <path d="M13.7 21a2 2 0 0 1-3.4 0" />
-            </svg>
-            <span>Сповіщення</span>
-          </button>
-        </div>
-      </header>
 
       <nav className="ctl-tabs" aria-label="Розділи керування">
         {TAB_LABELS.map((t) => (

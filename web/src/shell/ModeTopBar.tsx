@@ -3,7 +3,7 @@
 // the single object picker + mode switch + edge status chips (IOT2050
 // online, active mode, manifest delivery state).
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { fetchEdgeFleet, type EdgeSiteStatus } from '../control/controlClient'
 import { formatOrganizationLabel } from '../dashboard/config'
 import './shell.css'
@@ -24,6 +24,15 @@ export function navigateView(view: 'dashboard' | 'control', tab?: string) {
   window.dispatchEvent(new PopStateEvent('popstate'))
 }
 
+// TopBarMenuItem is an entry of the «Сервіс» dropdown — rare admin
+// actions (imports, exports, passport, alert settings) that don't
+// deserve a permanent button row.
+export type TopBarMenuItem = {
+  id: string
+  label: string
+  onSelect: () => void
+}
+
 type Props = {
   mode: ConsoleMode
   organizationID: string
@@ -32,6 +41,7 @@ type Props = {
   // title renders the brand block (logo + page title) inside the bar,
   // so the whole shell fits one row instead of two.
   title?: string
+  menu?: TopBarMenuItem[]
   // status lets the control page share its own poll; when omitted the
   // bar quietly polls the fleet itself.
   status?: EdgeSiteStatus | null
@@ -53,9 +63,28 @@ export function ModeTopBar({
   options,
   onOrganizationChange,
   title,
+  menu,
   status,
 }: Props) {
   const [fleetStatus, setFleetStatus] = useState<EdgeSiteStatus | null>(null)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const menuRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    if (!menuOpen) return
+    const onDown = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMenuOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [menuOpen])
 
   // Without a shared poll the bar checks the fleet itself, so any page
   // can show whether the selected object has an edge device online.
@@ -155,6 +184,64 @@ export function ModeTopBar({
           </span>
         )}
       </div>
+
+      {menu && menu.length > 0 && (
+        <div className="ctl-topbar-menu" ref={menuRef}>
+          <button
+            type="button"
+            className="ctl-topbar-menu-btn"
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            onClick={() => setMenuOpen((v) => !v)}
+          >
+            <svg
+              aria-hidden="true"
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <circle cx="12" cy="12" r="3" />
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+            </svg>
+            <span>Сервіс</span>
+            <svg
+              aria-hidden="true"
+              width="10"
+              height="10"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="m6 9 6 6 6-6" />
+            </svg>
+          </button>
+          {menuOpen && (
+            <div className="ctl-topbar-menu-list" role="menu">
+              {menu.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setMenuOpen(false)
+                    item.onSelect()
+                  }}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }

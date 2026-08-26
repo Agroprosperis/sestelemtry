@@ -13,14 +13,6 @@
   align-items: start;
 }
 
-.dashboard-header {
-  display: flex;
-  justify-content: flex-start;
-  align-items: center;
-  gap: 16px;
-  flex-wrap: wrap;
-}
-
 .dashboard-controls {
   display: flex;
   align-items: center;
@@ -36,14 +28,6 @@
 
 .dashboard-controls > :first-child {
   margin-right: auto;
-}
-
-.dashboard-header-actions {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  margin-left: auto;
-  flex-wrap: wrap;
 }
 
 .header-controls {
@@ -624,31 +608,6 @@
 .chart-card h2 {
   margin: 0 0 12px;
   font-size: 18px;
-}
-
-.export-data-button {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
-  border-radius: 10px;
-  padding: 6px 12px;
-  font: inherit;
-  font-size: 13px;
-  color: #0f172a;
-  cursor: pointer;
-  transition: background-color 120ms ease, border-color 120ms ease;
-}
-
-.export-data-button:hover {
-  background-color: #f1f5f9;
-  border-color: #cbd5e1;
-}
-
-.export-data-button:focus-visible {
-  outline: 2px solid #6366f1;
-  outline-offset: 2px;
 }
 
 .economics-switch-button {
@@ -1795,10 +1754,6 @@
   white-space: normal;
 }
 @media (max-width: 900px) {
-  .dashboard-header {
-    flex-direction: column;
-    align-items: flex-start;
-  }
   .header-controls {
     width: 100%;
     flex-wrap: wrap;

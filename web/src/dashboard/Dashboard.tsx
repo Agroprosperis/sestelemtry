@@ -1,8 +1,7 @@
 import { lazy, Suspense, useState } from 'react'
 import './dashboard.css'
-import { ModeTopBar } from '../shell/ModeTopBar'
+import { ModeTopBar, type TopBarMenuItem } from '../shell/ModeTopBar'
 import { DashboardControls } from './components/DashboardControls'
-import { DashboardHeader } from './components/DashboardHeader'
 import { EnergyChart } from './components/EnergyChart'
 import { MetricsPanel } from './components/MetricsPanel'
 import { WeatherCard } from './components/WeatherCard'
@@ -27,6 +26,15 @@ const RevenueChart = lazy(() =>
 const ExportDialog = lazy(() =>
   import('./components/ExportDialog').then((mod) => ({ default: mod.ExportDialog })),
 )
+
+// goToView rewrites ?view= (preserving organization_id etc) for the
+// service pages reachable from the «Сервіс» menu.
+function goToView(view: 'station' | 'alerts' | 'import') {
+  const url = new URL(window.location.href)
+  url.searchParams.set('view', view)
+  window.history.pushState({}, '', url.toString())
+  window.dispatchEvent(new PopStateEvent('popstate'))
+}
 
 export function Dashboard() {
   const { preset, anchor, setPreset, setAnchor } = useRangeParams()
@@ -69,6 +77,13 @@ export function Dashboard() {
     enabled: preset === 'day',
   })
 
+  const serviceMenu: TopBarMenuItem[] = [
+    { id: 'station', label: 'Паспорт станції', onSelect: () => goToView('station') },
+    { id: 'alerts', label: 'Сповіщення', onSelect: () => goToView('alerts') },
+    { id: 'import', label: 'Імпорт архіву', onSelect: () => goToView('import') },
+    { id: 'export', label: 'Експорт даних', onSelect: () => setExportOpen(true) },
+  ]
+
   return (
     <main className="dashboard-page">
       <ModeTopBar
@@ -77,8 +92,8 @@ export function Dashboard() {
         options={options}
         onOrganizationChange={onOrganizationChange}
         title="Моніторинг СЕС + УЗЕ"
+        menu={serviceMenu}
       />
-      <DashboardHeader onExportClick={() => setExportOpen(true)} />
 
       {error && (
         <section className="error-banner" role="alert" aria-live="polite">
