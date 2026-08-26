@@ -1,7 +1,4 @@
-import { formatOrganizationLabel } from '../config'
-
 type Props = {
-  organizationID: string
   onExportClick?: () => void
 }
 
@@ -31,25 +28,13 @@ function goToAlertsView() {
   window.dispatchEvent(new PopStateEvent('popstate'))
 }
 
-// DashboardHeader is the page-wide brand strip: logo + product name on
-// the left, and the global actions (archive import, data export) pinned
-// to the right. Range/period/org controls live in `DashboardControls`
-// next to the charts they affect — see `Dashboard.tsx`.
-export function DashboardHeader({ organizationID, onExportClick }: Props) {
+// DashboardHeader is the global-actions row (station passport, alerts,
+// archive import, data export). The brand block lives in the shared
+// ModeTopBar above; range/period/org controls live in
+// `DashboardControls` next to the charts they affect — see `Dashboard.tsx`.
+export function DashboardHeader({ onExportClick }: Props) {
   return (
     <header className="dashboard-header">
-      <div className="dashboard-header-brand">
-        <img
-          src="/logo_agroprosperis.png"
-          alt="Агропросперіс"
-          className="dashboard-header-logo"
-        />
-        <div className="dashboard-header-titles">
-          <h1>Моніторинг СЕС + УЗЕ</h1>
-          <p>{formatOrganizationLabel(organizationID)}</p>
-        </div>
-      </div>
-
       <div className="dashboard-header-actions">
         <button
           type="button"

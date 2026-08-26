@@ -29,6 +29,9 @@ type Props = {
   organizationID: string
   options: string[]
   onOrganizationChange: (next: string) => void
+  // title renders the brand block (logo + page title) inside the bar,
+  // so the whole shell fits one row instead of two.
+  title?: string
   // status lets the control page share its own poll; when omitted the
   // bar quietly polls the fleet itself.
   status?: EdgeSiteStatus | null
@@ -44,7 +47,14 @@ function shortManifestID(id: string): string {
   return `${site}-${hash.slice(0, 4)}`
 }
 
-export function ModeTopBar({ mode, organizationID, options, onOrganizationChange, status }: Props) {
+export function ModeTopBar({
+  mode,
+  organizationID,
+  options,
+  onOrganizationChange,
+  title,
+  status,
+}: Props) {
   const [fleetStatus, setFleetStatus] = useState<EdgeSiteStatus | null>(null)
 
   // Without a shared poll the bar checks the fleet itself, so any page
@@ -74,6 +84,17 @@ export function ModeTopBar({ mode, organizationID, options, onOrganizationChange
 
   return (
     <div className="ctl-topbar">
+      {title && (
+        <div className="ctl-topbar-brand">
+          <img
+            src="/logo_agroprosperis.png"
+            alt="Агропросперіс"
+            className="ctl-topbar-logo"
+          />
+          <h1>{title}</h1>
+        </div>
+      )}
+
       <label className="ctl-topbar-object">
         <span className="ctl-topbar-label">Об'єкт</span>
         <select value={organizationID} onChange={(e) => onOrganizationChange(e.target.value)}>

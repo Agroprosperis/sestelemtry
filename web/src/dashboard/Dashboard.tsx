@@ -76,11 +76,9 @@ export function Dashboard() {
         organizationID={organizationID}
         options={options}
         onOrganizationChange={onOrganizationChange}
+        title="Моніторинг СЕС + УЗЕ"
       />
-      <DashboardHeader
-        organizationID={organizationID}
-        onExportClick={() => setExportOpen(true)}
-      />
+      <DashboardHeader onExportClick={() => setExportOpen(true)} />
 
       {error && (
         <section className="error-banner" role="alert" aria-live="polite">

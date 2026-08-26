@@ -7,7 +7,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import '../dashboard/dashboard.css'
 import './control.css'
 import { PlannerPage } from '../planner/PlannerPage'
-import { formatOrganizationLabel } from '../dashboard/config'
 import { useOrganizationParam } from '../dashboard/hooks/useOrganizationParam'
 import { fetchEdgeSites } from '../planner/plannerClient'
 import { fetchEdgeStatus, type EdgeSiteStatus } from './controlClient'
@@ -110,25 +109,13 @@ export function ControlPage() {
         organizationID={organizationID}
         options={siteOptions}
         onOrganizationChange={changeOrganization}
+        title="Керування СЕС + УЗЕ"
         status={status}
       />
 
-      {/* The same brand strip as the analytics dashboard (same classes,
-          same logo position) so switching modes doesn't shift layout. */}
+      {/* Only cross-page navigation here; the planner and the journal
+          live in the tabs right below, so no buttons for them. */}
       <header className="dashboard-header">
-        <div className="dashboard-header-brand">
-          <img
-            src="/logo_agroprosperis.png"
-            alt="Агропросперіс"
-            className="dashboard-header-logo"
-          />
-          <div className="dashboard-header-titles">
-            <h1>Керування СЕС + УЗЕ</h1>
-            <p>{formatOrganizationLabel(organizationID)}</p>
-          </div>
-        </div>
-        {/* Only cross-page navigation here; the planner and the journal
-            live in the tabs right below, so no buttons for them. */}
         <div className="dashboard-header-actions">
           <button
             type="button"
