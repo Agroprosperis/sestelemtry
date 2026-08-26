@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { formatOrganizationLabel } from '../dashboard/config'
 import { useOrganizationParam } from '../dashboard/hooks/useOrganizationParam'
 import { ModeTopBar } from '../shell/ModeTopBar'
 import type { PlantInventory, PlantInventoryChange, PlantInventoryHistory } from '../types'
@@ -221,17 +220,8 @@ export function StationPage() {
         organizationID={organizationID}
         options={options}
         onOrganizationChange={onOrganizationChange}
+        title="Паспорт станції"
       />
-
-      <header className="station-header">
-        <div className="station-heading">
-          <h1>Паспорт станції</h1>
-          <p className="station-subtitle">
-            Номінальні параметри з SmartLogger
-            {organizationID ? ` · ${formatOrganizationLabel(organizationID)}` : ''}
-          </p>
-        </div>
-      </header>
 
       {error ? (
         <div className="station-error" role="alert">

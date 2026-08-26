@@ -9,26 +9,6 @@
   margin-bottom: 20px;
 }
 
-.station-header {
-  display: flex;
-  align-items: flex-start;
-  gap: 16px;
-  margin-bottom: 22px;
-}
-
-.station-heading h1 {
-  font-size: 1.4rem;
-  margin: 0;
-  letter-spacing: -0.01em;
-  color: #0f172a;
-}
-
-.station-subtitle {
-  margin: 4px 0 0;
-  font-size: 0.85rem;
-  color: #64748b;
-}
-
 .station-empty,
 .station-error,
 .station-loading {

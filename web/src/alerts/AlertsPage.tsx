@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { fetchOrganizations } from '../api'
 import { KNOWN_ORGANIZATIONS, formatOrganizationLabel } from '../dashboard/config'
+import { useOrganizationParam } from '../dashboard/hooks/useOrganizationParam'
+import { ModeTopBar } from '../shell/ModeTopBar'
 import './alerts.css'
 import {
   type AlertSettings,
@@ -9,14 +11,6 @@ import {
   sendAlertTestEmail,
 } from './alertsClient'
 import { useAlertSettings } from './useAlertSettings'
-
-function backToDashboard() {
-  if (typeof window === 'undefined') return
-  const url = new URL(window.location.href)
-  url.searchParams.delete('view')
-  window.history.pushState({}, '', url.toString())
-  window.dispatchEvent(new PopStateEvent('popstate'))
-}
 
 type OrgOption = { id: string; name: string }
 
@@ -55,6 +49,11 @@ type TestState =
   | null
 
 export function AlertsPage() {
+  const {
+    organizationID,
+    options: orgOptions,
+    change: onOrganizationChange,
+  } = useOrganizationParam()
   const {
     settings,
     saved,
@@ -100,17 +99,18 @@ export function AlertsPage() {
 
   return (
     <main className="alerts-page">
-      <header className="alerts-header">
-        <button type="button" className="alerts-back" onClick={backToDashboard}>
-          ← Дашборд
-        </button>
-        <div className="alerts-heading">
-          <h1>Сповіщення</h1>
-          <p className="alerts-subtitle">
-            Лист на пошту, коли обладнання перестає надсилати дані
-          </p>
-        </div>
-      </header>
+      <ModeTopBar
+        mode="none"
+        organizationID={organizationID}
+        options={orgOptions}
+        onOrganizationChange={onOrganizationChange}
+        title="Сповіщення"
+      />
+
+      <p className="alerts-subtitle">
+        Лист на пошту, коли обладнання перестає надсилати дані. Налаштування спільні
+        для всіх обʼєктів.
+      </p>
 
       {loading ? <p className="alerts-muted">Завантаження…</p> : null}
       {error ? <div className="alerts-banner alerts-banner-error">{error}</div> : null}

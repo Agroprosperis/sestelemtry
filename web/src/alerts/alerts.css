@@ -5,41 +5,14 @@
   color: #0f172a;
 }
 
-.alerts-header {
-  display: flex;
-  align-items: flex-start;
-  gap: 16px;
-  margin-bottom: 22px;
-}
-
-.alerts-heading h1 {
-  font-size: 1.4rem;
-  margin: 0;
-  letter-spacing: -0.01em;
-  color: #0f172a;
+.alerts-page .ctl-topbar {
+  margin-bottom: 16px;
 }
 
 .alerts-subtitle {
-  margin: 4px 0 0;
+  margin: 0 0 18px;
   font-size: 0.85rem;
   color: #64748b;
-}
-
-.alerts-back {
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
-  color: #0f172a;
-  border-radius: 8px;
-  padding: 7px 13px;
-  cursor: pointer;
-  font-size: 0.85rem;
-  white-space: nowrap;
-  transition: border-color 0.15s ease, background 0.15s ease;
-}
-
-.alerts-back:hover {
-  border-color: #cbd5e1;
-  background: #f1f5f9;
 }
 
 .alerts-card {

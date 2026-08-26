@@ -6,7 +6,6 @@ import { AccumulatedSnapshotNarrative } from './AccumulatedSnapshotNarrative'
 import { BatteryDayNarrative } from './BatteryDayNarrative'
 import { CurrentSnapshotNarrative } from './CurrentSnapshotNarrative'
 import { DailySummaryNarrative } from './DailySummaryNarrative'
-import { MetricsAtPicker } from './MetricsAtPicker'
 
 type Props = {
   current: CurrentResponse | null
@@ -34,17 +33,6 @@ type Props = {
   pvForecastTotal: number | null
 }
 
-function formatSnapshotLabel(at: Date): string {
-  return at.toLocaleString(undefined, {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  })
-}
-
 export function MetricsPanel({
   current,
   liveAllocation,
@@ -63,19 +51,13 @@ export function MetricsPanel({
 }: Props) {
   return (
     <div className="metrics-panel-stack">
-      <header className="metrics-at-bar">
-        <MetricsAtPicker value={metricsAt} onChange={onMetricsAtChange} />
-      </header>
-      {metricsAt && (
-        <p className="metrics-at-hint">
-          Показники станом на <strong>{formatSnapshotLabel(metricsAt)}</strong>
-        </p>
-      )}
       <CurrentSnapshotNarrative
         liveAllocation={liveAllocation}
         loading={loading}
         debug={debug}
         registers={registers}
+        metricsAt={metricsAt}
+        onMetricsAtChange={onMetricsAtChange}
       />
       <DailySummaryNarrative
         flows={flows}

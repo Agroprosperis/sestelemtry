@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { refreshDAMPrices } from '../api'
 import { useOrganizationParam } from '../dashboard/hooks/useOrganizationParam'
-import { ModeTopBar } from '../shell/ModeTopBar'
+import { ModeTopBar, type TopBarMenuItem } from '../shell/ModeTopBar'
 import { dailyTotals, pvEssArbitrageGain } from './compute'
 import { EconomicsDamPricesModal } from './components/EconomicsDamPricesModal'
 import { EconomicsHeader, type EconomicsRange } from './components/EconomicsHeader'
@@ -118,6 +118,20 @@ function readWindowFromUrl(): { from: string; to: string } {
   if (/^\d{4}-\d{2}$/.test(from) && /^\d{4}-\d{2}$/.test(to)) return { from, to }
   return { from: '', to: '' }
 }
+
+// goToView rewrites ?view= for the service pages in the «Сервіс» menu,
+// preserving the rest of the query string.
+function goToView(view: 'station' | 'alerts') {
+  const url = new URL(window.location.href)
+  url.searchParams.set('view', view)
+  window.history.pushState({}, '', url.toString())
+  window.dispatchEvent(new PopStateEvent('popstate'))
+}
+
+const SERVICE_MENU: TopBarMenuItem[] = [
+  { id: 'station', label: 'Паспорт станції', onSelect: () => goToView('station') },
+  { id: 'alerts', label: 'Сповіщення', onSelect: () => goToView('alerts') },
+]
 
 function updateUrl(date: string, range: EconomicsRange, windowFrom: string, windowTo: string) {
   if (typeof window === 'undefined') return
@@ -291,6 +305,7 @@ export function EconomicsPage() {
         options={options}
         onOrganizationChange={onOrganizationChange}
         title="Економіка СЕС + УЗЕ"
+        menu={SERVICE_MENU}
       />
 
       <EconomicsHeader

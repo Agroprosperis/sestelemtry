@@ -50,14 +50,8 @@ export function ImportPage() {
         organizationID={organizationID}
         options={options}
         onOrganizationChange={onOrganizationChange}
+        title="Імпорт даних"
       />
-
-      <header className="import-header">
-        <div className="import-heading">
-          <h1>Імпорт даних</h1>
-          <p className="import-subtitle">Архів FusionSolar і комерційний облік АСКОЕ</p>
-        </div>
-      </header>
 
       <FusionSolarImportCard organizationID={organizationID} />
       <AskoeImportCard organizationID={organizationID} />
