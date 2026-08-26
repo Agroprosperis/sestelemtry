@@ -91,7 +91,6 @@ export function Dashboard() {
         organizationID={organizationID}
         options={options}
         onOrganizationChange={onOrganizationChange}
-        title="Моніторинг СЕС + УЗЕ"
         menu={serviceMenu}
       />
 

@@ -116,7 +116,6 @@ export function ControlPage() {
         organizationID={organizationID}
         options={siteOptions}
         onOrganizationChange={changeOrganization}
-        title="Керування СЕС + УЗЕ"
         menu={serviceMenu}
         status={status}
       />

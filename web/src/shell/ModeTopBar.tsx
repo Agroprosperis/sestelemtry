@@ -38,8 +38,9 @@ type Props = {
   organizationID: string
   options: string[]
   onOrganizationChange: (next: string) => void
-  // title renders the brand block (logo + page title) inside the bar,
-  // so the whole shell fits one row instead of two.
+  // title renders a page name next to the logo. The mode pages skip it
+  // (the active mode button already names the section) so the bar stays
+  // one compact line; service pages pass it as their only heading.
   title?: string
   menu?: TopBarMenuItem[]
   // status lets the control page share its own poll; when omitted the
@@ -117,16 +118,14 @@ export function ModeTopBar({
     // media queries would lie on wide monitors).
     <div className="ctl-topbar-wrap">
     <div className="ctl-topbar">
-      {title && (
-        <div className="ctl-topbar-brand">
-          <img
-            src="/logo_agroprosperis.png"
-            alt="Агропросперіс"
-            className="ctl-topbar-logo"
-          />
-          <h1>{title}</h1>
-        </div>
-      )}
+      <div className="ctl-topbar-brand">
+        <img
+          src="/logo_agroprosperis.png"
+          alt="Агропросперіс"
+          className="ctl-topbar-logo"
+        />
+        {title && <h1>{title}</h1>}
+      </div>
 
       <label className="ctl-topbar-object">
         <span className="ctl-topbar-label">Об'єкт</span>

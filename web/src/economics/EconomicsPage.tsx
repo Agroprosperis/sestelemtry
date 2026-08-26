@@ -298,7 +298,6 @@ export function EconomicsPage() {
         organizationID={organizationID}
         options={options}
         onOrganizationChange={onOrganizationChange}
-        title="Економіка СЕС + УЗЕ"
         menu={serviceMenu}
       />
 
