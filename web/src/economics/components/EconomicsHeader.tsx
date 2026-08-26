@@ -26,12 +26,6 @@ function formatDateString(d: Date): string {
   return `${y}-${mo}-${da}`
 }
 
-// DamRefreshState mirrors the parent page's small state machine for
-// the "Оновити ціни РДН" button (see EconomicsPage.tsx). Kept as a
-// local type so the prop signature is self-documenting without
-// pulling the page in as a dependency cycle.
-export type DamRefreshState = 'idle' | 'loading' | 'error'
-
 // EconomicsRange is the period granularity toggle: a single day, a whole
 // calendar month, a calendar year, the all-time payback page, or the
 // all-objects portfolio rollup.
@@ -96,22 +90,6 @@ type Props = {
   onTariffsChange: (next: Tariffs) => void
   tariffsStatus: OrgTariffsStatus
   tariffsError: string | null
-  // Operator-driven "fetch DAM prices from OREE right now" hook.
-  // The handler is async; the button reflects the supplied state
-  // (loading / idle / error) so the page owns the lifecycle. When
-  // the request fails, `damRefreshError` carries the upstream
-  // message and the button shows it in its tooltip — clearer than
-  // a toast that's already gone by the time the operator clicks
-  // back.
-  onRefreshDam: () => void | Promise<void>
-  damRefreshState: DamRefreshState
-  damRefreshError: string | null
-  // Opens the server-side economics recompute dialog.
-  onOpenRecompute: () => void
-  // Opens the bulk OREE DAM-price import dialog. The single-day
-  // `onRefreshDam` button stays for the common "refresh today"
-  // shortcut; this hook is the date-range backfill.
-  onOpenDamImport: () => void
 }
 
 // statusLabel maps the hook's coarse state machine to the inline
@@ -252,22 +230,6 @@ function SupplierMarginField({
   )
 }
 
-// damRefreshLabel maps the small state machine to the button's
-// visible text. Kept stable across renders so the operator can scan
-// the button without it flickering label-to-label on every state
-// transition — the icon-less form is intentional, the surrounding
-// title attribute carries the detail.
-function damRefreshLabel(state: DamRefreshState): string {
-  switch (state) {
-    case 'loading':
-      return 'Оновлюємо…'
-    case 'error':
-      return 'Спробувати ще'
-    default:
-      return 'Оновити ціни РДН'
-  }
-}
-
 export function EconomicsHeader({
   organizationID,
   range,
@@ -283,19 +245,10 @@ export function EconomicsHeader({
   onTariffsChange,
   tariffsStatus,
   tariffsError,
-  onRefreshDam,
-  damRefreshState,
-  damRefreshError,
-  onOpenRecompute,
-  onOpenDamImport,
 }: Props) {
   const update = (patch: Partial<Tariffs>) => onTariffsChange({ ...tariffs, ...patch })
   const statusText = statusLabel(tariffsStatus)
   const statusTitle = tariffsStatus === 'error' && tariffsError ? tariffsError : undefined
-  const damButtonTitle =
-    damRefreshState === 'error' && damRefreshError
-      ? damRefreshError
-      : 'Завантажити свіжі ціни РДН з OREE для обраного дня'
   return (
     <header className="economics-header">
       <div className="economics-header-row">
@@ -368,38 +321,6 @@ export function EconomicsHeader({
                 onChange={(next) => onDateChange(formatDateString(next))}
               />
             )}
-            <button
-              type="button"
-              className={
-                damRefreshState === 'error'
-                  ? 'economics-refresh-dam economics-refresh-dam-error'
-                  : 'economics-refresh-dam'
-              }
-              onClick={() => {
-                void onRefreshDam()
-              }}
-              disabled={damRefreshState === 'loading'}
-              title={damButtonTitle}
-              aria-live="polite"
-            >
-              {damRefreshLabel(damRefreshState)}
-            </button>
-            <button
-              type="button"
-              className="economics-recompute-btn"
-              onClick={onOpenDamImport}
-              title="Завантажити архів цін РДН з OREE за діапазон дат"
-            >
-              Імпорт цін РДН
-            </button>
-            <button
-              type="button"
-              className="economics-recompute-btn"
-              onClick={onOpenRecompute}
-              title="Перерахувати погодинну економіку за діапазон дат і зберегти в базі"
-            >
-              Перерахунок економіки
-            </button>
           </div>
         </div>
       </div>

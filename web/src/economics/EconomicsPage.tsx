@@ -119,20 +119,6 @@ function readWindowFromUrl(): { from: string; to: string } {
   return { from: '', to: '' }
 }
 
-// goToView rewrites ?view= for the service pages in the «Сервіс» menu,
-// preserving the rest of the query string.
-function goToView(view: 'station' | 'alerts') {
-  const url = new URL(window.location.href)
-  url.searchParams.set('view', view)
-  window.history.pushState({}, '', url.toString())
-  window.dispatchEvent(new PopStateEvent('popstate'))
-}
-
-const SERVICE_MENU: TopBarMenuItem[] = [
-  { id: 'station', label: 'Паспорт станції', onSelect: () => goToView('station') },
-  { id: 'alerts', label: 'Сповіщення', onSelect: () => goToView('alerts') },
-]
-
 function updateUrl(date: string, range: EconomicsRange, windowFrom: string, windowTo: string) {
   if (typeof window === 'undefined') return
   const url = new URL(window.location.href)
@@ -297,6 +283,14 @@ export function EconomicsPage() {
     [onOrganizationChange, portfolioScope, month],
   )
 
+  // The economics-specific admin actions live in the shell's «Сервіс»
+  // menu (the DAM buttons left the header toolbar).
+  const serviceMenu: TopBarMenuItem[] = [
+    { id: 'dam-refresh', label: 'Оновити ціни РДН', onSelect: () => void onRefreshDam() },
+    { id: 'dam-import', label: 'Імпорт цін РДН', onSelect: () => setDamImportOpen(true) },
+    { id: 'recompute', label: 'Перерахунок економіки', onSelect: () => setRecomputeOpen(true) },
+  ]
+
   return (
     <main className="economics-page">
       <ModeTopBar
@@ -305,8 +299,22 @@ export function EconomicsPage() {
         options={options}
         onOrganizationChange={onOrganizationChange}
         title="Економіка СЕС + УЗЕ"
-        menu={SERVICE_MENU}
+        menu={serviceMenu}
       />
+
+      {/* The menu closes on click, so the refresh lifecycle needs its
+          own strip: progress while the POST runs, the upstream message
+          when it fails. */}
+      {damRefreshState === 'loading' && (
+        <div className="economics-dam-status" role="status">
+          Оновлюємо ціни РДН з OREE…
+        </div>
+      )}
+      {damRefreshState === 'error' && (
+        <div className="economics-dam-status economics-dam-status-error" role="alert">
+          Не вдалося оновити ціни РДН{damRefreshError ? `: ${damRefreshError}` : ''}
+        </div>
+      )}
 
       <EconomicsHeader
         organizationID={organizationID}
@@ -332,11 +340,6 @@ export function EconomicsPage() {
         onTariffsChange={setTariffs}
         tariffsStatus={tariffsStatus}
         tariffsError={tariffsError}
-        onRefreshDam={onRefreshDam}
-        damRefreshState={damRefreshState}
-        damRefreshError={damRefreshError}
-        onOpenRecompute={() => setRecomputeOpen(true)}
-        onOpenDamImport={() => setDamImportOpen(true)}
       />
 
       {recomputeOpen && (
