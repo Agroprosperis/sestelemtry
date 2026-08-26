@@ -95,9 +95,19 @@ function PlanTimeline({ preview }: { preview: PlanPreview }) {
 // PlannerPage — «План на добу» за мокапом cloud_console.html: кроковий
 // візард (споживання → вхідні дані AI → план УЗЕ), горизонт «від зараз
 // до кінця відомих РДН», ефект — подобово на завтра.
-export function PlannerPage() {
+//
+// embedded=true вбудовує візард як вкладку «План УЗЕ» режиму
+// «Керування»: без власної шапки й site-пікера, сайт диктує
+// siteOverride (обʼєкт консолі).
+export function PlannerPage({
+  embedded = false,
+  siteOverride,
+}: {
+  embedded?: boolean
+  siteOverride?: string
+} = {}) {
   const [sites, setSites] = useState<string[]>([])
-  const [site, setSite] = useState<string>(readSiteFromUrl())
+  const [site, setSite] = useState<string>(siteOverride ?? readSiteFromUrl())
   const [step, setStep] = useState<Step>(1)
   const [preview, setPreview] = useState<PlanPreview | null>(null)
   const [journal, setJournal] = useState<Journal | null>(null)
@@ -111,13 +121,19 @@ export function PlannerPage() {
   const [previewLoading, setPreviewLoading] = useState(false)
   const previewTimer = useRef<number | null>(null)
 
+  // Embedded mode: the console's object picker owns the site.
+  useEffect(() => {
+    if (siteOverride && siteOverride !== site) setSite(siteOverride)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [siteOverride])
+
   useEffect(() => {
     let cancelled = false
     fetchEdgeSites()
       .then((list) => {
         if (cancelled) return
         setSites(list)
-        if (list.length > 0 && !list.includes(site)) {
+        if (!siteOverride && list.length > 0 && !list.includes(site)) {
           setSite(list[0])
           writeSiteToUrl(list[0])
         }
@@ -352,35 +368,37 @@ export function PlannerPage() {
   }
 
   return (
-    <div className="planner-page">
-      <header className="planner-header-row planner-header">
-        <div>
-          <h1>План на добу</h1>
-          <p>Плануємо наперед: від поточної години до кінця відомих цін РДН. Ефект — подобово, на завтра.</p>
-        </div>
-        <div className="planner-header-controls">
-          {sites.length > 1 && (
-            <select
-              className="planner-site-select"
-              value={site}
-              onChange={(e) => {
-                setSite(e.target.value)
-                writeSiteToUrl(e.target.value)
-              }}
-              aria-label="Обʼєкт"
-            >
-              {sites.map((s) => (
-                <option key={s} value={s}>
-                  {s.toUpperCase()}
-                </option>
-              ))}
-            </select>
-          )}
-          <button type="button" className="planner-back-link" onClick={goBackToDashboard}>
-            ← Дашборд
-          </button>
-        </div>
-      </header>
+    <div className={'planner-page' + (embedded ? ' planner-embedded' : '')}>
+      {!embedded && (
+        <header className="planner-header-row planner-header">
+          <div>
+            <h1>План на добу</h1>
+            <p>Плануємо наперед: від поточної години до кінця відомих цін РДН. Ефект — подобово, на завтра.</p>
+          </div>
+          <div className="planner-header-controls">
+            {sites.length > 1 && (
+              <select
+                className="planner-site-select"
+                value={site}
+                onChange={(e) => {
+                  setSite(e.target.value)
+                  writeSiteToUrl(e.target.value)
+                }}
+                aria-label="Обʼєкт"
+              >
+                {sites.map((s) => (
+                  <option key={s} value={s}>
+                    {s.toUpperCase()}
+                  </option>
+                ))}
+              </select>
+            )}
+            <button type="button" className="planner-back-link" onClick={goBackToDashboard}>
+              ← Дашборд
+            </button>
+          </div>
+        </header>
+      )}
 
       {preview && (
         <div className="planner-steps">

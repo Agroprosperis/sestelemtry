@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -42,6 +43,13 @@ type edgeManifestDoc struct {
 	WriteEnabled bool   `json:"write_enabled"`
 	Preset       string `json:"preset"`
 
+	// Source distinguishes planner output ("" / "auto") from operator
+	// publications ("manual"). The edge ignores unknown fields; the
+	// cloud uses it to keep the rolling planner from overwriting a
+	// still-valid manual manifest.
+	Source string `json:"source,omitempty"`
+	Note   string `json:"note,omitempty"`
+
 	Limits struct {
 		EssChargeMaxKw    float64 `json:"ess_charge_max_kw,omitempty"`
 		EssDischargeMaxKw float64 `json:"ess_discharge_max_kw,omitempty"`
@@ -73,7 +81,7 @@ type edgePlanInterval struct {
 	PriceUah     float64   `json:"rdn_uah_per_kwh,omitempty"`
 }
 
-// EdgePublishResult is the response of the publish endpoint.
+// EdgePublishResult is the response of the publish endpoints.
 type EdgePublishResult struct {
 	SiteID     string `json:"site_id"`
 	ManifestID string `json:"manifest_id"`
@@ -81,6 +89,10 @@ type EdgePublishResult struct {
 	Intervals  int    `json:"intervals"`
 	LoadSource string `json:"load_source"`
 	ValidUntil string `json:"valid_until"`
+	// Skipped explains why nothing was published (e.g. an operator's
+	// manual manifest is still valid and blocks the rolling planner).
+	Skipped string `json:"skipped,omitempty"`
+	Source  string `json:"source,omitempty"`
 }
 
 // edgeManifestPublish handles POST /api/v1/edge/manifest/publish?site_id=.
@@ -114,6 +126,227 @@ func (h *Handlers) edgeManifestPublish(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, res)
 }
 
+// --- manual manifest (console «Ручний режим») ---
+
+// edgeManualInterval is one operator-entered dispatch hour.
+type edgeManualInterval struct {
+	TS           time.Time `json:"ts"`
+	EssKw        float64   `json:"ess_kw"` // + discharge / − charge
+	SocTargetPct float64   `json:"soc_target_pct,omitempty"`
+}
+
+// edgeManualPublishRequest is the POST /api/v1/edge/manifest/publish-manual
+// body. Intervals may be empty — a preset-only manual manifest (e.g.
+// «потримай self_consumption_safe 4 години») is legitimate. Cancel=true
+// discards the manual manifest by republishing the rolling plan.
+type edgeManualPublishRequest struct {
+	TTLHours  float64              `json:"ttl_hours"`
+	Preset    string               `json:"preset"`
+	Note      string               `json:"note"`
+	Cancel    bool                 `json:"cancel"`
+	Intervals []edgeManualInterval `json:"intervals"`
+}
+
+const (
+	edgeManualTTLDefault = 4 * time.Hour
+	edgeManualTTLMax     = 48 * time.Hour
+	// edgeManualEssMaxKw is a sanity bound, not a site limit — the real
+	// per-site caps still apply on the edge via manifest limits.
+	edgeManualEssMaxKw = 20000.0
+)
+
+func (r *edgeManualPublishRequest) validate() error {
+	if r.Cancel {
+		return nil
+	}
+	if r.TTLHours != 0 && (r.TTLHours < 0.5 || r.TTLHours > edgeManualTTLMax.Hours()) {
+		return fmt.Errorf("ttl_hours має бути в межах 0.5..%v", edgeManualTTLMax.Hours())
+	}
+	switch r.Preset {
+	case "", "economic_arbitrage", "self_consumption", "self_consumption_safe":
+	default:
+		return fmt.Errorf("невідомий preset %q", r.Preset)
+	}
+	seen := map[time.Time]bool{}
+	for i, iv := range r.Intervals {
+		if iv.TS.IsZero() {
+			return fmt.Errorf("intervals[%d]: ts обов'язковий", i)
+		}
+		if math.IsNaN(iv.EssKw) || math.IsInf(iv.EssKw, 0) || math.Abs(iv.EssKw) > edgeManualEssMaxKw {
+			return fmt.Errorf("intervals[%d]: ess_kw поза межами", i)
+		}
+		if iv.SocTargetPct < 0 || iv.SocTargetPct > 100 {
+			return fmt.Errorf("intervals[%d]: soc_target_pct має бути 0..100", i)
+		}
+		key := iv.TS.UTC().Truncate(time.Hour)
+		if seen[key] {
+			return fmt.Errorf("intervals[%d]: дубльована година %s", i, key.Format(time.RFC3339))
+		}
+		seen[key] = true
+	}
+	return nil
+}
+
+func (r *edgeManualPublishRequest) ttl() time.Duration {
+	if r.TTLHours <= 0 {
+		return edgeManualTTLDefault
+	}
+	return time.Duration(r.TTLHours * float64(time.Hour))
+}
+
+// edgeManifestPublishManual handles
+// POST /api/v1/edge/manifest/publish-manual?site_id=.
+func (h *Handlers) edgeManifestPublishManual(w http.ResponseWriter, r *http.Request) {
+	siteID, ok := h.requireEdge(w, r, http.MethodPost)
+	if !ok {
+		return
+	}
+	var req edgeManualPublishRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := req.validate(); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if req.Cancel {
+		// Back to the rolling planner: force one auto publication past
+		// the manual guard so the edge picks a fresh plan immediately.
+		res, err := h.publishEdgeManifest(r.Context(), siteID, true)
+		if err != nil {
+			h.edge.Log.Error("edge_manifest_manual_cancel", "site_id", siteID, "err", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, res)
+		return
+	}
+
+	res, err := h.publishManualEdgeManifest(r.Context(), siteID, req)
+	if err != nil {
+		h.edge.Log.Error("edge_manifest_manual", "site_id", siteID, "err", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+// publishManualEdgeManifest stores an operator manifest: the requested
+// intervals with the site's limits/SOC policy, valid for the TTL. While
+// it is valid the rolling planner leaves it alone.
+func (h *Handlers) publishManualEdgeManifest(ctx context.Context, siteID string, req edgeManualPublishRequest) (EdgePublishResult, error) {
+	e := h.edge
+	now := time.Now().UTC()
+
+	in := edgePlanInputs{Now: now}
+	if err := h.applyEdgeSiteParams(ctx, siteID, &in); err != nil {
+		return EdgePublishResult{SiteID: siteID}, err
+	}
+
+	preset := req.Preset
+	if preset == "" {
+		preset = "economic_arbitrage"
+	}
+
+	doc := edgeManifestDoc{
+		SchemaVersion: "lite-1",
+		SiteID:        siteID,
+		IssuedAt:      now,
+		ValidFrom:     now,
+		ValidUntil:    now.Add(req.ttl()),
+		Mode:          "shadow",
+		WriteEnabled:  false,
+		Preset:        preset,
+		Source:        "manual",
+		Note:          strings.TrimSpace(req.Note),
+	}
+	doc.Limits.EssChargeMaxKw = in.ChargeMaxKw
+	doc.Limits.EssDischargeMaxKw = in.DischargeMaxKw
+	doc.GridLimits.ImportLimitKw = in.GridImportKw
+	doc.GridLimits.TargetImportKw = in.GridTargetKw
+	doc.GridLimits.PvRatedKw = in.PvRatedKw
+	doc.SocPolicy.MinEconomicPct = in.SocMin
+	doc.SocPolicy.MaxEconomicPct = in.SocMax
+
+	if len(req.Intervals) > 0 {
+		ivs := make([]edgePlanInterval, 0, len(req.Intervals))
+		for _, iv := range req.Intervals {
+			ivs = append(ivs, edgePlanInterval{
+				TS:           iv.TS.UTC().Truncate(time.Hour),
+				EssKw:        round1(iv.EssKw),
+				SocTargetPct: round1(iv.SocTargetPct),
+				Action:       "manual",
+			})
+		}
+		sort.Slice(ivs, func(i, j int) bool { return ivs[i].TS.Before(ivs[j].TS) })
+		doc.Plan = &edgePlanDoc{Granularity: "1h", LoadSource: "manual", Intervals: ivs}
+	}
+	doc.ManifestID = edgeManualManifestID(siteID, doc)
+
+	res := EdgePublishResult{
+		SiteID:     siteID,
+		ManifestID: doc.ManifestID,
+		Intervals:  len(req.Intervals),
+		LoadSource: "manual",
+		ValidUntil: doc.ValidUntil.Format(time.RFC3339),
+		Source:     "manual",
+	}
+
+	_, latestID, hasLatest, err := storage.LatestEdgeManifest(ctx, e.Pool, siteID)
+	if err != nil {
+		return res, err
+	}
+	if hasLatest && latestID == doc.ManifestID {
+		return res, nil
+	}
+
+	payload, err := json.Marshal(doc)
+	if err != nil {
+		return res, err
+	}
+	if err := storage.UpsertEdgeManifest(ctx, e.Pool, siteID, doc.ManifestID, payload, doc.ValidFrom, doc.ValidUntil); err != nil {
+		return res, err
+	}
+	res.Published = true
+	e.Log.Info("edge_manifest_manual_published",
+		"site_id", siteID, "manifest_id", doc.ManifestID,
+		"intervals", len(req.Intervals), "valid_until", res.ValidUntil)
+	return res, nil
+}
+
+// manualManifestActive reports whether payload is an operator manifest
+// that is still within its validity window.
+func manualManifestActive(payload []byte, now time.Time) bool {
+	var m struct {
+		Source     string    `json:"source"`
+		ValidUntil time.Time `json:"valid_until"`
+	}
+	if json.Unmarshal(payload, &m) != nil {
+		return false
+	}
+	return m.Source == "manual" && m.ValidUntil.After(now)
+}
+
+// edgeManualManifestID hashes the manual content *including* the
+// validity end: re-publishing the same hours with a longer TTL must
+// yield a new version (the auto id deliberately ignores valid_until).
+func edgeManualManifestID(siteID string, doc edgeManifestDoc) string {
+	hashable := struct {
+		SiteID     string       `json:"site_id"`
+		Preset     string       `json:"preset"`
+		Note       string       `json:"note"`
+		ValidUntil time.Time    `json:"valid_until"`
+		Plan       *edgePlanDoc `json:"plan"`
+		Limits     any          `json:"limits"`
+		SocPolicy  any          `json:"soc_policy"`
+	}{siteID, doc.Preset, doc.Note, doc.ValidUntil, doc.Plan, doc.Limits, doc.SocPolicy}
+	raw, _ := json.Marshal(hashable)
+	sum := sha256.Sum256(raw)
+	return fmt.Sprintf("%s-manual-%s-%s", siteID, doc.ValidUntil.Format("20060102T1504"), hex.EncodeToString(sum[:])[:8])
+}
+
 // edgePlanInputs bundles everything the forward DP needs for one site:
 // horizon, ratings, tariffs and the merged hourly forecast series.
 type edgePlanInputs struct {
@@ -124,11 +357,18 @@ type edgePlanInputs struct {
 
 	Tariffs     economics.Tariffs
 	CapacityKwh float64
-	PowerKw     float64
+	PowerKw     float64 // DP charge/discharge cap (min of the two limits)
 	PvRatedKw   float64
 	SocMin      float64
 	SocMax      float64
 	StartSoc    float64
+
+	// Manifest-facing limits (may differ per direction when the
+	// console settings say so; default both to PowerKw).
+	ChargeMaxKw    float64
+	DischargeMaxKw float64
+	GridImportKw   float64
+	GridTargetKw   float64
 
 	Hours      []economics.ForwardHour
 	LoadSource string
@@ -168,9 +408,7 @@ func (h *Handlers) gatherEdgePlanInputs(ctx context.Context, siteID string, draf
 	now := time.Now().In(loc)
 
 	in := edgePlanInputs{Loc: loc, Timezone: tzName, Now: now}
-	in.Tariffs = h.resolveEdgeTariffs(ctx, siteID, now)
-	in.CapacityKwh, in.PowerKw, in.PvRatedKw, err = h.resolveEdgeRatings(ctx, siteID, in.Tariffs)
-	if err != nil {
+	if err := h.applyEdgeSiteParams(ctx, siteID, &in); err != nil {
 		return edgePlanInputs{}, err
 	}
 
@@ -207,7 +445,6 @@ func (h *Handlers) gatherEdgePlanInputs(ctx context.Context, siteID string, draf
 	}
 
 	in.StartSoc = h.edgeLatestSoc(ctx, siteID)
-	in.SocMin, in.SocMax = 20.0, 90.0
 	if in.StartSoc == 0 {
 		in.StartSoc = (in.SocMin + in.SocMax) / 2
 	}
@@ -253,15 +490,72 @@ func hasHour(m map[time.Time]float64, ts time.Time) bool {
 	return ok
 }
 
+// applyEdgeSiteParams fills tariffs, ratings, per-direction limits and
+// the SOC policy into in — passport/inventory numbers first, saved
+// console settings on top (mockup panel-settings). in.Now must be set.
+func (h *Handlers) applyEdgeSiteParams(ctx context.Context, siteID string, in *edgePlanInputs) error {
+	var err error
+	in.Tariffs = h.resolveEdgeTariffs(ctx, siteID, in.Now)
+	in.CapacityKwh, in.PowerKw, in.PvRatedKw, err = h.resolveEdgeRatings(ctx, siteID, in.Tariffs)
+	if err != nil {
+		return err
+	}
+	in.ChargeMaxKw, in.DischargeMaxKw = in.PowerKw, in.PowerKw
+	in.SocMin, in.SocMax = 20.0, 90.0
+
+	if s, saved := h.loadEdgeSiteSettings(ctx, siteID); saved && s != nil {
+		if s.PvRatedKw > 0 {
+			in.PvRatedKw = s.PvRatedKw
+		}
+		if s.AutoChargeMaxKw > 0 {
+			in.ChargeMaxKw = s.AutoChargeMaxKw
+		}
+		if s.AutoDischargeMaxKw > 0 {
+			in.DischargeMaxKw = s.AutoDischargeMaxKw
+		}
+		if s.AutoChargeMaxKw > 0 || s.AutoDischargeMaxKw > 0 {
+			// The DP has a single symmetric cap — take the stricter of
+			// the two so it never plans past either manifest limit.
+			in.PowerKw = math.Min(in.ChargeMaxKw, in.DischargeMaxKw)
+		}
+		if s.SocReservePct > 0 {
+			in.SocMin = s.SocReservePct
+		}
+		if s.SocTargetPct > 0 {
+			in.SocMax = s.SocTargetPct
+		}
+		in.GridImportKw = s.GridImportKw
+		in.GridTargetKw = s.GridTargetKw
+	}
+	return nil
+}
+
 // PublishEdgeManifest builds the forward plan for one site and stores
 // it as a manifest-lite version. The manifest_id is a content hash, so
 // republishing an unchanged plan is a no-op (the edge keeps its cached
-// copy via ETag).
+// copy via ETag). A still-valid manual manifest blocks this auto path —
+// cancel it via publish-manual {"cancel":true}.
 func (h *Handlers) PublishEdgeManifest(ctx context.Context, siteID string) (EdgePublishResult, error) {
+	return h.publishEdgeManifest(ctx, siteID, false)
+}
+
+func (h *Handlers) publishEdgeManifest(ctx context.Context, siteID string, overrideManual bool) (EdgePublishResult, error) {
 	e := h.edge
 	if e == nil {
 		return EdgePublishResult{}, fmt.Errorf("edge ingest not configured")
 	}
+
+	latestPayload, latestID, hasLatest, err := storage.LatestEdgeManifest(ctx, e.Pool, siteID)
+	if err != nil {
+		return EdgePublishResult{SiteID: siteID}, err
+	}
+	if hasLatest && !overrideManual && manualManifestActive(latestPayload, time.Now().UTC()) {
+		return EdgePublishResult{
+			SiteID: siteID, ManifestID: latestID, Source: "manual",
+			Skipped: "manual manifest active",
+		}, nil
+	}
+
 	in, err := h.gatherEdgePlanInputs(ctx, siteID, nil)
 	if err != nil {
 		return EdgePublishResult{}, err
@@ -303,9 +597,12 @@ func (h *Handlers) PublishEdgeManifest(ctx context.Context, siteID string) (Edge
 		Mode:          "shadow",
 		WriteEnabled:  false,
 		Preset:        "economic_arbitrage",
+		Source:        "auto",
 	}
-	doc.Limits.EssChargeMaxKw = in.PowerKw
-	doc.Limits.EssDischargeMaxKw = in.PowerKw
+	doc.Limits.EssChargeMaxKw = in.ChargeMaxKw
+	doc.Limits.EssDischargeMaxKw = in.DischargeMaxKw
+	doc.GridLimits.ImportLimitKw = in.GridImportKw
+	doc.GridLimits.TargetImportKw = in.GridTargetKw
 	doc.GridLimits.PvRatedKw = in.PvRatedKw
 	doc.SocPolicy.MinEconomicPct = in.SocMin
 	doc.SocPolicy.MaxEconomicPct = in.SocMax
@@ -324,13 +621,10 @@ func (h *Handlers) PublishEdgeManifest(ctx context.Context, siteID string) (Edge
 		Intervals:  len(intervals),
 		LoadSource: loadSource,
 		ValidUntil: doc.ValidUntil.Format(time.RFC3339),
+		Source:     doc.Source,
 	}
 
 	// Unchanged content → same id → nothing to publish.
-	_, latestID, hasLatest, err := storage.LatestEdgeManifest(ctx, e.Pool, siteID)
-	if err != nil {
-		return res, err
-	}
 	if hasLatest && latestID == doc.ManifestID {
 		return res, nil
 	}
@@ -835,6 +1129,9 @@ func (h *Handlers) RunEdgePlannerLoop(ctx context.Context, sites []string, inter
 			}
 			if res.Published {
 				h.edge.Log.Info("edge_planner_published", "site_id", site, "manifest_id", res.ManifestID)
+			}
+			if res.Skipped != "" {
+				h.edge.Log.Info("edge_planner_skipped", "site_id", site, "reason", res.Skipped)
 			}
 		}
 		select {

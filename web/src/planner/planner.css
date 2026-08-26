@@ -11,6 +11,13 @@
   min-width: 0;
 }
 
+/* Embedded as the «План УЗЕ» tab of the control mode: the outer
+   dashboard-page already provides padding and max-width. */
+.planner-page.planner-embedded {
+  max-width: none;
+  padding: 0;
+}
+
 .planner-header-row {
   display: flex;
   justify-content: space-between;

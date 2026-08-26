@@ -200,6 +200,45 @@ sudo systemctl start ems-edge     # схема створиться заново
 - телеметрія shadow-фази в хмарі лежить під org **`ze-edge`**
   (EDGE_ORG_SUFFIX), рішення — у `control_decisions`.
 
+## 9б. Режим «Керування» у веб-додатку
+
+Хмарна консоль керування — не окремий застосунок, а другий режим
+основного дашборда. Перемикач «Аналітика та моніторинг | Керування»
+у верхній панелі (поряд із пікером об'єкта); режим «Керування» =
+`?view=control`, старі посилання `?view=planner` редіректяться у
+вкладку «План УЗЕ».
+
+Вкладки:
+
+- **Стан** — live-потоки як на дашборді + «Команда УЗЕ (shadow)»
+  (останній запис `control_decisions`), «Стан керування» (SOC-резерв,
+  ліміт імпорту, heartbeat, черга на пристрої) і Energy Trend
+  «план і факт»: інтервали чинного manifest накладаються на фактичні
+  серії, вертикальний маркер — момент MANIFEST_APPLIED;
+- **План УЗЕ** — вбудований 3-кроковий планувальник (той самий код);
+- **Режими** — пресети (`economic_arbitrage` / `self_consumption` /
+  `self_consumption_safe`) і ручний погодинний план. Публікація йде
+  через `POST /api/v1/edge/manifest/publish-manual` з TTL (default 4
+  год): поки ручний manifest чинний, rolling-цикл його **не
+  перезаписує** (guard за `source: "manual"`); «Повернутись до AUTO» =
+  `{"cancel": true}` — примусова публікація rolling-плану;
+- **Обмеження** — `GET/PUT /api/v1/edge/settings` (SOC target/reserve,
+  ліміти заряду/розряду, ліміт і ціль імпорту, номінал СЕС). Значення
+  перекривають паспортні в планувальнику і потрапляють у
+  `limits`/`soc_policy` кожного наступного manifest;
+- **Журнал** — версії manifest зі статусом доставки + стрічка
+  `edge_events`.
+
+Статусні чипи верхньої панелі живляться з
+`GET /api/v1/edge/status?site_id=` (poll 15 с у консолі) та
+`GET /api/v1/edge/fleet` (дашборд, 60 с): «IOT2050 online» = heartbeat
+молодший за 180 с; стан manifest = applied/pending/expired за подією
+MANIFEST_APPLIED і `valid_until`.
+
+Нові таблиці (`edge_site_settings`) API створює сам при старті
+(`InitEdgeSchema`), окремих кроків міграції на ВМ не потрібно;
+дзеркальні SQL-файли — `migrations/014_edge_site_settings.sql`.
+
 ## 10. Польові тести (spec §13)
 
 ### Тест A — паралельний poll ВМ vs IOT2050

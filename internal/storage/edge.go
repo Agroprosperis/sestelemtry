@@ -111,6 +111,15 @@ func InitEdgeSchema(ctx context.Context, pool *pgxpool.Pool) error {
 			updated_at timestamptz NOT NULL DEFAULT now(),
 			PRIMARY KEY (site_id, hour)
 		)`,
+
+		// Per-site planner/control settings edited in the console
+		// (SOC policy, power limits, grid limits). One JSONB blob per
+		// site, last writer wins (mirrored by 014_edge_site_settings.sql).
+		`CREATE TABLE IF NOT EXISTS edge_site_settings (
+			site_id text PRIMARY KEY,
+			payload jsonb NOT NULL,
+			updated_at timestamptz NOT NULL DEFAULT now()
+		)`,
 	}
 	for _, s := range stmts {
 		if _, err := pool.Exec(ctx, s); err != nil {
@@ -493,6 +502,170 @@ func ListEdgeManifests(ctx context.Context, pool *pgxpool.Pool, siteID string, l
 		out = append(out, mi)
 	}
 	return out, rows.Err()
+}
+
+// EdgeSiteStatus is the live-state snapshot of one edge site: last
+// heartbeat, newest published manifest (with delivery status), and the
+// newest shadow decision. It powers the console's status chips and the
+// «Стан» tab; zero times mean "never seen".
+type EdgeSiteStatus struct {
+	SiteID string
+
+	// Heartbeat (edge_heartbeats, one row per site).
+	HeartbeatAt   time.Time
+	EdgeID        string
+	Status        string
+	BufferPending int64
+	LastSLPollOK  time.Time
+	Firmware      string
+
+	// Newest published manifest.
+	ManifestID         string
+	ManifestIssuedAt   time.Time
+	ManifestValidUntil time.Time
+	ManifestAppliedAt  time.Time // zero = not confirmed by the edge yet
+	ManifestPayload    []byte    // nil unless requested
+
+	// Newest shadow decision (control_decisions).
+	DecisionAt     time.Time
+	DecisionRecord []byte // canonical record jsonb, nil when none
+}
+
+// GetEdgeSiteStatus assembles the per-site snapshot. withPayload
+// controls whether the manifest payload jsonb is fetched (the fleet
+// summary skips it; the site status view needs it for the plan overlay).
+func GetEdgeSiteStatus(ctx context.Context, pool *pgxpool.Pool, siteID string, withPayload bool) (EdgeSiteStatus, error) {
+	st := EdgeSiteStatus{SiteID: siteID}
+
+	var hbAt, slPollOK *time.Time
+	var edgeID, status, firmware *string
+	var pending *int64
+	err := pool.QueryRow(ctx, `
+		SELECT updated_at, edge_id, status, buffer_pending, last_sl_poll_ok, firmware_version
+		FROM edge_heartbeats WHERE site_id = $1`, siteID).
+		Scan(&hbAt, &edgeID, &status, &pending, &slPollOK, &firmware)
+	if err != nil && err != pgx.ErrNoRows {
+		return st, err
+	}
+	if hbAt != nil {
+		st.HeartbeatAt = *hbAt
+	}
+	if edgeID != nil {
+		st.EdgeID = *edgeID
+	}
+	if status != nil {
+		st.Status = *status
+	}
+	if pending != nil {
+		st.BufferPending = *pending
+	}
+	if slPollOK != nil {
+		st.LastSLPollOK = *slPollOK
+	}
+	if firmware != nil {
+		st.Firmware = *firmware
+	}
+
+	payloadCol := "NULL::jsonb"
+	if withPayload {
+		payloadCol = "m.payload"
+	}
+	var issuedAt, validUntil, appliedAt *time.Time
+	err = pool.QueryRow(ctx, `
+		SELECT m.manifest_id, m.issued_at, m.valid_until, a.time, `+payloadCol+`
+		FROM edge_manifests m
+		LEFT JOIN LATERAL (
+			SELECT e.time FROM edge_events e
+			WHERE e.site_id = m.site_id AND e.code = 'MANIFEST_APPLIED'
+			  AND e.context->>'manifest_id' = m.manifest_id
+			ORDER BY e.time ASC LIMIT 1
+		) a ON true
+		WHERE m.site_id = $1 AND m.published
+		ORDER BY m.issued_at DESC LIMIT 1`, siteID).
+		Scan(&st.ManifestID, &issuedAt, &validUntil, &appliedAt, &st.ManifestPayload)
+	if err != nil && err != pgx.ErrNoRows {
+		return st, err
+	}
+	if issuedAt != nil {
+		st.ManifestIssuedAt = *issuedAt
+	}
+	if validUntil != nil {
+		st.ManifestValidUntil = *validUntil
+	}
+	if appliedAt != nil {
+		st.ManifestAppliedAt = *appliedAt
+	}
+
+	var decAt *time.Time
+	err = pool.QueryRow(ctx, `
+		SELECT time, record FROM control_decisions
+		WHERE site_id = $1 ORDER BY time DESC LIMIT 1`, siteID).
+		Scan(&decAt, &st.DecisionRecord)
+	if err != nil && err != pgx.ErrNoRows {
+		return st, err
+	}
+	if decAt != nil {
+		st.DecisionAt = *decAt
+	}
+	return st, nil
+}
+
+// EdgeEventRow is one uplinked edge event for console views.
+type EdgeEventRow struct {
+	Time     time.Time
+	Severity string
+	Code     string
+	Message  string
+	Context  []byte
+}
+
+// ListEdgeEvents returns the newest events for a site.
+func ListEdgeEvents(ctx context.Context, pool *pgxpool.Pool, siteID string, limit int) ([]EdgeEventRow, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := pool.Query(ctx, `
+		SELECT time, COALESCE(severity,''), COALESCE(code,''), COALESCE(message,''), context
+		FROM edge_events WHERE site_id = $1
+		ORDER BY time DESC LIMIT $2`, siteID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []EdgeEventRow
+	for rows.Next() {
+		var e EdgeEventRow
+		if err := rows.Scan(&e.Time, &e.Severity, &e.Code, &e.Message, &e.Context); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// GetEdgeSiteSettings returns the console-edited settings blob for a
+// site. ok is false when the site has none saved yet.
+func GetEdgeSiteSettings(ctx context.Context, pool *pgxpool.Pool, siteID string) (payload []byte, ok bool, err error) {
+	err = pool.QueryRow(ctx,
+		`SELECT payload FROM edge_site_settings WHERE site_id = $1`, siteID).Scan(&payload)
+	if err == pgx.ErrNoRows {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	return payload, true, nil
+}
+
+// UpsertEdgeSiteSettings stores the settings blob (last writer wins).
+func UpsertEdgeSiteSettings(ctx context.Context, pool *pgxpool.Pool, siteID string, payload []byte) error {
+	_, err := pool.Exec(ctx, `
+		INSERT INTO edge_site_settings (site_id, payload)
+		VALUES ($1, $2)
+		ON CONFLICT (site_id) DO UPDATE SET
+			payload = EXCLUDED.payload,
+			updated_at = now()`, siteID, payload)
+	return err
 }
 
 func nullTime(t time.Time) any {

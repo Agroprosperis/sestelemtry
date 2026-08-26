@@ -1,5 +1,6 @@
 import { lazy, Suspense, useState } from 'react'
 import './dashboard.css'
+import { ModeTopBar } from '../control/ModeTopBar'
 import { DashboardControls } from './components/DashboardControls'
 import { DashboardHeader } from './components/DashboardHeader'
 import { EnergyChart } from './components/EnergyChart'
@@ -70,6 +71,12 @@ export function Dashboard() {
 
   return (
     <main className="dashboard-page">
+      <ModeTopBar
+        mode="analytics"
+        organizationID={organizationID}
+        options={options}
+        onOrganizationChange={onOrganizationChange}
+      />
       <DashboardHeader
         organizationID={organizationID}
         onExportClick={() => setExportOpen(true)}

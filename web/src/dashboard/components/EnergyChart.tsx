@@ -55,6 +55,17 @@ type Props = {
   powerSeries?: PowerChartRow[]
   pvForecastSeries?: PvForecastHourlyRow[]
   aiPlan?: UzePlanResponse | null
+  // planOverlay re-skins the AI plan series when the chart shows a
+  // manifest plan instead of the retrospective optimum (control mode):
+  // custom labels/title, plan lines visible from the start, and an
+  // optional vertical annotation (e.g. «manifest applied»).
+  planOverlay?: {
+    title?: string
+    essLabel?: string
+    socLabel?: string
+    defaultVisible?: boolean
+    annotation?: { time: string; label: string }
+  }
 }
 
 const DAM_PRICE_KEY = 'dam_price_uah_per_mwh'
@@ -143,7 +154,10 @@ export function EnergyChart({
   powerSeries,
   pvForecastSeries,
   aiPlan,
+  planOverlay,
 }: Props) {
+  const aiEssLabel = planOverlay?.essLabel ?? AI_ESS_LABEL
+  const aiSocLabel = planOverlay?.socLabel ?? AI_SOC_LABEL
   const energyTooltip = useCallback(
     (props: Omit<React.ComponentProps<typeof EnergyTooltip>, 'preset'>) => (
       <EnergyTooltip {...props} preset={preset} />
@@ -163,8 +177,8 @@ export function EnergyChart({
   // an opt-in overlay for comparing against the optimum — while the
   // recommended consumption schedule is on by default: it is the line
   // the operator acts on.
-  const [hiddenSeries, setHiddenSeries] = useState<Set<string>>(
-    () => new Set([AI_ESS_KEY, AI_SOC_KEY]),
+  const [hiddenSeries, setHiddenSeries] = useState<Set<string>>(() =>
+    planOverlay?.defaultVisible ? new Set() : new Set([AI_ESS_KEY, AI_SOC_KEY]),
   )
   const toggleSeries = useCallback((id: string) => {
     setHiddenSeries((prev) => {
@@ -261,7 +275,7 @@ export function EnergyChart({
       items.push({ id: PV_FORECAST_KEY, label: PV_FORECAST_LABEL, color: PV_FORECAST_COLOR })
     }
     if (hasAiPlan) {
-      items.push({ id: AI_ESS_KEY, label: AI_ESS_LABEL, color: AI_PLAN_COLOR })
+      items.push({ id: AI_ESS_KEY, label: aiEssLabel, color: AI_PLAN_COLOR })
     }
     if (hasAiLoad) {
       items.push({ id: AI_LOAD_KEY, label: AI_LOAD_LABEL, color: AI_PLAN_LOAD_COLOR })
@@ -271,10 +285,10 @@ export function EnergyChart({
       items.push({ id: SOC_KEY, label: SOC_LABEL, color: SOC_COLOR })
     }
     if (hasAiPlan) {
-      items.push({ id: AI_SOC_KEY, label: AI_SOC_LABEL, color: AI_PLAN_SOC_COLOR })
+      items.push({ id: AI_SOC_KEY, label: aiSocLabel, color: AI_PLAN_SOC_COLOR })
     }
     return items
-  }, [hasSoc, hasPvForecast, hasAiPlan, hasAiLoad])
+  }, [hasSoc, hasPvForecast, hasAiPlan, hasAiLoad, aiEssLabel, aiSocLabel])
 
   const renderDayLegend = useCallback(
     () => (
@@ -309,7 +323,7 @@ export function EnergyChart({
 
   return (
     <div className="chart-card">
-      <h2>Energy Trend</h2>
+      <h2>{planOverlay?.title ?? 'Energy Trend'}</h2>
       <EnergySummary summary={summary} loading={loading} />
       <div className="chart-wrap">
         {loading ? (
@@ -392,6 +406,20 @@ export function EnergyChart({
                     />
                   ))}
                 <ReferenceLine y={0} yAxisId="power" stroke="#64748b" />
+                {planOverlay?.annotation && dayLabels.includes(planOverlay.annotation.time) && (
+                  <ReferenceLine
+                    x={planOverlay.annotation.time}
+                    yAxisId="power"
+                    stroke="#475569"
+                    strokeDasharray="4 3"
+                    label={{
+                      value: planOverlay.annotation.label,
+                      position: 'top',
+                      fill: '#475569',
+                      fontSize: 11,
+                    }}
+                  />
+                )}
                 {DAY_POWER_METRIC_KEYS.map((key) => {
                   const color = dayPowerColor(key)
                   return (
@@ -437,7 +465,7 @@ export function EnergyChart({
                     yAxisId="power"
                     type="stepAfter"
                     dataKey={AI_ESS_KEY}
-                    name={AI_ESS_LABEL}
+                    name={aiEssLabel}
                     stroke={AI_PLAN_COLOR}
                     strokeWidth={2}
                     strokeDasharray="6 3"
@@ -452,7 +480,7 @@ export function EnergyChart({
                     yAxisId="soc"
                     type="monotone"
                     dataKey={AI_SOC_KEY}
-                    name={AI_SOC_LABEL}
+                    name={aiSocLabel}
                     stroke={AI_PLAN_SOC_COLOR}
                     strokeWidth={2}
                     strokeDasharray="4 4"

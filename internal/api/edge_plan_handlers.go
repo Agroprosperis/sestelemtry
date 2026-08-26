@@ -1,7 +1,9 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"math"
 	"net/http"
 	"sort"
@@ -131,6 +133,95 @@ func (h *Handlers) edgeLoadPlan(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"site_id": siteID, "deleted": n})
 	}
+}
+
+// EdgeSiteSettings mirrors the console's settings panel (mockup
+// panel-settings): SOC policy, per-mode power limits and grid limits.
+// Zero values mean "not set" — the planner falls back to inventory /
+// tariffs / built-in defaults.
+type EdgeSiteSettings struct {
+	SocTargetPct         float64 `json:"soc_target_pct,omitempty"`
+	SocReservePct        float64 `json:"soc_reserve_pct,omitempty"`
+	AutoChargeMaxKw      float64 `json:"auto_charge_max_kw,omitempty"`
+	AutoDischargeMaxKw   float64 `json:"auto_discharge_max_kw,omitempty"`
+	IslandChargeMaxKw    float64 `json:"island_charge_max_kw,omitempty"`
+	IslandDischargeMaxKw float64 `json:"island_discharge_max_kw,omitempty"`
+	GridImportKw         float64 `json:"grid_import_kw,omitempty"`
+	GridTargetKw         float64 `json:"grid_target_kw,omitempty"`
+	PvRatedKw            float64 `json:"pv_rated_kw,omitempty"`
+}
+
+func (s *EdgeSiteSettings) validate() error {
+	if s.SocTargetPct < 0 || s.SocTargetPct > 100 || s.SocReservePct < 0 || s.SocReservePct > 100 {
+		return fmt.Errorf("SOC відсотки мають бути в межах 0..100")
+	}
+	if s.SocTargetPct > 0 && s.SocReservePct > 0 && s.SocReservePct >= s.SocTargetPct {
+		return fmt.Errorf("резерв SOC має бути нижчим за цільовий SOC")
+	}
+	for _, v := range []float64{
+		s.AutoChargeMaxKw, s.AutoDischargeMaxKw, s.IslandChargeMaxKw,
+		s.IslandDischargeMaxKw, s.GridImportKw, s.GridTargetKw, s.PvRatedKw,
+	} {
+		if v < 0 || math.IsNaN(v) || math.IsInf(v, 0) {
+			return fmt.Errorf("потужності й ліміти мають бути невід'ємними числами")
+		}
+	}
+	return nil
+}
+
+// edgeSettings handles GET/PUT /api/v1/edge/settings?site_id=.
+func (h *Handlers) edgeSettings(w http.ResponseWriter, r *http.Request) {
+	siteID, ok := h.requireEdge(w, r, http.MethodGet, http.MethodPut)
+	if !ok {
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		s, saved := h.loadEdgeSiteSettings(r.Context(), siteID)
+		if s == nil {
+			s = &EdgeSiteSettings{}
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"site_id": siteID, "saved": saved, "settings": s})
+	case http.MethodPut:
+		var s EdgeSiteSettings
+		if err := json.NewDecoder(r.Body).Decode(&s); err != nil {
+			http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		if err := s.validate(); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		payload, err := json.Marshal(s)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if err := storage.UpsertEdgeSiteSettings(r.Context(), h.edge.Pool, siteID, payload); err != nil {
+			h.edge.Log.Error("edge_settings_put", "site_id", siteID, "err", err)
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"site_id": siteID, "saved": true, "settings": s})
+	}
+}
+
+// loadEdgeSiteSettings reads the saved settings; nil when none.
+func (h *Handlers) loadEdgeSiteSettings(ctx context.Context, siteID string) (*EdgeSiteSettings, bool) {
+	payload, ok, err := storage.GetEdgeSiteSettings(ctx, h.edge.Pool, siteID)
+	if err != nil {
+		h.edge.Log.Warn("edge_settings_get", "site_id", siteID, "err", err)
+		return nil, false
+	}
+	if !ok {
+		return nil, false
+	}
+	var s EdgeSiteSettings
+	if err := json.Unmarshal(payload, &s); err != nil {
+		h.edge.Log.Warn("edge_settings_decode", "site_id", siteID, "err", err)
+		return nil, false
+	}
+	return &s, true
 }
 
 // plannerHorizon returns the planning window "current hour → end of

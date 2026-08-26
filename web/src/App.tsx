@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react'
 import { AlertsPage } from './alerts/AlertsPage'
+import { ControlPage } from './control/ControlPage'
 import { Dashboard } from './dashboard/Dashboard'
 import { EconomicsPage } from './economics/EconomicsPage'
 import { ImportPage } from './import/ImportPage'
-import { PlannerPage } from './planner/PlannerPage'
 import { StationPage } from './station/StationPage'
 
-type View = 'dashboard' | 'economics' | 'import' | 'station' | 'alerts' | 'planner'
+type View = 'dashboard' | 'economics' | 'import' | 'station' | 'alerts' | 'control'
 
 // readView reads the `?view=` query parameter on every render and
 // returns the active page id. We deliberately avoid pulling in
@@ -21,7 +21,22 @@ function readView(): View {
   if (view === 'import') return 'import'
   if (view === 'station') return 'station'
   if (view === 'alerts') return 'alerts'
-  if (view === 'planner') return 'planner'
+  if (view === 'control') return 'control'
+  // The standalone planner moved into the control mode's «План УЗЕ»
+  // tab; old ?view=planner links (bookmarks, dashboard header) land
+  // there. The URL is normalised so back/forward stays coherent.
+  if (view === 'planner') {
+    const url = new URL(window.location.href)
+    url.searchParams.set('view', 'control')
+    url.searchParams.set('tab', 'plan')
+    const site = url.searchParams.get('site')
+    if (site) {
+      url.searchParams.set('organization_id', site)
+      url.searchParams.delete('site')
+    }
+    window.history.replaceState({}, '', url)
+    return 'control'
+  }
   return 'dashboard'
 }
 
@@ -51,8 +66,8 @@ function App() {
   if (view === 'alerts') {
     return <AlertsPage />
   }
-  if (view === 'planner') {
-    return <PlannerPage />
+  if (view === 'control') {
+    return <ControlPage />
   }
   return <Dashboard />
 }
