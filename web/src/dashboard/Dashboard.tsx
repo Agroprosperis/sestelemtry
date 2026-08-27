@@ -56,10 +56,13 @@ export function Dashboard() {
     powerSeries,
     pvForecastSeries,
     pvForecastTotal,
+    pvForecastLoading,
+    pvForecastCoverage,
     loading,
     cardsLoading,
     flowsRefreshing,
     flowsLoaded,
+    flowsGap,
     refreshFlows,
     error,
   } = useDashboardData({
@@ -112,10 +115,13 @@ export function Dashboard() {
           anchor={anchor}
           flowsRefreshing={flowsRefreshing}
           flowsLoaded={flowsLoaded}
+          flowsGap={flowsGap}
           onRefreshFlows={() => void refreshFlows()}
           debug={debug}
           registers={registers}
           pvForecastTotal={pvForecastTotal}
+          pvForecastLoading={pvForecastLoading}
+          pvForecastCoverage={pvForecastCoverage}
         />
 
         <div className="dashboard-charts">

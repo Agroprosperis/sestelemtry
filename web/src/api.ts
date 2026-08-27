@@ -193,15 +193,27 @@ export async function fetchTimeseries(
 
 // EnergyFlowTotals mirrors `internal/api/types.go:EnergyFlowTotals`.
 // The API returns this object as `flows` only when the caller
-// requested at least one synthetic flow key AND the [from, to]
-// window is inside the on-the-fly compute budget (currently
-// day-sized). When the field is absent the dashboard knows the
-// allocator did not run — distinct from "ran and got zero".
+// requested at least one synthetic flow key AND the flows could be
+// produced for the window — live from the allocator for day-sized
+// windows, or from the persisted per-day rollup for wider ones. When
+// the field is absent the dashboard knows nothing computed the period
+// — distinct from "computed and got zero".
 export type EnergyFlowTotals = {
   pv_to_ess_kwh: number
   grid_to_ess_kwh: number
   ess_to_load_kwh: number
   ess_to_grid_kwh: number
+}
+
+// EnergyFlowMeta says which pipeline produced `flows`. Day-sized
+// windows run the allocator live ('allocator'); wider ones sum the
+// per-day totals the economics daemon persisted ('daily_cache'), where
+// days_covered below days_expected means some days in the period were
+// never computed and the totals understate it.
+export type EnergyFlowMeta = {
+  source: 'allocator' | 'daily_cache'
+  days_covered?: number
+  days_expected?: number
 }
 
 export type EnergySummaryResponse = {
@@ -210,6 +222,7 @@ export type EnergySummaryResponse = {
   to: string
   totals: Record<string, number>
   flows?: EnergyFlowTotals | null
+  flows_meta?: EnergyFlowMeta | null
 }
 
 export async function fetchEnergySummary(
@@ -218,6 +231,11 @@ export async function fetchEnergySummary(
     from: string
     to: string
     metricKeys?: string[]
+    // tz keys the cached per-day flow rollup that serves month/year
+    // windows onto civil days. Defaults to the browser's zone, which
+    // for our operators is the same Europe/Kyiv the economics daemon
+    // writes those rows under.
+    tz?: string
   },
   signal?: AbortSignal,
 ): Promise<EnergySummaryResponse> {
@@ -226,10 +244,62 @@ export async function fetchEnergySummary(
     from: input.from,
     to: input.to,
     metric_keys: input.metricKeys && input.metricKeys.length > 0 ? input.metricKeys.join(',') : undefined,
+    tz: input.tz || Intl.DateTimeFormat().resolvedOptions().timeZone || undefined,
   })
   const res = await fetch(url, { signal })
   if (!res.ok) {
     throw new Error(`energy-summary request failed: ${res.status}`)
+  }
+  return res.json()
+}
+
+// PvPlanSummaryResponse mirrors `internal/api/types.go:
+// PvPlanSummaryResponse`: the planned generation for a period, summed
+// from the same per-day forecasts the day chart plots hour by hour.
+//
+// `supported` is false for organizations the forecast flow has no site
+// code for (demo-org) — a plan of zero and no plan at all are
+// different claims, and only the latter should hide the comparison.
+//
+// `days_covered` below `days_expected` means part of the period
+// predates the flow's own history, so the sum understates it.
+export type PvPlanSummaryResponse = {
+  organization_id: string
+  supported: boolean
+  planned_kwh: number
+  days_covered: number
+  days_expected: number
+  from_day?: string
+  to_day?: string
+}
+
+// fetchPvPlanSummary returns the period plan for month/year views. The
+// day view doesn't need it: it already holds the hourly forecast for
+// the anchor day and sums that locally.
+//
+// The first call for a cold period fills the server-side per-day cache
+// and can take seconds; callers treat it as an independent pipeline
+// rather than gating the rest of the dashboard on it.
+export async function fetchPvPlanSummary(
+  input: {
+    organizationID: string
+    from: string
+    to: string
+    // tz decides which civil days the per-day plans are keyed by, and
+    // where "today" falls when the server clamps the window's end.
+    tz?: string
+  },
+  signal?: AbortSignal,
+): Promise<PvPlanSummaryResponse> {
+  const url = buildURL('/api/v1/pv-plan-summary', {
+    organization_id: input.organizationID,
+    from: input.from,
+    to: input.to,
+    tz: input.tz || Intl.DateTimeFormat().resolvedOptions().timeZone || undefined,
+  })
+  const res = await fetch(url, { signal })
+  if (!res.ok) {
+    throw new Error(`pv-plan-summary request failed: ${res.status}`)
   }
   return res.json()
 }

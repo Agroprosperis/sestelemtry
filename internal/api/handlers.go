@@ -20,6 +20,7 @@ import (
 	"github.com/nesh/sestelemetry/internal/askoe"
 	"github.com/nesh/sestelemetry/internal/economics"
 	"github.com/nesh/sestelemetry/internal/fusionsolar"
+	"github.com/nesh/sestelemetry/internal/pvplan"
 )
 
 type Handlers struct {
@@ -75,6 +76,17 @@ type Handlers struct {
 	// manifest distribution). nil when no EDGE_SITE_TOKENS were
 	// configured — the handlers respond 503.
 	edge *EdgeIngest
+	// pvPlan fetches per-day PV plan totals from the n8n forecast flow
+	// for /api/v1/pv-plan-summary. nil serves the endpoint from the
+	// pv_plan_daily cache alone (no upstream fill), which is what tests
+	// and offline deployments get.
+	pvPlan *pvplan.Client
+}
+
+// SetPvPlanClient installs the forecast-flow client that fills the
+// per-day PV plan cache. Called from cmd/api/main.go at startup.
+func (h *Handlers) SetPvPlanClient(c *pvplan.Client) {
+	h.pvPlan = c
 }
 
 // FusionSolarImporter synchronously pulls historical device data from
@@ -128,6 +140,18 @@ type storeReader interface {
 	WeatherForecast(ctx context.Context, organizationID string, from, to time.Time) (WeatherForecastResponse, error)
 	Samples(ctx context.Context, organizationID string, metricKeys []string, from, to time.Time, limit int, emit func(SampleRow) error) (int, bool, error)
 	EnergyFlowSources(ctx context.Context, organizationID string, from, to time.Time, lookback time.Duration) ([]EnergyFlowRawRow, error)
+	// EnergyFlowDailyTotals sums the per-day directional flows the
+	// economics daemon has persisted for the inclusive civil-date span
+	// [fromDay, toDay], and reports how many stored days contributed.
+	// Serves windows too wide for a live allocator run.
+	EnergyFlowDailyTotals(ctx context.Context, organizationID string, fromDay, toDay time.Time) (EnergyFlowTotals, int, error)
+	// PvPlanDays returns the cached per-day PV plan rows for the
+	// inclusive civil-date span [fromDay, toDay], and SavePvPlanDays
+	// writes back the days just fetched from the forecast flow. Together
+	// they make a month/year plan total one indexed read instead of one
+	// upstream call per day.
+	PvPlanDays(ctx context.Context, organizationID string, fromDay, toDay time.Time) ([]PvPlanDayTotal, error)
+	SavePvPlanDays(ctx context.Context, organizationID string, days []PvPlanDayTotal) error
 	// TelemetryDataRange reports the earliest/latest telemetry sample
 	// instants for an organization (UTC). ok is false when the org has
 	// no samples. Backs the recompute UI's full-period auto-detection.
@@ -339,6 +363,7 @@ func (h *Handlers) Router() http.Handler {
 	mux.HandleFunc("/api/v1/registers", h.registers)
 	mux.HandleFunc("/api/v1/energy-summary", h.energySummary)
 	mux.HandleFunc("/api/v1/energy-flow-hourly", h.energyFlowHourly)
+	mux.HandleFunc("/api/v1/pv-plan-summary", h.pvPlanSummary)
 	mux.HandleFunc("/api/v1/dam-prices", h.damPrices)
 	mux.HandleFunc("/api/v1/dam-prices/refresh", h.damPricesRefresh)
 	mux.HandleFunc("/api/v1/dam-prices/refresh-range", h.damPricesRefreshRange)
@@ -881,13 +906,21 @@ func (h *Handlers) energySummary(w http.ResponseWriter, r *http.Request) {
 	if len(metricKeys) == 0 {
 		metricKeys = ParseCSV(r.URL.Query().Get("metric_keys"))
 	}
-	from, to, _, _, err := parseRange(r)
+	from, to, _, tz, err := parseRange(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	if from.IsZero() || to.IsZero() {
 		http.Error(w, "from and to are required", http.StatusBadRequest)
+		return
+	}
+	// `tz` only steers the civil-day keys of the cached flow rollup
+	// that serves month/year windows. The accumulator deltas below are
+	// pure instant arithmetic and ignore it.
+	loc, err := loadLocation(tz)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	// A degenerate or inverted range is a client error, not a server
@@ -917,7 +950,7 @@ func (h *Handlers) energySummary(w http.ResponseWriter, r *http.Request) {
 	if len(effectiveKeys) == 0 {
 		effectiveKeys = EnergySummaryAccumulators
 	}
-	h.maybeAttachEnergyFlow(r.Context(), &resp, orgID, from, to, effectiveKeys)
+	h.maybeAttachEnergyFlow(r.Context(), &resp, orgID, from, to, effectiveKeys, loc)
 	h.log.Info("api_energy_summary_ok",
 		"organization_id", orgID,
 		"metric_keys", metricKeys,

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	neturl "net/url"
 	"strings"
 	"testing"
 	"time"
@@ -61,6 +62,22 @@ type mockStore struct {
 	flowSourcesOrg  string
 	flowSourcesFrom time.Time
 	flowSourcesTo   time.Time
+
+	flowDailyTotals  EnergyFlowTotals
+	flowDailyCovered int
+	flowDailyErr     error
+	flowDailyOrg     string
+	flowDailyFromDay time.Time
+	flowDailyToDay   time.Time
+
+	pvPlanDays     []PvPlanDayTotal
+	pvPlanErr      error
+	pvPlanOrg      string
+	pvPlanFromDay  time.Time
+	pvPlanToDay    time.Time
+	pvPlanSaved    []PvPlanDayTotal
+	pvPlanSavedOrg string
+	pvPlanSaveErr  error
 
 	tariffsByOrg     map[string]OrgTariffs
 	tariffsGetErr    error
@@ -188,6 +205,32 @@ func (m *mockStore) EnergyFlowSources(_ context.Context, orgID string, from, to 
 		return nil, m.flowSourcesErr
 	}
 	return m.flowSources, nil
+}
+
+func (m *mockStore) EnergyFlowDailyTotals(_ context.Context, orgID string, fromDay, toDay time.Time) (EnergyFlowTotals, int, error) {
+	m.flowDailyOrg = orgID
+	m.flowDailyFromDay = fromDay
+	m.flowDailyToDay = toDay
+	if m.flowDailyErr != nil {
+		return EnergyFlowTotals{}, 0, m.flowDailyErr
+	}
+	return m.flowDailyTotals, m.flowDailyCovered, nil
+}
+
+func (m *mockStore) PvPlanDays(_ context.Context, orgID string, fromDay, toDay time.Time) ([]PvPlanDayTotal, error) {
+	m.pvPlanOrg = orgID
+	m.pvPlanFromDay = fromDay
+	m.pvPlanToDay = toDay
+	if m.pvPlanErr != nil {
+		return nil, m.pvPlanErr
+	}
+	return m.pvPlanDays, nil
+}
+
+func (m *mockStore) SavePvPlanDays(_ context.Context, orgID string, days []PvPlanDayTotal) error {
+	m.pvPlanSavedOrg = orgID
+	m.pvPlanSaved = append(m.pvPlanSaved, days...)
+	return m.pvPlanSaveErr
 }
 
 func (m *mockStore) Ready(_ context.Context) error {
@@ -1315,16 +1358,20 @@ func TestEnergySummaryFlowDegradesOnEmptyData(t *testing.T) {
 	}
 }
 
-// TestEnergySummaryFlowSkipsWideWindow verifies the temporary
-// day-only guard inside EnergySummary: a request whose window is
-// wider than `maxEnergyFlowWindow` must NOT pull raw rows or run
-// the allocator, and resp.Flows must come back nil so the client
-// knows the compute was skipped. This keeps month/year refreshes
-// from blocking on a multi-second allocator pass while we ship a
-// proper daily-rollup cache.
-func TestEnergySummaryFlowSkipsWideWindow(t *testing.T) {
-	from := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
-	to := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+// TestEnergySummaryFlowWideWindowUsesDailyCache pins the month/year
+// path: a window wider than `maxEnergyFlowWindow` must never pull raw
+// rows (a live allocator pass over a month takes minutes and would
+// block the API worker on every dashboard refresh) and instead sums
+// the per-day totals the economics daemon already persisted. The civil
+// days are derived in the request's tz, and `to` is exclusive, so a
+// month asked for in Kyiv time covers Apr 1..Apr 30 and not May 1.
+func TestEnergySummaryFlowWideWindowUsesDailyCache(t *testing.T) {
+	kyiv, err := time.LoadLocation("Europe/Kyiv")
+	if err != nil {
+		t.Skipf("tzdata unavailable: %v", err)
+	}
+	from := time.Date(2026, 4, 1, 0, 0, 0, 0, kyiv)
+	to := time.Date(2026, 5, 1, 0, 0, 0, 0, kyiv)
 	store := &mockStore{
 		summaryResp: EnergySummaryResponse{
 			OrganizationID: "org-a",
@@ -1332,13 +1379,22 @@ func TestEnergySummaryFlowSkipsWideWindow(t *testing.T) {
 			To:             to,
 			Totals:         map[string]float64{"accumulated_pv_energy_yield_kwh": 12345},
 		},
+		flowDailyTotals: EnergyFlowTotals{
+			PVToESSKwh:   4000,
+			GridToESSKwh: 250,
+			ESSToLoadKwh: 3900,
+			ESSToGridKwh: 60,
+		},
+		flowDailyCovered: 30,
 	}
 	h := NewHandlers(store, "*")
 	h.SetEnergyFlowOrgs([]EnergyFlowOrg{{ID: "org-a"}})
 
-	url := fmt.Sprintf("/api/v1/energy-summary?organization_id=org-a&metric_keys=accumulated_pv_energy_yield_kwh,pv_to_ess_kwh&from=%s&to=%s",
-		from.Format(time.RFC3339), to.Format(time.RFC3339))
-	req := httptest.NewRequest(http.MethodGet, url, nil)
+	// Kyiv timestamps carry a `+03:00` offset, which a raw query string
+	// would decode as a space.
+	reqURL := fmt.Sprintf("/api/v1/energy-summary?organization_id=org-a&metric_keys=accumulated_pv_energy_yield_kwh,pv_to_ess_kwh&tz=Europe/Kyiv&from=%s&to=%s",
+		neturl.QueryEscape(from.Format(time.RFC3339)), neturl.QueryEscape(to.Format(time.RFC3339)))
+	req := httptest.NewRequest(http.MethodGet, reqURL, nil)
 	rec := httptest.NewRecorder()
 	h.Router().ServeHTTP(rec, req)
 
@@ -1348,15 +1404,141 @@ func TestEnergySummaryFlowSkipsWideWindow(t *testing.T) {
 	if store.flowSourcesOrg != "" {
 		t.Errorf("EnergyFlowSources should not have been called for a wide window, was called with %q", store.flowSourcesOrg)
 	}
+	if got := store.flowDailyFromDay.Format("2006-01-02"); got != "2026-04-01" {
+		t.Errorf("cache from_day = %s, want 2026-04-01", got)
+	}
+	if got := store.flowDailyToDay.Format("2006-01-02"); got != "2026-04-30" {
+		t.Errorf("cache to_day = %s, want 2026-04-30 (to is exclusive)", got)
+	}
+	var resp EnergySummaryResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Flows == nil {
+		t.Fatalf("resp.Flows is nil, want the cached rollup")
+	}
+	if resp.Flows.PVToESSKwh != 4000 || resp.Flows.ESSToLoadKwh != 3900 {
+		t.Errorf("resp.Flows = %+v, want the mocked cache sums", resp.Flows)
+	}
+	if resp.FlowsMeta == nil {
+		t.Fatalf("resp.FlowsMeta is nil, want the daily-cache provenance")
+	}
+	if resp.FlowsMeta.Source != EnergyFlowSourceDailyCache {
+		t.Errorf("flows_meta.source = %q, want %q", resp.FlowsMeta.Source, EnergyFlowSourceDailyCache)
+	}
+	if resp.FlowsMeta.DaysCovered != 30 || resp.FlowsMeta.DaysExpected != 30 {
+		t.Errorf("flows_meta coverage = %d/%d, want 30/30", resp.FlowsMeta.DaysCovered, resp.FlowsMeta.DaysExpected)
+	}
+	if got := resp.Totals["accumulated_pv_energy_yield_kwh"]; got != 12345 {
+		t.Errorf("raw counter total clobbered: got %g, want 12345", got)
+	}
+}
+
+// TestEnergySummaryFlowWideWindowWithoutCachedDays covers a period
+// nobody has computed yet. Flows must stay nil rather than becoming an
+// all-zero struct: zeros would claim the month moved no energy, which
+// is a different statement from "not computed".
+func TestEnergySummaryFlowWideWindowWithoutCachedDays(t *testing.T) {
+	from := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	to := time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC)
+	store := &mockStore{
+		summaryResp: EnergySummaryResponse{
+			OrganizationID: "org-a",
+			From:           from,
+			To:             to,
+			Totals:         map[string]float64{},
+		},
+		flowDailyCovered: 0,
+	}
+	h := NewHandlers(store, "*")
+	h.SetEnergyFlowOrgs([]EnergyFlowOrg{{ID: "org-a"}})
+
+	url := fmt.Sprintf("/api/v1/energy-summary?organization_id=org-a&metric_keys=pv_to_ess_kwh&from=%s&to=%s",
+		from.Format(time.RFC3339), to.Format(time.RFC3339))
+	req := httptest.NewRequest(http.MethodGet, url, nil)
+	rec := httptest.NewRecorder()
+	h.Router().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200 got %d body=%s", rec.Code, rec.Body.String())
+	}
 	var resp EnergySummaryResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
 	if resp.Flows != nil {
-		t.Errorf("resp.Flows = %+v, want nil for skipped wide window", resp.Flows)
+		t.Errorf("resp.Flows = %+v, want nil when no day is cached", resp.Flows)
 	}
-	if got := resp.Totals["accumulated_pv_energy_yield_kwh"]; got != 12345 {
-		t.Errorf("raw counter total clobbered: got %g, want 12345", got)
+}
+
+// TestCivilDaySpan nails the two boundaries that silently corrupt a
+// period total: an exclusive `to` must not reach into the next day,
+// and a DST shift inside the window must not shorten the day count
+// (the elapsed duration is 23 or 25 hours off a whole number of days
+// across a transition).
+func TestCivilDaySpan(t *testing.T) {
+	kyiv, err := time.LoadLocation("Europe/Kyiv")
+	if err != nil {
+		t.Skipf("tzdata unavailable: %v", err)
+	}
+	tests := []struct {
+		name      string
+		from, to  time.Time
+		loc       *time.Location
+		wantFirst string
+		wantLast  string
+		wantDays  int
+	}{
+		{
+			name:      "month ending at midnight stops on the last day",
+			from:      time.Date(2026, 4, 1, 0, 0, 0, 0, kyiv),
+			to:        time.Date(2026, 5, 1, 0, 0, 0, 0, kyiv),
+			loc:       kyiv,
+			wantFirst: "2026-04-01",
+			wantLast:  "2026-04-30",
+			wantDays:  30,
+		},
+		{
+			name:      "spring-forward month still counts every day",
+			from:      time.Date(2026, 3, 1, 0, 0, 0, 0, kyiv),
+			to:        time.Date(2026, 4, 1, 0, 0, 0, 0, kyiv),
+			loc:       kyiv,
+			wantFirst: "2026-03-01",
+			wantLast:  "2026-03-31",
+			wantDays:  31,
+		},
+		{
+			name:      "utc instants map onto local days",
+			from:      time.Date(2026, 7, 31, 21, 0, 0, 0, time.UTC),
+			to:        time.Date(2026, 8, 31, 21, 0, 0, 0, time.UTC),
+			loc:       kyiv,
+			wantFirst: "2026-08-01",
+			wantLast:  "2026-08-31",
+			wantDays:  31,
+		},
+		{
+			name:      "partial current day is one day",
+			from:      time.Date(2026, 8, 1, 0, 0, 0, 0, kyiv),
+			to:        time.Date(2026, 8, 1, 13, 30, 0, 0, kyiv),
+			loc:       kyiv,
+			wantFirst: "2026-08-01",
+			wantLast:  "2026-08-01",
+			wantDays:  1,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			first, last, days := civilDaySpan(tc.from, tc.to, tc.loc)
+			if got := first.Format("2006-01-02"); got != tc.wantFirst {
+				t.Errorf("first = %s, want %s", got, tc.wantFirst)
+			}
+			if got := last.Format("2006-01-02"); got != tc.wantLast {
+				t.Errorf("last = %s, want %s", got, tc.wantLast)
+			}
+			if days != tc.wantDays {
+				t.Errorf("days = %d, want %d", days, tc.wantDays)
+			}
+		})
 	}
 }
 

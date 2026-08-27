@@ -22,15 +22,20 @@ type Props = {
   // on screen during background refreshes instead of blanking to
   // dashes for the full duration of the on-the-fly allocator.
   flowsLoaded: boolean
+  // flowsGap marks a month/year total summed from an incomplete set of
+  // days; the period-flow card prints the shortfall.
+  flowsGap: { covered: number; expected: number } | null
   onRefreshFlows: () => void
   debug: boolean
   registers: Record<string, RegisterMeta> | null
-  // pvForecastTotal is the planned generation for the period in kWh,
-  // or null when the forecast is unavailable for the current preset
-  // (only `day` is wired up; month/year would need N daily fetches).
-  // Passed straight through to DailySummaryNarrative for the
-  // "plan vs fact" line.
+  // pvForecastTotal / pvForecastLoading / pvForecastCoverage are the
+  // period plan and its provenance, passed straight through to
+  // DailySummaryNarrative for the "plan vs fact" line. The day preset
+  // sums the hourly forecast it already plots; month and year read the
+  // per-day plan rollup from the API.
   pvForecastTotal: number | null
+  pvForecastLoading: boolean
+  pvForecastCoverage: { covered: number; expected: number } | null
 }
 
 export function MetricsPanel({
@@ -44,10 +49,13 @@ export function MetricsPanel({
   anchor,
   flowsRefreshing,
   flowsLoaded,
+  flowsGap,
   onRefreshFlows,
   debug,
   registers,
   pvForecastTotal,
+  pvForecastLoading,
+  pvForecastCoverage,
 }: Props) {
   return (
     <div className="metrics-panel-stack">
@@ -66,8 +74,11 @@ export function MetricsPanel({
         debug={debug}
         registers={registers}
         pvForecastTotal={pvForecastTotal}
+        pvForecastLoading={pvForecastLoading}
+        pvForecastCoverage={pvForecastCoverage}
         loading={flowsRefreshing}
         flowsLoaded={flowsLoaded}
+        flowsGap={flowsGap}
       />
       {preset === 'day' && (
         <BatteryDayNarrative

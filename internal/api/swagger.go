@@ -315,6 +315,74 @@ paths:
               schema:
                 type: string
                 example: internal server error
+  /api/v1/pv-plan-summary:
+    get:
+      summary: Planned PV generation for a period (plan vs actual)
+      operationId: getPvPlanSummary
+      description: |
+        Sums the per-day generation forecast over the requested window so
+        month and year views can compare plan against actual the way the
+        day view already does from the hourly forecast it plots.
+
+        Per-day forecasts come from the n8n flow (one call per civil day)
+        and are cached in pv_plan_daily. A past day's forecast never
+        changes, so the cache is permanent for everything but today,
+        which is refreshed every 30 minutes. Days still missing when the
+        request arrives are fetched inline within a bounded budget; a
+        cold year therefore fills over the first few polls.
+
+        The "to" edge is clamped to today because the flow only
+        forecasts about two weeks ahead: a full-month plan against
+        elapsed-month actuals would read as a collapse in performance.
+        Today counts whole, matching the day view.
+
+        "supported" is false for organizations the flow has no site code
+        for, which the dashboard uses to hide the comparison instead of
+        showing a plan of zero. "days_covered" below "days_expected"
+        means part of the period predates the flow's own history, so the
+        sum understates the period and clients should say so.
+      parameters:
+        - name: organization_id
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: from
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date-time
+          description: Exclusive end of the window.
+        - name: tz
+          in: query
+          required: false
+          schema:
+            type: string
+            default: UTC
+          description: |
+            IANA timezone whose civil days the per-day plans are keyed
+            by (e.g. Europe/Kyiv). Unknown zones return 400.
+      responses:
+        "200":
+          description: Planned generation and its day coverage
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PvPlanSummaryResponse"
+        "400":
+          description: Invalid or missing query parameters
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: to must be after from
   /api/v1/uze-plan:
     get:
       summary: Recommended УЗЕ (BESS) dispatch for one day
@@ -1185,6 +1253,43 @@ components:
           items:
             $ref: "#/components/schemas/EnergyFlowHourlyRow"
       required: [organization_id, date, tz, hours]
+    PvPlanSummaryResponse:
+      type: object
+      properties:
+        organization_id:
+          type: string
+          example: ab
+        supported:
+          type: boolean
+          description: >
+            False when the forecast flow has no site code for this
+            organization; every other field is then zero and clients
+            should hide the plan-vs-actual comparison entirely.
+          example: true
+        planned_kwh:
+          type: number
+          format: double
+          description: Sum of the per-day forecasts that exist in range.
+          example: 61234.5
+        days_covered:
+          type: integer
+          description: Days in range that carry a forecast.
+          example: 27
+        days_expected:
+          type: integer
+          description: >
+            Days in range, with the window's end clamped to today.
+          example: 27
+        from_day:
+          type: string
+          format: date
+          example: "2026-08-01"
+        to_day:
+          type: string
+          format: date
+          description: Clamped to today.
+          example: "2026-08-27"
+      required: [organization_id, supported, planned_kwh, days_covered, days_expected]
     UzePlanHour:
       type: object
       properties:

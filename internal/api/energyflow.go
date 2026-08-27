@@ -10,12 +10,12 @@ import (
 
 // maxEnergyFlowWindow caps how wide a window the on-the-fly
 // energy-flow allocator is allowed to chew through inside a single
-// /energy-summary request. We temporarily restrict it to day-sized
-// windows (with slack for the longest local-time → UTC offset and
-// week-boundary cases) because re-running the per-minute allocator
-// across a full month or year synchronously takes several seconds
-// and would block the API worker for every dashboard refresh. When
-// we ship the daily-flow cache this guard can be raised or removed.
+// /energy-summary request. Day-sized windows (with slack for the
+// longest local-time → UTC offset and week-boundary cases) run the
+// allocator live; anything wider is served from the per-day totals
+// the economics daemon has already persisted, because re-running the
+// per-minute allocator across a month or year synchronously takes
+// minutes and would block the API worker for every dashboard refresh.
 const maxEnergyFlowWindow = 36 * time.Hour
 
 // syntheticKeysRequested reports whether the caller's metric_keys
@@ -36,18 +36,25 @@ func syntheticKeysRequested(keys []string) bool {
 }
 
 // maybeAttachEnergyFlow conditionally fills resp.Flows with the four
-// directional flow totals computed on the fly from raw Modbus
-// counters. Behaviour:
+// directional flow totals, and resp.FlowsMeta with the pipeline that
+// produced them. Behaviour:
 //
 //   - If the caller didn't request any synthetic key, resp.Flows
 //     stays nil.
-//   - If the window exceeds maxEnergyFlowWindow, the compute is
-//     skipped (resp.Flows stays nil) and an info log is emitted.
-//   - On a compute failure resp.Flows still becomes a non-nil
-//     pointer with all-zero values, so the client can distinguish
-//     "not computed" (nil) from "computed but allocator dropped
-//     every bucket" (zero struct). A warn log captures the cause.
+//   - Windows up to maxEnergyFlowWindow run the allocator live over
+//     raw Modbus counters.
+//   - Wider windows are summed from the per-day totals the economics
+//     daemon persisted; resp.Flows stays nil when it has no day in
+//     range at all.
+//   - When the allocator itself fails, resp.Flows still becomes a
+//     non-nil pointer with all-zero values, so the client can
+//     distinguish "not computed" (nil) from "computed but the
+//     allocator dropped every bucket" (zero struct). A warn log
+//     captures the cause.
 //   - On success resp.Flows is the populated struct.
+//
+// `loc` is the timezone whose civil days the cached rollup is keyed
+// by; it only matters for the wide-window path.
 //
 // The caller writes the response unchanged; this helper never sets
 // HTTP status codes so the wider summary path stays useful even if
@@ -58,23 +65,13 @@ func (h *Handlers) maybeAttachEnergyFlow(
 	orgID string,
 	from, to time.Time,
 	effectiveKeys []string,
+	loc *time.Location,
 ) {
 	if resp == nil || !syntheticKeysRequested(effectiveKeys) {
 		return
 	}
 	if to.Sub(from) > maxEnergyFlowWindow {
-		// Wider-than-day windows skip the on-the-fly computation:
-		// until we add a daily-rollup cache, re-running the
-		// allocator on a month/year of raw rows would block the
-		// request for seconds. The dashboard hides the period-flow
-		// card for these presets, so the nil never reaches the UI;
-		// direct API consumers see resp.Flows == nil and know flows
-		// weren't computed.
-		h.log.Info("api_energy_summary_flow_skipped_wide_window",
-			"organization_id", orgID,
-			"window", to.Sub(from).String(),
-			"max_window", maxEnergyFlowWindow.String(),
-		)
+		h.attachEnergyFlowFromDailyCache(ctx, resp, orgID, from, to, loc)
 		return
 	}
 	flowStart := time.Now()
@@ -90,13 +87,117 @@ func (h *Handlers) maybeAttachEnergyFlow(
 			"duration_ms", time.Since(flowStart).Milliseconds(),
 		)
 		resp.Flows = &EnergyFlowTotals{}
+		resp.FlowsMeta = &EnergyFlowMeta{Source: EnergyFlowSourceAllocator}
 		return
 	}
 	resp.Flows = flows
+	resp.FlowsMeta = &EnergyFlowMeta{Source: EnergyFlowSourceAllocator}
 	h.log.Info("api_energy_summary_flow_compute_ok",
 		"organization_id", orgID,
 		"duration_ms", time.Since(flowStart).Milliseconds(),
 	)
+}
+
+// attachEnergyFlowFromDailyCache serves month/year windows by summing
+// the per-day flow totals in economics_daily. Those rows were produced
+// by the same allocator, one day at a time, by the economics-recompute
+// daemon — reconciled against the metered charge/discharge counters,
+// which puts them within ~0.1 % of a live run over the same day.
+//
+// The current day is included from the cache too, so its contribution
+// lags by up to economics.today_interval. Against a month or year
+// total that drift is a rounding error, and it keeps the request to a
+// single indexed aggregate that the dashboard can poll.
+//
+// resp.Flows stays nil when the cache holds no day in range: an
+// all-zero struct would read as "the period moved no energy", which is
+// a very different claim from "nobody has computed this period yet".
+func (h *Handlers) attachEnergyFlowFromDailyCache(
+	ctx context.Context,
+	resp *EnergySummaryResponse,
+	orgID string,
+	from, to time.Time,
+	loc *time.Location,
+) {
+	fromDay, toDay, expected := civilDaySpan(from, to, loc)
+	if expected <= 0 {
+		return
+	}
+	totals, covered, err := h.store.EnergyFlowDailyTotals(ctx, orgID, fromDay, toDay)
+	if err != nil {
+		// Unlike a failed allocator run, a failed cache read tells us
+		// nothing about the period, so Flows stays nil ("not computed")
+		// rather than becoming the zero struct ("computed, found
+		// nothing"). A deployment without the economics schema lands
+		// here and correctly shows placeholders.
+		h.log.Warn("api_energy_summary_flow_daily_cache",
+			"organization_id", orgID, "err", err,
+			"from_day", fromDay.Format("2006-01-02"),
+			"to_day", toDay.Format("2006-01-02"),
+		)
+		return
+	}
+	if covered == 0 {
+		h.log.Info("api_energy_summary_flow_daily_cache_empty",
+			"organization_id", orgID,
+			"from_day", fromDay.Format("2006-01-02"),
+			"to_day", toDay.Format("2006-01-02"),
+			"days_expected", expected,
+		)
+		return
+	}
+	resp.Flows = &totals
+	resp.FlowsMeta = &EnergyFlowMeta{
+		Source:       EnergyFlowSourceDailyCache,
+		DaysCovered:  covered,
+		DaysExpected: expected,
+	}
+	h.log.Info("api_energy_summary_flow_daily_cache_ok",
+		"organization_id", orgID,
+		"days_covered", covered,
+		"days_expected", expected,
+	)
+}
+
+// civilDaySpan maps the half-open instant window [from, to) onto the
+// inclusive span of civil days it touches in loc, plus how many days
+// that is. `to` being exclusive is the point: a month window ending at
+// the first midnight of the next month must not pull that next day's
+// row into the sum.
+func civilDaySpan(from, to time.Time, loc *time.Location) (fromDay, toDay time.Time, days int) {
+	if loc == nil {
+		loc = time.UTC
+	}
+	first := startOfCivilDay(from, loc)
+	// The last instant the window actually covers. Clamped to `from`
+	// so a degenerate range still names one day instead of walking
+	// backwards.
+	lastInstant := to.Add(-time.Nanosecond)
+	if lastInstant.Before(from) {
+		lastInstant = from
+	}
+	last := startOfCivilDay(lastInstant, loc)
+	if last.Before(first) {
+		return time.Time{}, time.Time{}, 0
+	}
+	// Count through the calendar rather than dividing the elapsed
+	// duration: a DST shift inside the window makes it 23 or 25 hours
+	// short of a whole number of days and rounds the count off by one.
+	days = int(civilDayIndex(last)-civilDayIndex(first)) + 1
+	return first, last, days
+}
+
+func startOfCivilDay(t time.Time, loc *time.Location) time.Time {
+	local := t.In(loc)
+	y, m, d := local.Date()
+	return time.Date(y, m, d, 0, 0, 0, 0, loc)
+}
+
+// civilDayIndex numbers calendar days so two of them can be
+// subtracted without the timezone offsets cancelling incorrectly.
+func civilDayIndex(t time.Time) int64 {
+	y, m, d := t.Date()
+	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC).Unix() / int64(24*time.Hour/time.Second)
 }
 
 // computeEnergyFlowTotals runs the allocation rule against the raw

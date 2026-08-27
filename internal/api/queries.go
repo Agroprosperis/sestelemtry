@@ -1193,6 +1193,66 @@ func (s *Store) GetEconomicsDaily(ctx context.Context, organizationID string, da
 	return storage.GetEconomicsDaily(ctx, s.pool, organizationID, day)
 }
 
+// EnergyFlowDailyTotals sums the persisted per-day directional flows
+// over the inclusive civil-date span [fromDay, toDay] and reports how
+// many stored days contributed. Backs the month/year period-flow card,
+// which cannot afford a live allocator run.
+func (s *Store) EnergyFlowDailyTotals(
+	ctx context.Context,
+	organizationID string,
+	fromDay, toDay time.Time,
+) (EnergyFlowTotals, int, error) {
+	sums, err := storage.SumEconomicsDailyFlows(ctx, s.pool, organizationID, fromDay, toDay)
+	if err != nil {
+		return EnergyFlowTotals{}, 0, err
+	}
+	return EnergyFlowTotals{
+		PVToESSKwh:   sums.PVToESSKwh,
+		GridToESSKwh: sums.GridToESSKwh,
+		ESSToLoadKwh: sums.ESSToLoadKwh,
+		ESSToGridKwh: sums.ESSToGridKwh,
+	}, sums.Days, nil
+}
+
+// PvPlanDays returns the cached per-day PV plan rows for the inclusive
+// civil-date span [fromDay, toDay].
+func (s *Store) PvPlanDays(
+	ctx context.Context,
+	organizationID string,
+	fromDay, toDay time.Time,
+) ([]PvPlanDayTotal, error) {
+	rows, err := storage.ListPvPlanDays(ctx, s.pool, organizationID, fromDay, toDay)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]PvPlanDayTotal, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, PvPlanDayTotal{
+			Day:        r.Day,
+			PlannedKwh: r.PlannedKwh,
+			FetchedAt:  r.FetchedAt,
+		})
+	}
+	return out, nil
+}
+
+// SavePvPlanDays caches the given per-day PV plan totals.
+func (s *Store) SavePvPlanDays(
+	ctx context.Context,
+	organizationID string,
+	days []PvPlanDayTotal,
+) error {
+	rows := make([]storage.PvPlanDay, 0, len(days))
+	for _, d := range days {
+		rows = append(rows, storage.PvPlanDay{
+			Day:        d.Day,
+			PlannedKwh: d.PlannedKwh,
+			FetchedAt:  d.FetchedAt,
+		})
+	}
+	return storage.UpsertPvPlanDays(ctx, s.pool, organizationID, rows)
+}
+
 // GetEconomicsDailyRange returns persisted per-day summaries for the
 // inclusive civil-date span [from, to], ordered by day ascending.
 func (s *Store) GetEconomicsDailyRange(ctx context.Context, organizationID string, from, to time.Time) ([]storage.EconomicsDailyRow, error) {

@@ -12,10 +12,18 @@ type Props = {
   debug: boolean
   registers: Record<string, RegisterMeta> | null
   // pvForecastTotal is the planned generation for the period in
-  // kWh, or null when the forecast is unavailable (no n8n mapping
-  // for the org or non-day preset). Drives the radial "% виконання"
-  // ring above the segment bars.
+  // kWh, or null when there is no plan to compare against (the org
+  // isn't in the forecast flow, or no day in range carries one).
+  // Drives the radial "% виконання" ring above the segment bars.
   pvForecastTotal: number | null
+  // pvForecastLoading keeps the placeholder up while the period plan
+  // is still in flight, so the line doesn't flash "прогноз
+  // недоступний" between the flows landing and the plan landing.
+  pvForecastLoading?: boolean
+  // pvForecastCoverage is set when the plan covers fewer days than the
+  // period holds (the forecast flow's history stops short of it), so
+  // the ring's percentage is measured against a partial plan.
+  pvForecastCoverage?: { covered: number; expected: number } | null
   // loading tracks the period-flow allocator. Drives only the
   // header spinner (and aria-busy); the actual numbers are gated
   // by `flowsLoaded` so background refreshes don't wipe stale-
@@ -27,6 +35,11 @@ type Props = {
   // "the day produced nothing" during the initial allocator call
   // (it can take 5–15 s on a busy day).
   flowsLoaded?: boolean
+  // flowsGap is set when a month/year total covers fewer days than the
+  // period holds, because the economics daemon hasn't computed the
+  // rest. Without saying so the card would present a short total as
+  // the full period.
+  flowsGap?: { covered: number; expected: number } | null
 }
 
 const TITLES: Record<RangePreset, string> = {
@@ -239,8 +252,11 @@ export function DailySummaryNarrative({
   debug,
   registers,
   pvForecastTotal,
+  pvForecastLoading = false,
+  pvForecastCoverage = null,
   loading,
   flowsLoaded = false,
+  flowsGap = null,
 }: Props) {
   const periodLabel = formatPeriodLabel(preset, anchor)
   const pvSegments = [
@@ -281,11 +297,12 @@ export function DailySummaryNarrative({
   ]
   const consumptionTotal =
     consumptionSegments[0].valueKwh + consumptionSegments[1].valueKwh
-  const forecastSummary = !flowsLoaded
-    ? `прогноз ${PLACEHOLDER}`
-    : pvForecastTotal !== null && pvForecastTotal > 0
-      ? `прогноз ${formatEnergyUk(pvForecastTotal)}`
-      : 'прогноз недоступний'
+  const forecastSummary =
+    !flowsLoaded || pvForecastLoading
+      ? `прогноз ${PLACEHOLDER}`
+      : pvForecastTotal !== null && pvForecastTotal > 0
+        ? `прогноз ${formatEnergyUk(pvForecastTotal)}`
+        : 'прогноз недоступний'
 
   // The in-header spinner only fires before the first successful
   // /energy-summary lands — subsequent background refreshes run
@@ -307,6 +324,19 @@ export function DailySummaryNarrative({
           <LoadingSpinner label="Завантаження підсумку" />
         )}
       </header>
+      {flowsLoaded && flowsGap && (
+        <p className="summary-coverage-note">
+          Розподіл енергії порахований за {flowsGap.covered} з{' '}
+          {flowsGap.expected} днів періоду — решта днів ще не оброблена.
+        </p>
+      )}
+      {flowsLoaded && !pvForecastLoading && pvForecastCoverage && (
+        <p className="summary-coverage-note">
+          Прогноз відомий за {pvForecastCoverage.covered} з{' '}
+          {pvForecastCoverage.expected} днів періоду — порівняння з планом
+          неповне.
+        </p>
+      )}
       <div className="summary-hero">
         <div className="summary-hero-text">
           <span className="summary-hero-label">

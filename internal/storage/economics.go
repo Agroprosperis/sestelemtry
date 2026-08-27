@@ -602,6 +602,64 @@ func GetEconomicsDaily(ctx context.Context, pool *pgxpool.Pool, organizationID s
 	return r, true, nil
 }
 
+// EnergyFlowDailySums is the cached directional-flow rollup for a span
+// of civil days: the four synthetic totals plus how many stored days
+// contributed them. Days is what lets a caller tell a whole period
+// from a partial one — a gap in economics_daily quietly lowers the
+// sums and nothing in the numbers themselves gives that away.
+type EnergyFlowDailySums struct {
+	PVToESSKwh   float64
+	GridToESSKwh float64
+	ESSToLoadKwh float64
+	ESSToGridKwh float64
+	Days         int
+}
+
+// SumEconomicsDailyFlows aggregates the four directional flow totals
+// persisted in economics_daily across the inclusive civil-date span
+// [fromDay, toDay]. This is the month/year path for the dashboard's
+// period-flow card: the economics daemon already ran the allocator
+// day by day, so summing its output costs one indexed aggregate
+// instead of re-scanning a month of raw 1 Hz samples.
+//
+// `fromDay` / `toDay` are matched as dates, so pass instants whose
+// wall-clock date is the civil day you mean (local midnight is the
+// convention elsewhere in this file).
+func SumEconomicsDailyFlows(
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	organizationID string,
+	fromDay, toDay time.Time,
+) (EnergyFlowDailySums, error) {
+	var out EnergyFlowDailySums
+	if pool == nil {
+		return out, fmt.Errorf("storage: nil pool")
+	}
+	if organizationID == "" {
+		return out, fmt.Errorf("storage: empty organization_id")
+	}
+	err := pool.QueryRow(ctx, `
+		SELECT
+			COALESCE(SUM(pv_to_ess_kwh), 0),
+			COALESCE(SUM(grid_to_ess_kwh), 0),
+			COALESCE(SUM(ess_to_load_kwh), 0),
+			COALESCE(SUM(ess_to_grid_kwh), 0),
+			COUNT(*)
+		FROM economics_daily
+		WHERE organization_id = $1 AND day >= $2::date AND day <= $3::date
+	`, organizationID, fromDay, toDay).Scan(
+		&out.PVToESSKwh,
+		&out.GridToESSKwh,
+		&out.ESSToLoadKwh,
+		&out.ESSToGridKwh,
+		&out.Days,
+	)
+	if err != nil {
+		return EnergyFlowDailySums{}, fmt.Errorf("storage: sum economics daily flows: %w", err)
+	}
+	return out, nil
+}
+
 // GetEconomicsDailyRange returns every persisted per-day summary for the
 // inclusive civil-date span [from, to], ordered by day ascending. An
 // empty slice (no error) means the org has no stored days in the range.

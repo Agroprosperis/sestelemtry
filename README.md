@@ -111,9 +111,36 @@ dashboard asks for any of the four keys, the EnergySummary handler
 `energyflow.Recompute` in `internal/energyflow/recompute.go`, and
 returns the totals in the response's typed `flows` field. The
 allocation rule itself lives in `internal/energyflow/allocate.go`.
-On-the-fly compute is currently gated to day-sized windows (see
-`maxEnergyFlowWindow`); month/year refreshes skip the allocator
-until we ship a daily-rollup cache.
+On-the-fly compute is gated to day-sized windows (see
+`maxEnergyFlowWindow`). Wider windows are summed from the per-day flow
+totals in `economics_daily`, which the economics-recompute daemon
+produced with the same allocator one day at a time — a live pass over a
+month would take minutes. The response's `flows_meta.source` says which
+pipeline answered (`allocator` or `daily_cache`), and for the cache it
+reports `days_covered` / `days_expected` so a period the daemon has not
+fully computed can be flagged rather than silently under-reported.
+Month/year flows therefore require the economics daemon to be running.
+
+### Plan vs actual (planned PV generation)
+
+The summary card compares actual generation against the n8n generation
+forecast on every preset. The day preset sums the hourly forecast it
+already plots. Month and year call `/api/v1/pv-plan-summary`
+(`internal/api/pvplan.go`), which sums per-day forecasts cached in
+`pv_plan_daily`: the flow answers one site-day per call, so a year is
+365 calls and a page view can't make them. A past day's forecast never
+changes, so its cache entry is permanent; today's is refreshed every 30
+minutes, and days the flow has no forecast for are cached as a miss and
+retried daily. Missing days are fetched inline within a bounded budget,
+which means a cold year fills over the first few polls.
+
+The window's end is clamped to today — the flow forecasts about two
+weeks ahead, and counting the rest of the month would compare a
+full-month plan against elapsed-month actuals. `days_covered` below
+`days_expected` means part of the period predates the flow's own
+history, which the dashboard prints next to the plan instead of passing
+a partial plan off as the whole period. Set `PV_FORECAST_WEBHOOK_URL` to
+point the API at a different flow.
 
 ### Topology auto-detection
 

@@ -194,6 +194,27 @@ type EnergyFlowTotals struct {
 	ESSToGridKwh float64 `json:"ess_to_grid_kwh"`
 }
 
+// Where a response's `flows` came from. Day-sized windows run the
+// allocator over raw Modbus counters; wider ones sum the per-day
+// totals the economics daemon already persisted, because re-running
+// the per-minute allocator across a month or year synchronously would
+// block the request for minutes.
+const (
+	EnergyFlowSourceAllocator  = "allocator"
+	EnergyFlowSourceDailyCache = "daily_cache"
+)
+
+// EnergyFlowMeta describes how `flows` was produced, so a client can
+// tell a complete answer from a partial one. For the daily-cache
+// source, DaysCovered below DaysExpected means the economics daemon
+// has not computed every day in the window and the totals therefore
+// understate the period — a gap the numbers alone can't reveal.
+type EnergyFlowMeta struct {
+	Source       string `json:"source"`
+	DaysCovered  int    `json:"days_covered,omitempty"`
+	DaysExpected int    `json:"days_expected,omitempty"`
+}
+
 // EnergySummaryResponse returns the per-period accumulator deltas
 // used by the dashboard's summary cards plus the optional
 // directional flow totals. Each value in `Totals` is
@@ -201,14 +222,49 @@ type EnergyFlowTotals struct {
 // clamped to >= 0; counter rollbacks land as zero so the dashboard
 // flags "no usable data" rather than inventing a number from
 // corrupted samples. `Flows` is populated only when the caller
-// requested at least one synthetic key and the window falls inside
-// the on-the-fly compute budget (see maxEnergyFlowWindow).
+// requested at least one synthetic key; `FlowsMeta` then says which
+// pipeline produced it (see maybeAttachEnergyFlow).
 type EnergySummaryResponse struct {
 	OrganizationID string             `json:"organization_id"`
 	From           time.Time          `json:"from"`
 	To             time.Time          `json:"to"`
 	Totals         map[string]float64 `json:"totals"`
 	Flows          *EnergyFlowTotals  `json:"flows,omitempty"`
+	FlowsMeta      *EnergyFlowMeta    `json:"flows_meta,omitempty"`
+}
+
+// PvPlanDayTotal is one cached civil day of planned PV generation.
+// PlannedKwh of 0 records that the forecast flow was asked and had
+// nothing for that day, which is why FetchedAt travels with it: the
+// handler retries those misses on a slow cadence instead of on every
+// dashboard poll.
+type PvPlanDayTotal struct {
+	Day        time.Time
+	PlannedKwh float64
+	FetchedAt  time.Time
+}
+
+// PvPlanSummaryResponse is the body of GET /api/v1/pv-plan-summary:
+// the planned generation for a period, summed from per-day forecasts.
+//
+// Supported is false for organizations the forecast flow doesn't know
+// (demo-org) — distinct from a period whose plan is simply zero, so
+// the dashboard hides the plan-vs-actual comparison instead of
+// claiming a plan of nothing.
+//
+// DaysCovered / DaysExpected report how much of the period actually
+// carries a forecast. The flow only keeps history back to its own
+// deployment, so an early period is legitimately partial and the sum
+// understates it; the client says so rather than presenting the
+// shortfall as the whole period.
+type PvPlanSummaryResponse struct {
+	OrganizationID string  `json:"organization_id"`
+	Supported      bool    `json:"supported"`
+	PlannedKwh     float64 `json:"planned_kwh"`
+	DaysCovered    int     `json:"days_covered"`
+	DaysExpected   int     `json:"days_expected"`
+	FromDay        string  `json:"from_day,omitempty"`
+	ToDay          string  `json:"to_day,omitempty"`
 }
 
 // LocationInfo is the geographic site of an organization, exposed via

@@ -370,6 +370,19 @@
   flex: 0 0 auto;
 }
 
+/* Coverage caveat for month/year totals summed from an incomplete set
+   of cached days. Amber rather than red: the numbers shown are real,
+   they just don't span the whole period yet. */
+.summary-coverage-note {
+  margin: 0;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: #fffbeb;
+  color: #92400e;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
 /* The battery variant overlays a Phosphor glyph in the centre of
    the SVG arc so the ring reads as a battery gauge at a glance.
    The wrapper uses inline grid stacking so the SVG and the icon

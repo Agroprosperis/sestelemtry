@@ -61,4 +61,54 @@ describe('DailySummaryNarrative', () => {
     expect(screen.queryAllByText('—').length).toBe(0)
     expect(screen.queryByLabelText('Завантаження підсумку')).toBeNull()
   })
+
+  it('compares a month against its plan', () => {
+    render(
+      <DailySummaryNarrative
+        flows={makeFlows()}
+        preset="month"
+        anchor={anchor}
+        debug={false}
+        registers={null}
+        pvForecastTotal={1200}
+        flowsLoaded
+      />,
+    )
+    expect(screen.getByText(/прогноз 1,20 МВт·год/)).toBeInTheDocument()
+  })
+
+  // The plan for a month lands after the flows do. Reading "прогноз
+  // недоступний" in between would be wrong, not just early.
+  it('holds the placeholder while the period plan is still loading', () => {
+    render(
+      <DailySummaryNarrative
+        flows={makeFlows()}
+        preset="month"
+        anchor={anchor}
+        debug={false}
+        registers={null}
+        pvForecastTotal={null}
+        pvForecastLoading
+        flowsLoaded
+      />,
+    )
+    expect(screen.getByText(/прогноз —/)).toBeInTheDocument()
+    expect(screen.queryByText(/прогноз недоступний/)).toBeNull()
+  })
+
+  it('says so when the plan covers only part of the period', () => {
+    render(
+      <DailySummaryNarrative
+        flows={makeFlows()}
+        preset="month"
+        anchor={anchor}
+        debug={false}
+        registers={null}
+        pvForecastTotal={900}
+        pvForecastCoverage={{ covered: 18, expected: 31 }}
+        flowsLoaded
+      />,
+    )
+    expect(screen.getByText(/Прогноз відомий за 18 з 31 днів/)).toBeInTheDocument()
+  })
 })

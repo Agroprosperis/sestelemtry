@@ -21,6 +21,7 @@ import (
 	"github.com/nesh/sestelemetry/internal/energyflow"
 	"github.com/nesh/sestelemetry/internal/fusionsolar"
 	"github.com/nesh/sestelemetry/internal/oree"
+	"github.com/nesh/sestelemetry/internal/pvplan"
 	"github.com/nesh/sestelemetry/internal/storage"
 )
 
@@ -97,6 +98,12 @@ func main() {
 		log.Error("db_init_edge", "err", err)
 		os.Exit(1)
 	}
+	// Per-day PV plan cache behind /api/v1/pv-plan-summary (month/year
+	// plan-vs-actual). Idempotent.
+	if err := storage.InitPvPlanSchema(ctx, pool); err != nil {
+		log.Error("db_init_pv_plan", "err", err)
+		os.Exit(1)
+	}
 
 	store := api.NewStore(pool)
 	// Boot-time feature detection: if the collector has run migration 004
@@ -112,6 +119,9 @@ func main() {
 	log.Info("api_features", "daily_cagg", hasCAGG)
 
 	svc := api.NewHandlers(store, *allowOrigin)
+	// Per-day PV plan totals for the month/year plan-vs-actual card,
+	// read from the same n8n forecast flow the day chart plots.
+	svc.SetPvPlanClient(pvplan.NewClient(strings.TrimSpace(os.Getenv("PV_FORECAST_WEBHOOK_URL")), nil))
 
 	// EMS edge uplink: enabled only when per-site Bearer tokens exist
 	// (EDGE_SITE_TOKENS="ab=tokenA,ze=tokenB"). During the shadow phase
