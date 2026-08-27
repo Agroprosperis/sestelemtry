@@ -8,15 +8,13 @@ import (
 	"fmt"
 	"math"
 	"net/http"
-	"net/url"
-	"os"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/nesh/sestelemetry/internal/economics"
+	"github.com/nesh/sestelemetry/internal/pvplan"
 	"github.com/nesh/sestelemetry/internal/storage"
 )
 
@@ -746,17 +744,10 @@ func (h *Handlers) edgeDAMPrices(ctx context.Context, zone int, now time.Time, l
 
 // --- PV generation forecast (the same n8n source the dashboard uses) ---
 
-// edgePvForecastURL is the n8n webhook that serves the per-orientation
-// hourly generation forecast (elevator_code + forecast_day → rows of
-// {hour_ending, orientation_idx, planned_kwh}). Same endpoint the
-// dashboard's day chart calls; overridable via PV_FORECAST_WEBHOOK_URL.
-const edgePvForecastURL = "https://granary.app.n8n.cloud/webhook/96bac28d-5020-48b3-8f23-0bc189029c00"
-
-// edgePvElevatorCode maps organization ids to the n8n flow's elevator
-// codes (mirrors web/src/dashboard/transforms/pvForecast.ts).
-var edgePvElevatorCode = map[string]string{
-	"ze": "JE", "pe": "RE", "pde": "PE", "ab": "AB", "ke": "KE", "de": "DE", "sm": "SM",
-}
+// The forecast flow itself (URL, site codes, row aggregation) lives in
+// internal/pvplan, shared with /api/v1/pv-plan-summary so the planner's
+// PV curve and the dashboard's plan-vs-actual card read the same
+// numbers for a given day.
 
 // edgePvPlanCache caches one site-day of the n8n forecast (the flow
 // recomputes it a few times a day; refetching on every 15-minute
@@ -778,8 +769,8 @@ const pvPlanTTL = 30 * time.Minute
 // false when the site has no elevator code or every fetch failed — the
 // caller falls back to the GTI estimate.
 func (h *Handlers) edgePvPlanForecast(ctx context.Context, siteID string, loc *time.Location, start, end time.Time) (map[time.Time]float64, bool) {
-	code, known := edgePvElevatorCode[siteID]
-	if !known {
+	code, known := pvplan.ElevatorCodeFor(siteID)
+	if !known || h.pvPlan == nil {
 		return nil, false
 	}
 	out := map[time.Time]float64{}
@@ -811,31 +802,15 @@ func (h *Handlers) pvPlanForDay(ctx context.Context, siteID, code string, day ti
 	}
 	cache.mu.Unlock()
 
-	base := edgePvForecastURL
-	if v := strings.TrimSpace(os.Getenv("PV_FORECAST_WEBHOOK_URL")); v != "" {
-		base = v
-	}
-	reqURL := base + "?elevator_code=" + url.QueryEscape(code) + "&forecast_day=" + day.Format("2006-01-02")
-
+	// A tighter deadline than the client's own: the planner answers a
+	// live request and would rather fall back to the GTI estimate than
+	// hold the caller for a slow upstream.
 	reqCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, reqURL, nil)
+	byHour, err := h.pvPlan.DayHourly(reqCtx, code, day)
 	if err != nil {
 		return nil, err
 	}
-	res, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer res.Body.Close()
-	if res.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("pv forecast: %s", res.Status)
-	}
-	var rows []map[string]any
-	if err := json.NewDecoder(res.Body).Decode(&rows); err != nil {
-		return nil, fmt.Errorf("pv forecast decode: %w", err)
-	}
-	byHour := aggregatePvPlanRows(rows)
 
 	cache.mu.Lock()
 	if cache.m == nil {
@@ -844,63 +819,6 @@ func (h *Handlers) pvPlanForDay(ctx context.Context, siteID, code string, day ti
 	cache.m[key] = cachedPvPlan{byHour: byHour, at: time.Now()}
 	cache.mu.Unlock()
 	return byHour, nil
-}
-
-// aggregatePvPlanRows sums planned_kwh across panel orientations per
-// hour, deduplicating repeated (hour_ending, orientation_idx) pairs —
-// the exact logic of the dashboard's aggregatePvForecastHourly.
-// hour_ending is 1..24 local Kyiv; the result keys are hour starts.
-func aggregatePvPlanRows(rows []map[string]any) map[int]float64 {
-	byHour := map[int]map[int]float64{}
-	for _, r := range rows {
-		hourEnding := int(anyToFloat(r["hour_ending"]))
-		if hourEnding < 1 || hourEnding > 24 {
-			continue
-		}
-		kwh := anyToFloat(r["planned_kwh"])
-		if math.IsNaN(kwh) {
-			continue
-		}
-		orientation := int(anyToFloat(r["orientation_idx"]))
-		inner, ok := byHour[hourEnding]
-		if !ok {
-			inner = map[int]float64{}
-			byHour[hourEnding] = inner
-		}
-		inner[orientation] = kwh
-	}
-	out := map[int]float64{}
-	for hourEnding, inner := range byHour {
-		sum := 0.0
-		for _, v := range inner {
-			sum += v
-		}
-		if sum > 0 {
-			out[hourEnding-1] = sum // 1 h interval → kWh ≡ avg kW
-		}
-	}
-	return out
-}
-
-func anyToFloat(v any) float64 {
-	switch t := v.(type) {
-	case float64:
-		return t
-	case string:
-		f, err := strconv.ParseFloat(strings.TrimSpace(t), 64)
-		if err != nil {
-			return math.NaN()
-		}
-		return f
-	case json.Number:
-		f, err := t.Float64()
-		if err != nil {
-			return math.NaN()
-		}
-		return f
-	default:
-		return math.NaN()
-	}
 }
 
 // edgeHourWeather is one hour of the stored Open-Meteo forecast used by

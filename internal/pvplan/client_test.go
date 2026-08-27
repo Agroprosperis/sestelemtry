@@ -8,7 +8,10 @@ import (
 	"time"
 )
 
-func TestAggregateDayTotalSumsOrientationsPerHour(t *testing.T) {
+// hour_ending 1..24 maps onto hour starts 0..23: the planner keys its
+// PV curve by hour start, and an off-by-one here would shift the whole
+// forecast an hour against the prices it's optimised against.
+func TestAggregateHourlySumsOrientationsPerHour(t *testing.T) {
 	rows := []map[string]any{
 		{"hour_ending": 12.0, "orientation_idx": 1.0, "planned_kwh": 10.0},
 		{"hour_ending": 12.0, "orientation_idx": 2.0, "planned_kwh": 5.0},
@@ -19,28 +22,38 @@ func TestAggregateDayTotalSumsOrientationsPerHour(t *testing.T) {
 		{"hour_ending": 25.0, "orientation_idx": 1.0, "planned_kwh": 99.0},
 		{"hour_ending": 14.0, "orientation_idx": 1.0, "planned_kwh": "not a number"},
 	}
-	kwh, hours := AggregateDayTotal(rows)
-	if kwh != 19 {
-		t.Fatalf("kwh = %v, want 19", kwh)
+	got := AggregateHourly(rows)
+	if len(got) != 2 {
+		t.Fatalf("hours = %d (%v), want 2", len(got), got)
 	}
-	if hours != 2 {
-		t.Fatalf("hours = %d, want 2", hours)
+	if got[11] != 15 {
+		t.Fatalf("hour 11 = %v, want 15 (two orientations summed)", got[11])
+	}
+	if got[12] != 4 {
+		t.Fatalf("hour 12 = %v, want 4", got[12])
+	}
+}
+
+// The flow is not strict about types: numbers arrive as JSON numbers or
+// as strings depending on the node that produced the row.
+func TestAggregateHourlyAcceptsStringTypedNumbers(t *testing.T) {
+	got := AggregateHourly([]map[string]any{
+		{"hour_ending": "14", "orientation_idx": "1", "planned_kwh": " 33.5 "},
+	})
+	if got[13] != 33.5 {
+		t.Fatalf("hour 13 = %v, want 33.5", got[13])
 	}
 }
 
 // A repeated (hour_ending, orientation_idx) pair is the upstream feed
 // re-publishing the same slot; counting both would double the day.
-func TestAggregateDayTotalDeduplicatesRepeatedSlots(t *testing.T) {
-	rows := []map[string]any{
+func TestAggregateHourlyDeduplicatesRepeatedSlots(t *testing.T) {
+	got := AggregateHourly([]map[string]any{
 		{"hour_ending": 12.0, "orientation_idx": 1.0, "planned_kwh": 10.0},
 		{"hour_ending": 12.0, "orientation_idx": 1.0, "planned_kwh": 7.0},
-	}
-	kwh, hours := AggregateDayTotal(rows)
-	if kwh != 7 {
-		t.Fatalf("kwh = %v, want 7 (last write wins)", kwh)
-	}
-	if hours != 1 {
-		t.Fatalf("hours = %d, want 1", hours)
+	})
+	if len(got) != 1 || got[11] != 7 {
+		t.Fatalf("got %v, want {11: 7} (last write wins)", got)
 	}
 }
 

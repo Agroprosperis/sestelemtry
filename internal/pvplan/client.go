@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -67,61 +68,76 @@ func NewClient(baseURL string, httpClient *http.Client) *Client {
 	return &Client{baseURL: baseURL, http: httpClient}
 }
 
-// DayTotal returns the planned generation for one civil day in kWh.
+// DayHourly fetches one site-day and returns planned generation in kWh
+// keyed by local hour start (0..23).
 //
-// ok is false when the flow answered but holds no forecast for that day
-// (it only keeps history back to when it was first deployed). That is a
-// normal answer, not an error: the caller records the miss so it stops
-// asking on every page view, and reports the day as uncovered instead
-// of folding a zero into the period total.
-func (c *Client) DayTotal(ctx context.Context, elevatorCode string, day time.Time) (kwh float64, ok bool, err error) {
+// An empty result (with no error) means the flow answered but holds no
+// forecast for that day — it only keeps history back to when it was
+// first deployed. That is a normal answer, not a failure: callers
+// record the miss so they stop asking on every page view.
+func (c *Client) DayHourly(ctx context.Context, elevatorCode string, day time.Time) (map[int]float64, error) {
 	if elevatorCode == "" {
-		return 0, false, fmt.Errorf("pvplan: empty elevator code")
+		return nil, fmt.Errorf("pvplan: empty elevator code")
 	}
 	reqURL := c.baseURL +
 		"?elevator_code=" + url.QueryEscape(elevatorCode) +
 		"&forecast_day=" + day.Format("2006-01-02")
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 	if err != nil {
-		return 0, false, err
+		return nil, err
 	}
 	res, err := c.http.Do(req)
 	if err != nil {
-		return 0, false, err
+		return nil, err
 	}
 	defer res.Body.Close()
 	if res.StatusCode != http.StatusOK {
-		return 0, false, fmt.Errorf("pvplan: %s", res.Status)
+		return nil, fmt.Errorf("pvplan: %s", res.Status)
 	}
 	// The flow returns a JSON array of rows, but answers a day it knows
 	// nothing about with an object ({} or a message). Decode loosely so
 	// that shape reads as "no forecast" instead of a decode failure.
 	var raw json.RawMessage
 	if err := json.NewDecoder(res.Body).Decode(&raw); err != nil {
-		return 0, false, fmt.Errorf("pvplan: decode: %w", err)
+		return nil, fmt.Errorf("pvplan: decode: %w", err)
 	}
 	var rows []map[string]any
 	if err := json.Unmarshal(raw, &rows); err != nil {
-		return 0, false, nil
+		return nil, nil
 	}
-	total, hours := AggregateDayTotal(rows)
-	if hours == 0 {
-		return 0, false, nil
-	}
-	return total, true, nil
+	return AggregateHourly(rows), nil
 }
 
-// AggregateDayTotal sums planned_kwh across panel orientations per
-// hour and then across hours, returning the day total and how many
-// hours contributed. Repeated (hour_ending, orientation_idx) pairs are
-// deduplicated last-wins and hours that don't add up to a positive
-// figure are dropped — the exact logic of the dashboard's
-// aggregatePvForecastHourly, so the day card and a period total built
-// from these rows can never disagree about the same day.
+// DayTotal returns the planned generation for one civil day in kWh.
+// ok is false when the flow has no forecast for that day (see
+// DayHourly): the day is reported as uncovered rather than folding a
+// zero into a period total.
+func (c *Client) DayTotal(ctx context.Context, elevatorCode string, day time.Time) (kwh float64, ok bool, err error) {
+	byHour, err := c.DayHourly(ctx, elevatorCode, day)
+	if err != nil {
+		return 0, false, err
+	}
+	if len(byHour) == 0 {
+		return 0, false, nil
+	}
+	for _, v := range byHour {
+		kwh += v
+	}
+	return kwh, true, nil
+}
+
+// AggregateHourly sums planned_kwh across panel orientations for each
+// hour, keyed by local hour start (the flow's hour_ending is 1..24, so
+// hour_ending 12 lands on key 11). Repeated (hour_ending,
+// orientation_idx) pairs are deduplicated last-wins and hours that
+// don't add up to a positive figure are dropped — the exact logic of
+// the dashboard's aggregatePvForecastHourly, so the day card, a period
+// total, and the planner's PV curve can never disagree about the same
+// day.
 //
-// Each row covers exactly one hour, so planned_kwh sums directly into
-// kWh with no interval scaling.
-func AggregateDayTotal(rows []map[string]any) (kwh float64, hours int) {
+// Each row covers exactly one hour, so planned_kwh needs no interval
+// scaling: the value is kWh for the hour and equally its average kW.
+func AggregateHourly(rows []map[string]any) map[int]float64 {
 	byHour := map[int]map[int]float64{}
 	for _, r := range rows {
 		hourEnding := int(anyToFloat(r["hour_ending"]))
@@ -139,17 +155,17 @@ func AggregateDayTotal(rows []map[string]any) (kwh float64, hours int) {
 		}
 		inner[int(anyToFloat(r["orientation_idx"]))] = value
 	}
-	for _, inner := range byHour {
+	out := make(map[int]float64, len(byHour))
+	for hourEnding, inner := range byHour {
 		sum := 0.0
 		for _, v := range inner {
 			sum += v
 		}
 		if sum > 0 {
-			kwh += sum
-			hours++
+			out[hourEnding-1] = sum
 		}
 	}
-	return kwh, hours
+	return out
 }
 
 // anyToFloat coerces the loosely typed JSON values the flow emits
@@ -166,7 +182,7 @@ func anyToFloat(v any) float64 {
 		}
 		return f
 	case string:
-		f, err := strconv.ParseFloat(t, 64)
+		f, err := strconv.ParseFloat(strings.TrimSpace(t), 64)
 		if err != nil {
 			return math.NaN()
 		}
