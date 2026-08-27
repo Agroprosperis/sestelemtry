@@ -87,10 +87,14 @@ export function ModeTopBar({
     }
   }, [menuOpen])
 
+  // Economics is about money, not live hardware — no chips there, and
+  // no point polling the fleet for them.
+  const showChips = mode !== 'economics'
+
   // Without a shared poll the bar checks the fleet itself, so any page
   // can show whether the selected object has an edge device online.
   useEffect(() => {
-    if (status !== undefined) return
+    if (status !== undefined || !showChips) return
     let cancelled = false
     const load = () =>
       fetchEdgeFleet()
@@ -105,7 +109,7 @@ export function ModeTopBar({
       cancelled = true
       window.clearInterval(id)
     }
-  }, [status, organizationID])
+  }, [status, organizationID, showChips])
 
   const st = status !== undefined ? status : fleetStatus
   const decision = st?.decision?.record
@@ -175,6 +179,7 @@ export function ModeTopBar({
         </div>
       </div>
 
+      {showChips && (
       <div className="ctl-topbar-chips">
         {st && (
           <span className={'ctl-chip ' + (st.heartbeat.online ? 'ok' : 'err')}>
@@ -200,6 +205,7 @@ export function ModeTopBar({
           </span>
         )}
       </div>
+      )}
 
       {menu && menu.length > 0 && (
         <div className="ctl-topbar-menu" ref={menuRef}>

@@ -233,6 +233,12 @@
   position: relative;
 }
 
+/* When the chips block isn't rendered (economics), the menu is the
+   element that pins itself to the right edge instead. */
+.ctl-topbar-mode + .ctl-topbar-menu {
+  margin-left: auto;
+}
+
 .ctl-topbar-menu-btn {
   display: inline-flex;
   align-items: center;
