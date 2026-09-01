@@ -36,6 +36,9 @@ type Decision struct {
 
 	ReasonCode string
 	Rationale  string
+	// Clamps lists every safety clamp applied to the desired power, in
+	// application order (diagnostics spec §3.2 outputs.clamps[]).
+	Clamps []string
 
 	Degraded bool
 	Anomaly  bool
@@ -57,6 +60,10 @@ func (d Decision) Record(siteID string) map[string]any {
 	putF(inputs, "load_power_kw", d.LoadPowerKw)
 	putF(inputs, "p_bess_plan_kw", d.PBessPlanKw)
 
+	clamps := d.Clamps
+	if clamps == nil {
+		clamps = []string{}
+	}
 	return map[string]any{
 		"site_id":       siteID,
 		"ts":            d.TS.UTC().Format(time.RFC3339),
@@ -70,6 +77,7 @@ func (d Decision) Record(siteID string) map[string]any {
 			"p_pv_limit_virtual_kw": round1(d.PPVLimitVirtualKw),
 			"would_write_40381":     round1(d.PBessVirtualKw),
 			"would_write_40378":     round1(d.PPVLimitVirtualKw),
+			"clamps":                clamps,
 		},
 		"reason_code": d.ReasonCode,
 		"rationale":   d.Rationale,
@@ -151,13 +159,27 @@ func Decide(t Tick, m *Manifest, cfg *Config) (Decision, []Event) {
 	}
 	var events []Event
 
-	// Desired power before safety clamps.
+	// Desired power before safety clamps. Blocking checks in spec
+	// order (§4): data_fault → sl_alarm → pcs_shutdown.
 	desired := 0.0
 	switch {
 	case t.DataQuality == QualityFault:
 		d.ReasonCode = "data_fault"
 		d.Rationale = "телеметрія несвіжа або відсутня — утримання 0"
 		d.Degraded = true
+	case t.SLAlarmActive():
+		words, _ := t.SLAlarmWords()
+		hex := slAlarmHex(words)
+		d.ReasonCode = "sl_alarm"
+		d.Rationale = "аларм SmartLogger [" + strings.Join(hex[:], " ") + "] — команда УЗЕ заблокована"
+		d.Degraded = true
+		// The message carries the word set, so the service dedup
+		// (code+message, 5 min) re-fires when the set changes.
+		events = append(events, Event{
+			TS: t.TS, Severity: SevAlarm, Code: EvSLAlarm,
+			Message: "SmartLogger alarm words: " + strings.Join(hex[:], " "),
+			Context: map[string]any{"words": hex[:]},
+		})
 	case t.PCSShutdown != nil && *t.PCSShutdown:
 		d.ReasonCode = "pcs_shutdown"
 		d.Rationale = "PCS вимкнено (40540) — команда УЗЕ заблокована"
@@ -178,6 +200,7 @@ func Decide(t Tick, m *Manifest, cfg *Config) (Decision, []Event) {
 	// Safety clamps; each applied clamp is recorded.
 	var clamps []string
 	desired = clampBess(t, params, desired, &clamps)
+	d.Clamps = clamps
 
 	d.PBessVirtualKw = round1(desired)
 	d.PPVLimitVirtualKw = round1(params.pvRatedKw)
@@ -186,7 +209,7 @@ func Decide(t Tick, m *Manifest, cfg *Config) (Decision, []Event) {
 		d.Degraded = true
 		d.Rationale = d.Rationale + "; обмежено: " + strings.Join(clamps, ", ")
 	}
-	if d.Degraded && d.ReasonCode != "data_fault" && d.ReasonCode != "pcs_shutdown" {
+	if d.Degraded && d.ReasonCode != "data_fault" && d.ReasonCode != "sl_alarm" && d.ReasonCode != "pcs_shutdown" {
 		events = append(events, Event{
 			TS: t.TS, Severity: SevWarning, Code: EvDispatchDegrade,
 			Message: "virtual dispatch clamped: " + strings.Join(clamps, ", "),

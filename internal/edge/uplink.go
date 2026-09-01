@@ -39,14 +39,16 @@ type BatchResponse struct {
 	} `json:"accepted"`
 }
 
-// Heartbeat is POST /api/v1/edge/heartbeat (spec §7.3).
+// Heartbeat is POST /api/v1/edge/heartbeat (spec §7.3). Health carries
+// the diagnostics snapshot (§8.3); old clouds ignore the extra field.
 type Heartbeat struct {
-	SiteID          string     `json:"site_id"`
-	EdgeID          string     `json:"edge_id"`
-	Status          string     `json:"status"`
-	BufferPending   int64      `json:"buffer_pending"`
-	LastSLPollOK    *time.Time `json:"last_sl_poll_ok,omitempty"`
-	FirmwareVersion string     `json:"firmware_version"`
+	SiteID          string          `json:"site_id"`
+	EdgeID          string          `json:"edge_id"`
+	Status          string          `json:"status"`
+	BufferPending   int64           `json:"buffer_pending"`
+	LastSLPollOK    *time.Time      `json:"last_sl_poll_ok,omitempty"`
+	FirmwareVersion string          `json:"firmware_version"`
+	Health          json.RawMessage `json:"health,omitempty"`
 }
 
 // UplinkClient talks to the sestelemetry cloud API with a per-site

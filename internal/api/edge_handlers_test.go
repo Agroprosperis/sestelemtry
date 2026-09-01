@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -33,6 +34,40 @@ func TestEdgeEndpointsUnconfigured(t *testing.T) {
 	h.Router().ServeHTTP(rec, req)
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("manifest: status = %d, want 503", rec.Code)
+	}
+}
+
+func TestEdgeHeartbeatRequestKeepsHealthRaw(t *testing.T) {
+	// The §8.3 snapshot must pass through to storage byte-identical —
+	// the cloud never re-interprets edge diagnostics.
+	raw := `{"site_id":"ze","edge_id":"iot2050-ze-001","status":"online",
+		"health":{"ts":"2026-09-01T12:00:00Z","ok":false,"checks":[{"id":"pcs","ok":false,"severity":"alarm"}]}}`
+	var req edgeHeartbeatRequest
+	if err := json.Unmarshal([]byte(raw), &req); err != nil {
+		t.Fatal(err)
+	}
+	if len(req.Health) == 0 {
+		t.Fatal("health field lost during decode")
+	}
+	var h struct {
+		OK     bool `json:"ok"`
+		Checks []struct {
+			ID string `json:"id"`
+		} `json:"checks"`
+	}
+	if err := json.Unmarshal(req.Health, &h); err != nil {
+		t.Fatal(err)
+	}
+	if h.OK || len(h.Checks) != 1 || h.Checks[0].ID != "pcs" {
+		t.Fatalf("health round-trip broken: %s", req.Health)
+	}
+	// Old builds without the field → empty raw, nothing stored.
+	var old edgeHeartbeatRequest
+	if err := json.Unmarshal([]byte(`{"site_id":"ze"}`), &old); err != nil {
+		t.Fatal(err)
+	}
+	if len(old.Health) != 0 {
+		t.Fatalf("health = %q, want empty for old heartbeats", old.Health)
 	}
 }
 

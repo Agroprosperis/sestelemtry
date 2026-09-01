@@ -1,7 +1,9 @@
 package edge
 
 import (
+	"encoding/json"
 	"math"
+	"strings"
 	"testing"
 	"time"
 )
@@ -251,6 +253,115 @@ func TestManifestValidateForEdgeGates(t *testing.T) {
 	}
 	if err := arbitrageManifest(0).ValidateForEdge("ab"); err != nil {
 		t.Fatalf("valid manifest rejected: %v", err)
+	}
+}
+
+func TestSLAlarmBlocksDispatch(t *testing.T) {
+	tick := testTick(map[string]float64{
+		"active_pv_power_kw": 0, "load_power_kw": 300, "soc_percent": 60,
+		"sl_alarm_1": 0, "sl_alarm_2": 16, "sl_alarm_3": 0,
+		"sl_alarm_4": 0, "sl_alarm_5": 0, "sl_alarm_6": 0,
+	}, QualityOK)
+	d, evs := Decide(tick, nil, testCfg())
+	if d.ReasonCode != "sl_alarm" || d.PBessVirtualKw != 0 {
+		t.Fatalf("got reason=%s p=%v, want sl_alarm/0", d.ReasonCode, d.PBessVirtualKw)
+	}
+	var alarm *Event
+	for i := range evs {
+		if evs[i].Code == EvSLAlarm {
+			alarm = &evs[i]
+		}
+	}
+	if alarm == nil {
+		t.Fatalf("expected SL_ALARM event, got %v", evs)
+	}
+	if alarm.Severity != SevAlarm {
+		t.Errorf("severity = %s, want alarm", alarm.Severity)
+	}
+	// The message must carry the hex word set so the 5-min dedup
+	// re-fires when the set changes (spec §5).
+	if !strings.Contains(alarm.Message, "0x0010") {
+		t.Errorf("message %q does not contain hex word 0x0010", alarm.Message)
+	}
+}
+
+func TestBlockingOrderDataFaultThenSLAlarmThenPcs(t *testing.T) {
+	all := map[string]float64{
+		"active_pv_power_kw": 0, "load_power_kw": 300, "soc_percent": 60,
+		"sl_alarm_1": 1, "pcs_shutdown": 1,
+	}
+	// data_fault wins over everything.
+	d, _ := Decide(testTick(all, QualityFault), nil, testCfg())
+	if d.ReasonCode != "data_fault" {
+		t.Fatalf("reason = %s, want data_fault first", d.ReasonCode)
+	}
+	// sl_alarm wins over pcs_shutdown.
+	d, _ = Decide(testTick(all, QualityOK), nil, testCfg())
+	if d.ReasonCode != "sl_alarm" {
+		t.Fatalf("reason = %s, want sl_alarm before pcs_shutdown", d.ReasonCode)
+	}
+	// All alarm words zero → pcs_shutdown.
+	noAlarm := map[string]float64{
+		"active_pv_power_kw": 0, "load_power_kw": 300, "soc_percent": 60,
+		"sl_alarm_1": 0, "sl_alarm_2": 0, "sl_alarm_3": 0,
+		"sl_alarm_4": 0, "sl_alarm_5": 0, "sl_alarm_6": 0,
+		"pcs_shutdown": 1,
+	}
+	d, _ = Decide(testTick(noAlarm, QualityOK), nil, testCfg())
+	if d.ReasonCode != "pcs_shutdown" {
+		t.Fatalf("reason = %s, want pcs_shutdown", d.ReasonCode)
+	}
+}
+
+func TestPlanHoldWithinDeadband(t *testing.T) {
+	tick := testTick(map[string]float64{
+		"active_pv_power_kw": 100, "load_power_kw": 100, "soc_percent": 90,
+	}, QualityOK)
+	// |plan| ≤ 2 kW → plan_hold with 0, even at the SOC ceiling (spec
+	// §2: SOC на стелі — наслідок, не причина).
+	for _, planKw := range []float64{0, 1.5, -2} {
+		d, _ := Decide(tick, arbitrageManifest(planKw), testCfg())
+		if d.ReasonCode != "plan_hold" || d.PBessVirtualKw != 0 {
+			t.Fatalf("plan %v: got %s %v, want plan_hold 0", planKw, d.ReasonCode, d.PBessVirtualKw)
+		}
+	}
+	// Just above the deadband the plan acts.
+	d, _ := Decide(testTick(map[string]float64{
+		"active_pv_power_kw": 0, "load_power_kw": 100, "soc_percent": 50,
+	}, QualityOK), arbitrageManifest(2.5), testCfg())
+	if d.ReasonCode != "plan_discharge" {
+		t.Fatalf("plan 2.5: reason = %s, want plan_discharge", d.ReasonCode)
+	}
+}
+
+func TestRecordCarriesClamps(t *testing.T) {
+	// SOC at the floor clamps the discharge → clamps[] non-empty.
+	tick := testTick(map[string]float64{
+		"active_pv_power_kw": 0, "load_power_kw": 300, "soc_percent": 20,
+	}, QualityOK)
+	d, _ := Decide(tick, nil, testCfg())
+	rec := d.Record("ab")
+	clamps, ok := rec["outputs"].(map[string]any)["clamps"].([]string)
+	if !ok || len(clamps) == 0 {
+		t.Fatalf("clamps = %v, want non-empty list", rec["outputs"].(map[string]any)["clamps"])
+	}
+
+	// Unclamped decision → empty array, never nil (spec §3.1).
+	tick = testTick(map[string]float64{
+		"active_pv_power_kw": 300, "load_power_kw": 100, "soc_percent": 50,
+	}, QualityOK)
+	d, _ = Decide(tick, nil, testCfg())
+	rec = d.Record("ab")
+	clamps, ok = rec["outputs"].(map[string]any)["clamps"].([]string)
+	if !ok || clamps == nil || len(clamps) != 0 {
+		t.Fatalf("clamps = %#v, want empty non-nil list", rec["outputs"].(map[string]any)["clamps"])
+	}
+	raw, err := json.Marshal(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"clamps":[]`) {
+		t.Fatalf("record JSON must serialize clamps as []: %s", raw)
 	}
 }
 

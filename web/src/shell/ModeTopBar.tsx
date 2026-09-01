@@ -188,6 +188,21 @@ export function ModeTopBar({
           </span>
         )}
         {modeChip && <span className="ctl-chip plain">{modeChip}</span>}
+        {mode === 'control' && st?.health && (
+          <span
+            className={'ctl-chip ' + (st.health.ok ? 'ok' : 'warn')}
+            title={
+              st.health.ok
+                ? 'Усі перевірки health пройдено'
+                : (st.health.checks ?? [])
+                    .filter((c) => !c.ok && (c.severity === 'warning' || c.severity === 'alarm'))
+                    .map((c) => c.label || c.id)
+                    .join(', ') || 'Є відхилення'
+            }
+          >
+            {st.health.ok ? 'діагностика OK' : 'є відхилення'}
+          </span>
+        )}
         {mode === 'control' && manifest?.manifest_id && (
           <span
             className={

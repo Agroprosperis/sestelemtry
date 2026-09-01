@@ -146,12 +146,35 @@ type BessLimits struct {
 	RatedCapacityKwh  float64 `yaml:"rated_capacity_kwh"`
 	SocMinEconomicPct float64 `yaml:"soc_min_economic_pct"`
 	SocMaxEconomicPct float64 `yaml:"soc_max_economic_pct"`
+	// Site passport for the bess_inventory health check (diagnostics
+	// spec §7.3): compared against SL 40398/40484/40488. Mismatch is a
+	// warning, never a dispatch block. Zero = not configured, check
+	// skipped. ze: 864 / 1720 / 8.
+	PassportKw       float64 `yaml:"passport_kw"`
+	PassportKwh      float64 `yaml:"passport_kwh"`
+	PassportEssCount int     `yaml:"passport_ess_count"`
 }
 
 type Limits struct {
 	Grid GridLimits `yaml:"grid"`
 	PV   PVLimits   `yaml:"pv"`
 	Bess BessLimits `yaml:"bess"`
+}
+
+// InverterDiagnostics configures the slow remapped-51xxx poll of the
+// PV SmartLogger (diagnostics spec §6). DeviceAddresses are RS-485
+// addresses on the PV SL (ze: 12…23, confirmed by Encombi PCAP) — NOT
+// FusionSolar SNs and NOT "1..N because N inverters". An empty list
+// disables the poll entirely (the fleet panel is then hidden; alarm
+// words 50000…50005 are still read in the 1s ESS poll).
+type InverterDiagnostics struct {
+	DeviceAddresses []int          `yaml:"device_addresses"`
+	PollInterval    time.Duration  `yaml:"poll_interval"`
+	Labels          map[int]string `yaml:"labels"`
+}
+
+type DiagnosticsConfig struct {
+	Inverters InverterDiagnostics `yaml:"inverters"`
 }
 
 // Config is the root of the edge YAML (config.edge.yaml).
@@ -167,6 +190,7 @@ type Config struct {
 	Control         ControlConfig  `yaml:"control"`
 	Limits          Limits         `yaml:"limits"`
 	LocalUI         LocalUIConfig  `yaml:"local_ui"`
+	Diagnostics     DiagnosticsConfig `yaml:"diagnostics"`
 
 	// EssDischargeSign overrides the convention that raw
 	// active_ess_power_kw > 0 means "discharging". Set to -1 for
@@ -197,6 +221,24 @@ func DefaultMetricKeys(role DeviceRole) []string {
 		"pcs_shutdown",
 		"total_energy_charged_kwh",
 		"total_energy_discharged_kwh",
+		// Shadow diagnostics (ems_edge_shadow_diagnostics.md §5/§7):
+		// BESS array details + SL alarm words, same 1s FC3 poll.
+		"reactive_ess_power_kvar",
+		"ess_chargeable_kwh",
+		"ess_dischargeable_kwh",
+		"ess_soh_pct",
+		"ess_soe_pct",
+		"ess_rated_kw",
+		"ess_rated_kwh",
+		"ess_count",
+		"pcs_count",
+		"pcs_in_operation",
+		"sl_alarm_1",
+		"sl_alarm_2",
+		"sl_alarm_3",
+		"sl_alarm_4",
+		"sl_alarm_5",
+		"sl_alarm_6",
 	}
 	switch role {
 	case RolePV:
@@ -326,6 +368,10 @@ func (c *Config) applyDefaults() {
 	if c.Limits.Bess.SocMaxEconomicPct <= 0 {
 		c.Limits.Bess.SocMaxEconomicPct = 90
 	}
+
+	if c.Diagnostics.Inverters.PollInterval <= 0 {
+		c.Diagnostics.Inverters.PollInterval = 30 * time.Second
+	}
 }
 
 func (c *Config) validate() error {
@@ -397,6 +443,11 @@ func (c *Config) validate() error {
 	case 0, 1, -1:
 	default:
 		return fmt.Errorf("edge config: ess_discharge_sign must be 1 or -1, got %d", c.EssDischargeSign)
+	}
+	for _, addr := range c.Diagnostics.Inverters.DeviceAddresses {
+		if addr < 1 || addr > 247 {
+			return fmt.Errorf("edge config: diagnostics.inverters.device_addresses: %d out of RS-485 range 1..247", addr)
+		}
 	}
 	return nil
 }

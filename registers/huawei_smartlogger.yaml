@@ -197,6 +197,100 @@ registers:
     gain: 1
     offset: 0
 
+  # --- Shadow diagnostics (ems_edge_shadow_diagnostics.md §5/§7) ---
+  # Same 1s ESS FC3 poll; all read-only.
+
+  - metric_key: reactive_ess_power_kvar
+    name: Reactive ESS power, kVar
+    address: 40394
+    data_type: INT32
+    swap_type: ABCD_BE
+    gain: 0.001
+    offset: 0
+
+  - metric_key: ess_chargeable_kwh
+    name: Chargeable ESS capacity, kWh
+    address: 40480
+    data_type: UINT32
+    swap_type: ABCD_BE
+    gain: 0.001
+    offset: 0
+
+  - metric_key: ess_dischargeable_kwh
+    name: Dischargeable ESS capacity, kWh
+    address: 40482
+    data_type: UINT32
+    swap_type: ABCD_BE
+    gain: 0.001
+    offset: 0
+
+  - metric_key: ess_soe_pct
+    name: ESS SOE, %
+    address: 40517
+    data_type: UINT16
+    swap_type: ABCD_BE
+    gain: 0.1
+    offset: 0
+
+  - metric_key: pcs_in_operation
+    name: ESS PCS in operation
+    address: 40539
+    data_type: UINT16
+    swap_type: ABCD_BE
+    gain: 1
+    offset: 0
+
+  # SmartLogger alarm words 1..6 (Issue 52; Encombi reads them every
+  # ESS cycle). Raw U16 bitmasks — shown as hex in the UI, any non-zero
+  # word blocks virtual dispatch (reason_code=sl_alarm).
+  - metric_key: sl_alarm_1
+    name: SmartLogger alarm word 1
+    address: 50000
+    data_type: UINT16
+    swap_type: ABCD_BE
+    gain: 1
+    offset: 0
+
+  - metric_key: sl_alarm_2
+    name: SmartLogger alarm word 2
+    address: 50001
+    data_type: UINT16
+    swap_type: ABCD_BE
+    gain: 1
+    offset: 0
+
+  - metric_key: sl_alarm_3
+    name: SmartLogger alarm word 3
+    address: 50002
+    data_type: UINT16
+    swap_type: ABCD_BE
+    gain: 1
+    offset: 0
+
+  - metric_key: sl_alarm_4
+    name: SmartLogger alarm word 4
+    address: 50003
+    data_type: UINT16
+    swap_type: ABCD_BE
+    gain: 1
+    offset: 0
+
+  - metric_key: sl_alarm_5
+    name: SmartLogger alarm word 5
+    address: 50004
+    data_type: UINT16
+    swap_type: ABCD_BE
+    gain: 1
+    offset: 0
+
+  - metric_key: sl_alarm_6
+    name: SmartLogger alarm word 6
+    address: 50005
+    data_type: UINT16
+    swap_type: ABCD_BE
+    gain: 1
+    offset: 0
+
   # --- Plant inventory (rare poll; not in 1s telemetry whitelist) ---
   # Issue 52 Table 2-1: Gain column is divisor; our gain = 1/vendor_gain.
 
