@@ -78,6 +78,7 @@ func TestClassifyInverter(t *testing.T) {
 		{0x0100, 0, InvStarting},
 		{0x0002, 0, InvStandby},
 		{0x0700, 0, InvStandby}, // немає опромінення
+		{0xA000, 0, InvStandby}, // нічний standby (live ze, §10.6)
 		{0x0300, 0, InvFault},   // unexpected shutdown
 		{0x0301, 0, InvShutdown},
 		{0x0200, 0x123, InvFault}, // major fault wins over on-grid status

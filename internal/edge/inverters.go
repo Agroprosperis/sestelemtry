@@ -116,6 +116,10 @@ func classifyInverter(status uint16, major uint32) (class, label string) {
 		return InvStandby, "standby"
 	case 0x07:
 		return InvStandby, "standby (немає опромінення)"
+	case 0xa0:
+		// Live ze firmware reports 0xA000 at night ("Standby: no
+		// irradiation") — seen on 10/12 units, §10.6 night run.
+		return InvStandby, "standby (ніч)"
 	case 0x03:
 		return InvShutdown, "вимкнено"
 	default:
