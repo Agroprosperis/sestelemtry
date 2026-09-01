@@ -55,3 +55,28 @@ FC3); рішення зберігаються як `would_write_*`. За пот�
 
 `docs/reports/reconcile_ze_2026-06-03_05.md` (ze, 3–5 червня, 100 %
 покриття, базлайн 62 % збігу знаку з Encombi).
+
+## Приймання діагностики (ems_edge_shadow_diagnostics §10): 2026-09-01
+
+Збірка `0729cf6` (гілка `edge-shadow-diagnostics`), конфіг ze:
+`diagnostics.inverters.device_addresses: [12…23]`, паспорт УЗЕ
+864 кВт / 1720 кВт·год / 8 шаф.
+
+| # | Критерій | Статус |
+| --- | --- | --- |
+| 1 | Журнал рішень: план·shadow·факт·PV/load·reason | ✅ live: `p_bess_plan_kw −362.3`, `p_bess_virtual_kw −362.3`, `ess_power_kw 0`, PV/load 27.9/72.1, `plan_charge`, `clamps []` |
+| 2 | Cloud Стан: три числа = JSON рішення | ✅ live (скрін: −378.1 / −378.1 / +4.6) |
+| 3 | 50000…50005 у whitelist, ненуль → `sl_alarm` | ✅ live: `alarms.words` = 6×`0x0`; блокування — unit-тести |
+| 4 | 12 рядків на обох консолях, клік → деталі | ✅ live: 12/12 `on_grid` на Edge і в Cloud `/status` |
+| 5 | Штучний fault → `INVERTER_FAULT`, решта живі | ✅ live: addr 24 → 13 рядків, `unreachable` (`modbus exception 3`), одна подія `INVERTER_FAULT`, 12 інших `on_grid`; після відкату 12/ok |
+| 6 | Ніч: 12× standby ≠ «аварія флоту» | ⏳ unit-тест є; live-перевірка ввечері 2026-09-01 |
+| 7 | tcpdump: без write; 51xxx ~30 с | ✅ 80 с capture: 1648 запитів, лише FC3, **write FC = 0**; 51xxx: 2 світи по ~20 мс, інтервал 30.0 с; телеметрія 40xxx без пропусків |
+| 8 | Порожні адреси не ламають shadow | ✅ unit-тести (панель схована, ключа немає в JSON) |
+| 9 | Unreachable: рядок є, числа `—`, флот не зникає | ✅ live (той самий тест, що №5) |
+| 10 | Картка УЗЕ на обох консолях | ✅ live: клас `розряд`/`заряд`, SOC 69.6 %, PCS 40539=1/40540=0, ліміти, SOH/SOE, rated vs паспорт |
+| 11 | 40540≠0 → shutdown; 40539=0 ≠ shutdown | ✅ unit-тести (live форсити shutdown не можна); поточний стан 40539=1, 40540=0 → ok |
+| 12 | Немає per-шафа рядків | ✅ конструктивно (northbound — лише агрегат) |
+
+Знахідка: `bess_inventory` warning — SL звітує rated 1123.2 кВт
+(40398) і `ess_count 0` (40488) проти паспорта 864/8; кандидат на
+issue в `ems-spec` (семантика регістрів або паспорт).
