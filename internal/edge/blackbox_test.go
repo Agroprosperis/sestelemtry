@@ -133,3 +133,37 @@ func TestBlackboxRetentionDropsOldRows(t *testing.T) {
 		t.Fatalf("rows after retention = %d, want 1", len(ticks.IDs))
 	}
 }
+
+// Retention must keep deleting across chunk boundaries (soak finding:
+// stalls came from one giant DELETE; the fix loops maintainChunk-sized
+// transactions until done).
+func TestBlackboxRetentionDeletesAcrossChunks(t *testing.T) {
+	ctx := context.Background()
+	bb := testBlackbox(t)
+
+	oldTS := time.Now().UTC().AddDate(0, 0, -45)
+	for i := 0; i < maintainChunk+50; i++ {
+		if err := bb.WriteEvent(ctx, Event{
+			TS: oldTS.Add(time.Duration(i) * time.Second),
+			Severity: SevInfo, Code: "TEST", Message: "old",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := bb.WriteEvent(ctx, Event{
+		TS: time.Now().UTC(), Severity: SevInfo, Code: "TEST", Message: "fresh",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := bb.Maintain(ctx, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	evs, err := bb.PendingEvents(ctx, maintainChunk+100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(evs.IDs) != 1 {
+		t.Fatalf("events after retention = %d, want 1", len(evs.IDs))
+	}
+}
