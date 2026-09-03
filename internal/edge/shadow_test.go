@@ -148,6 +148,23 @@ func TestPlanDischargeClampedToDeficitNoExport(t *testing.T) {
 	}
 }
 
+func TestPlanDischargeExportAllowedSkipsDeficitClamp(t *testing.T) {
+	tick := testTick(map[string]float64{
+		"active_pv_power_kw": 50, "load_power_kw": 100, "soc_percent": 70,
+	}, QualityOK)
+	m := arbitrageManifest(200)
+	m.ExportAllowed = true
+	d, _ := Decide(tick, m, testCfg())
+	if d.PBessVirtualKw != 200 {
+		t.Fatalf("p = %v, want 200 (export allowed — no deficit clamp)", d.PBessVirtualKw)
+	}
+	for _, c := range d.Clamps {
+		if strings.Contains(c, "без експорту") {
+			t.Fatalf("unexpected no-export clamp: %v", d.Clamps)
+		}
+	}
+}
+
 func TestPlanGridChargeRespectsImportTarget(t *testing.T) {
 	tick := testTick(map[string]float64{
 		"active_pv_power_kw": 0, "load_power_kw": 700, "soc_percent": 40,

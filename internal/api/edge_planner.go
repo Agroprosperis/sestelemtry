@@ -40,6 +40,9 @@ type edgeManifestDoc struct {
 	Mode         string `json:"mode"`
 	WriteEnabled bool   `json:"write_enabled"`
 	Preset       string `json:"preset"`
+	// ExportAllowed mirrors the planner's DP setting so the edge shadow
+	// engine does not clamp the exporting plan back to the deficit.
+	ExportAllowed bool `json:"export_allowed,omitempty"`
 
 	// Source distinguishes planner output ("" / "auto") from operator
 	// publications ("manual"). The edge ignores unknown fields; the
@@ -257,6 +260,7 @@ func (h *Handlers) publishManualEdgeManifest(ctx context.Context, siteID string,
 		Mode:          "shadow",
 		WriteEnabled:  false,
 		Preset:        preset,
+		ExportAllowed: in.ExportAllowed,
 		Source:        "manual",
 		Note:          strings.TrimSpace(req.Note),
 	}
@@ -360,6 +364,10 @@ type edgePlanInputs struct {
 	SocMin      float64
 	SocMax      float64
 	StartSoc    float64
+	// ExportAllowed lets the arbitrage DP discharge past the local
+	// deficit and sell at the export price (parity with the
+	// retrospective uze-plan optimum the dashboard compares against).
+	ExportAllowed bool
 
 	// Manifest-facing limits (may differ per direction when the
 	// console settings say so; default both to PowerKw).
@@ -500,6 +508,10 @@ func (h *Handlers) applyEdgeSiteParams(ctx context.Context, siteID string, in *e
 	}
 	in.ChargeMaxKw, in.DischargeMaxKw = in.PowerKw, in.PowerKw
 	in.SocMin, in.SocMax = 20.0, 90.0
+	// The pilot sites sell PV surplus at the export tariff, so BESS
+	// arbitrage may export too — same rules as the retrospective
+	// optimum. Becomes a per-site setting if a no-export site appears.
+	in.ExportAllowed = true
 
 	if s, saved := h.loadEdgeSiteSettings(ctx, siteID); saved && s != nil {
 		if s.PvRatedKw > 0 {
@@ -561,12 +573,13 @@ func (h *Handlers) publishEdgeManifest(ctx context.Context, siteID string, overr
 	now, end, loadSource := in.Now, in.End, in.LoadSource
 
 	steps, err := economics.BuildForwardPlan(in.Hours, economics.ForwardParams{
-		Tariffs:     in.Tariffs,
-		CapacityKwh: in.CapacityKwh,
-		PowerKw:     in.PowerKw,
-		SocMinPct:   in.SocMin,
-		SocMaxPct:   in.SocMax,
-		StartSocPct: in.StartSoc,
+		Tariffs:       in.Tariffs,
+		CapacityKwh:   in.CapacityKwh,
+		PowerKw:       in.PowerKw,
+		SocMinPct:     in.SocMin,
+		SocMaxPct:     in.SocMax,
+		StartSocPct:   in.StartSoc,
+		ExportAllowed: in.ExportAllowed,
 	})
 	if err != nil {
 		return EdgePublishResult{}, err
@@ -595,6 +608,7 @@ func (h *Handlers) publishEdgeManifest(ctx context.Context, siteID string, overr
 		Mode:          "shadow",
 		WriteEnabled:  false,
 		Preset:        "economic_arbitrage",
+		ExportAllowed: in.ExportAllowed,
 		Source:        "auto",
 	}
 	doc.Limits.EssChargeMaxKw = in.ChargeMaxKw

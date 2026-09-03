@@ -95,6 +95,7 @@ type engineParams struct {
 	ratedPowerKw   float64
 	pvRatedKw      float64
 	targetImportKw float64
+	exportAllowed  bool
 }
 
 func resolveParams(now time.Time, m *Manifest, cfg *Config) engineParams {
@@ -122,6 +123,7 @@ func resolveParams(now time.Time, m *Manifest, cfg *Config) engineParams {
 		p.preset = m.Preset
 	}
 	p.plan = m.Plan
+	p.exportAllowed = m.ExportAllowed
 	if m.SocPolicy.MinEconomicPct > 0 {
 		p.socMinPct = m.SocPolicy.MinEconomicPct
 	}
@@ -326,8 +328,9 @@ func clampBess(t Tick, params engineParams, p float64, clamps *[]string) float64
 
 	pvKnown := t.PVPowerKw != nil && t.LoadPowerKw != nil
 
-	// No export: discharge must not exceed the local deficit.
-	if p > 0 && pvKnown {
+	// No export (unless the manifest allows it): discharge must not
+	// exceed the local deficit.
+	if p > 0 && pvKnown && !params.exportAllowed {
 		maxNoExport := *t.LoadPowerKw - *t.PVPowerKw
 		if maxNoExport < 0 {
 			maxNoExport = 0

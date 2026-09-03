@@ -21,6 +21,67 @@ func fwdHours(n int, start time.Time, price func(i int) *float64, pv, load func(
 
 func pricePtr(v float64) *float64 { return &v }
 
+func TestForwardPlanExportsWhenAllowed(t *testing.T) {
+	// Zero load and zero PV: nothing to displace locally. Cheap night
+	// (hours 0–5) then an expensive evening. With export allowed the
+	// battery must sell into the expensive hours; with export
+	// forbidden the same inputs must plan no discharge at all.
+	start := time.Date(2026, 6, 3, 0, 0, 0, 0, time.UTC)
+	hours := fwdHours(12, start,
+		func(i int) *float64 {
+			if i < 6 {
+				return pricePtr(1.0)
+			}
+			return pricePtr(9.0)
+		},
+		func(int) float64 { return 0 },
+		func(int) float64 { return 0 },
+	)
+	p := ForwardParams{
+		CapacityKwh:   400,
+		PowerKw:       200,
+		SocMinPct:     20,
+		SocMaxPct:     90,
+		StartSocPct:   90,
+		ExportAllowed: true,
+	}
+	steps, err := BuildForwardPlan(hours, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var exported, exportedCheap float64
+	for i, s := range steps {
+		if s.DischargeGridKwh > s.DischargeKwh+1e-9 {
+			t.Fatalf("hour %d: export %.1f exceeds total discharge %.1f", i, s.DischargeGridKwh, s.DischargeKwh)
+		}
+		if i < 6 {
+			exportedCheap += s.DischargeGridKwh
+		} else {
+			exported += s.DischargeGridKwh
+		}
+		if s.EssKw > 0 && math.Abs(s.EssKw-(s.DischargeKwh-s.ChargePvKwh-s.ChargeGridKwh)) > 1e-6 {
+			t.Fatalf("hour %d: EssKw %.2f inconsistent with breakdown", i, s.EssKw)
+		}
+	}
+	if exported < 100 {
+		t.Fatalf("expensive-hour export = %.1f kWh, want a real discharge", exported)
+	}
+	if exportedCheap > exported/4 {
+		t.Fatalf("cheap-hour export %.1f vs expensive %.1f — selling in the wrong hours", exportedCheap, exported)
+	}
+
+	p.ExportAllowed = false
+	steps, err = BuildForwardPlan(hours, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, s := range steps {
+		if s.DischargeKwh > 1e-9 || s.DischargeGridKwh > 1e-9 {
+			t.Fatalf("hour %d: no-export plan discharges %.1f kWh with zero local load", i, s.DischargeKwh)
+		}
+	}
+}
+
 func TestForwardPlanArbitrage(t *testing.T) {
 	// Flat 100 kW load, no PV. Cheap night (1 UAH/kWh, hours 0–5),
 	// expensive evening (10 UAH/kWh, hours 18–21), mid otherwise. The

@@ -9,6 +9,7 @@ import type { PlanDayEffect, PlanPreview, PlanPreviewHour } from './plannerClien
 
 const C = {
   disLoad: '#16a34a',
+  disGrid: '#0891b2',
   chgPv: '#facc15',
   chgGrid: '#9ca3af',
   rdn: '#3b82f6',
@@ -28,7 +29,11 @@ const fmtN = (v: number) => Math.round(v).toLocaleString('uk-UA')
 const fmtUahSigned = (v: number) =>
   (v < 0 ? '−' : '') + Math.abs(Math.round(v)).toLocaleString('uk-UA') + ' ₴'
 
-type Series = 'load' | 'sun' | 'grid' | 'soc' | 'rdn'
+type Series = 'load' | 'exp' | 'sun' | 'grid' | 'soc' | 'rdn'
+
+// Розряд ділиться на «в споживання» (все, крім експорту) та «в мережу».
+const disToLoad = (h: PlanPreviewHour) => h.discharge_kwh - (h.discharge_grid_kwh ?? 0)
+const disToGrid = (h: PlanPreviewHour) => h.discharge_grid_kwh ?? 0
 
 type TipState = { i: number; x: number; y: number } | null
 
@@ -53,7 +58,8 @@ export function PlanChartSvg({
 
   const labelOf = (h: PlanPreviewHour) => hourFmt.format(new Date(h.ts))
   const todayRest = hours.filter((h) => !h.tomorrow).length
-  const income = (h: PlanPreviewHour) => h.discharge_kwh * h.import_uah_per_kwh
+  const income = (h: PlanPreviewHour) =>
+    disToLoad(h) * h.import_uah_per_kwh + disToGrid(h) * h.export_uah_per_kwh
   const gridCost = (h: PlanPreviewHour) => h.charge_grid_kwh * h.import_uah_per_kwh
 
   // Geometry per the mockup: zero line at 60% of the plot height,
@@ -221,10 +227,17 @@ export function PlanChartSvg({
     const c = cx(i)
     const x = c - bw / 2
     let acc = 0
-    if (show('load') && h.discharge_kwh > 0.5) {
-      const hh = h.discharge_kwh * k
+    if (show('load') && disToLoad(h) > 0.5) {
+      const hh = disToLoad(h) * k
       texts.push(
         <rect key={'d' + i} x={x} y={zeroY - acc - hh} width={bw} height={hh} fill={C.disLoad} rx={1} />,
+      )
+      acc += hh
+    }
+    if (show('exp') && disToGrid(h) > 0.5) {
+      const hh = disToGrid(h) * k
+      texts.push(
+        <rect key={'dg' + i} x={x} y={zeroY - acc - hh} width={bw} height={hh} fill={C.disGrid} rx={1} />,
       )
       acc += hh
     }
@@ -239,7 +252,7 @@ export function PlanChartSvg({
       texts.push(<rect key={'cg' + i} x={x} y={zeroY + accd} width={bw} height={hh} fill={C.chgGrid} rx={1} />)
       accd += hh
     }
-    if (show('load') && h.discharge_kwh > 3 && income(h) >= 5) {
+    if ((show('load') || show('exp')) && h.discharge_kwh > 3 && income(h) >= 5) {
       texts.push(
         <text
           key={'m' + i}
@@ -300,12 +313,14 @@ export function PlanChartSvg({
   const tipHour = tip ? hours[tip.i] : null
   // Mirror the mockup's has.* checks: legend hides series with no data.
   const has = {
-    load: hours.some((h) => h.discharge_kwh > 0.5),
+    load: hours.some((h) => disToLoad(h) > 0.5),
+    exp: hours.some((h) => disToGrid(h) > 0.5),
     sun: hours.some((h) => h.charge_pv_kwh > 0.5),
     grid: hours.some((h) => h.charge_grid_kwh > 0.5),
   }
   const legend: { s: Series; label: string; swatch: React.CSSProperties }[] = []
   if (has.load) legend.push({ s: 'load', label: 'Розряд → споживання', swatch: { background: C.disLoad } })
+  if (has.exp) legend.push({ s: 'exp', label: 'Розряд → мережа (експорт)', swatch: { background: C.disGrid } })
   if (has.sun) legend.push({ s: 'sun', label: 'Заряд від сонця', swatch: { background: C.chgPv } })
   if (has.grid) legend.push({ s: 'grid', label: 'Заряд від мережі', swatch: { background: C.chgGrid } })
   legend.push({
@@ -374,13 +389,24 @@ export function PlanChartSvg({
             </div>
             {tipHour.discharge_kwh > 0.5 && (
               <>
-                <div className="t-row">
-                  <span>
-                    <i style={{ background: C.disLoad }} />
-                    На споживання
-                  </span>
-                  <b>{fmtN(tipHour.discharge_kwh)} кВт·год</b>
-                </div>
+                {disToLoad(tipHour) > 0.5 && (
+                  <div className="t-row">
+                    <span>
+                      <i style={{ background: C.disLoad }} />
+                      На споживання
+                    </span>
+                    <b>{fmtN(disToLoad(tipHour))} кВт·год</b>
+                  </div>
+                )}
+                {disToGrid(tipHour) > 0.5 && (
+                  <div className="t-row">
+                    <span>
+                      <i style={{ background: C.disGrid }} />
+                      В мережу (експорт)
+                    </span>
+                    <b>{fmtN(disToGrid(tipHour))} кВт·год</b>
+                  </div>
+                )}
                 <div className="t-row total">
                   <span>Дохід розряду</span>
                   <b>{fmtUahSigned(income(tipHour))}</b>
@@ -462,6 +488,12 @@ export function EffectPanel({
           <span>УЗЕ → споживання (уникнений all-in імпорт)</span>
           <strong>{fmtUahSigned(day.ess_to_load_uah)}</strong>
         </div>
+        {(day.ess_to_grid_uah ?? 0) > 0.5 && (
+          <div className="uze-wf-row pos">
+            <span>УЗЕ → мережа (продаж за експорт-ціною)</span>
+            <strong>{fmtUahSigned(day.ess_to_grid_uah)}</strong>
+          </div>
+        )}
         <div className="uze-wf-row neg">
           <span>Собівартість сонця (втрачений експорт)</span>
           <strong>{fmtUahSigned(-day.pv_charge_cost_uah)}</strong>
@@ -509,7 +541,8 @@ export function EffectPanel({
         </div>
       </div>
       <p className="uze-chart-foot">
-        «Без плану» — прямий імпорт (load − СЕС). Розряд: {fmtN(day.ess_to_load_kwh)} кВт·год, заряд від СЕС{' '}
+        «Без плану» — прямий імпорт (load − СЕС). Розряд: {fmtN(day.ess_to_load_kwh + (day.ess_to_grid_kwh ?? 0))} кВт·год
+        {(day.ess_to_grid_kwh ?? 0) > 0.5 ? ` (з них експорт ${fmtN(day.ess_to_grid_kwh)})` : ''}, заряд від СЕС{' '}
         {fmtN(day.charge_pv_kwh)} кВт·год. Ліміт {fmtN(preview.params.power_kw)} кВт.
       </p>
     </div>

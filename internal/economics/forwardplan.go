@@ -16,10 +16,10 @@ import (
 // shadow engine follows in the economic_arbitrage preset. Mechanics
 // mirror cycle.go's optimizeDaySchedule (same SOC-level DP, same
 // project_net price semantics: PV charge at export opportunity price,
-// grid charge at import price, discharge valued at import price,
-// degradation per discharged kWh) with one extra constraint — export
-// is forbidden (preset export_allowed=false), so discharge is capped
-// by the local deficit.
+// grid charge at import price, discharge into load valued at import
+// price, discharge beyond the local deficit exported at export price,
+// degradation per discharged kWh). ExportAllowed=false caps discharge
+// by the local deficit — then the plan can only displace imports.
 
 // ForwardHour is one hour of forecast inputs.
 type ForwardHour struct {
@@ -38,6 +38,10 @@ type ForwardParams struct {
 	SocMaxPct          float64 // economic band ceiling (e.g. 90)
 	StartSocPct        float64 // SOC now (measured; band midpoint if unknown)
 	GridTargetImportKw float64 // cap on grid draw while charging; 0 = uncapped
+	// ExportAllowed lets the DP discharge past the local deficit and
+	// sell the excess at the export price (cycle.go parity). False
+	// keeps the legacy behaviour: discharge only displaces imports.
+	ExportAllowed bool
 }
 
 // ForwardStep is one planned hour.
@@ -47,10 +51,13 @@ type ForwardStep struct {
 	EssKw         float64 // + discharge / − charge (AC net over the hour)
 	ChargePvKwh   float64
 	ChargeGridKwh float64
-	DischargeKwh  float64
-	SocEndPct     float64
-	RdnUahPerKwh  float64
-	Action        string // charge | discharge | hold
+	// DischargeKwh is the TOTAL AC discharge; DischargeGridKwh is the
+	// part exported past the local deficit (0 unless ExportAllowed).
+	DischargeKwh     float64
+	DischargeGridKwh float64
+	SocEndPct        float64
+	RdnUahPerKwh     float64
+	Action           string // charge | discharge | hold
 }
 
 // ImportExportPrices computes the all-in hourly prices from the RDN
@@ -133,8 +140,8 @@ func BuildForwardPlan(hours []ForwardHour, p ForwardParams) ([]ForwardStep, erro
 	downLevels := int(math.Ceil((p.PowerKw * etaD) / step))
 
 	type action struct {
-		prev       int
-		cp, cg, dl float64
+		prev           int
+		cp, cg, dl, dg float64
 	}
 	parents := make([][]action, len(hours))
 
@@ -196,14 +203,18 @@ func BuildForwardPlan(hours []ForwardHour, p ForwardParams) ([]ForwardStep, erro
 				if dischargeAC > p.PowerKw+1e-9 {
 					break
 				}
-				// No export: the battery only displaces local deficit.
-				if dischargeAC > displaceable+1e-9 {
+				// Discharge covers the local deficit first (import
+				// price); the remainder is exported — but only when the
+				// preset allows export, otherwise it caps the action.
+				dl := math.Min(dischargeAC, displaceable)
+				dg := dischargeAC - dl
+				if !p.ExportAllowed && dg > 1e-9 {
 					break
 				}
-				v := f[s] + dischargeAC*importPrice - dischargeAC*degradation
+				v := f[s] + dl*importPrice + dg*exportPrice - dischargeAC*degradation
 				if v > nf[ns] {
 					nf[ns] = v
-					par[ns] = action{prev: s, dl: dischargeAC}
+					par[ns] = action{prev: s, dl: dl, dg: dg}
 				}
 			}
 		}
@@ -232,18 +243,19 @@ func BuildForwardPlan(hours []ForwardHour, p ForwardParams) ([]ForwardStep, erro
 		a := parents[hi][lvl]
 		h := hours[hi]
 		st := ForwardStep{
-			TS:            h.TS,
-			Tradable:      h.RdnUahPerKwh != nil,
-			ChargePvKwh:   a.cp,
-			ChargeGridKwh: a.cg,
-			DischargeKwh:  a.dl,
-			SocEndPct:     pctOf(socOf(lvl)),
-			Action:        "hold",
+			TS:               h.TS,
+			Tradable:         h.RdnUahPerKwh != nil,
+			ChargePvKwh:      a.cp,
+			ChargeGridKwh:    a.cg,
+			DischargeKwh:     a.dl + a.dg,
+			DischargeGridKwh: a.dg,
+			SocEndPct:        pctOf(socOf(lvl)),
+			Action:           "hold",
 		}
 		if h.RdnUahPerKwh != nil {
 			st.RdnUahPerKwh = *h.RdnUahPerKwh
 		}
-		st.EssKw = a.dl - (a.cp + a.cg)
+		st.EssKw = a.dl + a.dg - (a.cp + a.cg)
 		if st.EssKw > 1e-9 {
 			st.Action = "discharge"
 		} else if st.EssKw < -1e-9 {
