@@ -617,7 +617,7 @@ export function PlannerPage({
             <span className="planner-badges" style={{ marginLeft: 'auto' }}>
               {tomorrow && (
                 <span className="planner-chip operator">
-                  Ефект завтра: {tomorrow.net_effect_uah >= 0 ? '+' : ''}{fmtUah(tomorrow.net_effect_uah)}
+                  Економія від плану: {fmtUah(tomorrow.net_effect_uah)}
                 </span>
               )}
               <span className="planner-chip heuristic">AI only</span>

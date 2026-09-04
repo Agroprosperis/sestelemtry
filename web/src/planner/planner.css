@@ -849,10 +849,10 @@
 }
 
 .uze-wf-title {
-  font-size: 12.5px;
+  font-size: 12px;
   font-weight: 700;
   color: #0f172a;
-  padding-bottom: 6px;
+  margin-bottom: 8px;
 }
 
 .uze-wf-row {
