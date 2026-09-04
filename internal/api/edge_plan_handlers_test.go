@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"math"
 	"net/http"
 	"net/http/httptest"
@@ -97,11 +98,19 @@ func TestBuildEdgeSiteStatus(t *testing.T) {
 		t.Errorf("empty: decision = %+v, want nil", resp.Decision)
 	}
 
-	// Fresh heartbeat + applied, still-valid manifest + decision.
+	// Empty snapshot must not expose a health key at all (the UI keys
+	// panel visibility on its presence).
+	if resp.Health != nil {
+		t.Errorf("empty: health = %s, want absent", resp.Health)
+	}
+
+	// Fresh heartbeat + applied, still-valid manifest + decision +
+	// health snapshot (diagnostics spec §8.3, relayed verbatim).
 	st := storage.EdgeSiteStatus{
 		SiteID:             "ze",
 		HeartbeatAt:        now.Add(-45 * time.Second),
 		Status:             "shadow",
+		Health:             []byte(`{"ts":"2026-08-26T11:59:30Z","ok":true,"checks":[]}`),
 		ManifestID:         "ze-20260826-01",
 		ManifestIssuedAt:   now.Add(-time.Hour),
 		ManifestValidUntil: now.Add(time.Hour),
@@ -118,6 +127,15 @@ func TestBuildEdgeSiteStatus(t *testing.T) {
 	}
 	if resp.Decision == nil || resp.Decision.AgeSeconds != 3 {
 		t.Errorf("fresh: decision = %+v, want age 3", resp.Decision)
+	}
+	var health struct {
+		OK bool `json:"ok"`
+	}
+	if resp.Health == nil {
+		t.Fatalf("fresh: health missing from status response")
+	}
+	if err := json.Unmarshal(resp.Health, &health); err != nil || !health.OK {
+		t.Errorf("fresh: health = %s (err %v), want ok:true passthrough", resp.Health, err)
 	}
 
 	// Stale heartbeat → offline; expired manifest wins over applied.

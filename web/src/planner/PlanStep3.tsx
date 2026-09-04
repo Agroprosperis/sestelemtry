@@ -7,8 +7,10 @@ import type { PlanDayEffect, PlanPreview, PlanPreviewHour } from './plannerClien
 // the boundary-point SOC line, «решта сьогодні / ЗАВТРА» overlays and
 // the left panel (waterfall rows + compare box) instead of a bar chart.
 
+// Colors 1:1 from the mockup's render() palette (cloud_console.html).
 const C = {
   disLoad: '#16a34a',
+  disGrid: '#ea580c',
   chgPv: '#facc15',
   chgGrid: '#9ca3af',
   rdn: '#3b82f6',
@@ -28,7 +30,11 @@ const fmtN = (v: number) => Math.round(v).toLocaleString('uk-UA')
 const fmtUahSigned = (v: number) =>
   (v < 0 ? '−' : '') + Math.abs(Math.round(v)).toLocaleString('uk-UA') + ' ₴'
 
-type Series = 'load' | 'sun' | 'grid' | 'soc' | 'rdn'
+type Series = 'load' | 'exp' | 'sun' | 'grid' | 'soc' | 'reserve' | 'rdn'
+
+// Розряд ділиться на «в споживання» (все, крім експорту) та «в мережу».
+const disToLoad = (h: PlanPreviewHour) => h.discharge_kwh - (h.discharge_grid_kwh ?? 0)
+const disToGrid = (h: PlanPreviewHour) => h.discharge_grid_kwh ?? 0
 
 type TipState = { i: number; x: number; y: number } | null
 
@@ -48,12 +54,20 @@ export function PlanChartSvg({
     () => new Intl.DateTimeFormat('uk-UA', { timeZone: preview.timezone, hour: '2-digit', hour12: false }),
     [preview.timezone],
   )
+  const dayFmt = useMemo(
+    () =>
+      new Intl.DateTimeFormat('uk-UA', { timeZone: preview.timezone, day: '2-digit', month: '2-digit' }),
+    [preview.timezone],
+  )
 
   if (n === 0) return null
 
   const labelOf = (h: PlanPreviewHour) => hourFmt.format(new Date(h.ts))
+  // Tooltip head 1:1 with the mockup's horizonLabel: "DD.MM HH".
+  const headOf = (h: PlanPreviewHour) => `${dayFmt.format(new Date(h.ts))} ${labelOf(h)}`
   const todayRest = hours.filter((h) => !h.tomorrow).length
-  const income = (h: PlanPreviewHour) => h.discharge_kwh * h.import_uah_per_kwh
+  const income = (h: PlanPreviewHour) =>
+    disToLoad(h) * h.import_uah_per_kwh + disToGrid(h) * h.export_uah_per_kwh
   const gridCost = (h: PlanPreviewHour) => h.charge_grid_kwh * h.import_uah_per_kwh
 
   // Geometry per the mockup: zero line at 60% of the plot height,
@@ -206,40 +220,56 @@ export function PlanChartSvg({
       </text>
     </g>,
   )
-  if (show('soc')) {
-    ;[0, 50, 100].forEach((p) =>
-      texts.push(
-        <text key={'soc' + p} x={ix1 + 6} y={ySoc(p) + 3} textAnchor="start" fontSize={10.5} fill={C.socOpt}>
-          {p}%
-        </text>,
-      ),
-    )
-  }
+  // SOC axis % labels are not part of the legend toggle in the mockup.
+  ;[0, 50, 100].forEach((p) =>
+    texts.push(
+      <text key={'soc' + p} x={ix1 + 6} y={ySoc(p) + 3} textAnchor="start" fontSize={10.5} fill={C.socOpt}>
+        {p}%
+      </text>,
+    ),
+  )
 
   // Bars + money labels + x labels.
   hours.forEach((h, i) => {
     const c = cx(i)
     const x = c - bw / 2
+    // Stacking is computed independently of legend toggles (the mockup
+    // hides an <g> without reflowing neighbours).
     let acc = 0
-    if (show('load') && h.discharge_kwh > 0.5) {
-      const hh = h.discharge_kwh * k
-      texts.push(
-        <rect key={'d' + i} x={x} y={zeroY - acc - hh} width={bw} height={hh} fill={C.disLoad} rx={1} />,
-      )
+    if (disToLoad(h) > 0.5) {
+      const hh = disToLoad(h) * k
+      if (show('load')) {
+        texts.push(
+          <rect key={'d' + i} x={x} y={zeroY - acc - hh} width={bw} height={hh} fill={C.disLoad} rx={1} />,
+        )
+      }
+      acc += hh
+    }
+    if (disToGrid(h) > 0.5) {
+      const hh = disToGrid(h) * k
+      if (show('exp')) {
+        texts.push(
+          <rect key={'dg' + i} x={x} y={zeroY - acc - hh} width={bw} height={hh} fill={C.disGrid} rx={1} />,
+        )
+      }
       acc += hh
     }
     let accd = 0
-    if (show('sun') && h.charge_pv_kwh > 0.5) {
+    if (h.charge_pv_kwh > 0.5) {
       const hh = h.charge_pv_kwh * k
-      texts.push(<rect key={'cp' + i} x={x} y={zeroY + accd} width={bw} height={hh} fill={C.chgPv} rx={1} />)
+      if (show('sun')) {
+        texts.push(<rect key={'cp' + i} x={x} y={zeroY + accd} width={bw} height={hh} fill={C.chgPv} rx={1} />)
+      }
       accd += hh
     }
-    if (show('grid') && h.charge_grid_kwh > 0.5) {
+    if (h.charge_grid_kwh > 0.5) {
       const hh = h.charge_grid_kwh * k
-      texts.push(<rect key={'cg' + i} x={x} y={zeroY + accd} width={bw} height={hh} fill={C.chgGrid} rx={1} />)
+      if (show('grid')) {
+        texts.push(<rect key={'cg' + i} x={x} y={zeroY + accd} width={bw} height={hh} fill={C.chgGrid} rx={1} />)
+      }
       accd += hh
     }
-    if (show('load') && h.discharge_kwh > 3 && income(h) >= 5) {
+    if (h.discharge_kwh > 3 && income(h) >= 5) {
       texts.push(
         <text
           key={'m' + i}
@@ -277,6 +307,9 @@ export function PlanChartSvg({
     texts.push(
       <polyline key="socline" points={pts.join(' ')} fill="none" stroke={C.socOpt} strokeWidth={2} />,
     )
+  }
+  // Reserve line is its own legend series in the mockup ("Резерв SOC N%").
+  if (show('reserve')) {
     const reserve = preview.params.soc_min_pct
     texts.push(
       <g key="reserve">
@@ -300,18 +333,26 @@ export function PlanChartSvg({
   const tipHour = tip ? hours[tip.i] : null
   // Mirror the mockup's has.* checks: legend hides series with no data.
   const has = {
-    load: hours.some((h) => h.discharge_kwh > 0.5),
+    load: hours.some((h) => disToLoad(h) > 0.5),
+    exp: hours.some((h) => disToGrid(h) > 0.5),
     sun: hours.some((h) => h.charge_pv_kwh > 0.5),
     grid: hours.some((h) => h.charge_grid_kwh > 0.5),
   }
+  // Legend items and wording 1:1 with the mockup (plan mode).
   const legend: { s: Series; label: string; swatch: React.CSSProperties }[] = []
   if (has.load) legend.push({ s: 'load', label: 'Розряд → споживання', swatch: { background: C.disLoad } })
+  if (has.exp) legend.push({ s: 'exp', label: 'Розряд → експорт', swatch: { background: C.disGrid } })
   if (has.sun) legend.push({ s: 'sun', label: 'Заряд від сонця', swatch: { background: C.chgPv } })
   if (has.grid) legend.push({ s: 'grid', label: 'Заряд від мережі', swatch: { background: C.chgGrid } })
   legend.push({
     s: 'soc',
-    label: `SOC план · резерв ${Math.round(preview.params.soc_min_pct)}%`,
+    label: 'SOC план',
     swatch: { borderTop: `2px solid ${C.socOpt}`, background: 'none', height: 0 },
+  })
+  legend.push({
+    s: 'reserve',
+    label: `Резерв SOC ${Math.round(preview.params.soc_min_pct)}%`,
+    swatch: { borderTop: '2px dashed #dc2626', background: 'none', height: 0 },
   })
   legend.push({ s: 'rdn', label: 'Ціна РДН', swatch: { background: C.rdn, opacity: 0.5 } })
 
@@ -319,7 +360,7 @@ export function PlanChartSvg({
     <div className="uze-right">
       <p className="uze-horizon-note">
         Горизонт від «зараз» до кінця відомих РДН. Ліворуч поділу — решта сьогодні (контекст); правіше —{' '}
-        <b>завтра</b>, за яке рахуємо очікуваний ефект. Клік по годині — деталі.
+        <b>завтра</b>, за яке рахуємо очікуваний ефект
       </p>
       <div className="uze-chart-canvas" style={{ position: 'relative' }}>
         <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="План УЗЕ на добу">
@@ -333,13 +374,16 @@ export function PlanChartSvg({
               height={ih}
               fill="transparent"
               style={{ cursor: 'pointer' }}
-              onMouseEnter={(e) => {
+              onMouseMove={(e) => {
+                // Mouse-following tip, flip near the right edge — 1:1
+                // with the mockup's mousemove handler.
                 const host = (e.currentTarget.ownerSVGElement?.parentElement ?? null) as HTMLElement | null
                 const rect = host?.getBoundingClientRect()
                 if (!rect) return
-                const px = ((ix0 + (i + 0.5) * slot) / W) * rect.width
-                // Clamp so the ~190px tip never leaves the canvas.
-                setTip({ i, x: Math.min(Math.max(px, 100), rect.width - 100), y: 40 })
+                let px = e.clientX - rect.left + 14
+                const py = e.clientY - rect.top + 12
+                if (px + 190 > rect.width) px = e.clientX - rect.left - 200
+                setTip({ i, x: px, y: py })
               }}
               onMouseLeave={() => setTip(null)}
               onClick={() => onHourClick?.(h)}
@@ -349,15 +393,9 @@ export function PlanChartSvg({
         {tip && tipHour && (
           <div
             className="uze-tip"
-            style={{
-              display: 'block',
-              left: Math.min(Math.max(tip.x - 90, 4), 9999),
-              top: tip.y,
-            }}
+            style={{ display: 'block', left: tip.x, top: tip.y }}
           >
-            <div className="t-head">
-              {tipHour.tomorrow ? 'завтра' : 'сьогодні'} {labelOf(tipHour)}:00
-            </div>
+            <div className="t-head">{headOf(tipHour)}</div>
             {tipHour.rdn_uah_per_kwh != null && (
               <div className="t-row">
                 <span>Ціна РДН</span>
@@ -379,7 +417,14 @@ export function PlanChartSvg({
                     <i style={{ background: C.disLoad }} />
                     На споживання
                   </span>
-                  <b>{fmtN(tipHour.discharge_kwh)} кВт·год</b>
+                  <b>{fmtN(disToLoad(tipHour))} кВт·год</b>
+                </div>
+                <div className="t-row">
+                  <span>
+                    <i style={{ background: C.disGrid }} />
+                    На експорт
+                  </span>
+                  <b>{fmtN(disToGrid(tipHour))} кВт·год</b>
                 </div>
                 <div className="t-row total">
                   <span>Дохід розряду</span>
@@ -387,28 +432,32 @@ export function PlanChartSvg({
                 </div>
               </>
             )}
-            {tipHour.charge_pv_kwh > 0.5 && (
-              <div className="t-row">
-                <span>
-                  <i style={{ background: C.chgPv }} />
-                  Заряд від сонця
-                </span>
-                <b>{fmtN(tipHour.charge_pv_kwh)} кВт·год</b>
-              </div>
-            )}
-            {tipHour.charge_grid_kwh > 0.5 && (
+            {tipHour.charge_pv_kwh + tipHour.charge_grid_kwh > 0.5 && (
               <>
-                <div className="t-row">
-                  <span>
-                    <i style={{ background: C.chgGrid }} />
-                    Заряд від мережі
-                  </span>
-                  <b>{fmtN(tipHour.charge_grid_kwh)} кВт·год</b>
-                </div>
-                <div className="t-row total">
-                  <span>Вартість заряду</span>
-                  <b>{fmtUahSigned(-gridCost(tipHour))}</b>
-                </div>
+                {tipHour.charge_pv_kwh > 0.5 && (
+                  <div className="t-row">
+                    <span>
+                      <i style={{ background: C.chgPv }} />
+                      Заряд від сонця
+                    </span>
+                    <b>{fmtN(tipHour.charge_pv_kwh)} кВт·год</b>
+                  </div>
+                )}
+                {tipHour.charge_grid_kwh > 0.5 && (
+                  <div className="t-row">
+                    <span>
+                      <i style={{ background: C.chgGrid }} />
+                      Заряд від мережі
+                    </span>
+                    <b>{fmtN(tipHour.charge_grid_kwh)} кВт·год</b>
+                  </div>
+                )}
+                {gridCost(tipHour) > 0.5 && (
+                  <div className="t-row total">
+                    <span>Вартість заряду з мережі</span>
+                    <b>{fmtUahSigned(-gridCost(tipHour))}</b>
+                  </div>
+                )}
               </>
             )}
             <div className="t-row">
@@ -462,8 +511,14 @@ export function EffectPanel({
           <span>УЗЕ → споживання (уникнений all-in імпорт)</span>
           <strong>{fmtUahSigned(day.ess_to_load_uah)}</strong>
         </div>
+        {(day.ess_to_grid_uah ?? 0) > 0.5 && (
+          <div className="uze-wf-row pos">
+            <span>УЗЕ → експорт (пік РДН −5%)</span>
+            <strong>{fmtUahSigned(day.ess_to_grid_uah)}</strong>
+          </div>
+        )}
         <div className="uze-wf-row neg">
-          <span>Собівартість сонця (втрачений експорт)</span>
+          <span>Собівартість сонця (втрачений денний експорт)</span>
           <strong>{fmtUahSigned(-day.pv_charge_cost_uah)}</strong>
         </div>
         {day.grid_charge_cost_uah > 0.5 && (
@@ -479,8 +534,8 @@ export function EffectPanel({
         {Math.abs(day.soc_carry_uah) > 0.5 && (
           <div className={'uze-wf-row ' + (day.soc_carry_uah >= 0 ? 'pos' : 'neg')}>
             <span>
-              Резерв SOC за добу ({Math.round(day.soc_open_pct)}% → {Math.round(day.soc_close_pct)}%, перенос за{' '}
-              {day.shadow_price_uah.toFixed(2)} ₴)
+              Резерв SOC за добу ({Math.round(day.soc_open_pct)}% → {Math.round(day.soc_close_pct)}%, перенос на
+              наст. добу за {day.shadow_price_uah.toFixed(2)} ₴)
             </span>
             <strong>{fmtUahSigned(day.soc_carry_uah)}</strong>
           </div>
@@ -509,8 +564,8 @@ export function EffectPanel({
         </div>
       </div>
       <p className="uze-chart-foot">
-        «Без плану» — прямий імпорт (load − СЕС). Розряд: {fmtN(day.ess_to_load_kwh)} кВт·год, заряд від СЕС{' '}
-        {fmtN(day.charge_pv_kwh)} кВт·год. Ліміт {fmtN(preview.params.power_kw)} кВт.
+        «Без плану» — прямий імпорт (load − СЕС). Розряд: {fmtN(day.ess_to_load_kwh + (day.ess_to_grid_kwh ?? 0))}{' '}
+        кВт·год. Ліміт {fmtN(preview.params.power_kw)} кВт.
       </p>
     </div>
   )

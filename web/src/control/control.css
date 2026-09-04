@@ -141,22 +141,39 @@
 
 /* --- layout of the «Стан» tab --- */
 
+.ctl-state-stack {
+  display: grid;
+  gap: 20px;
+}
+
+/* Every nested track is minmax(0, …): plain 1fr/auto floors at the
+   content's min-content (nowrap numbers, chart summary), which inflated
+   the columns until they overlapped and overflowed the viewport. */
 .ctl-state-grid {
   display: grid;
-  grid-template-columns: minmax(300px, 360px) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 360px) minmax(0, 1fr);
   gap: 20px;
   align-items: start;
 }
 
 .ctl-state-left {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 20px;
+  min-width: 0;
 }
 
 .ctl-state-right {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 20px;
   min-width: 0;
+}
+
+/* The dashboard's summary strip inside Energy Trend keeps its own 1fr
+   tracks; scoped override so it can shrink inside the control column. */
+.ctl-state-right .energy-summary-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 @media (max-width: 1000px) {
@@ -365,6 +382,186 @@
 .ctl-sev.alarm {
   background: #fef2f2;
   color: #b91c1c;
+}
+
+.ctl-sev.ok {
+  background: #f0fdf4;
+  color: #15803d;
+}
+
+.ctl-sev.plain {
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.ctl-sev.warn {
+  background: #fffbeb;
+  color: #b45309;
+}
+
+.ctl-sev.err {
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.ctl-event-code-label {
+  font-family: inherit;
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+/* --- план · shadow · факт (diagnostics spec §8.2) --- */
+
+.ctl-psf {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.ctl-psf-cell {
+  display: grid;
+  gap: 2px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.ctl-psf-cell .k {
+  font-size: 11px;
+  font-weight: 600;
+  color: #64748b;
+}
+
+.ctl-psf-cell .v {
+  font-size: 20px;
+  font-weight: 800;
+  color: #0f172a;
+  font-variant-numeric: tabular-nums;
+  /* Wraps between the number and «кВт» when the cell is tight instead
+     of painting outside the card. */
+  white-space: normal;
+}
+
+.ctl-psf-cell .v.pos {
+  color: #15803d;
+}
+
+.ctl-psf-cell .v.neg {
+  color: #1d4ed8;
+}
+
+.ctl-psf-cell .sub {
+  font-size: 10px;
+  color: #94a3b8;
+}
+
+/* --- картка УЗЕ (spec §7.2) --- */
+
+.ctl-bess-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  font-size: 13px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.ctl-bess-head .warn {
+  color: #b45309;
+}
+
+.ctl-bess-sub {
+  font-size: 12px;
+  color: #64748b;
+  margin-top: 6px;
+}
+
+.ctl-bess-details {
+  margin-top: 10px;
+}
+
+.ctl-bess-details summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: #64748b;
+  margin-bottom: 6px;
+}
+
+/* --- checks table (spec §4) --- */
+
+.ctl-checks-table td:first-child {
+  font-weight: 600;
+}
+
+.ctl-checks-table .muted {
+  color: #94a3b8;
+}
+
+.ctl-check-detail {
+  font-size: 11px;
+  color: #94a3b8;
+  margin-top: 2px;
+}
+
+/* --- флот інверторів (spec §6.3) --- */
+
+.ctl-inv-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.ctl-inv-wrap {
+  overflow-x: auto;
+}
+
+.ctl-inv-table .mono,
+.ctl-events-table .mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+
+.ctl-inv-row {
+  cursor: pointer;
+}
+
+.ctl-inv-row:hover td {
+  background: #f8fafc;
+}
+
+.ctl-inv-bad td {
+  background: #fef2f2;
+}
+
+.ctl-inv-warn td {
+  background: #fffbeb;
+}
+
+.ctl-inv-detail td {
+  background: #f8fafc;
+  font-size: 12px;
+  color: #475569;
+}
+
+/* Канонна розшифровка Huawei-кодів: muted-рядок ПІД hex (ніколи
+   замість нього), обрізається трикрапкою — повний текст у title. */
+.ctl-inv-declabel {
+  font-family: inherit;
+  font-size: 10.5px;
+  color: #64748b;
+  max-width: 140px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ctl-inv-decode {
+  margin-top: 4px;
+  color: #334155;
 }
 
 /* --- notices --- */

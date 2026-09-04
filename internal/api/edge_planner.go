@@ -40,6 +40,9 @@ type edgeManifestDoc struct {
 	Mode         string `json:"mode"`
 	WriteEnabled bool   `json:"write_enabled"`
 	Preset       string `json:"preset"`
+	// ExportAllowed mirrors the planner's DP setting so the edge shadow
+	// engine does not clamp the exporting plan back to the deficit.
+	ExportAllowed bool `json:"export_allowed,omitempty"`
 
 	// Source distinguishes planner output ("" / "auto") from operator
 	// publications ("manual"). The edge ignores unknown fields; the
@@ -257,6 +260,7 @@ func (h *Handlers) publishManualEdgeManifest(ctx context.Context, siteID string,
 		Mode:          "shadow",
 		WriteEnabled:  false,
 		Preset:        preset,
+		ExportAllowed: in.ExportAllowed,
 		Source:        "manual",
 		Note:          strings.TrimSpace(req.Note),
 	}
@@ -360,6 +364,10 @@ type edgePlanInputs struct {
 	SocMin      float64
 	SocMax      float64
 	StartSoc    float64
+	// ExportAllowed lets the arbitrage DP discharge past the local
+	// deficit and sell at the export price (parity with the
+	// retrospective uze-plan optimum the dashboard compares against).
+	ExportAllowed bool
 
 	// Manifest-facing limits (may differ per direction when the
 	// console settings say so; default both to PowerKw).
@@ -498,12 +506,22 @@ func (h *Handlers) applyEdgeSiteParams(ctx context.Context, siteID string, in *e
 	if err != nil {
 		return err
 	}
+	// Trusted SL PV rating (40396) caps every later override (§4.1);
+	// resolveEdgeRatings returns exactly it (0 = not polled yet).
+	slPvKw := in.PvRatedKw
 	in.ChargeMaxKw, in.DischargeMaxKw = in.PowerKw, in.PowerKw
 	in.SocMin, in.SocMax = 20.0, 90.0
+	// The pilot sites sell PV surplus at the export tariff, so BESS
+	// arbitrage may export too — same rules as the retrospective
+	// optimum. Becomes a per-site setting if a no-export site appears.
+	in.ExportAllowed = true
 
 	if s, saved := h.loadEdgeSiteSettings(ctx, siteID); saved && s != nil {
 		if s.PvRatedKw > 0 {
 			in.PvRatedKw = s.PvRatedKw
+			if slPvKw > 0 && in.PvRatedKw > slPvKw {
+				in.PvRatedKw = slPvKw
+			}
 		}
 		if s.AutoChargeMaxKw > 0 {
 			in.ChargeMaxKw = s.AutoChargeMaxKw
@@ -561,12 +579,13 @@ func (h *Handlers) publishEdgeManifest(ctx context.Context, siteID string, overr
 	now, end, loadSource := in.Now, in.End, in.LoadSource
 
 	steps, err := economics.BuildForwardPlan(in.Hours, economics.ForwardParams{
-		Tariffs:     in.Tariffs,
-		CapacityKwh: in.CapacityKwh,
-		PowerKw:     in.PowerKw,
-		SocMinPct:   in.SocMin,
-		SocMaxPct:   in.SocMax,
-		StartSocPct: in.StartSoc,
+		Tariffs:       in.Tariffs,
+		CapacityKwh:   in.CapacityKwh,
+		PowerKw:       in.PowerKw,
+		SocMinPct:     in.SocMin,
+		SocMaxPct:     in.SocMax,
+		StartSocPct:   in.StartSoc,
+		ExportAllowed: in.ExportAllowed,
 	})
 	if err != nil {
 		return EdgePublishResult{}, err
@@ -595,6 +614,7 @@ func (h *Handlers) publishEdgeManifest(ctx context.Context, siteID string, overr
 		Mode:          "shadow",
 		WriteEnabled:  false,
 		Preset:        "economic_arbitrage",
+		ExportAllowed: in.ExportAllowed,
 		Source:        "auto",
 	}
 	doc.Limits.EssChargeMaxKw = in.ChargeMaxKw
@@ -644,13 +664,18 @@ func (h *Handlers) publishEdgeManifest(ctx context.Context, siteID string, overr
 // edgeManifestID derives a deterministic content id: same plan → same
 // id → the edge's ETag poll sees 304 and nothing is re-applied.
 func edgeManifestID(siteID string, horizonEnd time.Time, doc edgeManifestDoc) string {
+	// Every dispatch-relevant field must be here: what the hash misses
+	// never reaches the edge (live bug 2026-09-04 — export_allowed
+	// flipped, id stayed, publish no-oped until the plan changed).
 	hashable := struct {
-		SiteID    string       `json:"site_id"`
-		Preset    string       `json:"preset"`
-		Plan      *edgePlanDoc `json:"plan"`
-		Limits    any          `json:"limits"`
-		SocPolicy any          `json:"soc_policy"`
-	}{siteID, doc.Preset, doc.Plan, doc.Limits, doc.SocPolicy}
+		SiteID        string       `json:"site_id"`
+		Preset        string       `json:"preset"`
+		ExportAllowed bool         `json:"export_allowed"`
+		Plan          *edgePlanDoc `json:"plan"`
+		Limits        any          `json:"limits"`
+		GridLimits    any          `json:"grid_limits"`
+		SocPolicy     any          `json:"soc_policy"`
+	}{siteID, doc.Preset, doc.ExportAllowed, doc.Plan, doc.Limits, doc.GridLimits, doc.SocPolicy}
 	raw, _ := json.Marshal(hashable)
 	sum := sha256.Sum256(raw)
 	return fmt.Sprintf("%s-%s-%s", siteID, horizonEnd.Format("20060102"), hex.EncodeToString(sum[:])[:8])
@@ -686,30 +711,38 @@ func (h *Handlers) resolveEdgeTariffs(ctx context.Context, orgID string, day tim
 }
 
 // resolveEdgeRatings finds the ESS/PV passport numbers: the live plant
-// inventory (Modbus 40396/40398/40484) first, tariff metadata second.
+// per diagnostics spec §4.1: the passport (prod tariff metadata) is the
+// policy source; trusted SmartLogger registers only cap it. 40398 (ESS
+// rated kW) is NOT trusted until its semantics are settled (ze reports
+// 1123 vs the 864 passport), so power never comes from the SL.
 func (h *Handlers) resolveEdgeRatings(ctx context.Context, orgID string, t economics.Tariffs) (capacityKwh, powerKw, pvRatedKw float64, err error) {
+	// Trusted SL inventory (40484 kWh, 40396 PV kW) — hard caps only.
+	var slCapacityKwh, slPvKw float64
 	if h.store != nil {
 		if inv, ok, err := h.store.LatestPlantInventory(ctx, orgID); err == nil && ok {
 			if inv.ESSRatedKwh != nil {
-				capacityKwh = *inv.ESSRatedKwh
-			}
-			if inv.ESSRatedKw != nil {
-				powerKw = *inv.ESSRatedKw
+				slCapacityKwh = *inv.ESSRatedKwh
 			}
 			if inv.PVRatedKw != nil {
-				pvRatedKw = *inv.PVRatedKw
+				slPvKw = *inv.PVRatedKw
 			}
 		}
 	}
-	if capacityKwh <= 0 && t.EssCapacityKwh > 0 {
+
+	// Passport: tariff metadata maintained in prod (never git YAML).
+	if t.EssCapacityKwh > 0 {
 		// Tariffs store the usable 10–90% window; scale to nameplate.
 		capacityKwh = t.EssCapacityKwh / 0.8
 	}
-	if powerKw <= 0 {
-		powerKw = t.EssPowerLimitKw
+	powerKw = t.EssPowerLimitKw
+	pvRatedKw = slPvKw
+
+	// Trusted SL values cap the passport (>0 only; ze had 40488=0).
+	if slCapacityKwh > 0 && (capacityKwh <= 0 || slCapacityKwh < capacityKwh) {
+		capacityKwh = slCapacityKwh
 	}
 	if capacityKwh <= 0 || powerKw <= 0 {
-		return 0, 0, 0, fmt.Errorf("no ESS ratings for %s: need plant inventory or tariffs (ess_capacity_kwh / ess_power_limit_kw)", orgID)
+		return 0, 0, 0, fmt.Errorf("no ESS ratings for %s: need tariffs passport (ess_capacity_kwh / ess_power_limit_kw) or trusted plant inventory", orgID)
 	}
 	return capacityKwh, powerKw, pvRatedKw, nil
 }

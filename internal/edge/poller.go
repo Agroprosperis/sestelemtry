@@ -22,6 +22,10 @@ const (
 	EvDispatchDegrade = "DISPATCH_DEGRADED"
 	EvManifestApplied = "MANIFEST_APPLIED"
 	EvManifestExpired = "MANIFEST_EXPIRED"
+	// Diagnostics spec §8.2:
+	EvSLAlarm           = "SL_ALARM"
+	EvInverterFault     = "INVERTER_FAULT"
+	EvInverterRecovered = "INVERTER_RECOVERED"
 )
 
 const (

@@ -1,0 +1,557 @@
+{
+  "schema_version": "1.0",
+  "updated": "2026-09-02",
+  "title": "Huawei SUN2000 alarm/status decode (SmartLogger remapped 51xxx)",
+  "sources": [
+    {
+      "id": "smartlogger-modbus-table-2-7",
+      "path": "docs/references/huawei/smartlogger-modbus-interface-definitions-v300r024-issue52.pdf",
+      "section": "Table 2-7 Inverter Register Definitions",
+      "note": "Major/Minor/Warning U32 = Alarm ID (bits 31–16) + Cause ID (bits 15–0); offsets 12/14/16"
+    },
+    {
+      "id": "sun2000-modbus-table-5-1",
+      "path": "SUN2000 Modbus Interface Definitions (not stored in repo)",
+      "section": "Table 5-1 Alarm information",
+      "note": "Alarm ID, level, bit in registers 32008–32010"
+    },
+    {
+      "id": "huawei-alarm-reference",
+      "url": "https://support.huawei.com/enterprise/en/doc/EDOC1100345192",
+      "section": "Inverter Alarm Reference",
+      "note": "Cause ID details per alarm ID"
+    }
+  ],
+  "decode": {
+    "fault_u32": {
+      "description": "Remapped per-inverter Major/Minor/Warning at offsets 12, 14, 16 (U32 each).",
+      "alarm_id_mask": "0xFFFF0000",
+      "cause_id_mask": "0x0000FFFF",
+      "alarm_id_shift": 16,
+      "steps": [
+        "Parse hex string to unsigned 32-bit integer.",
+        "If value is 0, return empty decode.",
+        "alarm_id = (value >> 16) & 0xFFFF",
+        "cause_id = value & 0xFFFF",
+        "Lookup alarms[String(alarm_id)]; format cause via cause_id rules."
+      ],
+      "example": {
+        "hex": "0x7DC0003",
+        "alarm_id": 2012,
+        "cause_id": 3,
+        "summary_en": "String Current Backfeed · PV string 3",
+        "summary_uk": "Зворотний струм стрінгу · PV стрінг 3"
+      }
+    },
+    "status_u16": {
+      "description": "Inverter status at remapped offset 9 (same enum as SUN2000 register 32089). SmartLogger may also report 0xB000 (comm interrupt) and 0xC000 (uploading).",
+      "register_sun2000": 32089
+    }
+  },
+  "cause_id_patterns": {
+    "pv_string_index": {
+      "description": "Cause ID 1…n maps to PV string 1…n (Huawei Alarm Reference).",
+      "label_en": "PV string {n}",
+      "label_uk": "PV стрінг {n}",
+      "max_n": 36
+    },
+    "grid_loss": {
+      "description": "Alarm 2032 Grid Loss.",
+      "values": {
+        "1": {
+          "name_en": "Grid outage or AC circuit disconnected",
+          "name_uk": "Відсутність мережі або розімкнутий AC"
+        }
+      },
+      "fallback_en": "Cause ID {n}",
+      "fallback_uk": "Cause ID {n}"
+    },
+    "none": {
+      "description": "No per-cause table in Alarm Reference; show numeric Cause ID if non-zero.",
+      "fallback_en": "Cause ID {n}",
+      "fallback_uk": "Cause ID {n}"
+    }
+  },
+  "status_codes": {
+    "0x0000": {
+      "name_en": "Standby: initialization",
+      "name_uk": "Standby: ініціалізація",
+      "ui_class": "standby"
+    },
+    "0x0001": {
+      "name_en": "Standby: insulation resistance detection",
+      "name_uk": "Standby: перевірка опору ізоляції",
+      "ui_class": "standby"
+    },
+    "0x0002": {
+      "name_en": "Standby: sunlight detection",
+      "name_uk": "Standby: детекція сонячного опромінення",
+      "ui_class": "standby"
+    },
+    "0x0003": {
+      "name_en": "Standby: grid detecting",
+      "name_uk": "Standby: детекція мережі",
+      "ui_class": "standby"
+    },
+    "0x0100": {
+      "name_en": "Starting",
+      "name_uk": "Пуск",
+      "ui_class": "starting"
+    },
+    "0x0200": {
+      "name_en": "On-grid",
+      "name_uk": "У мережі",
+      "ui_class": "on_grid"
+    },
+    "0x0201": {
+      "name_en": "Grid connected: power limited",
+      "name_uk": "У мережі: обмеження потужності",
+      "ui_class": "on_grid"
+    },
+    "0x0202": {
+      "name_en": "Grid connected: self derating",
+      "name_uk": "У мережі: самозниження потужності",
+      "ui_class": "on_grid"
+    },
+    "0x0203": {
+      "name_en": "Off-grid operation",
+      "name_uk": "Off-grid режим",
+      "ui_class": "on_grid"
+    },
+    "0x0300": {
+      "name_en": "OFF: unexpected shutdown",
+      "name_uk": "OFF: неочікуване вимкнення",
+      "ui_class": "fault"
+    },
+    "0x0301": {
+      "name_en": "OFF: instructed shutdown",
+      "name_uk": "OFF: командне вимкнення",
+      "ui_class": "shutdown"
+    },
+    "0x0302": {
+      "name_en": "OFF: OVGR",
+      "name_uk": "OFF: OVGR",
+      "ui_class": "shutdown"
+    },
+    "0x0303": {
+      "name_en": "OFF: communication interrupted",
+      "name_uk": "OFF: перервано зв'язок",
+      "ui_class": "shutdown"
+    },
+    "0x0304": {
+      "name_en": "OFF: power limited",
+      "name_uk": "OFF: обмеження потужності",
+      "ui_class": "shutdown"
+    },
+    "0x0305": {
+      "name_en": "OFF: manual startup required",
+      "name_uk": "OFF: потрібен ручний пуск",
+      "ui_class": "shutdown"
+    },
+    "0x0307": {
+      "name_en": "Shutdown: rapid shutdown",
+      "name_uk": "Shutdown: rapid shutdown",
+      "ui_class": "shutdown"
+    },
+    "0x030A": {
+      "name_en": "Shutdown: commanded rapid shutdown",
+      "name_uk": "Shutdown: командний rapid shutdown",
+      "ui_class": "shutdown"
+    },
+    "0x0700": {
+      "name_en": "Standby: no irradiation",
+      "name_uk": "Standby: немає опромінення",
+      "ui_class": "standby"
+    },
+    "0xB000": {
+      "name_en": "SmartLogger: communication interrupt",
+      "name_uk": "SmartLogger: перерва зв'язку",
+      "ui_class": "unreachable"
+    },
+    "0xC000": {
+      "name_en": "SmartLogger: uploading",
+      "name_uk": "SmartLogger: оновлення прошивки",
+      "ui_class": "unknown"
+    }
+  },
+  "alarms": {
+    "2001": {
+      "name_en": "High String Input Voltage",
+      "name_uk": "Висока вхідна напруга стрінгу",
+      "level": "major",
+      "bitfield": { "register": 1, "bit": 0 },
+      "cause_id_pattern": "pv_string_index"
+    },
+    "2002": {
+      "name_en": "DC Arc Fault",
+      "name_uk": "Дуга DC (AFCI)",
+      "level": "major",
+      "bitfield": { "register": 1, "bit": 1 },
+      "cause_id_pattern": "none"
+    },
+    "2003": {
+      "name_en": "DC Arc Fault (ADMC, clear manually)",
+      "name_uk": "Дуга DC (ADMC, скидання вручну)",
+      "level": "major",
+      "bitfield": { "register": 3, "bit": 13 },
+      "cause_id_pattern": "none"
+    },
+    "2011": {
+      "name_en": "String Reverse Connection",
+      "name_uk": "Зворотне підключення стрінгу",
+      "level": "major",
+      "bitfield": { "register": 1, "bit": 2 },
+      "cause_id_pattern": "pv_string_index"
+    },
+    "2012": {
+      "name_en": "String Current Backfeed",
+      "name_uk": "Зворотний струм стрінгу",
+      "level": "warning",
+      "bitfield": { "register": 1, "bit": 3 },
+      "cause_id_pattern": "pv_string_index"
+    },
+    "2013": {
+      "name_en": "Abnormal String Power",
+      "name_uk": "Аномальна потужність стрінгу",
+      "level": "warning",
+      "bitfield": { "register": 1, "bit": 4 },
+      "cause_id_pattern": "pv_string_index"
+    },
+    "2014": {
+      "name_en": "High Input String Voltage to Ground",
+      "name_uk": "Висока напруга стрінгу на землю",
+      "level": "major",
+      "bitfield": { "register": 3, "bit": 2 },
+      "cause_id_pattern": "pv_string_index"
+    },
+    "2015": {
+      "name_en": "PV String Loss",
+      "name_uk": "Втрата PV стрінгу",
+      "level": "warning",
+      "bitfield": { "register": 3, "bit": 6 },
+      "cause_id_pattern": "pv_string_index"
+    },
+    "2021": {
+      "name_en": "AFCI Self-Check Fail",
+      "name_uk": "Помилка self-check AFCI",
+      "level": "major",
+      "bitfield": { "register": 1, "bit": 5 },
+      "cause_id_pattern": "none"
+    },
+    "2031": {
+      "name_en": "Phase Wire Short-Circuited to PE",
+      "name_uk": "Фаза замкнута на PE",
+      "level": "major",
+      "bitfield": { "register": 1, "bit": 6 },
+      "cause_id_pattern": "none"
+    },
+    "2032": {
+      "name_en": "Grid Loss",
+      "name_uk": "Втрата мережі",
+      "level": "major",
+      "bitfield": { "register": 1, "bit": 7 },
+      "cause_id_pattern": "grid_loss"
+    },
+    "2033": {
+      "name_en": "Grid Undervoltage",
+      "name_uk": "Просадка напруги мережі",
+      "level": "major",
+      "bitfield": { "register": 1, "bit": 8 },
+      "cause_id_pattern": "none"
+    },
+    "2034": {
+      "name_en": "Grid Overvoltage",
+      "name_uk": "Перенапруга мережі",
+      "level": "major",
+      "bitfield": { "register": 1, "bit": 9 },
+      "cause_id_pattern": "none"
+    },
+    "2035": {
+      "name_en": "Grid Voltage Imbalance",
+      "name_uk": "Дисбаланс напруги мережі",
+      "level": "major",
+      "bitfield": { "register": 1, "bit": 10 },
+      "cause_id_pattern": "none"
+    },
+    "2036": {
+      "name_en": "Grid Overfrequency",
+      "name_uk": "Перевищення частоти мережі",
+      "level": "major",
+      "bitfield": { "register": 1, "bit": 11 },
+      "cause_id_pattern": "none"
+    },
+    "2037": {
+      "name_en": "Grid Underfrequency",
+      "name_uk": "Зниження частоти мережі",
+      "level": "major",
+      "bitfield": { "register": 1, "bit": 12 },
+      "cause_id_pattern": "none"
+    },
+    "2038": {
+      "name_en": "Unstable Grid Frequency",
+      "name_uk": "Нестабільна частота мережі",
+      "level": "major",
+      "bitfield": { "register": 1, "bit": 13 },
+      "cause_id_pattern": "none"
+    },
+    "2039": {
+      "name_en": "Output Overcurrent",
+      "name_uk": "Перевищення вихідного струму",
+      "level": "major",
+      "bitfield": { "register": 1, "bit": 14 },
+      "cause_id_pattern": "none"
+    },
+    "2040": {
+      "name_en": "Output DC Component Overhigh",
+      "name_uk": "Зависока DC-составляюча на виході",
+      "level": "major",
+      "bitfield": { "register": 1, "bit": 15 },
+      "cause_id_pattern": "none"
+    },
+    "2051": {
+      "name_en": "Abnormal Residual Current",
+      "name_uk": "Аномальний диференціальний струм",
+      "level": "major",
+      "bitfield": { "register": 2, "bit": 0 },
+      "cause_id_pattern": "none"
+    },
+    "2061": {
+      "name_en": "Abnormal Grounding",
+      "name_uk": "Аномальне заземлення",
+      "level": "major",
+      "bitfield": { "register": 2, "bit": 1 },
+      "cause_id_pattern": "none"
+    },
+    "2062": {
+      "name_en": "Low Insulation Resistance",
+      "name_uk": "Низький опір ізоляції",
+      "level": "major",
+      "bitfield": { "register": 2, "bit": 2 },
+      "cause_id_pattern": "none"
+    },
+    "2063": {
+      "name_en": "Overtemperature",
+      "name_uk": "Перегрів",
+      "level": "minor",
+      "bitfield": { "register": 2, "bit": 3 },
+      "cause_id_pattern": "none"
+    },
+    "2064": {
+      "name_en": "Device Fault",
+      "name_uk": "Несправність пристрою",
+      "level": "major",
+      "bitfield": { "register": 2, "bit": 4 },
+      "cause_id_pattern": "none"
+    },
+    "2065": {
+      "name_en": "Upgrade Failed or Version Mismatch",
+      "name_uk": "Помилка оновлення або невідповідність версії",
+      "level": "minor",
+      "bitfield": { "register": 2, "bit": 5 },
+      "cause_id_pattern": "none"
+    },
+    "2066": {
+      "name_en": "License Expired",
+      "name_uk": "Ліцензія прострочена",
+      "level": "warning",
+      "bitfield": { "register": 2, "bit": 6 },
+      "cause_id_pattern": "none"
+    },
+    "2067": {
+      "name_en": "Faulty Power Collector",
+      "name_uk": "Несправний power collector",
+      "level": "major",
+      "bitfield": { "register": 2, "bit": 8 },
+      "cause_id_pattern": "none"
+    },
+    "2068": {
+      "name_en": "Battery Abnormal",
+      "name_uk": "Аномалія акумулятора",
+      "level": "minor",
+      "bitfield": { "register": 2, "bit": 9 },
+      "cause_id_pattern": "none"
+    },
+    "2069": {
+      "name_en": "Battery Reverse Connection",
+      "name_uk": "Акумулятор підключено reversely",
+      "level": "major",
+      "bitfield": { "register": 3, "bit": 4 },
+      "cause_id_pattern": "none"
+    },
+    "2070": {
+      "name_en": "Active Islanding",
+      "name_uk": "Active islanding",
+      "level": "major",
+      "bitfield": { "register": 2, "bit": 10 },
+      "cause_id_pattern": "none"
+    },
+    "2071": {
+      "name_en": "Passive Islanding",
+      "name_uk": "Passive islanding",
+      "level": "major",
+      "bitfield": { "register": 2, "bit": 11 },
+      "cause_id_pattern": "none"
+    },
+    "2072": {
+      "name_en": "Transient AC Overvoltage",
+      "name_uk": "Краткочасна AC перенапруга",
+      "level": "major",
+      "bitfield": { "register": 2, "bit": 12 },
+      "cause_id_pattern": "none"
+    },
+    "2075": {
+      "name_en": "Peripheral Port Short Circuit",
+      "name_uk": "КЗ периферійного порту",
+      "level": "warning",
+      "bitfield": { "register": 2, "bit": 13 },
+      "cause_id_pattern": "none"
+    },
+    "2077": {
+      "name_en": "Churn Output Overload",
+      "name_uk": "Перевантаження churn output",
+      "level": "major",
+      "bitfield": { "register": 2, "bit": 14 },
+      "cause_id_pattern": "none"
+    },
+    "2080": {
+      "name_en": "Abnormal PV Module Configuration",
+      "name_uk": "Аномальна конфігурація PV модулів",
+      "level": "major",
+      "bitfield": { "register": 2, "bit": 15 },
+      "cause_id_pattern": "none"
+    },
+    "2081": {
+      "name_en": "Optimizer Fault",
+      "name_uk": "Несправність optimizer",
+      "level": "warning",
+      "bitfield": { "register": 3, "bit": 0 },
+      "cause_id_pattern": "none"
+    },
+    "2082": {
+      "name_en": "On-grid/Off-grid Controller Abnormal",
+      "name_uk": "Аномалія on/off-grid controller",
+      "level": "major",
+      "bitfield": { "register": 3, "bit": 5 },
+      "cause_id_pattern": "none"
+    },
+    "2085": {
+      "name_en": "Built-in PID Operation Abnormal",
+      "name_uk": "Аномалія вбудованого PID",
+      "level": "minor",
+      "bitfield": { "register": 3, "bit": 1 },
+      "cause_id_pattern": "none"
+    },
+    "2086": {
+      "name_en": "External Fan Abnormal",
+      "name_uk": "Зовнішній вентилятор — аномалія",
+      "level": "major",
+      "bitfield": { "register": 3, "bit": 3 },
+      "cause_id_pattern": "none"
+    },
+    "2087": {
+      "name_en": "Internal Fan Abnormal",
+      "name_uk": "Внутрішній вентилятор — аномалія",
+      "level": "major",
+      "bitfield": { "register": 3, "bit": 7 },
+      "cause_id_pattern": "none"
+    },
+    "2088": {
+      "name_en": "DC Protection Unit Abnormal",
+      "name_uk": "Аномалія DC protection unit",
+      "level": "major",
+      "bitfield": { "register": 3, "bit": 8 },
+      "cause_id_pattern": "none"
+    },
+    "2089": {
+      "name_en": "EL Unit Abnormal",
+      "name_uk": "Аномалія EL unit",
+      "level": "minor",
+      "bitfield": { "register": 3, "bit": 9 },
+      "cause_id_pattern": "none"
+    },
+    "2090": {
+      "name_en": "Active Adjustment Instruction Abnormal",
+      "name_uk": "Аномалія active adjustment instruction",
+      "level": "major",
+      "bitfield": { "register": 3, "bit": 10 },
+      "cause_id_pattern": "none"
+    },
+    "2091": {
+      "name_en": "Reactive Adjustment Instruction Abnormal",
+      "name_uk": "Аномалія reactive adjustment instruction",
+      "level": "major",
+      "bitfield": { "register": 3, "bit": 11 },
+      "cause_id_pattern": "none"
+    },
+    "2092": {
+      "name_en": "CT Wiring Abnormal",
+      "name_uk": "Аномалія підключення CT",
+      "level": "major",
+      "bitfield": { "register": 3, "bit": 12 },
+      "cause_id_pattern": "none"
+    },
+    "2093": {
+      "name_en": "DC Switch Abnormal",
+      "name_uk": "Аномалія DC switch",
+      "level": "minor",
+      "bitfield": { "register": 3, "bit": 14 },
+      "cause_id_pattern": "none"
+    },
+    "2094": {
+      "name_en": "Allowable Battery Discharge Capacity Low",
+      "name_uk": "Низька допустима ємність розряду акумулятора",
+      "level": "warning",
+      "bitfield": { "register": 3, "bit": 15 },
+      "cause_id_pattern": "none"
+    },
+    "61440": {
+      "name_en": "Faulty Monitoring Unit",
+      "name_uk": "Несправний модуль моніторингу",
+      "level": "minor",
+      "bitfield": { "register": 2, "bit": 7 },
+      "cause_id_pattern": "none"
+    }
+  },
+  "smartlogger_alarms": {
+    "description": "ESS/PV SmartLogger registers 50000–50005 (plant level, not per-inverter U32). See SmartLogger PDF Table 2-3.",
+    "1100": {
+      "name_en": "Abnormal Active Schedule",
+      "name_uk": "Аномалія active schedule",
+      "level": "major"
+    },
+    "1101": {
+      "name_en": "Abnormal Reactive Schedule",
+      "name_uk": "Аномалія reactive schedule",
+      "level": "major"
+    },
+    "1103": {
+      "name_en": "MCB Disconnect",
+      "name_uk": "MCB відключено",
+      "level": "major"
+    },
+    "1106": {
+      "name_en": "AC SPD Fault",
+      "name_uk": "Несправність AC SPD",
+      "level": "major"
+    },
+    "1115": {
+      "name_en": "24V Power Failure",
+      "name_uk": "Відмова живлення 24V",
+      "level": "major"
+    }
+  },
+  "prod_examples": [
+    {
+      "context": "ze addr 20 warning only",
+      "warning": "0x7DC0003",
+      "status": "0x0201",
+      "decode_uk": "2012 Зворотний струм стрінгу · PV стрінг 3 (warning); status — обмеження потужності"
+    },
+    {
+      "context": "ze grid dip all inverters",
+      "major": "0x7F00001",
+      "status": "0x0300",
+      "decode_uk": "2032 Втрата мережі · відсутність мережі/AC (major); status — неочікуване OFF"
+    }
+  ]
+}

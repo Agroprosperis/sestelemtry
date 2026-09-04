@@ -261,10 +261,13 @@ type edgePlanPreviewHour struct {
 	EssKw         float64 `json:"ess_kw"` // + розряд / − заряд
 	ChargePvKwh   float64 `json:"charge_pv_kwh"`
 	ChargeGridKwh float64 `json:"charge_grid_kwh"`
-	DischargeKwh  float64 `json:"discharge_kwh"`
-	GridKw        float64 `json:"grid_kw"` // плановий імпорт(+) із урахуванням УЗЕ
-	SocEndPct     float64 `json:"soc_end_pct"`
-	Action        string  `json:"action"`
+	// DischargeKwh — весь розряд; DischargeGridKwh — його експортна
+	// частина (понад локальний дефіцит).
+	DischargeKwh     float64 `json:"discharge_kwh"`
+	DischargeGridKwh float64 `json:"discharge_grid_kwh"`
+	GridKw           float64 `json:"grid_kw"` // плановий імпорт(+) із урахуванням УЗЕ
+	SocEndPct        float64 `json:"soc_end_pct"`
+	Action           string  `json:"action"`
 }
 
 // edgePlanDayEffect is the §3 day-slice of the continuous optimisation:
@@ -274,6 +277,7 @@ type edgePlanDayEffect struct {
 	Tomorrow bool   `json:"tomorrow"`
 
 	EssToLoadUah      float64 `json:"ess_to_load_uah"`
+	EssToGridUah      float64 `json:"ess_to_grid_uah"`
 	PvChargeCostUah   float64 `json:"pv_charge_cost_uah"`
 	GridChargeCostUah float64 `json:"grid_charge_cost_uah"`
 	DegradationUah    float64 `json:"degradation_uah"`
@@ -291,6 +295,7 @@ type edgePlanDayEffect struct {
 	PlanCostUah     float64 `json:"plan_cost_uah"`
 
 	EssToLoadKwh  float64 `json:"ess_to_load_kwh"`
+	EssToGridKwh  float64 `json:"ess_to_grid_kwh"`
 	ChargePvKwh   float64 `json:"charge_pv_kwh"`
 	ChargeGridKwh float64 `json:"charge_grid_kwh"`
 }
@@ -351,12 +356,13 @@ func (h *Handlers) edgePlanPreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	steps, err := economics.BuildForwardPlan(in.Hours, economics.ForwardParams{
-		Tariffs:     in.Tariffs,
-		CapacityKwh: in.CapacityKwh,
-		PowerKw:     in.PowerKw,
-		SocMinPct:   in.SocMin,
-		SocMaxPct:   in.SocMax,
-		StartSocPct: in.StartSoc,
+		Tariffs:       in.Tariffs,
+		CapacityKwh:   in.CapacityKwh,
+		PowerKw:       in.PowerKw,
+		SocMinPct:     in.SocMin,
+		SocMaxPct:     in.SocMax,
+		StartSocPct:   in.StartSoc,
+		ExportAllowed: in.ExportAllowed,
 	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -401,12 +407,13 @@ func buildEdgePlanPreview(siteID string, in edgePlanInputs, steps []economics.Fo
 			LoadKw:       round1(fh.LoadKw),
 			OperatorLoad: in.OperatorHour[fh.TS.UTC()],
 
-			EssKw:         round1(s.EssKw),
-			ChargePvKwh:   round1(s.ChargePvKwh),
-			ChargeGridKwh: round1(s.ChargeGridKwh),
-			DischargeKwh:  round1(s.DischargeKwh),
-			SocEndPct:     round1(s.SocEndPct),
-			Action:        s.Action,
+			EssKw:            round1(s.EssKw),
+			ChargePvKwh:      round1(s.ChargePvKwh),
+			ChargeGridKwh:    round1(s.ChargeGridKwh),
+			DischargeKwh:     round1(s.DischargeKwh),
+			DischargeGridKwh: round1(s.DischargeGridKwh),
+			SocEndPct:        round1(s.SocEndPct),
+			Action:           s.Action,
 		}
 		if fh.RdnUahPerKwh != nil {
 			p := round3(*fh.RdnUahPerKwh)
@@ -419,10 +426,12 @@ func buildEdgePlanPreview(siteID string, in edgePlanInputs, steps []economics.Fo
 			w := wx
 			hr.Weather = &w
 		}
-		// Planned grid draw: local deficit minus battery help plus
-		// grid charging (never negative — export is not planned).
+		// Planned grid draw: local deficit minus the battery's share
+		// into load plus grid charging; the exported part does not
+		// reduce imports (it goes out), so it is excluded here.
 		deficit := math.Max(0, fh.LoadKw-fh.PvKw)
-		hr.GridKw = round1(math.Max(0, deficit-s.DischargeKwh+s.ChargeGridKwh))
+		toLoad := s.DischargeKwh - s.DischargeGridKwh
+		hr.GridKw = round1(math.Max(0, deficit-toLoad+s.ChargeGridKwh))
 		resp.Hours = append(resp.Hours, hr)
 	}
 
@@ -434,7 +443,7 @@ func buildEdgePlanPreview(siteID string, in edgePlanInputs, steps []economics.Fo
 // prices each day per spec §3:
 //
 //	ефект(D) = потоки(D) + тіньова_цінність_SOC(D)
-//	потоки   = Σ( розряд·imp − заряд_з_мережі·imp − заряд_від_СЕС·exp − знос )
+//	потоки   = Σ( розряд_у_load·imp + експорт·exp − заряд_з_мережі·imp − заряд_від_СЕС·exp − знос )
 //	тіньова  = ΔSOC(D)·capacity·min(imp за D)
 func computeEdgeDayEffects(in edgePlanInputs, steps []economics.ForwardStep, tomorrowStart time.Time) []edgePlanDayEffect {
 	byDay := map[string]*edgePlanDayEffect{}
@@ -469,12 +478,15 @@ func computeEdgeDayEffects(in edgePlanInputs, steps []economics.ForwardStep, tom
 			shadow[day] = imp
 		}
 
-		d.EssToLoadUah += s.DischargeKwh * imp
+		toLoad := s.DischargeKwh - s.DischargeGridKwh
+		d.EssToLoadUah += toLoad * imp
+		d.EssToGridUah += s.DischargeGridKwh * exp
 		d.GridChargeCostUah += s.ChargeGridKwh * imp
 		d.PvChargeCostUah += s.ChargePvKwh * exp
 		d.DegradationUah += s.DischargeKwh * in.Tariffs.DegradationUahPerKwh
 
-		d.EssToLoadKwh += s.DischargeKwh
+		d.EssToLoadKwh += toLoad
+		d.EssToGridKwh += s.DischargeGridKwh
 		d.ChargePvKwh += s.ChargePvKwh
 		d.ChargeGridKwh += s.ChargeGridKwh
 
@@ -485,7 +497,7 @@ func computeEdgeDayEffects(in edgePlanInputs, steps []economics.ForwardStep, tom
 	out := make([]edgePlanDayEffect, 0, len(order))
 	for _, day := range order {
 		d := byDay[day]
-		d.FlowsUah = d.EssToLoadUah - d.GridChargeCostUah - d.PvChargeCostUah - d.DegradationUah
+		d.FlowsUah = d.EssToLoadUah + d.EssToGridUah - d.GridChargeCostUah - d.PvChargeCostUah - d.DegradationUah
 		d.SocOpenPct = round1(socOpen[day])
 		d.SocClosePct = round1(socClose[day])
 		d.SocCarryUah = (socClose[day] - socOpen[day]) / 100 * in.CapacityKwh * shadow[day]
@@ -495,6 +507,7 @@ func computeEdgeDayEffects(in edgePlanInputs, steps []economics.ForwardStep, tom
 		d.PlanCostUah = d.BaselineCostUah - d.FlowsUah
 
 		d.EssToLoadUah = round1(d.EssToLoadUah)
+		d.EssToGridUah = round1(d.EssToGridUah)
 		d.PvChargeCostUah = round1(d.PvChargeCostUah)
 		d.GridChargeCostUah = round1(d.GridChargeCostUah)
 		d.DegradationUah = round1(d.DegradationUah)
@@ -504,6 +517,7 @@ func computeEdgeDayEffects(in edgePlanInputs, steps []economics.ForwardStep, tom
 		d.BaselineCostUah = round1(d.BaselineCostUah)
 		d.PlanCostUah = round1(d.PlanCostUah)
 		d.EssToLoadKwh = round1(d.EssToLoadKwh)
+		d.EssToGridKwh = round1(d.EssToGridKwh)
 		d.ChargePvKwh = round1(d.ChargePvKwh)
 		d.ChargeGridKwh = round1(d.ChargeGridKwh)
 		out = append(out, *d)

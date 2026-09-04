@@ -90,6 +90,10 @@ func (s *Service) uiStatus(w http.ResponseWriter, r *http.Request) {
 	if d := s.lastDecision.Load(); d != nil {
 		out["decision"] = d.Record(s.cfg.SiteID)
 	}
+	out["health"] = s.buildHealth(now)
+	if len(s.cfg.Diagnostics.Inverters.DeviceAddresses) > 0 {
+		out["inverter_poll_s"] = int(s.cfg.Diagnostics.Inverters.PollInterval.Seconds())
+	}
 
 	m := s.manifest.Load()
 	if m != nil {

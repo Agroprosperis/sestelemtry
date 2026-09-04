@@ -35,6 +35,10 @@ type Manifest struct {
 	Mode         Mode   `json:"mode"`
 	WriteEnabled bool   `json:"write_enabled"`
 	Preset       string `json:"preset"`
+	// ExportAllowed lets the plan discharge past the local deficit
+	// (BESS arbitrage sells at the export tariff). Absent/false in old
+	// manifests → the legacy no-export clamp stays in force.
+	ExportAllowed bool `json:"export_allowed,omitempty"`
 
 	Limits     ManifestLimits     `json:"limits"`
 	GridLimits ManifestGridLimits `json:"grid_limits"`

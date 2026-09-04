@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -40,6 +41,7 @@ CREATE TABLE IF NOT EXISTS telemetry_raw (
 	uploaded INTEGER DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_telemetry_upload ON telemetry_raw(uploaded, ts_utc);
+CREATE INDEX IF NOT EXISTS idx_telemetry_ts ON telemetry_raw(ts_utc);
 
 CREATE TABLE IF NOT EXISTS control_decisions (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -61,6 +63,7 @@ CREATE TABLE IF NOT EXISTS control_decisions (
 	uploaded INTEGER DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_decisions_upload ON control_decisions(uploaded, ts_utc);
+CREATE INDEX IF NOT EXISTS idx_decisions_ts ON control_decisions(ts_utc);
 
 CREATE TABLE IF NOT EXISTS events (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -73,7 +76,12 @@ CREATE TABLE IF NOT EXISTS events (
 	uploaded INTEGER DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_events_upload ON events(uploaded, ts_utc);
+CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts_utc);
 `
+
+// Note for upgrades of a grown DB: the first start after adding the
+// idx_*_ts indexes rebuilds them with a full table scan (~1–2 min per
+// GB on the IOT2050). One-time cost, paid at startup, not per hour.
 
 // OpenBlackbox opens (creating if needed) the SQLite black box in WAL
 // mode. A single writer connection avoids SQLITE_BUSY between the tick
@@ -314,14 +322,25 @@ func (b *Blackbox) PendingCount(ctx context.Context) (int64, error) {
 	return total, nil
 }
 
+// maintainChunk caps rows per DELETE transaction. The black box runs
+// on a single writer connection, so a long DELETE freezes the 1 s tick
+// writer for its whole duration — the ze soak showed 25→95 s hourly
+// stalls as the unindexed full-scan DELETE grew with the DB (Тест C).
+// Small chunks release the connection every few ms; the pause between
+// chunks lets queued ticks through.
+const maintainChunk = 2000
+
 // Maintain enforces retention (drop rows older than retention_days)
 // and the disk guard: above disk_critical_pct usage, uploaded rows are
-// deleted oldest-first regardless of age.
+// deleted oldest-first regardless of age. All deletes are chunked and
+// use the idx_*_ts / idx_*_upload indexes, so the hourly no-op probe
+// costs microseconds instead of a full table scan.
 func (b *Blackbox) Maintain(ctx context.Context, now time.Time) error {
 	cutoff := tsUTC(now.AddDate(0, 0, -b.retentionDays))
 	for table := range blackboxTables {
-		if _, err := b.db.ExecContext(ctx,
-			`DELETE FROM `+table+` WHERE ts_utc < ?`, cutoff); err != nil {
+		if err := b.deleteChunked(ctx, `DELETE FROM `+table+` WHERE id IN (
+			SELECT id FROM `+table+` WHERE ts_utc < ? LIMIT `+strconv.Itoa(maintainChunk)+`
+		)`, 0, cutoff); err != nil {
 			return err
 		}
 	}
@@ -334,14 +353,37 @@ func (b *Blackbox) Maintain(ctx context.Context, now time.Time) error {
 		return nil
 	}
 	for table := range blackboxTables {
-		if _, err := b.db.ExecContext(ctx, `
-			DELETE FROM `+table+` WHERE id IN (
-				SELECT id FROM `+table+` WHERE uploaded = 1 ORDER BY ts_utc LIMIT 50000
-			)`); err != nil {
+		// Same 50k/hour emergency budget as before, in chunks.
+		if err := b.deleteChunked(ctx, `DELETE FROM `+table+` WHERE id IN (
+			SELECT id FROM `+table+` WHERE uploaded = 1 ORDER BY ts_utc LIMIT `+strconv.Itoa(maintainChunk)+`
+		)`, 50000); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// deleteChunked repeats a LIMIT-ed delete until it stops making
+// progress or maxRows (0 = unlimited) is reached, yielding the writer
+// connection between chunks.
+func (b *Blackbox) deleteChunked(ctx context.Context, query string, maxRows int64, args ...any) error {
+	var total int64
+	for {
+		res, err := b.db.ExecContext(ctx, query, args...)
+		if err != nil {
+			return err
+		}
+		n, _ := res.RowsAffected()
+		total += n
+		if n < maintainChunk || (maxRows > 0 && total >= maxRows) {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
 }
 
 func diskUsedPct(dir string) (float64, error) {

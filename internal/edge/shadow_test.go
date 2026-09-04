@@ -1,7 +1,9 @@
 package edge
 
 import (
+	"encoding/json"
 	"math"
+	"strings"
 	"testing"
 	"time"
 )
@@ -146,6 +148,23 @@ func TestPlanDischargeClampedToDeficitNoExport(t *testing.T) {
 	}
 }
 
+func TestPlanDischargeExportAllowedSkipsDeficitClamp(t *testing.T) {
+	tick := testTick(map[string]float64{
+		"active_pv_power_kw": 50, "load_power_kw": 100, "soc_percent": 70,
+	}, QualityOK)
+	m := arbitrageManifest(200)
+	m.ExportAllowed = true
+	d, _ := Decide(tick, m, testCfg())
+	if d.PBessVirtualKw != 200 {
+		t.Fatalf("p = %v, want 200 (export allowed — no deficit clamp)", d.PBessVirtualKw)
+	}
+	for _, c := range d.Clamps {
+		if strings.Contains(c, "без експорту") {
+			t.Fatalf("unexpected no-export clamp: %v", d.Clamps)
+		}
+	}
+}
+
 func TestPlanGridChargeRespectsImportTarget(t *testing.T) {
 	tick := testTick(map[string]float64{
 		"active_pv_power_kw": 0, "load_power_kw": 700, "soc_percent": 40,
@@ -170,9 +189,12 @@ func TestPlanGridChargeUnclampedWithinTarget(t *testing.T) {
 func TestExpiredManifestFallsBackToSafePreset(t *testing.T) {
 	m := arbitrageManifest(-300)
 	m.ValidUntil = testTS.Add(-time.Minute)
+	m.Limits.EssChargeMaxKw = 324
+	m.Limits.EssDischargeMaxKw = 324
 	// The expired plan wanted a -300 kW grid charge; fallback must
 	// ignore it. Serving the local deficit from the battery stays
-	// allowed (that IS self-consumption), capped by rated power.
+	// allowed (that IS self-consumption), capped by the manifest policy
+	// limit, which persists past expiry (§4.1 — stale cap beats none).
 	tick := testTick(map[string]float64{
 		"active_pv_power_kw": 0, "load_power_kw": 500, "soc_percent": 40,
 	}, QualityOK)
@@ -184,7 +206,97 @@ func TestExpiredManifestFallsBackToSafePreset(t *testing.T) {
 		t.Fatalf("p = %v: fallback must never grid-charge", d.PBessVirtualKw)
 	}
 	if d.PBessVirtualKw != 324 {
-		t.Fatalf("p = %v, want 324 (deficit discharge at rated cap)", d.PBessVirtualKw)
+		t.Fatalf("p = %v, want 324 (deficit discharge at policy cap)", d.PBessVirtualKw)
+	}
+}
+
+// §4.1: policy limits come from the manifest ladder, never device YAML.
+func TestPolicyLimitClampsPlanDischarge(t *testing.T) {
+	m := arbitrageManifest(500)
+	m.Limits.EssDischargeMaxKw = 300
+	tick := testTick(map[string]float64{
+		"active_pv_power_kw": 0, "load_power_kw": 800, "soc_percent": 70,
+	}, QualityOK)
+	d, _ := Decide(tick, m, testCfg())
+	if d.PBessVirtualKw != 300 {
+		t.Fatalf("p = %v, want 300 (policy discharge cap)", d.PBessVirtualKw)
+	}
+	found := false
+	for _, c := range d.Clamps {
+		if strings.Contains(c, "ліміт політики розряду") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("policy clamp not recorded: %v", d.Clamps)
+	}
+}
+
+func TestAnomalyComparesWithPolicyLimit(t *testing.T) {
+	m := arbitrageManifest(200)
+	m.Limits.EssChargeMaxKw = 100
+	m.Limits.EssDischargeMaxKw = 100
+	tick := testTick(map[string]float64{
+		"active_pv_power_kw": 0, "load_power_kw": 1000, "soc_percent": 70,
+	}, QualityOK)
+	d, evs := Decide(tick, m, testCfg())
+	if !d.Anomaly {
+		t.Fatal("desired 200 > 1.5×policy 100 must flag anomaly")
+	}
+	found := false
+	for _, ev := range evs {
+		if ev.Code == EvShadowAnomaly && strings.Contains(ev.Message, "policy limit 100.0") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("SHADOW_ANOMALY event with policy limit missing: %v", evs)
+	}
+	if d.PBessVirtualKw != 100 {
+		t.Fatalf("p = %v, want 100 (policy cap)", d.PBessVirtualKw)
+	}
+}
+
+// No manifest policy and no dynamic registers → anomaly is muted and
+// power is not clamped by any YAML rated figure (§4.1).
+func TestNoPolicyMutesAnomalyAndRatedClamp(t *testing.T) {
+	m := arbitrageManifest(900)
+	tick := testTick(map[string]float64{
+		"active_pv_power_kw": 0, "load_power_kw": 2000, "soc_percent": 70,
+	}, QualityOK)
+	d, evs := Decide(tick, m, testCfg())
+	if d.Anomaly {
+		t.Fatal("no policy known — anomaly must not be raised")
+	}
+	for _, ev := range evs {
+		if ev.Code == EvShadowAnomaly {
+			t.Fatalf("unexpected SHADOW_ANOMALY: %v", ev)
+		}
+	}
+	if d.PBessVirtualKw != 900 {
+		t.Fatalf("p = %v, want 900 (no YAML rated clamp)", d.PBessVirtualKw)
+	}
+}
+
+// Dynamic 40490/40492 keep capping even without a manifest policy.
+func TestDynamicRegistersClampWithoutPolicy(t *testing.T) {
+	m := arbitrageManifest(500)
+	tick := testTick(map[string]float64{
+		"active_pv_power_kw": 0, "load_power_kw": 800, "soc_percent": 70,
+		"ess_discharge_max_kw": 150,
+	}, QualityOK)
+	d, _ := Decide(tick, m, testCfg())
+	if d.PBessVirtualKw != 150 {
+		t.Fatalf("p = %v, want 150 (40492 dynamic cap)", d.PBessVirtualKw)
+	}
+	found := false
+	for _, c := range d.Clamps {
+		if strings.Contains(c, "(40492)") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("dynamic clamp not recorded: %v", d.Clamps)
 	}
 }
 
@@ -251,6 +363,115 @@ func TestManifestValidateForEdgeGates(t *testing.T) {
 	}
 	if err := arbitrageManifest(0).ValidateForEdge("ab"); err != nil {
 		t.Fatalf("valid manifest rejected: %v", err)
+	}
+}
+
+func TestSLAlarmBlocksDispatch(t *testing.T) {
+	tick := testTick(map[string]float64{
+		"active_pv_power_kw": 0, "load_power_kw": 300, "soc_percent": 60,
+		"sl_alarm_1": 0, "sl_alarm_2": 16, "sl_alarm_3": 0,
+		"sl_alarm_4": 0, "sl_alarm_5": 0, "sl_alarm_6": 0,
+	}, QualityOK)
+	d, evs := Decide(tick, nil, testCfg())
+	if d.ReasonCode != "sl_alarm" || d.PBessVirtualKw != 0 {
+		t.Fatalf("got reason=%s p=%v, want sl_alarm/0", d.ReasonCode, d.PBessVirtualKw)
+	}
+	var alarm *Event
+	for i := range evs {
+		if evs[i].Code == EvSLAlarm {
+			alarm = &evs[i]
+		}
+	}
+	if alarm == nil {
+		t.Fatalf("expected SL_ALARM event, got %v", evs)
+	}
+	if alarm.Severity != SevAlarm {
+		t.Errorf("severity = %s, want alarm", alarm.Severity)
+	}
+	// The message must carry the hex word set so the 5-min dedup
+	// re-fires when the set changes (spec §5).
+	if !strings.Contains(alarm.Message, "0x0010") {
+		t.Errorf("message %q does not contain hex word 0x0010", alarm.Message)
+	}
+}
+
+func TestBlockingOrderDataFaultThenSLAlarmThenPcs(t *testing.T) {
+	all := map[string]float64{
+		"active_pv_power_kw": 0, "load_power_kw": 300, "soc_percent": 60,
+		"sl_alarm_1": 1, "pcs_shutdown": 1,
+	}
+	// data_fault wins over everything.
+	d, _ := Decide(testTick(all, QualityFault), nil, testCfg())
+	if d.ReasonCode != "data_fault" {
+		t.Fatalf("reason = %s, want data_fault first", d.ReasonCode)
+	}
+	// sl_alarm wins over pcs_shutdown.
+	d, _ = Decide(testTick(all, QualityOK), nil, testCfg())
+	if d.ReasonCode != "sl_alarm" {
+		t.Fatalf("reason = %s, want sl_alarm before pcs_shutdown", d.ReasonCode)
+	}
+	// All alarm words zero → pcs_shutdown.
+	noAlarm := map[string]float64{
+		"active_pv_power_kw": 0, "load_power_kw": 300, "soc_percent": 60,
+		"sl_alarm_1": 0, "sl_alarm_2": 0, "sl_alarm_3": 0,
+		"sl_alarm_4": 0, "sl_alarm_5": 0, "sl_alarm_6": 0,
+		"pcs_shutdown": 1,
+	}
+	d, _ = Decide(testTick(noAlarm, QualityOK), nil, testCfg())
+	if d.ReasonCode != "pcs_shutdown" {
+		t.Fatalf("reason = %s, want pcs_shutdown", d.ReasonCode)
+	}
+}
+
+func TestPlanHoldWithinDeadband(t *testing.T) {
+	tick := testTick(map[string]float64{
+		"active_pv_power_kw": 100, "load_power_kw": 100, "soc_percent": 90,
+	}, QualityOK)
+	// |plan| ≤ 2 kW → plan_hold with 0, even at the SOC ceiling (spec
+	// §2: SOC на стелі — наслідок, не причина).
+	for _, planKw := range []float64{0, 1.5, -2} {
+		d, _ := Decide(tick, arbitrageManifest(planKw), testCfg())
+		if d.ReasonCode != "plan_hold" || d.PBessVirtualKw != 0 {
+			t.Fatalf("plan %v: got %s %v, want plan_hold 0", planKw, d.ReasonCode, d.PBessVirtualKw)
+		}
+	}
+	// Just above the deadband the plan acts.
+	d, _ := Decide(testTick(map[string]float64{
+		"active_pv_power_kw": 0, "load_power_kw": 100, "soc_percent": 50,
+	}, QualityOK), arbitrageManifest(2.5), testCfg())
+	if d.ReasonCode != "plan_discharge" {
+		t.Fatalf("plan 2.5: reason = %s, want plan_discharge", d.ReasonCode)
+	}
+}
+
+func TestRecordCarriesClamps(t *testing.T) {
+	// SOC at the floor clamps the discharge → clamps[] non-empty.
+	tick := testTick(map[string]float64{
+		"active_pv_power_kw": 0, "load_power_kw": 300, "soc_percent": 20,
+	}, QualityOK)
+	d, _ := Decide(tick, nil, testCfg())
+	rec := d.Record("ab")
+	clamps, ok := rec["outputs"].(map[string]any)["clamps"].([]string)
+	if !ok || len(clamps) == 0 {
+		t.Fatalf("clamps = %v, want non-empty list", rec["outputs"].(map[string]any)["clamps"])
+	}
+
+	// Unclamped decision → empty array, never nil (spec §3.1).
+	tick = testTick(map[string]float64{
+		"active_pv_power_kw": 300, "load_power_kw": 100, "soc_percent": 50,
+	}, QualityOK)
+	d, _ = Decide(tick, nil, testCfg())
+	rec = d.Record("ab")
+	clamps, ok = rec["outputs"].(map[string]any)["clamps"].([]string)
+	if !ok || clamps == nil || len(clamps) != 0 {
+		t.Fatalf("clamps = %#v, want empty non-nil list", rec["outputs"].(map[string]any)["clamps"])
+	}
+	raw, err := json.Marshal(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"clamps":[]`) {
+		t.Fatalf("record JSON must serialize clamps as []: %s", raw)
 	}
 }
 
