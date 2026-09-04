@@ -437,7 +437,6 @@ function InvertersCard({ inverters }: { inverters: InverterHealth[] }) {
     (a, b) =>
       (INV_ORDER[a.class] ?? 9) - (INV_ORDER[b.class] ?? 9) || a.device_address - b.device_address,
   )
-  const hex = (v?: string) => (v && v !== '0x0' ? <strong>{v}</strong> : (v ?? '—'))
 
   return (
     <section className="ctl-card">
@@ -482,7 +481,6 @@ function InvertersCard({ inverters }: { inverters: InverterHealth[] }) {
                 onToggle={() =>
                   setOpen((cur) => (cur === r.device_address ? null : r.device_address))
                 }
-                hex={hex}
               />
             ))}
           </tbody>
@@ -496,12 +494,10 @@ function InvRow({
   r,
   open,
   onToggle,
-  hex,
 }: {
   r: InverterHealth
   open: boolean
   onToggle: () => void
-  hex: (v?: string) => React.ReactNode
 }) {
   const rowCls =
     r.class === 'fault' || r.class === 'unreachable'
@@ -509,6 +505,27 @@ function InvRow({
       : r.class === 'shutdown'
         ? 'ctl-inv-warn'
         : ''
+  // Hex — джерело істини; канонна розшифровка (label_uk) — muted-рядком
+  // під ним, ніколи замість нього.
+  const hexDec = (v?: string, label?: string) =>
+    v && v !== '0x0' ? (
+      <>
+        <strong>{v}</strong>
+        {label && (
+          <div className="ctl-inv-declabel" title={label}>
+            {label}
+          </div>
+        )}
+      </>
+    ) : (
+      (v ?? '—')
+    )
+  const decodeParts = [
+    r.status_label_uk && `status: ${r.status_label_uk}`,
+    r.major_label_uk && `major: ${r.major_label_uk}`,
+    r.minor_label_uk && `minor: ${r.minor_label_uk}`,
+    r.warning_label_uk && `warning: ${r.warning_label_uk}`,
+  ].filter(Boolean)
   return (
     <>
       <tr className={'ctl-inv-row ' + rowCls} onClick={onToggle}>
@@ -517,13 +534,15 @@ function InvRow({
         </td>
         <td>{r.label || `addr ${r.device_address}`}</td>
         <td>
-          <span className={'ctl-sev ' + (INV_SEV[r.class] ?? '')}>{r.status_label || r.class}</span>
+          <span className={'ctl-sev ' + (INV_SEV[r.class] ?? '')}>
+            {r.status_label_uk || r.status_label || r.class}
+          </span>
         </td>
         <td>{fmtNum(r.p_kw)}</td>
         <td className="mono">{r.status_raw ?? '—'}</td>
-        <td className="mono">{hex(r.major_fault)}</td>
-        <td className="mono">{hex(r.minor_fault)}</td>
-        <td className="mono">{hex(r.warning)}</td>
+        <td className="mono">{hexDec(r.major_fault, r.major_label_uk)}</td>
+        <td className="mono">{hexDec(r.minor_fault, r.minor_label_uk)}</td>
+        <td className="mono">{hexDec(r.warning, r.warning_label_uk)}</td>
         <td>{fmtNum(r.temp_c)}</td>
         <td>
           <span className={'ctl-sev ' + (r.poll_ok ? 'ok' : 'err')}>
@@ -540,6 +559,9 @@ function InvRow({
             {r.status_raw ?? '—'} ({r.status_label || '—'}) · major/minor/warning{' '}
             {r.major_fault ?? '—'}/{r.minor_fault ?? '—'}/{r.warning ?? '—'} · poll{' '}
             {r.poll_ok ? 'OK' : `fail${r.poll_error ? ` — ${r.poll_error}` : ''}`} · {r.ts}
+            {decodeParts.length > 0 && (
+              <div className="ctl-inv-decode">{decodeParts.join(' · ')}</div>
+            )}
           </td>
         </tr>
       )}

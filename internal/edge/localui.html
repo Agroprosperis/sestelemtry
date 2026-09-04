@@ -113,6 +113,8 @@
     table.data tr.inv-fault td { background: #fef2f2; }
     table.data tr.inv-shutdown td { background: #fffbeb; }
     tr.inv-detail td { background: var(--soft); font-family: ui-monospace, monospace; font-size: 11px; }
+    /* Канонна розшифровка Huawei-кодів: muted під hex, з трикрапкою. */
+    .inv-declabel { color: var(--muted); font-size: 10px; max-width: 130px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     /* Checks §4 */
     #checks-table td.chk-detail { color: var(--muted); font-size: 11px; }
   </style>
@@ -536,18 +538,24 @@ function renderInverters(list) {
     (INV_ORDER[a.class] ?? 9) - (INV_ORDER[b.class] ?? 9) || a.device_address - b.device_address);
   $('inv-body').innerHTML = sorted.map((r) => {
     const cls = r.class === 'fault' || r.class === 'unreachable' ? 'inv-fault' : r.class === 'shutdown' ? 'inv-shutdown' : '';
-    const badge = '<span class="badge ' + (INV_BADGE[r.class] || 'gray') + '">' + esc(r.status_label || r.class) + '</span>';
+    const badge = '<span class="badge ' + (INV_BADGE[r.class] || 'gray') + '">' + esc(r.status_label_uk || r.status_label || r.class) + '</span>';
     const num = (v, dec) => v == null ? '—' : v.toFixed(dec == null ? 1 : dec);
-    const hexOr = (v) => v && v !== '0x0' ? '<strong>' + esc(v) + '</strong>' : (v || '—');
+    // Hex — джерело істини; канонна розшифровка muted-рядком під ним.
+    const hexOr = (v, label) => {
+      if (!v || v === '0x0') return v || '—';
+      let out = '<strong>' + esc(v) + '</strong>';
+      if (label) out += '<div class="inv-declabel" title="' + esc(label) + '">' + esc(label) + '</div>';
+      return out;
+    };
     const main = '<tr class="inv-row ' + cls + '" data-addr="' + r.device_address + '">' +
       '<td><strong>' + r.device_address + '</strong></td>' +
       '<td>' + esc(r.label || 'addr ' + r.device_address) + '</td>' +
       '<td>' + badge + '</td>' +
       '<td>' + num(r.p_kw) + '</td>' +
       '<td>' + esc(r.status_raw || '—') + '</td>' +
-      '<td>' + hexOr(r.major_fault) + '</td>' +
-      '<td>' + hexOr(r.minor_fault) + '</td>' +
-      '<td>' + hexOr(r.warning) + '</td>' +
+      '<td>' + hexOr(r.major_fault, r.major_label_uk) + '</td>' +
+      '<td>' + hexOr(r.minor_fault, r.minor_label_uk) + '</td>' +
+      '<td>' + hexOr(r.warning, r.warning_label_uk) + '</td>' +
       '<td>' + num(r.temp_c) + '</td>' +
       '<td>' + (r.poll_ok ? '<span class="badge green">OK</span>' : '<span class="badge red">fail</span>') + '</td></tr>';
     if (!openInvRows.has(r.device_address)) return main;
@@ -558,11 +566,17 @@ function renderInverters(list) {
       'cos φ: ' + num(r.pf, 3),
       'ізоляція: ' + num(r.insulation_mohm, 3) + ' МОм',
       't шафи: ' + num(r.temp_c) + ' °C',
-      'status: ' + (r.status_raw || '—') + ' (' + esc(r.status_label || '') + ')',
+      'status: ' + (r.status_raw || '—') + ' (' + esc(r.status_label_uk || r.status_label || '') + ')',
       'major/minor/warning: ' + (r.major_fault || '—') + ' / ' + (r.minor_fault || '—') + ' / ' + (r.warning || '—'),
-      'poll: ' + (r.poll_ok ? 'OK' : 'fail' + (r.poll_error ? ' — ' + esc(r.poll_error) : '')) + ' · ' + (r.ts || '—'),
-    ].join('\n');
-    return main + '<tr class="inv-detail"><td colspan="10" style="white-space:pre-wrap">' + det + '</td></tr>';
+    ];
+    const decode = [
+      r.major_label_uk ? 'major: ' + r.major_label_uk : '',
+      r.minor_label_uk ? 'minor: ' + r.minor_label_uk : '',
+      r.warning_label_uk ? 'warning: ' + r.warning_label_uk : '',
+    ].filter(Boolean);
+    if (decode.length) det.push('декод: ' + esc(decode.join(' · ')));
+    det.push('poll: ' + (r.poll_ok ? 'OK' : 'fail' + (r.poll_error ? ' — ' + esc(r.poll_error) : '')) + ' · ' + (r.ts || '—'));
+    return main + '<tr class="inv-detail"><td colspan="10" style="white-space:pre-wrap">' + det.join('\n') + '</td></tr>';
   }).join('');
 
   document.querySelectorAll('#inv-body tr.inv-row').forEach((tr) => {

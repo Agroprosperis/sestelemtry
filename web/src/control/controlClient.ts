@@ -157,6 +157,11 @@ export type InverterHealth = {
   major_fault?: string
   minor_fault?: string
   warning?: string
+  /** Розшифровки з канону ems-spec (huawei inverter_alarm_decode). */
+  status_label_uk?: string
+  major_label_uk?: string
+  minor_label_uk?: string
+  warning_label_uk?: string
   poll_ok: boolean
   poll_error: string | null
   ts: string

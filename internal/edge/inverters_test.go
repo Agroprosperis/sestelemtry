@@ -65,6 +65,49 @@ func TestDecodeInverterBlock(t *testing.T) {
 	if !r.PollOK || r.PollError != nil {
 		t.Errorf("poll_ok=%v err=%v", r.PollOK, r.PollError)
 	}
+	// Канонні розшифровки: статус є, нульові слова — без лейблів.
+	if r.StatusLabelUK != "У мережі" {
+		t.Errorf("status_label_uk = %q, want 'У мережі'", r.StatusLabelUK)
+	}
+	if r.MajorLabelUK != "" || r.MinorLabelUK != "" || r.WarningLabelUK != "" {
+		t.Errorf("zero words must not carry labels: %q/%q/%q", r.MajorLabelUK, r.MinorLabelUK, r.WarningLabelUK)
+	}
+}
+
+// Live-приклад ze (§prod_examples канону): warning 0x7DC0003 при
+// status 0x0201 — рядок отримує канонні розшифровки, hex не зникає.
+func TestDecodeInverterBlockDecodesFaults(t *testing.T) {
+	ts := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	b := invBlock(map[int]uint16{
+		9:  0x0201,
+		16: 0x07DC, 17: 0x0003, // warning U32 = 0x7DC0003
+	})
+	r := decodeInverterBlock(20, "", b, ts)
+	if r.Warning != "0x7dc0003" {
+		t.Fatalf("warning hex = %q", r.Warning)
+	}
+	if r.WarningLabelUK != "2012 Зворотний струм стрінгу · PV стрінг 3" {
+		t.Fatalf("warning_label_uk = %q", r.WarningLabelUK)
+	}
+	if r.StatusLabelUK != "У мережі: обмеження потужності" {
+		t.Fatalf("status_label_uk = %q", r.StatusLabelUK)
+	}
+	if r.Class != InvOnGrid {
+		t.Fatalf("class = %s, want on_grid (warning не червонить)", r.Class)
+	}
+}
+
+// Нічний 0xA000 відсутній у каноні: label не деградує до hex, а падає
+// назад на §6.2-текст.
+func TestDecodeInverterBlockUnknownStatusFallsBack(t *testing.T) {
+	b := invBlock(map[int]uint16{9: 0xA000})
+	r := decodeInverterBlock(12, "", b, time.Now().UTC())
+	if r.Class != InvStandby {
+		t.Fatalf("class = %s, want standby (§6.2)", r.Class)
+	}
+	if r.StatusLabelUK != r.StatusLabel || r.StatusLabelUK == "" {
+		t.Fatalf("status_label_uk = %q, want §6.2 fallback %q", r.StatusLabelUK, r.StatusLabel)
+	}
 }
 
 func TestClassifyInverter(t *testing.T) {
@@ -139,6 +182,31 @@ func TestInverterEventsOnlyOnTransition(t *testing.T) {
 	evs = drain()
 	if len(evs) != 1 || evs[0].Code != EvInverterRecovered {
 		t.Fatalf("recovery: %v", evs)
+	}
+}
+
+// Повідомлення INVERTER_FAULT несе і hex, і канонну розшифровку
+// (цільовий формат задачі decode).
+func TestInverterFaultEventCarriesDecode(t *testing.T) {
+	s := &Service{log: slog.Default()}
+	events := make(chan Event, 4)
+	rows := []InverterSnapshot{{
+		DeviceAddress: 20, RegisterBase: 51475, Class: InvFault,
+		StatusRaw: "0x0300", StatusLabel: "аварія",
+		MajorFault: "0x7f00001", MinorFault: "0x0",
+		StatusLabelUK: "OFF: неочікуване вимкнення",
+		MajorLabelUK:  "2032 Втрата мережі · Відсутність мережі або розімкнутий AC",
+		TS:            time.Now().UTC(),
+	}}
+	s.emitInverterTransitions(context.Background(), rows, map[int]string{}, events)
+	ev := <-events
+	want := "inverter addr 20: fault (status 0x0300, major 0x7f00001, minor 0x0) — " +
+		"OFF: неочікуване вимкнення; major: 2032 Втрата мережі · Відсутність мережі або розімкнутий AC"
+	if ev.Message != want {
+		t.Fatalf("message:\n got %q\nwant %q", ev.Message, want)
+	}
+	if ev.Context["status_label_uk"] != "OFF: неочікуване вимкнення" {
+		t.Fatalf("context missing decode labels: %v", ev.Context)
 	}
 }
 

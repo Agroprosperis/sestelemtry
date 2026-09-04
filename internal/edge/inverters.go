@@ -5,8 +5,10 @@ import (
 	"encoding/binary"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
+	"github.com/nesh/sestelemetry/internal/huawei/inverterdecode"
 	"github.com/nesh/sestelemetry/internal/modbusclient"
 )
 
@@ -54,6 +56,13 @@ type InverterSnapshot struct {
 	MajorFault     string    `json:"major_fault,omitempty"`
 	MinorFault     string    `json:"minor_fault,omitempty"`
 	Warning        string    `json:"warning,omitempty"`
+	// Розшифровки з канону ems-spec (inverterdecode). Hex вище завжди
+	// лишається — decode його доповнює, не замінює. Порожньо, коли
+	// слово 0; для невідомого статусу — фолбек на §6.2-лейбл.
+	StatusLabelUK  string    `json:"status_label_uk,omitempty"`
+	MajorLabelUK   string    `json:"major_label_uk,omitempty"`
+	MinorLabelUK   string    `json:"minor_label_uk,omitempty"`
+	WarningLabelUK string    `json:"warning_label_uk,omitempty"`
 	PollOK         bool      `json:"poll_ok"`
 	PollError      *string   `json:"poll_error"`
 	TS             time.Time `json:"ts"`
@@ -77,7 +86,17 @@ func decodeInverterBlock(addr int, label string, raw []byte, ts time.Time) Inver
 
 	status := u16(9)
 	major := u32(12)
+	minor := u32(14)
+	warning := u32(16)
 	class, statusLabel := classifyInverter(status, major)
+
+	// §6.2-клас лишається джерелом істини для кольору/агрегації; канон
+	// дає людський текст. Невідомий канону статус (live ze вночі —
+	// 0xA000) не деградує лейбл до сирого hex: тримаємо §6.2-текст.
+	statusLabelUK := statusLabel
+	if st := inverterdecode.DecodeStatusU16(status); st.Known {
+		statusLabelUK = st.NameUK
+	}
 
 	return InverterSnapshot{
 		DeviceAddress:  addr,
@@ -96,9 +115,39 @@ func decodeInverterBlock(addr int, label string, raw []byte, ts time.Time) Inver
 		MajorFault:     hexU32(major),
 		MinorFault:     hexU32(u32(14)),
 		Warning:        hexU32(u32(16)),
+		StatusLabelUK:  statusLabelUK,
+		MajorLabelUK:   faultSummaryUK(major),
+		MinorLabelUK:   faultSummaryUK(minor),
+		WarningLabelUK: faultSummaryUK(warning),
 		PollOK:         true,
 		TS:             ts,
 	}
+}
+
+// faultSummaryUK: "" для нульового слова, інакше канонний summary
+// ("2012 Зворотний струм стрінгу · PV стрінг 3"; для невідомого
+// alarm_id — "Alarm ID N · Cause ID M", без вигаданих назв).
+func faultSummaryUK(v uint32) string {
+	return inverterdecode.DecodeFaultU32(v).SummaryUK
+}
+
+// decodeSuffixUK збирає розшифрований хвіст для повідомлення
+// INVERTER_FAULT: "{status}; major: {…}; minor: {…}; warning: {…}".
+func (r InverterSnapshot) decodeSuffixUK() string {
+	parts := make([]string, 0, 4)
+	if r.StatusLabelUK != "" {
+		parts = append(parts, r.StatusLabelUK)
+	}
+	if r.MajorLabelUK != "" {
+		parts = append(parts, "major: "+r.MajorLabelUK)
+	}
+	if r.MinorLabelUK != "" {
+		parts = append(parts, "minor: "+r.MinorLabelUK)
+	}
+	if r.WarningLabelUK != "" {
+		parts = append(parts, "warning: "+r.WarningLabelUK)
+	}
+	return strings.Join(parts, "; ")
 }
 
 // classifyInverter reduces the SUN2000 status enum to the UI classes
@@ -281,19 +330,38 @@ func (s *Service) emitInverterTransitions(ctx context.Context, rows []InverterSn
 			msg := fmt.Sprintf("inverter %s: %s", name, r.Class)
 			if r.Class == InvFault {
 				msg += fmt.Sprintf(" (status %s, major %s, minor %s)", r.StatusRaw, r.MajorFault, r.MinorFault)
+				// Розшифровка з канону — тим самим рядком, hex лишається.
+				// Приклад: "… — OFF: неочікуване вимкнення; major: 2032
+				// Втрата мережі · Відсутність мережі або розімкнутий AC".
+				if d := r.decodeSuffixUK(); d != "" {
+					msg += " — " + d
+				}
 			}
 			ctxMap := map[string]any{"device_address": r.DeviceAddress, "class": r.Class}
 			if r.PollError != nil {
 				ctxMap["poll_error"] = *r.PollError
+			}
+			if r.StatusLabelUK != "" {
+				ctxMap["status_label_uk"] = r.StatusLabelUK
+			}
+			if r.MajorLabelUK != "" {
+				ctxMap["major_label_uk"] = r.MajorLabelUK
+			}
+			if r.MinorLabelUK != "" {
+				ctxMap["minor_label_uk"] = r.MinorLabelUK
 			}
 			emitEvent(ctx, events, Event{
 				TS: r.TS, Severity: SevAlarm, Code: EvInverterFault,
 				Message: msg, Context: ctxMap,
 			})
 		case seen && bad(prev) && !bad(r.Class):
+			label := r.StatusLabelUK
+			if label == "" {
+				label = r.StatusLabel
+			}
 			emitEvent(ctx, events, Event{
 				TS: r.TS, Severity: SevInfo, Code: EvInverterRecovered,
-				Message: fmt.Sprintf("inverter %s recovered: %s", name, r.StatusLabel),
+				Message: fmt.Sprintf("inverter %s recovered: %s", name, label),
 				Context: map[string]any{"device_address": r.DeviceAddress, "class": r.Class},
 			})
 		}

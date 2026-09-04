@@ -547,6 +547,23 @@
   color: #475569;
 }
 
+/* Канонна розшифровка Huawei-кодів: muted-рядок ПІД hex (ніколи
+   замість нього), обрізається трикрапкою — повний текст у title. */
+.ctl-inv-declabel {
+  font-family: inherit;
+  font-size: 10.5px;
+  color: #64748b;
+  max-width: 140px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ctl-inv-decode {
+  margin-top: 4px;
+  color: #334155;
+}
+
 /* --- notices --- */
 
 .ctl-notice {
