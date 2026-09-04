@@ -109,24 +109,24 @@ func BuildForwardPlan(hours []ForwardHour, p ForwardParams) ([]ForwardStep, erro
 	startKwh := clampFloat(p.StartSocPct/100*p.CapacityKwh, minKwh, maxKwh)
 	start := int(math.Round((startKwh - minKwh) / step))
 
-	// Terminal value: energy left above the floor is worth what it can
-	// displace later (mean import price over the horizon), discounted
-	// by the discharge efficiency. Prevents both the "dump everything
-	// before midnight" and the "never discharge" end-of-horizon biases.
-	meanImport := 0.0
-	tradable := 0
+	// Terminal value (spec §2.4, SHADOW_SOC): leftover energy above the
+	// floor is valued at the CHEAPEST all-in import in the horizon —
+	// the replacement cost of a refill. One shadow price, shared with
+	// the day-effect waterfall; no mean, no efficiency discount (an
+	// earlier mean×η×0.9 variant over-valued the leftover and made the
+	// DP hold SOC instead of exporting into expensive evenings).
+	minImport := 0.0
 	for _, h := range hours {
-		if h.RdnUahPerKwh != nil {
-			imp, _ := ImportExportPrices(p.Tariffs, *h.RdnUahPerKwh)
-			meanImport += imp
-			tradable++
+		if h.RdnUahPerKwh == nil {
+			continue
+		}
+		imp, _ := ImportExportPrices(p.Tariffs, *h.RdnUahPerKwh)
+		if minImport == 0 || imp < minImport {
+			minImport = imp
 		}
 	}
-	if tradable > 0 {
-		meanImport /= float64(tradable)
-	}
 	terminalValue := func(level int) float64 {
-		return (socOf(level) - minKwh) * meanImport * etaD * 0.9
+		return (socOf(level) - minKwh) * minImport
 	}
 
 	negInf := math.Inf(-1)
@@ -257,7 +257,13 @@ func BuildForwardPlan(hours []ForwardHour, p ForwardParams) ([]ForwardStep, erro
 		}
 		st.EssKw = a.dl + a.dg - (a.cp + a.cg)
 		if st.EssKw > 1e-9 {
-			st.Action = "discharge"
+			// Manifest action enum (spec): a discharge hour that sells
+			// past the local deficit is "export", not plain "discharge".
+			if a.dg > 1e-9 {
+				st.Action = "export"
+			} else {
+				st.Action = "discharge"
+			}
 		} else if st.EssKw < -1e-9 {
 			st.Action = "charge"
 		}

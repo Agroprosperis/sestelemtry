@@ -82,6 +82,59 @@ func TestForwardPlanExportsWhenAllowed(t *testing.T) {
 	}
 }
 
+// Spec §2.4 terminal (SHADOW_SOC = min import): selling at a net export
+// price above the cheapest refill must beat holding SOC past the
+// horizon. The earlier mean×η×0.9 terminal held here (export 4.0 <
+// mean-based ≈5.98) and never showed the export gain.
+func TestForwardPlanTerminalIsMinImportNotMean(t *testing.T) {
+	start := time.Date(2026, 6, 3, 0, 0, 0, 0, time.UTC)
+	hours := fwdHours(12, start,
+		func(i int) *float64 {
+			if i == 11 {
+				return pricePtr(2.0) // найдешевший дозаряд у горизонті
+			}
+			return pricePtr(8.0)
+		},
+		func(int) float64 { return 0 },
+		func(int) float64 { return 0 },
+	)
+	steps, err := BuildForwardPlan(hours, ForwardParams{
+		// Export = РДН × 0.5 → 4.0 у дорогі години: вище min імпорту
+		// (2.0), нижче старого mean-терміналу (~5.98).
+		Tariffs:       Tariffs{ExportDiscount: 0.5},
+		CapacityKwh:   400,
+		PowerKw:       200,
+		SocMinPct:     20,
+		SocMaxPct:     90,
+		StartSocPct:   90,
+		ExportAllowed: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var exported, exportedCheap float64
+	sawExportAction := false
+	for i, s := range steps {
+		if i == 11 {
+			exportedCheap += s.DischargeGridKwh
+		} else {
+			exported += s.DischargeGridKwh
+		}
+		if s.DischargeGridKwh > 1e-9 && s.Action == "export" {
+			sawExportAction = true
+		}
+	}
+	if exported < 100 {
+		t.Fatalf("exported %.1f kWh at 8.0 hours, want a real sell-down (min-import terminal)", exported)
+	}
+	if exportedCheap > 1 {
+		t.Fatalf("sold %.1f kWh in the cheapest hour", exportedCheap)
+	}
+	if !sawExportAction {
+		t.Fatal("export hours must carry action=export for the manifest")
+	}
+}
+
 func TestForwardPlanArbitrage(t *testing.T) {
 	// Flat 100 kW load, no PV. Cheap night (1 UAH/kWh, hours 0–5),
 	// expensive evening (10 UAH/kWh, hours 18–21), mid otherwise. The
@@ -176,11 +229,19 @@ func TestForwardPlanNoExportCapsDischargeAtLoad(t *testing.T) {
 }
 
 func TestForwardPlanPvSurplusCharges(t *testing.T) {
-	// Midday PV surplus (300 PV vs 100 load) with flat prices: the
-	// evening deficit should be served by PV energy stored midday.
+	// Midday PV surplus (300 PV vs 100 load); the evening is pricier
+	// than the cheapest hour, so the deficit should be served by PV
+	// energy stored midday. (With perfectly flat prices the §2.4
+	// min-import terminal correctly prefers holding: cycling would only
+	// burn round-trip losses.)
 	start := time.Date(2026, 6, 3, 0, 0, 0, 0, time.UTC)
 	hours := fwdHours(24, start,
-		func(int) *float64 { return pricePtr(5.0) },
+		func(i int) *float64 {
+			if i > 15 {
+				return pricePtr(6.0)
+			}
+			return pricePtr(5.0)
+		},
 		func(i int) float64 {
 			if i >= 10 && i <= 15 {
 				return 300
