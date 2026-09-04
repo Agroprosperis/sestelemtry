@@ -506,6 +506,9 @@ func (h *Handlers) applyEdgeSiteParams(ctx context.Context, siteID string, in *e
 	if err != nil {
 		return err
 	}
+	// Trusted SL PV rating (40396) caps every later override (§4.1);
+	// resolveEdgeRatings returns exactly it (0 = not polled yet).
+	slPvKw := in.PvRatedKw
 	in.ChargeMaxKw, in.DischargeMaxKw = in.PowerKw, in.PowerKw
 	in.SocMin, in.SocMax = 20.0, 90.0
 	// The pilot sites sell PV surplus at the export tariff, so BESS
@@ -516,6 +519,9 @@ func (h *Handlers) applyEdgeSiteParams(ctx context.Context, siteID string, in *e
 	if s, saved := h.loadEdgeSiteSettings(ctx, siteID); saved && s != nil {
 		if s.PvRatedKw > 0 {
 			in.PvRatedKw = s.PvRatedKw
+			if slPvKw > 0 && in.PvRatedKw > slPvKw {
+				in.PvRatedKw = slPvKw
+			}
 		}
 		if s.AutoChargeMaxKw > 0 {
 			in.ChargeMaxKw = s.AutoChargeMaxKw
@@ -705,30 +711,38 @@ func (h *Handlers) resolveEdgeTariffs(ctx context.Context, orgID string, day tim
 }
 
 // resolveEdgeRatings finds the ESS/PV passport numbers: the live plant
-// inventory (Modbus 40396/40398/40484) first, tariff metadata second.
+// per diagnostics spec §4.1: the passport (prod tariff metadata) is the
+// policy source; trusted SmartLogger registers only cap it. 40398 (ESS
+// rated kW) is NOT trusted until its semantics are settled (ze reports
+// 1123 vs the 864 passport), so power never comes from the SL.
 func (h *Handlers) resolveEdgeRatings(ctx context.Context, orgID string, t economics.Tariffs) (capacityKwh, powerKw, pvRatedKw float64, err error) {
+	// Trusted SL inventory (40484 kWh, 40396 PV kW) — hard caps only.
+	var slCapacityKwh, slPvKw float64
 	if h.store != nil {
 		if inv, ok, err := h.store.LatestPlantInventory(ctx, orgID); err == nil && ok {
 			if inv.ESSRatedKwh != nil {
-				capacityKwh = *inv.ESSRatedKwh
-			}
-			if inv.ESSRatedKw != nil {
-				powerKw = *inv.ESSRatedKw
+				slCapacityKwh = *inv.ESSRatedKwh
 			}
 			if inv.PVRatedKw != nil {
-				pvRatedKw = *inv.PVRatedKw
+				slPvKw = *inv.PVRatedKw
 			}
 		}
 	}
-	if capacityKwh <= 0 && t.EssCapacityKwh > 0 {
+
+	// Passport: tariff metadata maintained in prod (never git YAML).
+	if t.EssCapacityKwh > 0 {
 		// Tariffs store the usable 10–90% window; scale to nameplate.
 		capacityKwh = t.EssCapacityKwh / 0.8
 	}
-	if powerKw <= 0 {
-		powerKw = t.EssPowerLimitKw
+	powerKw = t.EssPowerLimitKw
+	pvRatedKw = slPvKw
+
+	// Trusted SL values cap the passport (>0 only; ze had 40488=0).
+	if slCapacityKwh > 0 && (capacityKwh <= 0 || slCapacityKwh < capacityKwh) {
+		capacityKwh = slCapacityKwh
 	}
 	if capacityKwh <= 0 || powerKw <= 0 {
-		return 0, 0, 0, fmt.Errorf("no ESS ratings for %s: need plant inventory or tariffs (ess_capacity_kwh / ess_power_limit_kw)", orgID)
+		return 0, 0, 0, fmt.Errorf("no ESS ratings for %s: need tariffs passport (ess_capacity_kwh / ess_power_limit_kw) or trusted plant inventory", orgID)
 	}
 	return capacityKwh, powerKw, pvRatedKw, nil
 }

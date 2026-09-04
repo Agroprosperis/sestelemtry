@@ -90,9 +90,15 @@ type engineParams struct {
 	preset         string
 	planSource     string
 	plan           *Plan
-	socMinPct      float64
-	socMaxPct      float64
-	ratedPowerKw   float64
+	socMinPct float64
+	socMaxPct float64
+	// Policy power limits (diagnostics spec §4.1): the manifest carries
+	// the passport / admin «Обмеження» ladder resolved by the cloud.
+	// 0 = no policy known (no manifest yet) — then only the dynamic SL
+	// registers 40490/40492 cap the power and SHADOW_ANOMALY is muted.
+	// Never sourced from the device YAML (the «324» incident).
+	chargeMaxKw    float64
+	dischargeMaxKw float64
 	pvRatedKw      float64
 	targetImportKw float64
 	exportAllowed  bool
@@ -104,12 +110,21 @@ func resolveParams(now time.Time, m *Manifest, cfg *Config) engineParams {
 		planSource:     "config",
 		socMinPct:      cfg.Limits.Bess.SocMinEconomicPct,
 		socMaxPct:      cfg.Limits.Bess.SocMaxEconomicPct,
-		ratedPowerKw:   cfg.Limits.Bess.RatedPowerKw,
 		pvRatedKw:      cfg.Limits.PV.RatedKw,
 		targetImportKw: cfg.Limits.Grid.TargetImportKw,
 	}
 	if m == nil {
 		return p
+	}
+	// Policy power limits come only from the manifest (§4.1) and stay
+	// in force even when it expires: the passport ladder does not
+	// become invalid with the plan window, and a stale cap is safer
+	// than none.
+	if m.Limits.EssChargeMaxKw > 0 {
+		p.chargeMaxKw = m.Limits.EssChargeMaxKw
+	}
+	if m.Limits.EssDischargeMaxKw > 0 {
+		p.dischargeMaxKw = m.Limits.EssDischargeMaxKw
 	}
 	if !m.ActiveAt(now) {
 		// Expired manifest → safe fallback (spec: self_consumption_safe,
@@ -190,11 +205,13 @@ func Decide(t Tick, m *Manifest, cfg *Config) (Decision, []Event) {
 		desired = desiredPower(t, params, &d)
 	}
 
-	if params.ratedPowerKw > 0 && math.Abs(desired) > params.ratedPowerKw*1.5 {
+	// SHADOW_ANOMALY versus the POLICY limit (§4.1) — never the device
+	// YAML. No known policy (no manifest yet) → do not raise at all.
+	if policyKw := math.Max(params.chargeMaxKw, params.dischargeMaxKw); policyKw > 0 && math.Abs(desired) > policyKw*1.5 {
 		d.Anomaly = true
 		events = append(events, Event{
 			TS: t.TS, Severity: SevWarning, Code: EvShadowAnomaly,
-			Message: fmt.Sprintf("virtual command %.1f kW exceeds 1.5x rated %.1f kW", desired, params.ratedPowerKw),
+			Message: fmt.Sprintf("virtual command %.1f kW exceeds 1.5x policy limit %.1f kW", desired, policyKw),
 			Context: map[string]any{"reason_code": d.ReasonCode},
 		})
 	}
@@ -308,22 +325,24 @@ func clampBess(t Tick, params engineParams, p float64, clamps *[]string) float64
 		return 0
 	}
 
-	// Dynamic SmartLogger limits win over the passport rating.
-	dischargeCap := params.ratedPowerKw
-	if t.ESSDischargeMaxKw != nil {
-		dischargeCap = *t.ESSDischargeMaxKw
+	// §4.1: команда = min(план, ліміт політики, 40490/40492). Policy
+	// (manifest: паспорт/«Обмеження») and the dynamic SL registers cap
+	// independently; the device YAML is never a power source.
+	if p > 0 && params.dischargeMaxKw > 0 && p > params.dischargeMaxKw {
+		note(fmt.Sprintf("ліміт політики розряду %.0f кВт", params.dischargeMaxKw))
+		p = params.dischargeMaxKw
 	}
-	chargeCap := params.ratedPowerKw
-	if t.ESSChargeMaxKw != nil {
-		chargeCap = *t.ESSChargeMaxKw
+	if p < 0 && params.chargeMaxKw > 0 && -p > params.chargeMaxKw {
+		note(fmt.Sprintf("ліміт політики заряду %.0f кВт", params.chargeMaxKw))
+		p = -params.chargeMaxKw
 	}
-	if p > 0 && dischargeCap > 0 && p > dischargeCap {
-		note(fmt.Sprintf("ліміт розряду %.0f кВт (40492)", dischargeCap))
-		p = dischargeCap
+	if p > 0 && t.ESSDischargeMaxKw != nil && *t.ESSDischargeMaxKw > 0 && p > *t.ESSDischargeMaxKw {
+		note(fmt.Sprintf("ліміт розряду %.0f кВт (40492)", *t.ESSDischargeMaxKw))
+		p = *t.ESSDischargeMaxKw
 	}
-	if p < 0 && chargeCap > 0 && -p > chargeCap {
-		note(fmt.Sprintf("ліміт заряду %.0f кВт (40490)", chargeCap))
-		p = -chargeCap
+	if p < 0 && t.ESSChargeMaxKw != nil && *t.ESSChargeMaxKw > 0 && -p > *t.ESSChargeMaxKw {
+		note(fmt.Sprintf("ліміт заряду %.0f кВт (40490)", *t.ESSChargeMaxKw))
+		p = -*t.ESSChargeMaxKw
 	}
 
 	pvKnown := t.PVPowerKw != nil && t.LoadPowerKw != nil

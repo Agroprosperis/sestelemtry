@@ -142,6 +142,12 @@ type PVLimits struct {
 }
 
 type BessLimits struct {
+	// RatedPowerKw/RatedCapacityKwh are ILLUSTRATIVE FORM ONLY
+	// (diagnostics spec §4.1): the shadow engine takes power policy
+	// exclusively from manifest limits (паспорт/«Обмеження» ladder in
+	// the cloud) and the dynamic SL registers 40490/40492. Shown on the
+	// local console for reference; never used to clamp or to raise
+	// SHADOW_ANOMALY (the ze «324» incident).
 	RatedPowerKw      float64 `yaml:"rated_power_kw"`
 	RatedCapacityKwh  float64 `yaml:"rated_capacity_kwh"`
 	SocMinEconomicPct float64 `yaml:"soc_min_economic_pct"`

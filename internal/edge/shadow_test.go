@@ -189,9 +189,12 @@ func TestPlanGridChargeUnclampedWithinTarget(t *testing.T) {
 func TestExpiredManifestFallsBackToSafePreset(t *testing.T) {
 	m := arbitrageManifest(-300)
 	m.ValidUntil = testTS.Add(-time.Minute)
+	m.Limits.EssChargeMaxKw = 324
+	m.Limits.EssDischargeMaxKw = 324
 	// The expired plan wanted a -300 kW grid charge; fallback must
 	// ignore it. Serving the local deficit from the battery stays
-	// allowed (that IS self-consumption), capped by rated power.
+	// allowed (that IS self-consumption), capped by the manifest policy
+	// limit, which persists past expiry (§4.1 — stale cap beats none).
 	tick := testTick(map[string]float64{
 		"active_pv_power_kw": 0, "load_power_kw": 500, "soc_percent": 40,
 	}, QualityOK)
@@ -203,7 +206,97 @@ func TestExpiredManifestFallsBackToSafePreset(t *testing.T) {
 		t.Fatalf("p = %v: fallback must never grid-charge", d.PBessVirtualKw)
 	}
 	if d.PBessVirtualKw != 324 {
-		t.Fatalf("p = %v, want 324 (deficit discharge at rated cap)", d.PBessVirtualKw)
+		t.Fatalf("p = %v, want 324 (deficit discharge at policy cap)", d.PBessVirtualKw)
+	}
+}
+
+// §4.1: policy limits come from the manifest ladder, never device YAML.
+func TestPolicyLimitClampsPlanDischarge(t *testing.T) {
+	m := arbitrageManifest(500)
+	m.Limits.EssDischargeMaxKw = 300
+	tick := testTick(map[string]float64{
+		"active_pv_power_kw": 0, "load_power_kw": 800, "soc_percent": 70,
+	}, QualityOK)
+	d, _ := Decide(tick, m, testCfg())
+	if d.PBessVirtualKw != 300 {
+		t.Fatalf("p = %v, want 300 (policy discharge cap)", d.PBessVirtualKw)
+	}
+	found := false
+	for _, c := range d.Clamps {
+		if strings.Contains(c, "ліміт політики розряду") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("policy clamp not recorded: %v", d.Clamps)
+	}
+}
+
+func TestAnomalyComparesWithPolicyLimit(t *testing.T) {
+	m := arbitrageManifest(200)
+	m.Limits.EssChargeMaxKw = 100
+	m.Limits.EssDischargeMaxKw = 100
+	tick := testTick(map[string]float64{
+		"active_pv_power_kw": 0, "load_power_kw": 1000, "soc_percent": 70,
+	}, QualityOK)
+	d, evs := Decide(tick, m, testCfg())
+	if !d.Anomaly {
+		t.Fatal("desired 200 > 1.5×policy 100 must flag anomaly")
+	}
+	found := false
+	for _, ev := range evs {
+		if ev.Code == EvShadowAnomaly && strings.Contains(ev.Message, "policy limit 100.0") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("SHADOW_ANOMALY event with policy limit missing: %v", evs)
+	}
+	if d.PBessVirtualKw != 100 {
+		t.Fatalf("p = %v, want 100 (policy cap)", d.PBessVirtualKw)
+	}
+}
+
+// No manifest policy and no dynamic registers → anomaly is muted and
+// power is not clamped by any YAML rated figure (§4.1).
+func TestNoPolicyMutesAnomalyAndRatedClamp(t *testing.T) {
+	m := arbitrageManifest(900)
+	tick := testTick(map[string]float64{
+		"active_pv_power_kw": 0, "load_power_kw": 2000, "soc_percent": 70,
+	}, QualityOK)
+	d, evs := Decide(tick, m, testCfg())
+	if d.Anomaly {
+		t.Fatal("no policy known — anomaly must not be raised")
+	}
+	for _, ev := range evs {
+		if ev.Code == EvShadowAnomaly {
+			t.Fatalf("unexpected SHADOW_ANOMALY: %v", ev)
+		}
+	}
+	if d.PBessVirtualKw != 900 {
+		t.Fatalf("p = %v, want 900 (no YAML rated clamp)", d.PBessVirtualKw)
+	}
+}
+
+// Dynamic 40490/40492 keep capping even without a manifest policy.
+func TestDynamicRegistersClampWithoutPolicy(t *testing.T) {
+	m := arbitrageManifest(500)
+	tick := testTick(map[string]float64{
+		"active_pv_power_kw": 0, "load_power_kw": 800, "soc_percent": 70,
+		"ess_discharge_max_kw": 150,
+	}, QualityOK)
+	d, _ := Decide(tick, m, testCfg())
+	if d.PBessVirtualKw != 150 {
+		t.Fatalf("p = %v, want 150 (40492 dynamic cap)", d.PBessVirtualKw)
+	}
+	found := false
+	for _, c := range d.Clamps {
+		if strings.Contains(c, "(40492)") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("dynamic clamp not recorded: %v", d.Clamps)
 	}
 }
 
