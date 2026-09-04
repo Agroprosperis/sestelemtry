@@ -981,6 +981,54 @@
   color: #15803d;
 }
 
+/* context chart card (mockup plan-forecast-card 1:1) */
+.plan-forecast-card {
+  padding: 10px 12px 12px;
+  min-width: 0;
+}
+
+.plan-forecast-chart-wrap {
+  margin-top: 8px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+  padding: 4px 2px 0;
+  overflow-x: auto;
+}
+
+.plan-forecast-svg {
+  display: block;
+  width: 100%;
+  min-width: 520px;
+  height: auto;
+}
+
+.dam-chart-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.dam-chart-head h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.dam-chart-meta {
+  color: #475569;
+  font-size: 12px;
+}
+
+.dam-chart-meta strong {
+  color: #0f172a;
+  font-weight: 600;
+}
+
 /* context chart legend chips (mockup plan-forecast-legend) */
 .planner-forecast-legend {
   display: inline-flex;
@@ -1004,13 +1052,13 @@
 
 .planner-forecast-legend i.rdn {
   background: #3b82f6;
-  opacity: 0.35;
+  opacity: 0.5;
 }
 
 .planner-forecast-legend i.pv {
   height: 0;
   width: 18px;
-  border-top: 2px solid #f59e0b;
+  border-top: 2px dashed #16a34a;
   background: none;
   border-radius: 0;
 }
