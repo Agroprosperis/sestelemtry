@@ -658,13 +658,18 @@ func (h *Handlers) publishEdgeManifest(ctx context.Context, siteID string, overr
 // edgeManifestID derives a deterministic content id: same plan → same
 // id → the edge's ETag poll sees 304 and nothing is re-applied.
 func edgeManifestID(siteID string, horizonEnd time.Time, doc edgeManifestDoc) string {
+	// Every dispatch-relevant field must be here: what the hash misses
+	// never reaches the edge (live bug 2026-09-04 — export_allowed
+	// flipped, id stayed, publish no-oped until the plan changed).
 	hashable := struct {
-		SiteID    string       `json:"site_id"`
-		Preset    string       `json:"preset"`
-		Plan      *edgePlanDoc `json:"plan"`
-		Limits    any          `json:"limits"`
-		SocPolicy any          `json:"soc_policy"`
-	}{siteID, doc.Preset, doc.Plan, doc.Limits, doc.SocPolicy}
+		SiteID        string       `json:"site_id"`
+		Preset        string       `json:"preset"`
+		ExportAllowed bool         `json:"export_allowed"`
+		Plan          *edgePlanDoc `json:"plan"`
+		Limits        any          `json:"limits"`
+		GridLimits    any          `json:"grid_limits"`
+		SocPolicy     any          `json:"soc_policy"`
+	}{siteID, doc.Preset, doc.ExportAllowed, doc.Plan, doc.Limits, doc.GridLimits, doc.SocPolicy}
 	raw, _ := json.Marshal(hashable)
 	sum := sha256.Sum256(raw)
 	return fmt.Sprintf("%s-%s-%s", siteID, horizonEnd.Format("20060102"), hex.EncodeToString(sum[:])[:8])
