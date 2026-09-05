@@ -166,12 +166,21 @@
   }
 }
 
+.ctl-topbar-end {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+
 .ctl-topbar-chips {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  margin-left: auto;
   flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .ctl-chip {
@@ -231,17 +240,6 @@
 
 .ctl-topbar-menu {
   position: relative;
-}
-
-/* When the chips block isn't rendered (economics), the menu is the
-   element that pins itself to the right edge instead. Theme toggle
-   sits after chips/menu; if neither is present it pins itself. */
-.ctl-topbar-mode + .ctl-topbar-menu {
-  margin-left: auto;
-}
-
-.ctl-topbar-mode + .theme-toggle {
-  margin-left: auto;
 }
 
 .ctl-topbar-menu-btn {

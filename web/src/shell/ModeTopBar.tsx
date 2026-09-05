@@ -180,6 +180,7 @@ export function ModeTopBar({
         </div>
       </div>
 
+      <div className="ctl-topbar-end">
       {showChips && (
       <div className="ctl-topbar-chips">
         {st && (
@@ -282,6 +283,7 @@ export function ModeTopBar({
       )}
 
       <ThemeToggle />
+      </div>
     </div>
     </div>
   )
