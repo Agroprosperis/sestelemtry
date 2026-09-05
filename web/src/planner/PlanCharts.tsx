@@ -1,6 +1,7 @@
 import { useMemo, type ReactNode } from 'react'
 import type { PlanPreview, PlanPreviewHour } from './plannerClient'
 import { useChartChrome } from '../theme/useChartChrome'
+import { useTheme } from '../theme/theme'
 
 // ContextChart — «РДН + прогноз СЕС + load»: custom SVG ported 1:1
 // from the mockup's buildPlanForecastChartSvg (cloud_console.html):
@@ -36,7 +37,13 @@ function weatherKind(h: PlanPreviewHour): string {
   return 'cloudy'
 }
 
-function rdnTierText(p: number): string {
+function rdnTierText(p: number, dark: boolean): string {
+  if (dark) {
+    if (p >= 8) return '#fecaca'
+    if (p >= 4) return '#fde68a'
+    if (p >= 1.5) return '#93c5fd'
+    return '#93c5fd'
+  }
   if (p >= 8) return '#991b1b'
   if (p >= 4) return '#854d0e'
   if (p >= 1.5) return '#1e40af'
@@ -56,6 +63,8 @@ function cloudDescription(hours: PlanPreviewHour[]): string {
 
 export function ContextChart({ preview, children }: { preview: PlanPreview; children?: ReactNode }) {
   const chrome = useChartChrome()
+  const { resolved } = useTheme()
+  const dark = resolved === 'dark'
   const hours = preview.hours
   const n = hours.length
 
@@ -103,11 +112,11 @@ export function ContextChart({ preview, children }: { preview: PlanPreview; chil
 
   const parts: ReactNode[] = []
 
-  // Weather strip: light band, one icon + °C per hour on the bar grid.
+  // Weather strip: one icon + °C per hour on the bar grid.
   const hasWeather = hours.some((h) => h.weather)
   parts.push(
     <g key="wband">
-      <rect x={ML} y={0} width={ix1 - ML} height={WEATHER} fill="#f0f9ff" />
+      <rect x={ML} y={0} width={ix1 - ML} height={WEATHER} fill={chrome.weatherBand} />
       <line x1={ML} y1={WEATHER} x2={ix1} y2={WEATHER} stroke={chrome.grid} />
     </g>,
   )
@@ -214,7 +223,7 @@ export function ContextChart({ preview, children }: { preview: PlanPreview; chil
           textAnchor="middle"
           fontSize={8.5}
           fontWeight={p >= 8 ? 700 : 600}
-          fill={rdnTierText(p)}
+          fill={rdnTierText(p, dark)}
         >
           {fmtRdnLabel(p)}
         </text>,

@@ -20,5 +20,6 @@ export function chartChrome() {
     faint: cssVar('--text-faint', '#94a3b8'),
     neutral: cssVar('--border-strong', '#cbd5e1'),
     onAccent: cssVar('--on-accent', '#ffffff'),
+    weatherBand: cssVar('--bg-muted', '#f1f5f9'),
   }
 }
