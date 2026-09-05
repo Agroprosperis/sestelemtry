@@ -13,6 +13,7 @@ import {
   YAxis,
 } from 'recharts'
 import type { EconomicsAnnualResponse } from '../../api'
+import { useChartChrome } from '../../theme/useChartChrome'
 import { OptimumInfo } from '../monthly/EconomicsMonthlyView'
 import {
   formatMonthTitle,
@@ -208,6 +209,7 @@ type CapexPaybackTooltipProps = {
 }
 
 function CapexPaybackTooltip({ active, payload, staged }: CapexPaybackTooltipProps) {
+  const chrome = useChartChrome()
   if (!active || !payload?.length) return null
   const row = payload[0].payload
   const cum = row.factCum ?? row.forecastCum
@@ -238,7 +240,7 @@ function CapexPaybackTooltip({ active, payload, staged }: CapexPaybackTooltipPro
       ) : null}
       {staged ? (
         <div className="economics-trend-tip-row">
-          <i style={{ background: '#64748b' }} />
+          <i style={{ background: chrome.muted }} />
           <span>CAPEX на цей місяць</span>
           <b>{formatUah(row.capex)}</b>
         </div>
@@ -322,6 +324,7 @@ function investmentStagesNote(n: number): string {
 const Q_ROMAN = ['I', 'II', 'III', 'IV']
 
 export function EconomicsPaybackView({ data, capexUah, capexSteps, plannedPaybackMonths }: Props) {
+  const chrome = useChartChrome()
   const [grain, setGrain] = useState<EffectGrain>('month')
 
   const model = useMemo(
@@ -565,7 +568,7 @@ export function EconomicsPaybackView({ data, capexUah, capexSteps, plannedPaybac
                 <span><i style={{ background: '#2f6fed' }} />Фактичний накопичений EBITDA</span>
                 <span><i style={{ background: '#60a5fa' }} />Прогноз накопиченого EBITDA</span>
                 <span>
-                  <i style={{ background: '#64748b' }} />
+                  <i style={{ background: chrome.muted }} />
                   CAPEX ({uahShortHrn(capexNow)}
                   {staged ? ', етапами' : ''})
                 </span>
@@ -574,31 +577,31 @@ export function EconomicsPaybackView({ data, capexUah, capexSteps, plannedPaybac
             </div>
           <ResponsiveContainer width="100%" height={320}>
             <ComposedChart data={paybackRows} margin={{ top: 18, right: 18, bottom: 0, left: 0 }}>
-              <CartesianGrid strokeDasharray="2 5" stroke="#e7ecf2" vertical={false} />
+              <CartesianGrid strokeDasharray="2 5" stroke={chrome.grid} vertical={false} />
               <XAxis
                 type="number"
                 dataKey="t"
                 domain={[0, tMax]}
                 ticks={timeTicks}
                 tickFormatter={tickLabel}
-                tick={{ fontSize: 11, fill: '#8a94a6' }}
+                tick={{ fontSize: 11, fill: chrome.tick }}
                 tickLine={false}
                 axisLine={false}
               />
               <YAxis
-                tick={{ fontSize: 11, fill: '#98a2b3' }}
+                tick={{ fontSize: 11, fill: chrome.axis }}
                 width={56}
                 tickLine={false}
                 axisLine={false}
                 tickFormatter={mainTick}
                 domain={[0, (dataMax: number) => Math.max(dataMax, capexMax) * 1.08]}
               />
-              <Tooltip content={<CapexPaybackTooltip staged={staged} />} cursor={{ stroke: '#cbd5e1' }} />
+              <Tooltip content={<CapexPaybackTooltip staged={staged} />} cursor={{ stroke: chrome.cursorStroke }} />
               {staged ? (
                 <Line
                   type="stepAfter"
                   dataKey="capex"
-                  stroke="#64748b"
+                  stroke={chrome.muted}
                   strokeWidth={1.4}
                   dot={false}
                   activeDot={false}
@@ -607,15 +610,15 @@ export function EconomicsPaybackView({ data, capexUah, capexSteps, plannedPaybac
               ) : (
                 <ReferenceLine
                   y={capexNow}
-                  stroke="#64748b"
+                  stroke={chrome.muted}
                   strokeWidth={1.4}
-                  label={{ value: `CAPEX ${uahShortHrn(capexNow)}`, position: 'insideTopLeft', fontSize: 11, fill: '#475569' }}
+                  label={{ value: `CAPEX ${uahShortHrn(capexNow)}`, position: 'insideTopLeft', fontSize: 11, fill: chrome.label }}
                 />
               )}
               {todayT !== null && todayT > 0 ? (
                 <ReferenceLine
                   x={todayT}
-                  stroke="#64748b"
+                  stroke={chrome.zero}
                   strokeWidth={1.2}
                   strokeDasharray="4 4"
                   // The fact window is often a thin slice at the left of a
@@ -623,7 +626,7 @@ export function EconomicsPaybackView({ data, capexUah, capexSteps, plannedPaybac
                   // the line where there is room (for a vertical reference
                   // line "insideTopLeft" anchors the text start at the
                   // line, extending rightwards).
-                  label={{ value: 'Сьогодні', position: 'insideTopLeft', fontSize: 11, fill: '#475569', dx: 4 }}
+                  label={{ value: 'Сьогодні', position: 'insideTopLeft', fontSize: 11, fill: chrome.label, dx: 4 }}
                 />
               ) : null}
               {paybackT !== null ? (
@@ -653,7 +656,7 @@ export function EconomicsPaybackView({ data, capexUah, capexSteps, plannedPaybac
                   y={startRow.factCum ?? 0}
                   r={3.5}
                   fill="#12b76a"
-                  stroke="#fff"
+                  stroke={chrome.onAccent}
                   strokeWidth={1.5}
                   label={{ value: 'Початок експлуатації', position: 'right', fontSize: 10, fill: '#12b76a' }}
                 />
@@ -664,13 +667,13 @@ export function EconomicsPaybackView({ data, capexUah, capexSteps, plannedPaybac
                   y={allTimeEbitda}
                   r={4}
                   fill="#2f6fed"
-                  stroke="#fff"
+                  stroke={chrome.onAccent}
                   strokeWidth={1.5}
                   label={{ value: `Повернуто ${uahShortHrn(allTimeEbitda)}`, position: 'top', fontSize: 11, fill: '#2f6fed', dy: -6 }}
                 />
               ) : null}
               {paybackT !== null ? (
-                <ReferenceDot x={paybackT} y={paybackCapex} r={4.5} fill="#7c3aed" stroke="#fff" strokeWidth={1.5} />
+                <ReferenceDot x={paybackT} y={paybackCapex} r={4.5} fill="#7c3aed" stroke={chrome.onAccent} strokeWidth={1.5} />
               ) : null}
               {paybackT !== null ? (
                 // Invisible anchor that hangs the "Точка окупності" caption
@@ -753,17 +756,17 @@ export function EconomicsPaybackView({ data, capexUah, capexSteps, plannedPaybac
           </div>
           <ResponsiveContainer width="100%" height={240}>
             <ComposedChart data={effectRows} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
-              <CartesianGrid strokeDasharray="2 5" stroke="#e7ecf2" vertical={false} />
+              <CartesianGrid strokeDasharray="2 5" stroke={chrome.grid} vertical={false} />
               <XAxis
                 dataKey="label"
-                tick={{ fontSize: 11, fill: '#8a94a6' }}
+                tick={{ fontSize: 11, fill: chrome.tick }}
                 tickLine={false}
                 axisLine={false}
                 interval={effectRows.length > 16 ? Math.ceil(effectRows.length / 16) - 1 : 0}
               />
               <YAxis
                 yAxisId="period"
-                tick={{ fontSize: 11, fill: '#98a2b3' }}
+                tick={{ fontSize: 11, fill: chrome.axis }}
                 width={72}
                 tickLine={false}
                 axisLine={false}
@@ -774,7 +777,7 @@ export function EconomicsPaybackView({ data, capexUah, capexSteps, plannedPaybac
               <YAxis
                 yAxisId="cum"
                 orientation="right"
-                tick={{ fontSize: 11, fill: '#98a2b3' }}
+                tick={{ fontSize: 11, fill: chrome.axis }}
                 width={72}
                 tickLine={false}
                 axisLine={false}
@@ -783,9 +786,9 @@ export function EconomicsPaybackView({ data, capexUah, capexSteps, plannedPaybac
                 tickFormatter={(v: number) => axisTickLabel(cumAxis, v)}
               />
               {effectAxis.domain[0] < 0 ? (
-                <ReferenceLine yAxisId="period" y={0} stroke="#cbd5e1" strokeWidth={1} />
+                <ReferenceLine yAxisId="period" y={0} stroke={chrome.zero} strokeWidth={1} />
               ) : null}
-              <Tooltip content={<EffectTooltip />} cursor={{ fill: 'rgba(148, 163, 184, 0.12)' }} />
+              <Tooltip content={<EffectTooltip />} cursor={{ fill: chrome.cursor }} />
               <Bar
                 yAxisId="period"
                 dataKey="periodFact"
@@ -810,7 +813,7 @@ export function EconomicsPaybackView({ data, capexUah, capexSteps, plannedPaybac
                 dataKey="cum"
                 stroke="#2f6fed"
                 strokeWidth={1.8}
-                dot={{ r: 2.4, fill: '#fff', stroke: '#2f6fed', strokeWidth: 1.4 }}
+                dot={{ r: 2.4, fill: chrome.onAccent, stroke: '#2f6fed', strokeWidth: 1.4 }}
               />
             </ComposedChart>
           </ResponsiveContainer>

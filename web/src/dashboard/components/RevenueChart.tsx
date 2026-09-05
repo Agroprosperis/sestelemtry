@@ -10,6 +10,7 @@ import {
 } from 'recharts'
 import { formatChartNumber } from '../format'
 import type { RangePreset } from '../range'
+import { useChartChrome } from '../../theme/useChartChrome'
 import type { EnergyRow } from '../transforms/buckets'
 import type { DAMChartRow } from '../transforms/dam'
 import { revenueChartRows, totalRevenue } from '../transforms/revenue'
@@ -47,6 +48,7 @@ function xAxisInterval(preset: RangePreset): number {
 }
 
 export function RevenueChart({ energySeries, damSeries, preset, loading = false }: Props) {
+  const chrome = useChartChrome()
   const series = useMemo(
     () => revenueChartRows(energySeries, damSeries),
     [energySeries, damSeries],
@@ -87,7 +89,7 @@ export function RevenueChart({ energySeries, damSeries, preset, loading = false 
                   <stop offset="100%" stopColor={REVENUE_FILL_COLOR} stopOpacity={0.05} />
                 </linearGradient>
               </defs>
-              {preset !== 'day' && <CartesianGrid strokeDasharray="3 3" />}
+              {preset !== 'day' && <CartesianGrid strokeDasharray="3 3" stroke={chrome.grid} />}
               <XAxis
                 dataKey="time"
                 interval={tickInterval}

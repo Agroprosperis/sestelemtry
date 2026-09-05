@@ -8,6 +8,7 @@ import {
   type Icon,
 } from '@phosphor-icons/react'
 import type { CurrentResponse, RegisterMeta } from '../../types'
+import { useCssVar } from '../../theme/useChartChrome'
 import { formatEnergyCompactKWhUk } from '../format'
 import { LoadingSpinner } from './LoadingSpinner'
 import { ModbusAddr } from './ModbusAddr'
@@ -54,6 +55,8 @@ export function AccumulatedSnapshotNarrative({
   debug,
   registers,
 }: Props) {
+  const faint = useCssVar('--text-faint', '#94a3b8')
+  const muted = useCssVar('--text-muted', '#475569')
   const rows: RowSpec[] = [
     {
       label: 'Виробіток СЕС',
@@ -94,14 +97,14 @@ export function AccumulatedSnapshotNarrative({
       label: 'Батарея: розряд',
       metricKey: 'total_energy_discharged_kwh',
       Icon: BatteryFull,
-      color: '#94a3b8',
+      color: faint,
       value: reading(current, 'total_energy_discharged_kwh'),
     },
     {
       label: 'Постачання з мережі (загальне)',
       metricKey: 'total_power_supply_from_grid_kwh',
       Icon: Plug,
-      color: '#475569',
+      color: muted,
       value: reading(current, 'total_power_supply_from_grid_kwh'),
     },
   ]

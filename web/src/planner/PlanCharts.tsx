@@ -1,5 +1,6 @@
 import { useMemo, type ReactNode } from 'react'
 import type { PlanPreview, PlanPreviewHour } from './plannerClient'
+import { useChartChrome } from '../theme/useChartChrome'
 
 // ContextChart — «РДН + прогноз СЕС + load»: custom SVG ported 1:1
 // from the mockup's buildPlanForecastChartSvg (cloud_console.html):
@@ -54,6 +55,7 @@ function cloudDescription(hours: PlanPreviewHour[]): string {
 }
 
 export function ContextChart({ preview, children }: { preview: PlanPreview; children?: ReactNode }) {
+  const chrome = useChartChrome()
   const hours = preview.hours
   const n = hours.length
 
@@ -106,7 +108,7 @@ export function ContextChart({ preview, children }: { preview: PlanPreview; chil
   parts.push(
     <g key="wband">
       <rect x={ML} y={0} width={ix1 - ML} height={WEATHER} fill="#f0f9ff" />
-      <line x1={ML} y1={WEATHER} x2={ix1} y2={WEATHER} stroke="#e2e8f0" />
+      <line x1={ML} y1={WEATHER} x2={ix1} y2={WEATHER} stroke={chrome.grid} />
     </g>,
   )
   if (hasWeather) {
@@ -127,7 +129,7 @@ export function ContextChart({ preview, children }: { preview: PlanPreview; chil
             dangerouslySetInnerHTML={{ __html: WEATHER_ICON_PATHS[kind] ?? WEATHER_ICON_PATHS.cloudy }}
           />
           {w.temp_c != null && (
-            <text x={0} y={26} textAnchor="middle" fontSize={tempFs} fontWeight={600} fill={night ? '#64748b' : '#475569'}>
+            <text x={0} y={26} textAnchor="middle" fontSize={tempFs} fontWeight={600} fill={night ? chrome.zero : chrome.label}>
               {Math.round(w.temp_c)}°
             </text>
           )}
@@ -151,7 +153,7 @@ export function ContextChart({ preview, children }: { preview: PlanPreview; chil
   // Grid.
   for (let t = 0; t <= 4; t++) {
     const y = iy0 + (ih * t) / 4
-    parts.push(<line key={'g' + t} x1={ix0} y1={y} x2={ix1} y2={y} stroke="#e2e8f0" strokeDasharray="3 4" />)
+    parts.push(<line key={'g' + t} x1={ix0} y1={y} x2={ix1} y2={y} stroke={chrome.grid} strokeDasharray="3 4" />)
   }
 
   // «решта сьогодні» + «зараз» + «завтра».
@@ -227,7 +229,7 @@ export function ContextChart({ preview, children }: { preview: PlanPreview; chil
   parts.push(<path key="la" d={loadAreaD} fill="#ea580c" opacity={0.1} />)
   parts.push(<path key="ll" d={loadLineD} fill="none" stroke="#ea580c" strokeWidth={2} />)
   parts.push(
-    <circle key="ld" cx={loadPts[0].x} cy={loadPts[0].y} r={4} fill="#ea580c" stroke="#fff" strokeWidth={1.5} />,
+    <circle key="ld" cx={loadPts[0].x} cy={loadPts[0].y} r={4} fill="#ea580c" stroke={chrome.onAccent} strokeWidth={1.5} />,
   )
 
   // PV forecast: dashed green line + area + triangle markers.
@@ -255,7 +257,7 @@ export function ContextChart({ preview, children }: { preview: PlanPreview; chil
         textAnchor="middle"
         fontSize={major ? 9 : 8}
         fontWeight={major ? 600 : 400}
-        fill={major ? '#64748b' : '#94a3b8'}
+        fill={major ? chrome.zero : chrome.tick}
       >
         {String(h.local_hour).padStart(2, '0')}
       </text>,
@@ -274,7 +276,7 @@ export function ContextChart({ preview, children }: { preview: PlanPreview; chil
       </text>,
     )
   }
-  parts.push(<line key="base" x1={ix0} y1={iy1} x2={ix1} y2={iy1} stroke="#cbd5e1" />)
+  parts.push(<line key="base" x1={ix0} y1={iy1} x2={ix1} y2={iy1} stroke={chrome.axis} />)
 
   // Header meta: «зараз HH:MM → кінець DD.MM.YYYY · РДН … · Погода …».
   const nowLabel = timeFmt.format(new Date(preview.now))

@@ -6,6 +6,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { fetchEdgeFleet, type EdgeSiteStatus } from '../control/controlClient'
 import { formatOrganizationLabel } from '../dashboard/config'
+import { ThemeToggle } from '../theme/ThemeToggle'
 import './shell.css'
 
 // 'none' is for the service pages (station, import): no mode is
@@ -279,6 +280,8 @@ export function ModeTopBar({
           )}
         </div>
       )}
+
+      <ThemeToggle />
     </div>
     </div>
   )

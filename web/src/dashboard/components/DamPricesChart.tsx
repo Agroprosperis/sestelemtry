@@ -9,6 +9,7 @@ import {
   YAxis,
 } from 'recharts'
 import type { DAMPrice } from '../../types'
+import { useChartChrome } from '../../theme/useChartChrome'
 import type { RangePreset } from '../range'
 
 type Props = {
@@ -82,6 +83,7 @@ function summarize(prices: DAMPrice[]) {
 }
 
 export function DamPricesChart({ prices, preset, loading, error }: Props) {
+  const chrome = useChartChrome()
   const rows = useMemo(
     () => (preset === 'day' ? buildRowsForDay(prices) : buildDailyAverages(prices, preset)),
     [prices, preset],
@@ -118,7 +120,7 @@ export function DamPricesChart({ prices, preset, loading, error }: Props) {
         ) : (
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={rows}>
-              <CartesianGrid strokeDasharray="3 3" />
+              <CartesianGrid strokeDasharray="3 3" stroke={chrome.grid} />
               <XAxis dataKey="label" interval="preserveStartEnd" />
               <YAxis tickFormatter={(v) => uahPerMwh(Number(v))} width={70} />
               <Tooltip

@@ -206,7 +206,7 @@ export function LoadEditor({
                 }
               }}
             />
-            <span style={{ color: '#64748b' }}>кВт</span>
+            <span className="planner-unit-suffix">кВт</span>
             <button type="button" className="planner-button" onClick={() => moveSelection(1)} disabled={selectedIdx < 0 || selectedIdx >= hours.length - 1}>
               →
             </button>

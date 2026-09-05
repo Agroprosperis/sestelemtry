@@ -1,6 +1,5 @@
 /* App-wide shell: the top bar (Об'єкт + Режим + status chips) shared by
-   the analytics dashboard, the «Керування» mode and the service pages.
-   Visual language matches the light dashboard theme. */
+   the analytics dashboard, the «Керування» mode and the service pages. */
 
 .ctl-topbar-wrap {
   container-type: inline-size;
@@ -13,10 +12,10 @@
   gap: 10px;
   flex-wrap: wrap;
   padding: 10px 12px;
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
   border-radius: 12px;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  box-shadow: 0 1px 2px rgba(var(--shadow-color), 0.04);
 }
 
 .ctl-topbar-brand {
@@ -31,6 +30,7 @@
   width: auto;
   display: block;
   flex-shrink: 0;
+  filter: var(--logo-filter);
 }
 
 .ctl-topbar-brand h1 {
@@ -38,7 +38,7 @@
   font-size: 17px;
   line-height: 1.2;
   white-space: nowrap;
-  color: #0f172a;
+  color: var(--text);
 }
 
 .ctl-topbar-label {
@@ -46,7 +46,7 @@
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: #64748b;
+  color: var(--text-subtle);
   margin-right: 8px;
 }
 
@@ -59,11 +59,11 @@
 .ctl-topbar-object select {
   font-size: 14px;
   font-weight: 600;
-  color: #0f172a;
+  color: var(--text);
   padding: 7px 10px;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--border);
   border-radius: 8px;
-  background: #f8fafc;
+  background: var(--input-bg);
   min-width: 210px;
   /* A <select> auto-sizes to its widest option; cap it so one long
      org name can't blow the bar onto a second line. */
@@ -78,8 +78,8 @@
 
 .ctl-mode-switch {
   display: inline-flex;
-  background: #f1f5f9;
-  border: 1px solid #e2e8f0;
+  background: var(--switch-track);
+  border: 1px solid var(--border);
   border-radius: 10px;
   padding: 3px;
   gap: 3px;
@@ -92,14 +92,14 @@
   border-radius: 8px;
   font-size: 13px;
   font-weight: 600;
-  color: #475569;
+  color: var(--text-muted);
   cursor: pointer;
   white-space: nowrap;
 }
 
 .ctl-mode-switch button.active {
-  background: #0f172a;
-  color: #ffffff;
+  background: var(--switch-active-bg);
+  color: var(--switch-active-fg);
 }
 
 /* Compaction keys on the bar's own width (container queries), because
@@ -182,9 +182,9 @@
   font-weight: 600;
   padding: 4px 8px;
   border-radius: 999px;
-  border: 1px solid #e2e8f0;
-  background: #f8fafc;
-  color: #334155;
+  border: 1px solid var(--border);
+  background: var(--bg-sunken);
+  color: var(--text-secondary);
   white-space: nowrap;
 }
 
@@ -192,39 +192,39 @@
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #94a3b8;
+  background: var(--text-faint);
 }
 
 .ctl-chip.ok {
-  border-color: #bbf7d0;
-  background: #f0fdf4;
-  color: #15803d;
+  border-color: var(--ok-border);
+  background: var(--ok-bg);
+  color: var(--ok-text);
 }
 
 .ctl-chip.ok .ctl-dot {
-  background: #22c55e;
+  background: var(--ok);
 }
 
 .ctl-chip.warn {
-  border-color: #fde68a;
-  background: #fffbeb;
-  color: #b45309;
+  border-color: var(--warn-border);
+  background: var(--warn-bg);
+  color: var(--warn-text);
 }
 
 .ctl-chip.err {
-  border-color: #fecaca;
-  background: #fef2f2;
-  color: #b91c1c;
+  border-color: var(--err-border);
+  background: var(--err-bg);
+  color: var(--err-text);
 }
 
 .ctl-chip.err .ctl-dot {
-  background: #ef4444;
+  background: var(--err);
 }
 
 .ctl-chip.shadow {
-  border-color: #c7d2fe;
-  background: #eef2ff;
-  color: #4338ca;
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+  color: var(--accent-text);
 }
 
 /* --- «Сервіс» dropdown (rare admin actions) --- */
@@ -234,8 +234,13 @@
 }
 
 /* When the chips block isn't rendered (economics), the menu is the
-   element that pins itself to the right edge instead. */
+   element that pins itself to the right edge instead. Theme toggle
+   sits after chips/menu; if neither is present it pins itself. */
 .ctl-topbar-mode + .ctl-topbar-menu {
+  margin-left: auto;
+}
+
+.ctl-topbar-mode + .theme-toggle {
   margin-left: auto;
 }
 
@@ -243,26 +248,26 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
   border-radius: 10px;
   padding: 6px 10px;
   font: inherit;
   font-size: 13px;
   font-weight: 600;
-  color: #0f172a;
+  color: var(--text);
   cursor: pointer;
   white-space: nowrap;
   transition: background-color 120ms ease, border-color 120ms ease;
 }
 
 .ctl-topbar-menu-btn:hover {
-  background-color: #f1f5f9;
-  border-color: #cbd5e1;
+  background-color: var(--bg-muted);
+  border-color: var(--border-strong);
 }
 
 .ctl-topbar-menu-btn:focus-visible {
-  outline: 2px solid #6366f1;
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
@@ -275,10 +280,10 @@
   display: flex;
   flex-direction: column;
   padding: 6px;
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
   border-radius: 12px;
-  box-shadow: 0 12px 32px -12px rgba(15, 23, 42, 0.28);
+  box-shadow: 0 12px 32px -12px rgba(var(--shadow-color), 0.28);
 }
 
 .ctl-topbar-menu-list button {
@@ -292,10 +297,10 @@
   font: inherit;
   font-size: 13px;
   font-weight: 500;
-  color: #0f172a;
+  color: var(--text);
   cursor: pointer;
 }
 
 .ctl-topbar-menu-list button:hover {
-  background: #f1f5f9;
+  background: var(--bg-muted);
 }

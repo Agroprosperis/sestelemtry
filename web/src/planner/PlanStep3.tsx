@@ -1,5 +1,7 @@
 import { useMemo, useState } from 'react'
 import type { PlanDayEffect, PlanPreview, PlanPreviewHour } from './plannerClient'
+import { useChartChrome } from '../theme/useChartChrome'
+import { useTheme } from '../theme/theme'
 
 // Step-3 visuals ported 1:1 from the ems-spec mockup (cloud_console
 // `render()` + uze-* styles): the custom SVG dispatch chart with the
@@ -15,11 +17,15 @@ const C = {
   chgGrid: '#9ca3af',
   rdn: '#3b82f6',
   socOpt: '#9333ea',
-  money: '#166534',
-  zero: '#475569',
 }
 
-function rdnTier(p: number): { fill: string; opacity: number; text: string } {
+function rdnTier(p: number, dark: boolean): { fill: string; opacity: number; text: string } {
+  if (dark) {
+    if (p >= 8) return { fill: '#7f1d1d', opacity: 0.72, text: '#fecaca' }
+    if (p >= 4) return { fill: '#854d0e', opacity: 0.55, text: '#fde68a' }
+    if (p >= 1.5) return { fill: '#1e3a8a', opacity: 0.5, text: '#93c5fd' }
+    return { fill: '#1e3a5f', opacity: 0.45, text: '#93c5fd' }
+  }
   if (p >= 8) return { fill: '#fecaca', opacity: 0.72, text: '#991b1b' }
   if (p >= 4) return { fill: '#fef08a', opacity: 0.55, text: '#854d0e' }
   if (p >= 1.5) return { fill: '#bfdbfe', opacity: 0.5, text: '#1e40af' }
@@ -45,6 +51,10 @@ export function PlanChartSvg({
   preview: PlanPreview
   onHourClick?: (h: PlanPreviewHour) => void
 }) {
+  const chrome = useChartChrome()
+  const { resolved } = useTheme()
+  const dark = resolved === 'dark'
+  const money = dark ? '#86efac' : '#166534'
   const [hidden, setHidden] = useState<Set<Series>>(new Set())
   const [tip, setTip] = useState<TipState>(null)
 
@@ -123,7 +133,7 @@ export function PlanChartSvg({
         <rect key={'r' + i} x={x} y={iy1 - bh} width={slot - 2} height={bh} fill={C.rdn} fillOpacity={0.13} />,
       )
       if (!dense || i % 2 === 0) {
-        const tier = rdnTier(price)
+        const tier = rdnTier(price, dark)
         const lw = dense ? slot * 2 - 2 : slot - 2
         texts.push(
           <g key={'rl' + i}>
@@ -187,15 +197,15 @@ export function PlanChartSvg({
   )
 
   // Zero line goes under the bars (mockup draws it before the groups).
-  texts.push(<line key="zero" x1={ix0} y1={zeroY} x2={ix1} y2={zeroY} stroke={C.zero} strokeWidth={1} />)
+  texts.push(<line key="zero" x1={ix0} y1={zeroY} x2={ix1} y2={zeroY} stroke={chrome.zero} strokeWidth={1} />)
 
   // Axis gridlines and scale labels.
   ;[maxUp, maxUp / 2].forEach((v, idx) => {
     const y = zeroY - v * k
     texts.push(
       <g key={'ax' + idx}>
-        <line x1={ix0} y1={y} x2={ix1} y2={y} stroke="#eef2f7" />
-        <text x={ix0 - 5} y={y + 3} textAnchor="end" fontSize={10.5} fill="#94a3b8">
+        <line x1={ix0} y1={y} x2={ix1} y2={y} stroke={chrome.grid} />
+        <text x={ix0 - 5} y={y + 3} textAnchor="end" fontSize={10.5} fill={chrome.tick}>
           {Math.round(v)}
         </text>
       </g>,
@@ -203,10 +213,10 @@ export function PlanChartSvg({
   })
   texts.push(
     <g key="ax-labels">
-      <text x={ix0 - 5} y={zeroY + maxDn * k + 3} textAnchor="end" fontSize={10.5} fill="#94a3b8">
+      <text x={ix0 - 5} y={zeroY + maxDn * k + 3} textAnchor="end" fontSize={10.5} fill={chrome.tick}>
         −{Math.round(maxDn)}
       </text>
-      <text x={ix0 - 5} y={iy0 - 8} textAnchor="start" fontSize={10} fill="#94a3b8">
+      <text x={ix0 - 5} y={iy0 - 8} textAnchor="start" fontSize={10} fill={chrome.tick}>
         кВт·год
       </text>
       <text x={ix1 + 6} y={iy0 - 8} textAnchor="end" fontSize={10} fill={C.socOpt}>
@@ -215,7 +225,7 @@ export function PlanChartSvg({
       <text x={ix0 - 5} y={iy1 + 16} textAnchor="end" fontSize={8.5} fill="#1d4ed8" opacity={0.8}>
         РДН
       </text>
-      <text x={ix0 - 5} y={iy1 + 36} textAnchor="end" fontSize={9} fill="#334155" fontWeight={600}>
+      <text x={ix0 - 5} y={iy1 + 36} textAnchor="end" fontSize={9} fill={chrome.label} fontWeight={600}>
         год
       </text>
     </g>,
@@ -278,7 +288,7 @@ export function PlanChartSvg({
           textAnchor="middle"
           fontSize={10.5}
           fontWeight={700}
-          fill={C.money}
+          fill={money}
         >
           {fmtN(income(h))}
         </text>,
@@ -292,7 +302,7 @@ export function PlanChartSvg({
         y={iy1 + 36}
         textAnchor="middle"
         fontSize={major ? 9 : 8}
-        fill={h.tomorrow ? '#7c3aed' : '#334155'}
+        fill={h.tomorrow ? '#7c3aed' : chrome.label}
         fontWeight={major ? 700 : 500}
       >
         {labelOf(h)}
@@ -492,6 +502,7 @@ export function EffectPanel({
   dateLabel: string
   preview: PlanPreview
 }) {
+  const chrome = useChartChrome()
   const loadSourceNote =
     preview.load_source === 'operator'
       ? 'Load: операторський план'
@@ -500,7 +511,7 @@ export function EffectPanel({
         : 'Load: heuristic (медіана 14 діб)'
   return (
     <div className="uze-left">
-      <p className="uze-chart-foot" style={{ margin: 0, color: '#64748b' }}>
+      <p className="uze-chart-foot" style={{ margin: 0, color: chrome.label }}>
         {loadSourceNote} · ефект за добу <strong>завтра {dateLabel}</strong>
       </p>
       <div className="uze-waterfall">

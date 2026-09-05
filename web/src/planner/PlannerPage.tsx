@@ -650,7 +650,7 @@ export function PlannerPage({
               <span>УЗЕ: <b>{detailHour.ess_kw > 0 ? '+' : ''}{detailHour.ess_kw} кВт</b> ({detailHour.action})</span>
               <span>SOC на кінець: <b>{detailHour.soc_end_pct}%</b></span>
               <span>Мережа: <b>{detailHour.grid_kw} кВт</b></span>
-              <span style={{ color: '#94a3b8' }}>Ручне коригування години — етап керованого запису (MVP-3)</span>
+              <span className="planner-hour-detail-note">Ручне коригування години — етап керованого запису (MVP-3)</span>
             </div>
           )}
           {journal && <ManifestJournal journal={journal} />}

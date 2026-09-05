@@ -17,6 +17,7 @@ import type {
   EconomicsMonthlyTotals,
 } from '../../api'
 import { formatOrganizationLabel } from '../../dashboard/config'
+import { useChartChrome } from '../../theme/useChartChrome'
 import { makeTrendCap, TREND_NEG_ORDER, TREND_POS_ORDER } from '../trendBarCap'
 import {
   AiLead,
@@ -200,6 +201,7 @@ function AnnualTrend({
   totals: EconomicsMonthlyTotals
   onSelectMonth: (month: string) => void
 }) {
+  const chrome = useChartChrome()
   const rows = useMemo<AnnualTrendRow[]>(
     () =>
       months.map((m) => ({
@@ -279,11 +281,11 @@ function AnnualTrend({
             onClick={handleClick}
             style={{ cursor: 'pointer' }}
           >
-            <CartesianGrid strokeDasharray="2 5" stroke="#e7ecf2" vertical={false} />
-            <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#8a94a6' }} interval={0} tickLine={false} axisLine={false} />
-            <YAxis tick={{ fontSize: 11, fill: '#98a2b3' }} width={40} tickLine={false} axisLine={false} />
-            <Tooltip content={<TrendTooltip />} cursor={{ fill: 'rgba(148, 163, 184, 0.12)' }} />
-            <ReferenceLine y={0} stroke="#98a2b3" />
+            <CartesianGrid strokeDasharray="2 5" stroke={chrome.grid} vertical={false} />
+            <XAxis dataKey="label" tick={{ fontSize: 10, fill: chrome.tick }} interval={0} tickLine={false} axisLine={false} />
+            <YAxis tick={{ fontSize: 11, fill: chrome.axis }} width={40} tickLine={false} axisLine={false} />
+            <Tooltip content={<TrendTooltip />} cursor={{ fill: chrome.cursor }} />
+            <ReferenceLine y={0} stroke={chrome.zero} />
             <Bar dataKey="pv" name="виробіток СЕС" stackId="pos" fill="#91d9aa" maxBarSize={36} shape={makeTrendCap('top', 'pv', TREND_POS_ORDER)} />
             <Bar dataKey="essDischarge" name="розряд УЗЕ" stackId="pos" fill="#5fc993" maxBarSize={36} shape={makeTrendCap('top', 'essDischarge', TREND_POS_ORDER)} />
             <Bar dataKey="gridImport" name="з мережі" stackId="pos" fill="#12b76a" maxBarSize={36} shape={makeTrendCap('top', 'gridImport', TREND_POS_ORDER)} />
@@ -481,7 +483,7 @@ function AnnualAiAnalysis({
                     <div className="economics-optimum-legend">
                       <span><i style={{ background: '#7c3aed' }} />фактичний ефект</span>
                       <span><i style={{ background: '#f59e0b' }} />недовикористано</span>
-                      <span><i style={{ background: '#e5e7eb' }} />оптимум</span>
+                      <span><i style={{ background: chrome.neutral }} />оптимум</span>
                     </div>
                   </div>
                   <div className="economics-optimum-list">
