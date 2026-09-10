@@ -71,6 +71,9 @@ export type EdgeDecisionRecord = {
   outputs?: {
     p_bess_virtual_kw?: number
     p_pv_limit_virtual_kw?: number
+    would_write_40381?: number
+    would_write_40378?: number
+    clamps?: string[]
   }
   reason_code?: string
   rationale?: string
@@ -90,12 +93,96 @@ export type EdgeEventInfo = {
   context?: Record<string, unknown>
 }
 
+// --- Diagnostics snapshot (ems_edge_shadow_diagnostics.md §8.3),
+// relayed verbatim from the edge heartbeat. Absent on old edge builds.
+
+export type HealthCheck = {
+  id: string
+  ok: boolean
+  severity: 'ok' | 'info' | 'warning' | 'alarm'
+  label: string
+  expected: string
+  actual: string
+  detail?: string
+}
+
+export type BessHealth = {
+  class: string
+  class_label: string
+  soc_percent: number | null
+  soh_percent: number | null
+  soe_percent: number | null
+  soc_min_pct: number
+  soc_max_pct: number
+  p_kw: number | null
+  q_kvar: number | null
+  p_plan_kw: number | null
+  p_shadow_kw: number | null
+  clamps: string[]
+  charge_max_kw: number | null
+  discharge_max_kw: number | null
+  chargeable_kwh: number | null
+  dischargeable_kwh: number | null
+  rated_kw: number | null
+  rated_kwh: number | null
+  passport_kw: number | null
+  passport_kwh: number | null
+  passport_ess_count: number | null
+  n_ess: number | null
+  n_pcs: number | null
+  pcs_in_operation: number | null
+  pcs_shutdown: number | null
+  pcs_label: string
+  charged_kwh: number | null
+  discharged_kwh: number | null
+  poll_ok: boolean
+  poll_error: string | null
+  ts: string
+}
+
+export type InverterHealth = {
+  device_address: number
+  register_base: number
+  label?: string
+  class: string
+  status_raw?: string
+  status_label: string
+  p_kw: number | null
+  q_kvar: number | null
+  p_dc_kw: number | null
+  i_dc_a: number | null
+  pf: number | null
+  insulation_mohm: number | null
+  temp_c: number | null
+  major_fault?: string
+  minor_fault?: string
+  warning?: string
+  /** Розшифровки з канону ems-spec (huawei inverter_alarm_decode). */
+  status_label_uk?: string
+  major_label_uk?: string
+  minor_label_uk?: string
+  warning_label_uk?: string
+  poll_ok: boolean
+  poll_error: string | null
+  ts: string
+}
+
+export type EdgeHealth = {
+  ts: string
+  ok: boolean
+  checks: HealthCheck[]
+  bess?: BessHealth
+  inverters?: InverterHealth[]
+  alarms?: { words: string[] }
+}
+
 export type EdgeSiteStatus = {
   site_id: string
   heartbeat: EdgeHeartbeatInfo
   manifest: EdgeManifestStatus
   decision?: EdgeDecisionStatus
   events?: EdgeEventInfo[]
+  health?: EdgeHealth
 }
 
 export type EdgeFleet = {

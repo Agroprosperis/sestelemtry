@@ -1,10 +1,27 @@
 <!doctype html>
-<html lang="en">
+<html lang="uk">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/png" href="/logo_agroprosperis.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
     <title>Моніторинг СЕС + УЗЕ — Агропросперіс</title>
+    <script>
+      (function () {
+        try {
+          var key = 'ses.theme'
+          var pref = localStorage.getItem(key) || 'system'
+          if (pref !== 'light' && pref !== 'dark' && pref !== 'system') pref = 'system'
+          var dark =
+            pref === 'dark' ||
+            (pref === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)
+          var resolved = dark ? 'dark' : 'light'
+          document.documentElement.setAttribute('data-theme', resolved)
+          document.documentElement.setAttribute('data-theme-preference', pref)
+          document.documentElement.style.colorScheme = resolved
+        } catch (e) {}
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>

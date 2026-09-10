@@ -14,6 +14,25 @@ type Props = {
   status: EdgeSiteStatus | null
 }
 
+// Human labels for edge event codes (incl. the diagnostics-spec ones:
+// SL_ALARM, INVERTER_FAULT/RECOVERED).
+const EVENT_CODE_LABELS: Record<string, string> = {
+  SL_POLL_FAIL: 'збій опитування SmartLogger',
+  SL_POLL_RECOVERED: 'опитування SL відновлено',
+  UPLINK_OFFLINE: 'uplink недоступний',
+  UPLINK_BACKLOG: 'черга uplink росте',
+  SHADOW_ANOMALY: 'аномалія shadow-двигуна',
+  DISPATCH_DEGRADED: 'команду обрізано лімітами',
+  MANIFEST_APPLIED: 'manifest застосовано',
+  MANIFEST_EXPIRED: 'manifest прострочено',
+  MANIFEST_REJECTED: 'manifest відхилено',
+  OVERRIDE_SET: 'локальний override увімкнено',
+  OVERRIDE_CLEARED: 'локальний override знято',
+  SL_ALARM: 'аварія SmartLogger (50000…50005)',
+  INVERTER_FAULT: 'аварія / втрата інвертора',
+  INVERTER_RECOVERED: 'інвертор відновився',
+}
+
 function fmtTime(iso: string): string {
   return new Intl.DateTimeFormat('uk-UA', {
     day: '2-digit',
@@ -74,7 +93,12 @@ export function JournalTab({ site, status }: Props) {
                   <td>
                     <span className={'ctl-sev ' + e.severity}>{e.severity}</span>
                   </td>
-                  <td className="mono">{e.code}</td>
+                  <td className="mono">
+                    {e.code}
+                    {EVENT_CODE_LABELS[e.code] && (
+                      <div className="ctl-event-code-label">{EVENT_CODE_LABELS[e.code]}</div>
+                    )}
+                  </td>
                   <td>{e.message}</td>
                 </tr>
               ))}

@@ -2,10 +2,315 @@
   box-sizing: border-box;
 }
 
+/*
+ * Theme tokens — light is the default on :root; [data-theme="dark"]
+ * overrides. Preference (light|dark|system) is stored separately;
+ * data-theme always holds the resolved light|dark for CSS.
+ */
+:root,
+[data-theme='light'] {
+  color-scheme: light;
+
+  --bg-page: #f4f6f8;
+  --bg-elevated: #ffffff;
+  --bg-sunken: #f8fafc;
+  --bg-muted: #f1f5f9;
+  --bg-subtle: #fbfcfe;
+  --bg-hover: #f1f5f9;
+  --bg-panel: #edf1f5;
+  --bg-panel-2: #eef1f6;
+  --bg-panel-3: #eef2f7;
+  --bg-stripe: #f1f4f8;
+  --bg-table-head: #e9edf3;
+  --bg-table-alt: #f8fafc;
+
+  --text: #0f172a;
+  --text-secondary: #334155;
+  --text-muted: #475569;
+  --text-subtle: #64748b;
+  --text-faint: #94a3b8;
+  --text-disabled: #98a2b3;
+  --text-inverse: #ffffff;
+  --text-label: #667085;
+  /* Always-light text on saturated fills (primary buttons, heatmap cells). */
+  --on-accent: #ffffff;
+
+  --border: #e2e8f0;
+  --border-strong: #cbd5e1;
+  --border-muted: #e4e9f0;
+  --border-soft: #e6eaf1;
+  --border-hairline: #d6dce5;
+
+  --accent: #6366f1;
+  --accent-fill: #4f46e5;
+  --accent-soft: #eef2ff;
+  --accent-text: #4338ca;
+  --accent-border: #c7d2fe;
+  --accent-ring: rgba(99, 102, 241, 0.18);
+
+  --ok: #22c55e;
+  --ok-text: #15803d;
+  --ok-text-strong: #166534;
+  --ok-bg: #f0fdf4;
+  --ok-bg-soft: #ecfdf5;
+  --ok-border: #bbf7d0;
+  --ok-strong: #16a34a;
+  --ok-deep: #047857;
+  --ok-chip: #dcfce7;
+  --ok-tint: #86efac;
+  --ok-light: #a7f3d0;
+
+  --warn: #f59e0b;
+  --warn-text: #b45309;
+  --warn-text-strong: #92400e;
+  --warn-bg: #fffbeb;
+  --warn-bg-soft: #fef3c7;
+  --warn-border: #fde68a;
+  --warn-strong: #d97706;
+  --warn-deep: #ea580c;
+  --warn-chip: #ffedd5;
+  --warn-orange: #f97316;
+  --warn-amber: #fdba74;
+  --warn-peach: #fed7aa;
+  --warn-surface: #fff7ed;
+
+  --err: #ef4444;
+  --err-text: #b91c1c;
+  --err-strong: #dc2626;
+  --err-bg: #fef2f2;
+  --err-bg-soft: #fee2e2;
+  --err-border: #fecaca;
+  --err-tint: #fca5a5;
+
+  --info: #2563eb;
+  --info-mid: #3b82f6;
+  --info-text: #1d4ed8;
+  --info-deep: #1e40af;
+  --info-link: #2f6fed;
+  --info-bg: #eff6ff;
+  --info-bg-soft: #dbeafe;
+  --info-border: #bfdbfe;
+  --info-tint: #93c5fd;
+  --info-sky: #e0f2fe;
+  --info-wash: #e8effd;
+  --info-soft-fill: rgba(59, 130, 246, 0.05);
+  --info-deep-fill: rgba(30, 64, 175, 0.08);
+
+  --violet: #7c3aed;
+  --violet-deep: #5b21b6;
+  --violet-soft: #8b5cf6;
+  --violet-bg: #f5f3ff;
+  --violet-bg-soft: #ede9fe;
+  --violet-border: #ddd6fe;
+  --violet-tint: #c4b5fd;
+  --violet-fill: rgba(124, 58, 237, 0.08);
+
+  --teal: #0d9488;
+  --sky: #0369a1;
+
+  --shadow-color: 15, 23, 42;
+  --shadow-sm: 0 1px 2px rgba(var(--shadow-color), 0.04);
+  --shadow-md: 0 12px 32px -12px rgba(var(--shadow-color), 0.28);
+  --shadow-lg: 0 16px 40px -12px rgba(var(--shadow-color), 0.35);
+  --overlay: rgba(15, 23, 42, 0.45);
+  --overlay-strong: rgba(15, 23, 42, 0.55);
+  --scrim: rgba(15, 23, 42, 0.25);
+
+  --input-bg: #f8fafc;
+  --input-border: #e2e8f0;
+
+  --switch-track: #f1f5f9;
+  --btn-primary-bg: #0f172a;
+  --btn-primary-fg: #ffffff;
+  --btn-primary-hover: #1e293b;
+  --switch-active-bg: var(--btn-primary-bg);
+  --switch-active-fg: var(--btn-primary-fg);
+
+  /* Saturated blue fill; always pair with --on-accent (not --text-inverse). */
+  --info-fill: #1e40af;
+
+  /* Energy-flow hub stays a dark command chip in both themes. */
+  --hub-from: #1e293b;
+  --hub-to: #0f172a;
+  --hub-fg: #f8fafc;
+  --hub-muted: #94a3b8;
+  --hub-stale-from: #64748b;
+  --hub-stale-to: #475569;
+
+  --chart-grid: #e7ecf2;
+  --chart-tick: #8a94a6;
+  --chart-axis: #98a2b3;
+  --chart-cursor: rgba(148, 163, 184, 0.15);
+  --chart-cursor-stroke: #94a3b8;
+  --chart-zero: #64748b;
+
+  /* Heatmap intensity scale (economics) */
+  --hm0-bg: #f1f5f9;
+  --hm0-fg: #64748b;
+  --hm1-bg: #dcfce7;
+  --hm1-fg: #166534;
+  --hm2-bg: #86efac;
+  --hm2-fg: #14532d;
+  --hm3-bg: #22c55e;
+  --hm3-fg: #ffffff;
+  --hm4-bg: #15803d;
+  --hm4-fg: #ffffff;
+
+  --logo-filter: none;
+}
+
+[data-theme='dark'] {
+  color-scheme: dark;
+
+  --bg-page: #0b1220;
+  --bg-elevated: #131c2e;
+  --bg-sunken: #0f172a;
+  --bg-muted: #1a2438;
+  --bg-subtle: #152033;
+  --bg-hover: #1e293b;
+  --bg-panel: #1a2438;
+  --bg-panel-2: #1a2438;
+  --bg-panel-3: #1e293b;
+  --bg-stripe: #152033;
+  --bg-table-head: #1a2438;
+  --bg-table-alt: #0f172a;
+
+  --text: #e8eef7;
+  --text-secondary: #cbd5e1;
+  --text-muted: #94a3b8;
+  --text-subtle: #94a3b8;
+  --text-faint: #64748b;
+  --text-disabled: #64748b;
+  --text-inverse: #0b1220;
+  --text-label: #94a3b8;
+  --on-accent: #ffffff;
+
+  --border: #243044;
+  --border-strong: #334155;
+  --border-muted: #1e293b;
+  --border-soft: #243044;
+  --border-hairline: #2a3548;
+
+  --accent: #818cf8;
+  --accent-fill: #4f46e5;
+  --accent-soft: #1e1b4b;
+  --accent-text: #a5b4fc;
+  --accent-border: #3730a3;
+  --accent-ring: rgba(129, 140, 248, 0.28);
+
+  --ok: #22c55e;
+  --ok-text: #86efac;
+  --ok-text-strong: #bbf7d0;
+  --ok-bg: #052e16;
+  --ok-bg-soft: #064e3b;
+  --ok-border: #166534;
+  --ok-strong: #4ade80;
+  --ok-deep: #6ee7b7;
+  --ok-chip: #14532d;
+  --ok-tint: #4ade80;
+  --ok-light: #34d399;
+
+  --warn: #f59e0b;
+  --warn-text: #fcd34d;
+  --warn-text-strong: #fde68a;
+  --warn-bg: #422006;
+  --warn-bg-soft: #78350f;
+  --warn-border: #854d0e;
+  --warn-strong: #fbbf24;
+  --warn-deep: #fb923c;
+  --warn-chip: #7c2d12;
+  --warn-orange: #fb923c;
+  --warn-amber: #fdba74;
+  --warn-peach: #fdba74;
+  --warn-surface: #431407;
+
+  --err: #f87171;
+  --err-text: #fca5a5;
+  --err-strong: #f87171;
+  --err-bg: #450a0a;
+  --err-bg-soft: #7f1d1d;
+  --err-border: #991b1b;
+  --err-tint: #fca5a5;
+
+  --info: #60a5fa;
+  --info-mid: #60a5fa;
+  --info-text: #93c5fd;
+  --info-deep: #93c5fd;
+  --info-link: #60a5fa;
+  --info-bg: #0c1e3a;
+  --info-bg-soft: #1e3a5f;
+  --info-border: #1e40af;
+  --info-tint: #93c5fd;
+  --info-sky: #0c4a6e;
+  --info-wash: #172554;
+  --info-soft-fill: rgba(96, 165, 250, 0.08);
+  --info-deep-fill: rgba(96, 165, 250, 0.12);
+
+  --violet: #a78bfa;
+  --violet-deep: #c4b5fd;
+  --violet-soft: #a78bfa;
+  --violet-bg: #2e1065;
+  --violet-bg-soft: #4c1d95;
+  --violet-border: #5b21b6;
+  --violet-tint: #c4b5fd;
+  --violet-fill: rgba(167, 139, 250, 0.12);
+
+  --teal: #2dd4bf;
+  --sky: #38bdf8;
+
+  --shadow-color: 0, 0, 0;
+  --shadow-sm: 0 1px 2px rgba(var(--shadow-color), 0.4);
+  --shadow-md: 0 12px 32px -12px rgba(var(--shadow-color), 0.55);
+  --shadow-lg: 0 16px 40px -12px rgba(var(--shadow-color), 0.65);
+  --overlay: rgba(0, 0, 0, 0.55);
+  --overlay-strong: rgba(0, 0, 0, 0.7);
+  --scrim: rgba(0, 0, 0, 0.4);
+
+  --input-bg: #0f172a;
+  --input-border: #334155;
+
+  --switch-track: #1e293b;
+  --btn-primary-bg: #e8eef7;
+  --btn-primary-fg: #0b1220;
+  --btn-primary-hover: #cbd5e1;
+  --switch-active-bg: var(--btn-primary-bg);
+  --switch-active-fg: var(--btn-primary-fg);
+
+  --info-fill: #2563eb;
+
+  --hub-from: #334155;
+  --hub-to: #1e293b;
+  --hub-fg: #e8eef7;
+  --hub-muted: #94a3b8;
+  --hub-stale-from: #475569;
+  --hub-stale-to: #334155;
+
+  --chart-grid: #243044;
+  --chart-tick: #64748b;
+  --chart-axis: #64748b;
+  --chart-cursor: rgba(148, 163, 184, 0.12);
+  --chart-cursor-stroke: #64748b;
+  --chart-zero: #64748b;
+
+  --hm0-bg: #1a2438;
+  --hm0-fg: #94a3b8;
+  --hm1-bg: #14532d;
+  --hm1-fg: #bbf7d0;
+  --hm2-bg: #166534;
+  --hm2-fg: #dcfce7;
+  --hm3-bg: #16a34a;
+  --hm3-fg: #ffffff;
+  --hm4-bg: #4ade80;
+  --hm4-fg: #052e16;
+
+  /* Soften dark charcoal wordmark on dark surfaces without killing brand blues/greens. */
+  --logo-filter: brightness(1.15) contrast(1.05);
+}
+
 :root {
   font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-  color: #0f172a;
-  background: #f4f6f8;
+  color: var(--text);
+  background: var(--bg-page);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -14,8 +319,20 @@
 
 body {
   margin: 0;
+  background: var(--bg-page);
+  color: var(--text);
+  transition: background-color 160ms ease, color 160ms ease;
 }
 
 #root {
   min-height: 100vh;
+  background: var(--bg-page);
+}
+
+/* Native controls inherit theme */
+input,
+select,
+textarea,
+button {
+  color: inherit;
 }

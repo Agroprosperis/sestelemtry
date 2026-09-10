@@ -44,13 +44,14 @@ type Service struct {
 
 	// Local-console state (read by the HTTP goroutine, written by the
 	// core loop / uplink — hence atomics and sync.Map).
-	startedAt    time.Time
-	lastTick     atomic.Pointer[Tick]
-	lastDecision atomic.Pointer[Decision]
-	lastUplinkOK atomic.Int64 // unix seconds of the last accepted batch
-	devPollOK    sync.Map     // host → unix seconds of its last reading
-	override     atomic.Pointer[overrideState]
-	events       chan Event // core-loop event channel (console sends too)
+	startedAt     time.Time
+	lastTick      atomic.Pointer[Tick]
+	lastDecision  atomic.Pointer[Decision]
+	lastUplinkOK  atomic.Int64 // unix seconds of the last accepted batch
+	devPollOK     sync.Map     // host → unix seconds of its last reading
+	override      atomic.Pointer[overrideState]
+	lastInverters atomic.Pointer[inverterFleet] // written by the 51xxx poller
+	events        chan Event // core-loop event channel (console sends too)
 
 	// Core-loop state (no locks: touched only from the core loop).
 	lastManifestID   string
@@ -130,6 +131,10 @@ func Run(ctx context.Context, cfg *Config, log *slog.Logger, version string) err
 	}
 	wg.Add(1)
 	go func() { defer wg.Done(); s.runMaintenance(ctx) }()
+	if len(cfg.Diagnostics.Inverters.DeviceAddresses) > 0 {
+		wg.Add(1)
+		go func() { defer wg.Done(); s.runInverterPoller(ctx, events) }()
+	}
 	if cfg.LocalUI.On() {
 		wg.Add(1)
 		go func() { defer wg.Done(); s.runLocalUI(ctx) }()
@@ -399,6 +404,9 @@ func (s *Service) runHeartbeat(ctx context.Context) {
 		if unix := s.lastPollOK.Load(); unix > 0 {
 			ts := time.Unix(unix, 0).UTC()
 			hb.LastSLPollOK = &ts
+		}
+		if raw, err := json.Marshal(s.buildHealth(time.Now().UTC())); err == nil {
+			hb.Health = raw
 		}
 		if err := s.client.SendHeartbeat(ctx, hb); err != nil {
 			s.log.Warn("edge_heartbeat", "err", err)

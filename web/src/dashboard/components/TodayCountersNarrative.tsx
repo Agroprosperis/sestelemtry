@@ -8,6 +8,7 @@ import {
   Sun,
 } from '@phosphor-icons/react'
 import type { CurrentResponse, RegisterMeta } from '../../types'
+import { useCssVar } from '../../theme/useChartChrome'
 import { formatEnergyCompactKWhUk } from '../format'
 import { ModbusAddr } from './ModbusAddr'
 
@@ -47,7 +48,7 @@ const ROWS: Row[] = [
   },
   {
     key: 'power_supply_from_grid_day_kwh',
-    icon: <Plug size={ICON_SIZE} weight="duotone" color="#475569" />,
+    icon: null,
     label: 'Постачання з мережі за день',
   },
   {
@@ -81,6 +82,7 @@ function formatTotal(value: number | null, loading: boolean): string {
 }
 
 export function TodayCountersNarrative({ current, loading, debug, registers }: Props) {
+  const muted = useCssVar('--text-muted', '#475569')
   return (
     <section
       className="metrics-group daily-narrative"
@@ -93,10 +95,16 @@ export function TodayCountersNarrative({ current, loading, debug, registers }: P
       <ul className="daily-narrative-list">
         {ROWS.map((row) => {
           const value = reading(current, row.key)
+          const icon =
+            row.key === 'power_supply_from_grid_day_kwh' ? (
+              <Plug size={ICON_SIZE} weight="duotone" color={muted} />
+            ) : (
+              row.icon
+            )
           return (
             <li key={row.key}>
               <span className="daily-narrative-icon" aria-hidden="true">
-                {row.icon}
+                {icon}
               </span>
               <span>
                 {row.label}

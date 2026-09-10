@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { EconomicsUzeCycle, EconomicsUzeCycleChart } from '../../api'
+import { useChartChrome } from '../../theme/useChartChrome'
 
 // Колірна палітра серій (порт client_js/uze_cycle_chart.js).
 const C = {
@@ -13,7 +14,6 @@ const C = {
   socFact: '#c084fc',
   fact: '#334155',
   money: '#166534',
-  zero: '#475569',
 } as const
 
 type SeriesKey = 's-load' | 's-exp' | 's-sun' | 's-grid' | 's-socopt' | 's-socfact' | 's-fact' | 's-rdn'
@@ -36,6 +36,7 @@ type Tip = { head: string; rows: TipRow[] }
 // the realised-fact line, with a cursor-following tooltip and a legend that
 // toggles series. SOC lines start hidden, matching the original embed.
 function CycleChartSvg({ chart }: { chart: EconomicsUzeCycleChart }) {
+  const chrome = useChartChrome()
   const canvasRef = useRef<HTMLDivElement>(null)
   const [hover, setHover] = useState<number | null>(null)
   const [pos, setPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
@@ -222,7 +223,7 @@ function CycleChartSvg({ chart }: { chart: EconomicsUzeCycleChart }) {
     }
     const label = m.tips[i]?.head ?? ''
     xlab.push(
-      <text key={i} x={c.toFixed(1)} y={(m.iy1 + 36).toFixed(1)} textAnchor="middle" fontSize={11} fill="#334155" fontWeight={600}>
+      <text key={i} x={c.toFixed(1)} y={(m.iy1 + 36).toFixed(1)} textAnchor="middle" fontSize={11} fill={chrome.label} fontWeight={600}>
         {label.split(' ')[1] ?? label}
       </text>,
     )
@@ -245,15 +246,15 @@ function CycleChartSvg({ chart }: { chart: EconomicsUzeCycleChart }) {
   const ax: ReactNode[] = []
   ;[m.maxUp, m.maxUp / 2].forEach((v, idx) => {
     const y = m.zeroY - v * m.k
-    ax.push(<line key={`l${idx}`} x1={m.ix0} y1={y.toFixed(1)} x2={m.ix1} y2={y.toFixed(1)} stroke="#eef2f7" />)
+    ax.push(<line key={`l${idx}`} x1={m.ix0} y1={y.toFixed(1)} x2={m.ix1} y2={y.toFixed(1)} stroke={chrome.grid} />)
     ax.push(
-      <text key={`t${idx}`} x={m.ix0 - 5} y={(y + 3).toFixed(1)} textAnchor="end" fontSize={10.5} fill="#94a3b8">
+      <text key={`t${idx}`} x={m.ix0 - 5} y={(y + 3).toFixed(1)} textAnchor="end" fontSize={10.5} fill={chrome.tick}>
         {Math.round(v)}
       </text>,
     )
   })
   ax.push(
-    <text key="dn" x={m.ix0 - 5} y={(m.zeroY + m.maxDn * m.k + 3).toFixed(1)} textAnchor="end" fontSize={10.5} fill="#94a3b8">
+    <text key="dn" x={m.ix0 - 5} y={(m.zeroY + m.maxDn * m.k + 3).toFixed(1)} textAnchor="end" fontSize={10.5} fill={chrome.tick}>
       −{Math.round(m.maxDn)}
     </text>,
   )
@@ -309,14 +310,14 @@ function CycleChartSvg({ chart }: { chart: EconomicsUzeCycleChart }) {
       <div className="uze-right">
         <div className="uze-chart-canvas" ref={canvasRef}>
           <svg viewBox={`0 0 ${m.W} ${m.H}`} role="img" aria-label="Погодинний оптимальний розряд/заряд УЗЕ">
-            <text x={m.ix0 - 5} y={m.iy0 - 8} textAnchor="start" fontSize={10} fill="#94a3b8">кВт·год</text>
+            <text x={m.ix0 - 5} y={m.iy0 - 8} textAnchor="start" fontSize={10} fill={chrome.tick}>кВт·год</text>
             {m.has.socopt || m.has.socfact ? (
               <text x={m.ix1 + 6} y={m.iy0 - 8} textAnchor="end" fontSize={10} fill={C.socOpt}>SOC</text>
             ) : null}
             <g style={{ display: vis('s-rdn') ? undefined : 'none' }}>{rdnCols}</g>
             {ax}
             {socAx}
-            <line x1={m.ix0} y1={m.zeroY} x2={m.ix1} y2={m.zeroY} stroke={C.zero} strokeWidth={1} />
+            <line x1={m.ix0} y1={m.zeroY} x2={m.ix1} y2={m.zeroY} stroke={chrome.zero} strokeWidth={1} />
             <g style={{ display: vis('s-load') ? undefined : 'none' }}>{gLoad}</g>
             <g style={{ display: vis('s-exp') ? undefined : 'none' }}>{gExp}</g>
             <g style={{ display: vis('s-sun') ? undefined : 'none' }}>{gSun}</g>

@@ -90,6 +90,7 @@ func RunReplay(ctx context.Context, cfg *Config, log *slog.Logger, opts ReplayOp
 		"p_bess_virtual_kw", "would_write_40381", "would_write_40378",
 		"p_bess_plan_kw", "soc_percent", "pv_power_kw", "load_power_kw",
 		"grid_power_kw", "ess_power_actual_kw", "data_quality", "rationale",
+		"clamps",
 	}); err != nil {
 		return err
 	}
@@ -134,6 +135,7 @@ func RunReplay(ctx context.Context, cfg *Config, log *slog.Logger, opts ReplayOp
 			fmtPtr(d.ESSPowerKw),
 			d.DataQuality,
 			d.Rationale,
+			strings.Join(d.Clamps, " | "),
 		}); err != nil {
 			return err
 		}

@@ -21,3 +21,19 @@ class ResizeObserverMock {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 ;(globalThis as any).ResizeObserver = ResizeObserverMock
+
+if (typeof window.matchMedia !== 'function') {
+  Object.defineProperty(window, 'matchMedia', {
+    writable: true,
+    value: (query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: () => {},
+      removeListener: () => {},
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      dispatchEvent: () => false,
+    }),
+  })
+}

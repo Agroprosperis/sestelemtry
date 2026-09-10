@@ -39,6 +39,7 @@ import type { PowerChartRow } from '../transforms/power'
 import type { PvForecastHourlyRow } from '../transforms/pvForecast'
 import type { SOCChartRow } from '../transforms/soc'
 import type { EnergySummary as Summary } from '../transforms/summary'
+import { useChartChrome } from '../../theme/useChartChrome'
 import { ChartSkeleton } from './ChartSkeleton'
 import { EnergySummary } from './EnergySummary'
 import { EnergyTooltip } from './EnergyTooltip'
@@ -156,6 +157,7 @@ export function EnergyChart({
   aiPlan,
   planOverlay,
 }: Props) {
+  const chrome = useChartChrome()
   const aiEssLabel = planOverlay?.essLabel ?? AI_ESS_LABEL
   const aiSocLabel = planOverlay?.socLabel ?? AI_SOC_LABEL
   const energyTooltip = useCallback(
@@ -334,7 +336,7 @@ export function EnergyChart({
           ) : (
             <ResponsiveContainer width="100%" height="100%" debounce={RESIZE_DEBOUNCE_MS}>
               <ComposedChart data={dayData}>
-                <CartesianGrid strokeDasharray="3 3" />
+                <CartesianGrid strokeDasharray="3 3" stroke={chrome.grid} />
                 <XAxis
                   dataKey="time"
                   interval={tickInterval}
@@ -367,7 +369,7 @@ export function EnergyChart({
                   allowEscapeViewBox={{ x: false, y: true }}
                   wrapperStyle={{ pointerEvents: 'none', zIndex: 5 }}
                   isAnimationActive={false}
-                  cursor={{ stroke: '#94a3b8', strokeDasharray: '3 3' }}
+                  cursor={{ stroke: chrome.cursorStroke, strokeDasharray: '3 3' }}
                 />
                 <Legend content={renderDayLegend} wrapperStyle={{ fontSize: 12 }} />
                 {hasSoc && !hiddenSeries.has(SOC_KEY) && (
@@ -405,17 +407,17 @@ export function EnergyChart({
                       }}
                     />
                   ))}
-                <ReferenceLine y={0} yAxisId="power" stroke="#64748b" />
+                <ReferenceLine y={0} yAxisId="power" stroke={chrome.zero} />
                 {planOverlay?.annotation && dayLabels.includes(planOverlay.annotation.time) && (
                   <ReferenceLine
                     x={planOverlay.annotation.time}
                     yAxisId="power"
-                    stroke="#475569"
+                    stroke={chrome.label}
                     strokeDasharray="4 3"
                     label={{
                       value: planOverlay.annotation.label,
                       position: 'top',
-                      fill: '#475569',
+                      fill: chrome.label,
                       fontSize: 11,
                     }}
                   />
@@ -532,7 +534,7 @@ export function EnergyChart({
         ) : (
           <ResponsiveContainer width="100%" height="100%" debounce={RESIZE_DEBOUNCE_MS}>
             <BarChart data={series} stackOffset="sign">
-              <CartesianGrid strokeDasharray="3 3" />
+              <CartesianGrid strokeDasharray="3 3" stroke={chrome.grid} />
               <XAxis dataKey="time" interval={tickInterval} />
               <YAxis tickFormatter={(v) => formatChartNumber(Number(v))} />
               <Tooltip
@@ -541,10 +543,10 @@ export function EnergyChart({
                 allowEscapeViewBox={{ x: false, y: true }}
                 wrapperStyle={{ pointerEvents: 'none', zIndex: 5 }}
                 isAnimationActive={false}
-                cursor={{ fill: 'rgba(148, 163, 184, 0.15)' }}
+                cursor={{ fill: chrome.cursor }}
               />
               <Legend wrapperStyle={{ fontSize: 12 }} />
-              <ReferenceLine y={0} stroke="#64748b" />
+              <ReferenceLine y={0} stroke={chrome.zero} />
               {metrics.map((m) => (
                 <Bar
                   key={m.key}

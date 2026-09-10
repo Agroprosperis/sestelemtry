@@ -32,7 +32,9 @@ export type PlanPreviewHour = {
   ess_kw: number
   charge_pv_kwh: number
   charge_grid_kwh: number
+  /** Весь розряд за годину; discharge_grid_kwh — його експортна частина. */
   discharge_kwh: number
+  discharge_grid_kwh: number
   grid_kw: number
   soc_end_pct: number
   action: string
@@ -42,6 +44,7 @@ export type PlanDayEffect = {
   date: string
   tomorrow: boolean
   ess_to_load_uah: number
+  ess_to_grid_uah: number
   pv_charge_cost_uah: number
   grid_charge_cost_uah: number
   degradation_uah: number
@@ -54,6 +57,7 @@ export type PlanDayEffect = {
   baseline_cost_uah: number
   plan_cost_uah: number
   ess_to_load_kwh: number
+  ess_to_grid_kwh: number
   charge_pv_kwh: number
   charge_grid_kwh: number
 }

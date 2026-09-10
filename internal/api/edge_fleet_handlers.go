@@ -67,6 +67,9 @@ type edgeSiteStatusResp struct {
 	Manifest  edgeStatusManifest  `json:"manifest"`
 	Decision  *edgeStatusDecision `json:"decision,omitempty"`
 	Events    []edgeStatusEvent   `json:"events,omitempty"`
+	// Health is the raw §8.3 diagnostics snapshot from the newest
+	// heartbeat. Absent for edge builds that do not send it.
+	Health json.RawMessage `json:"health,omitempty"`
 }
 
 func buildEdgeSiteStatus(st storage.EdgeSiteStatus, now time.Time) edgeSiteStatusResp {
@@ -121,6 +124,9 @@ func buildEdgeSiteStatus(st storage.EdgeSiteStatus, now time.Time) edgeSiteStatu
 			AgeSeconds: int64(now.Sub(st.DecisionAt).Seconds()),
 			Record:     json.RawMessage(st.DecisionRecord),
 		}
+	}
+	if len(st.Health) > 0 {
+		resp.Health = json.RawMessage(st.Health)
 	}
 	return resp
 }

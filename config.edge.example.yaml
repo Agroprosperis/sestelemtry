@@ -68,8 +68,11 @@ local_ui:
   enabled: true
   listen: ":8081"
 
-# Passport limits used when the manifest carries none and the
-# SmartLogger limit registers (40490/40492) are unavailable.
+# Приклад форми YAML — НЕ runtime-джерело кВт (діагностика §4.1).
+# Потужність УЗЕ движок бере ЛИШЕ з manifest.limits (паспорт /
+# «Обмеження» адміна, зібрані хмарою) і з динамічних 40490/40492.
+# bess.rated_* нижче — ілюстрація для консолі, на клампи й
+# SHADOW_ANOMALY не впливає (інцидент «324» на ze, 2026-09-04).
 limits:
   grid:
     import_limit_kw: 947
@@ -77,7 +80,27 @@ limits:
   pv:
     rated_kw: 450
   bess:
-    rated_power_kw: 324
+    rated_power_kw: 324          # ілюстрація; не rated для движка
     rated_capacity_kwh: 645
     soc_min_economic_pct: 20
     soc_max_economic_pct: 90
+    # Site passport for the bess_inventory health check (compared with
+    # SL 40398/40484/40488; mismatch = warning, not a dispatch block).
+    # ze: passport_kw: 864, passport_kwh: 1720, passport_ess_count: 8.
+    # passport_kw: 324
+    # passport_kwh: 645
+    # passport_ess_count: 2
+
+# Shadow diagnostics (ems_edge_shadow_diagnostics.md).
+# device_addresses are RS-485 addresses on the PV SmartLogger — take
+# them from the SmartLogger web UI or a PCAP of the existing controller
+# (ze: [12,13,14,15,16,17,18,19,20,21,22,23], confirmed by PCAP).
+# Do NOT guess "1..N"; FusionSolar SNs are not these addresses.
+# Empty/omitted list = no 51xxx poll (fleet panel hidden); the SL alarm
+# words 50000…50005 are polled in the 1s ESS cycle regardless.
+diagnostics:
+  inverters:
+    device_addresses: []
+    poll_interval: 30s
+    # labels:
+    #   12: INV-12

@@ -1,6 +1,7 @@
 package edge
 
 import (
+	"fmt"
 	"math"
 	"time"
 )
@@ -182,3 +183,55 @@ func buildTickFromValues(
 func f64ptr(v float64) *float64 { return &v }
 
 func round3(v float64) float64 { return math.Round(v*1000) / 1000 }
+
+// slAlarmWordKeys are the metric keys of the six SmartLogger alarm
+// words (registers 50000…50005, Issue 52 Alarm 1…6), in order.
+var slAlarmWordKeys = [6]string{
+	"sl_alarm_1", "sl_alarm_2", "sl_alarm_3",
+	"sl_alarm_4", "sl_alarm_5", "sl_alarm_6",
+}
+
+// SLAlarmWords extracts the six raw alarm words from the tick. The
+// second return is false when none of the words were polled at all
+// (old catalog, replay CSV without the columns) — absence must not be
+// confused with "all clear", but it must not fake an alarm either.
+func (t Tick) SLAlarmWords() ([6]uint16, bool) {
+	var words [6]uint16
+	any := false
+	for i, k := range slAlarmWordKeys {
+		if v, ok := t.Values[k]; ok {
+			words[i] = uint16(v)
+			any = true
+		}
+	}
+	return words, any
+}
+
+// SLAlarmActive reports whether any polled alarm word is non-zero.
+func (t Tick) SLAlarmActive() bool {
+	words, ok := t.SLAlarmWords()
+	if !ok {
+		return false
+	}
+	for _, w := range words {
+		if w != 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// slAlarmHex renders the words for events and the health snapshot:
+// "0x0" for zero, "0x0010"-style for non-zero (mirrors the spec's UI
+// example `A2=0x0010`).
+func slAlarmHex(words [6]uint16) [6]string {
+	var out [6]string
+	for i, w := range words {
+		if w == 0 {
+			out[i] = "0x0"
+		} else {
+			out[i] = fmt.Sprintf("0x%04x", w)
+		}
+	}
+	return out
+}

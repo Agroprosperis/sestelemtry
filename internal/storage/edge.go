@@ -75,7 +75,9 @@ func InitEdgeSchema(ctx context.Context, pool *pgxpool.Pool) error {
 		`CREATE INDEX IF NOT EXISTS edge_events_site_time
 			ON edge_events (site_id, time DESC)`,
 
-		// Liveness: one row per site, last writer wins.
+		// Liveness: one row per site, last writer wins. `health` is the
+		// §8.3 diagnostics snapshot from the same heartbeat (nullable:
+		// old edge builds do not send it). Mirrored by 016_edge_health.sql.
 		`CREATE TABLE IF NOT EXISTS edge_heartbeats (
 			site_id text PRIMARY KEY,
 			edge_id text,
@@ -83,8 +85,10 @@ func InitEdgeSchema(ctx context.Context, pool *pgxpool.Pool) error {
 			buffer_pending bigint,
 			last_sl_poll_ok timestamptz,
 			firmware_version text,
+			health jsonb,
 			updated_at timestamptz NOT NULL DEFAULT now()
 		)`,
+		`ALTER TABLE edge_heartbeats ADD COLUMN IF NOT EXISTS health jsonb`,
 
 		// Published manifests (manifest-lite). The newest issued_at row
 		// per site is what GET /api/v1/edge/manifest serves.
@@ -318,7 +322,9 @@ func InsertEdgeEvents(ctx context.Context, db DBTX, siteID, batchID string, docs
 	return len(rows), nil
 }
 
-// EdgeHeartbeat is the liveness report of one edge device.
+// EdgeHeartbeat is the liveness report of one edge device. Health is
+// the raw §8.3 diagnostics snapshot (nil when the edge build predates
+// the field).
 type EdgeHeartbeat struct {
 	SiteID          string
 	EdgeID          string
@@ -326,21 +332,29 @@ type EdgeHeartbeat struct {
 	BufferPending   int64
 	LastSLPollOK    *time.Time
 	FirmwareVersion string
+	Health          []byte
 }
 
 // UpsertEdgeHeartbeat records the latest heartbeat (one row per site).
+// A heartbeat without health keeps the previous snapshot NULLed —
+// stale diagnostics must not outlive the build that produced them.
 func UpsertEdgeHeartbeat(ctx context.Context, db DBTX, hb EdgeHeartbeat) error {
+	var health any
+	if len(hb.Health) > 0 {
+		health = hb.Health
+	}
 	_, err := db.Exec(ctx, `
-		INSERT INTO edge_heartbeats (site_id, edge_id, status, buffer_pending, last_sl_poll_ok, firmware_version, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, now())
+		INSERT INTO edge_heartbeats (site_id, edge_id, status, buffer_pending, last_sl_poll_ok, firmware_version, health, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, now())
 		ON CONFLICT (site_id) DO UPDATE SET
 			edge_id = EXCLUDED.edge_id,
 			status = EXCLUDED.status,
 			buffer_pending = EXCLUDED.buffer_pending,
 			last_sl_poll_ok = EXCLUDED.last_sl_poll_ok,
 			firmware_version = EXCLUDED.firmware_version,
+			health = EXCLUDED.health,
 			updated_at = now()`,
-		hb.SiteID, hb.EdgeID, hb.Status, hb.BufferPending, hb.LastSLPollOK, hb.FirmwareVersion)
+		hb.SiteID, hb.EdgeID, hb.Status, hb.BufferPending, hb.LastSLPollOK, hb.FirmwareVersion, health)
 	return err
 }
 
@@ -518,6 +532,7 @@ type EdgeSiteStatus struct {
 	BufferPending int64
 	LastSLPollOK  time.Time
 	Firmware      string
+	Health        []byte // §8.3 snapshot jsonb; nil when the edge does not send it
 
 	// Newest published manifest.
 	ManifestID         string
@@ -541,9 +556,9 @@ func GetEdgeSiteStatus(ctx context.Context, pool *pgxpool.Pool, siteID string, w
 	var edgeID, status, firmware *string
 	var pending *int64
 	err := pool.QueryRow(ctx, `
-		SELECT updated_at, edge_id, status, buffer_pending, last_sl_poll_ok, firmware_version
+		SELECT updated_at, edge_id, status, buffer_pending, last_sl_poll_ok, firmware_version, health
 		FROM edge_heartbeats WHERE site_id = $1`, siteID).
-		Scan(&hbAt, &edgeID, &status, &pending, &slPollOK, &firmware)
+		Scan(&hbAt, &edgeID, &status, &pending, &slPollOK, &firmware, &st.Health)
 	if err != nil && err != pgx.ErrNoRows {
 		return st, err
 	}

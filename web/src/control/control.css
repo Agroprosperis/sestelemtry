@@ -1,7 +1,5 @@
 /* «Керування» mode: tab strip and the control-specific cards. The top
-   bar (Об'єкт + Режим + чипи) lives in shell/shell.css; the visual
-   language follows the light dashboard theme (white cards, #e2e8f0
-   borders, 12px radius). */
+   bar (Об'єкт + Режим + чипи) lives in shell/shell.css. */
 
 /* --- tabs and buttons --- */
 
@@ -9,9 +7,9 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  border: 1px solid #e2e8f0;
-  background: #ffffff;
-  color: #0f172a;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text);
   font-size: 13px;
   font-weight: 600;
   padding: 8px 13px;
@@ -20,22 +18,22 @@
 }
 
 .ctl-btn:hover {
-  background: #f8fafc;
+  background: var(--bg-sunken);
 }
 
 .ctl-btn.primary {
-  background: #0f172a;
-  border-color: #0f172a;
-  color: #ffffff;
+  background: var(--btn-primary-bg);
+  border-color: var(--btn-primary-bg);
+  color: var(--btn-primary-fg);
 }
 
 .ctl-btn.primary:hover {
-  background: #1e293b;
+  background: var(--btn-primary-hover);
 }
 
 .ctl-btn.danger {
-  border-color: #fecaca;
-  color: #b91c1c;
+  border-color: var(--err-border);
+  color: var(--err-text);
 }
 
 .ctl-btn:disabled {
@@ -46,8 +44,8 @@
 .ctl-tabs {
   display: inline-flex;
   gap: 4px;
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
   border-radius: 12px;
   padding: 4px;
   align-self: start;
@@ -60,23 +58,23 @@
   border-radius: 9px;
   font-size: 13px;
   font-weight: 600;
-  color: #475569;
+  color: var(--text-muted);
   cursor: pointer;
   white-space: nowrap;
 }
 
 .ctl-tabs button.active {
-  background: #0f172a;
-  color: #ffffff;
+  background: var(--btn-primary-bg);
+  color: var(--btn-primary-fg);
 }
 
 /* --- generic cards --- */
 
 .ctl-card {
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
   border-radius: 12px;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  box-shadow: 0 1px 2px rgba(var(--shadow-color), 0.04);
   padding: 16px;
 }
 
@@ -84,13 +82,13 @@
   margin: 0 0 12px;
   font-size: 15px;
   font-weight: 700;
-  color: #0f172a;
+  color: var(--text);
 }
 
 .ctl-card-sub {
   margin: -8px 0 12px;
   font-size: 12px;
-  color: #64748b;
+  color: var(--text-subtle);
 }
 
 .ctl-rows {
@@ -104,7 +102,7 @@
   align-items: baseline;
   gap: 12px;
   padding: 7px 0;
-  border-bottom: 1px solid #f1f5f9;
+  border-bottom: 1px solid var(--bg-muted);
   font-size: 13px;
 }
 
@@ -113,50 +111,67 @@
 }
 
 .ctl-row .k {
-  color: #64748b;
+  color: var(--text-subtle);
 }
 
 .ctl-row .v {
   font-weight: 700;
-  color: #0f172a;
+  color: var(--text);
   text-align: right;
 }
 
 .ctl-row .v.ok {
-  color: #15803d;
+  color: var(--ok-text);
 }
 
 .ctl-row .v.warn {
-  color: #b45309;
+  color: var(--warn-text);
 }
 
 .ctl-row .v.err {
-  color: #b91c1c;
+  color: var(--err-text);
 }
 
 .ctl-row .v.muted {
-  color: #94a3b8;
+  color: var(--text-faint);
   font-weight: 500;
 }
 
 /* --- layout of the «Стан» tab --- */
 
+.ctl-state-stack {
+  display: grid;
+  gap: 20px;
+}
+
+/* Every nested track is minmax(0, …): plain 1fr/auto floors at the
+   content's min-content (nowrap numbers, chart summary), which inflated
+   the columns until they overlapped and overflowed the viewport. */
 .ctl-state-grid {
   display: grid;
-  grid-template-columns: minmax(300px, 360px) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 360px) minmax(0, 1fr);
   gap: 20px;
   align-items: start;
 }
 
 .ctl-state-left {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 20px;
+  min-width: 0;
 }
 
 .ctl-state-right {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 20px;
   min-width: 0;
+}
+
+/* The dashboard's summary strip inside Energy Trend keeps its own 1fr
+   tracks; scoped override so it can shrink inside the control column. */
+.ctl-state-right .energy-summary-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 @media (max-width: 1000px) {
@@ -170,9 +185,9 @@
   gap: 8px;
   align-items: center;
   font-size: 12px;
-  color: #4338ca;
-  background: #eef2ff;
-  border: 1px solid #c7d2fe;
+  color: var(--accent-text);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-border);
   border-radius: 10px;
   padding: 8px 12px;
 }
@@ -186,17 +201,17 @@
 }
 
 .ctl-mode-card {
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--border);
   border-radius: 12px;
   padding: 14px;
   display: grid;
   gap: 8px;
-  background: #ffffff;
+  background: var(--bg-elevated);
 }
 
 .ctl-mode-card.active {
-  border-color: #0f172a;
-  box-shadow: 0 0 0 1px #0f172a;
+  border-color: var(--btn-primary-bg);
+  box-shadow: 0 0 0 1px var(--btn-primary-bg);
 }
 
 .ctl-mode-card h3 {
@@ -210,7 +225,7 @@
 .ctl-mode-card p {
   margin: 0;
   font-size: 12px;
-  color: #64748b;
+  color: var(--text-subtle);
   line-height: 1.45;
 }
 
@@ -231,7 +246,7 @@
 
 .ctl-manual-controls select,
 .ctl-manual-controls input {
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--border);
   border-radius: 8px;
   padding: 6px 9px;
   font-size: 13px;
@@ -248,19 +263,19 @@
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: #64748b;
+  color: var(--text-subtle);
   padding: 6px 8px;
-  border-bottom: 1px solid #e2e8f0;
+  border-bottom: 1px solid var(--border);
 }
 
 .ctl-manual-table td {
   padding: 5px 8px;
-  border-bottom: 1px solid #f1f5f9;
+  border-bottom: 1px solid var(--bg-muted);
 }
 
 .ctl-manual-table input {
   width: 90px;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--border);
   border-radius: 7px;
   padding: 5px 8px;
   font-size: 13px;
@@ -268,13 +283,13 @@
 }
 
 .ctl-manual-table input:focus {
-  outline: 2px solid #93c5fd;
-  border-color: #60a5fa;
+  outline: 2px solid var(--info-tint);
+  border-color: var(--info);
 }
 
 .ctl-manual-hint {
   font-size: 12px;
-  color: #64748b;
+  color: var(--text-subtle);
   margin-top: 10px;
 }
 
@@ -294,18 +309,18 @@
 }
 
 .ctl-field span {
-  color: #475569;
+  color: var(--text-muted);
   font-weight: 600;
   font-size: 12px;
 }
 
 .ctl-field small {
-  color: #94a3b8;
+  color: var(--text-faint);
   font-size: 11px;
 }
 
 .ctl-field input {
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--border);
   border-radius: 8px;
   padding: 8px 10px;
   font-size: 14px;
@@ -333,14 +348,14 @@
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: #64748b;
+  color: var(--text-subtle);
   padding: 6px 8px;
-  border-bottom: 1px solid #e2e8f0;
+  border-bottom: 1px solid var(--border);
 }
 
 .ctl-events-table td {
   padding: 6px 8px;
-  border-bottom: 1px solid #f1f5f9;
+  border-bottom: 1px solid var(--bg-muted);
   vertical-align: top;
 }
 
@@ -353,18 +368,198 @@
 }
 
 .ctl-sev.info {
-  background: #eff6ff;
-  color: #1d4ed8;
+  background: var(--info-bg);
+  color: var(--info-text);
 }
 
 .ctl-sev.warning {
-  background: #fffbeb;
-  color: #b45309;
+  background: var(--warn-bg);
+  color: var(--warn-text);
 }
 
 .ctl-sev.alarm {
-  background: #fef2f2;
-  color: #b91c1c;
+  background: var(--err-bg);
+  color: var(--err-text);
+}
+
+.ctl-sev.ok {
+  background: var(--ok-bg);
+  color: var(--ok-text);
+}
+
+.ctl-sev.plain {
+  background: var(--bg-muted);
+  color: var(--text-muted);
+}
+
+.ctl-sev.warn {
+  background: var(--warn-bg);
+  color: var(--warn-text);
+}
+
+.ctl-sev.err {
+  background: var(--err-bg);
+  color: var(--err-text);
+}
+
+.ctl-event-code-label {
+  font-family: inherit;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+/* --- план · shadow · факт (diagnostics spec §8.2) --- */
+
+.ctl-psf {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.ctl-psf-cell {
+  display: grid;
+  gap: 2px;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.ctl-psf-cell .k {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-subtle);
+}
+
+.ctl-psf-cell .v {
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  /* Wraps between the number and «кВт» when the cell is tight instead
+     of painting outside the card. */
+  white-space: normal;
+}
+
+.ctl-psf-cell .v.pos {
+  color: var(--ok-text);
+}
+
+.ctl-psf-cell .v.neg {
+  color: var(--info-text);
+}
+
+.ctl-psf-cell .sub {
+  font-size: 10px;
+  color: var(--text-faint);
+}
+
+/* --- картка УЗЕ (spec §7.2) --- */
+
+.ctl-bess-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.ctl-bess-head .warn {
+  color: var(--warn-text);
+}
+
+.ctl-bess-sub {
+  font-size: 12px;
+  color: var(--text-subtle);
+  margin-top: 6px;
+}
+
+.ctl-bess-details {
+  margin-top: 10px;
+}
+
+.ctl-bess-details summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-subtle);
+  margin-bottom: 6px;
+}
+
+/* --- checks table (spec §4) --- */
+
+.ctl-checks-table td:first-child {
+  font-weight: 600;
+}
+
+.ctl-checks-table .muted {
+  color: var(--text-faint);
+}
+
+.ctl-check-detail {
+  font-size: 11px;
+  color: var(--text-faint);
+  margin-top: 2px;
+}
+
+/* --- флот інверторів (spec §6.3) --- */
+
+.ctl-inv-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.ctl-inv-wrap {
+  overflow-x: auto;
+}
+
+.ctl-inv-table .mono,
+.ctl-events-table .mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+
+.ctl-inv-row {
+  cursor: pointer;
+}
+
+.ctl-inv-row:hover td {
+  background: var(--bg-sunken);
+}
+
+.ctl-inv-bad td {
+  background: var(--err-bg);
+}
+
+.ctl-inv-warn td {
+  background: var(--warn-bg);
+}
+
+.ctl-inv-detail td {
+  background: var(--bg-sunken);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* Канонна розшифровка Huawei-кодів: muted-рядок ПІД hex (ніколи
+   замість нього), обрізається трикрапкою — повний текст у title. */
+.ctl-inv-declabel {
+  font-family: inherit;
+  font-size: 10.5px;
+  color: var(--text-subtle);
+  max-width: 140px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ctl-inv-decode {
+  margin-top: 4px;
+  color: var(--text-secondary);
 }
 
 /* --- notices --- */
@@ -373,19 +568,19 @@
   font-size: 13px;
   border-radius: 10px;
   padding: 10px 14px;
-  border: 1px solid #bbf7d0;
-  background: #f0fdf4;
-  color: #166534;
+  border: 1px solid var(--ok-border);
+  background: var(--ok-bg);
+  color: var(--ok-text-strong);
 }
 
 .ctl-notice.err {
-  border-color: #fecaca;
-  background: #fef2f2;
-  color: #b91c1c;
+  border-color: var(--err-border);
+  background: var(--err-bg);
+  color: var(--err-text);
 }
 
 .ctl-placeholder {
-  color: #94a3b8;
+  color: var(--text-faint);
   font-size: 13px;
   padding: 24px 0;
   text-align: center;

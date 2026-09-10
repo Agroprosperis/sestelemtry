@@ -6,6 +6,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { fetchEdgeFleet, type EdgeSiteStatus } from '../control/controlClient'
 import { formatOrganizationLabel } from '../dashboard/config'
+import { ThemeToggle } from '../theme/ThemeToggle'
 import './shell.css'
 
 // 'none' is for the service pages (station, import): no mode is
@@ -179,6 +180,7 @@ export function ModeTopBar({
         </div>
       </div>
 
+      <div className="ctl-topbar-end">
       {showChips && (
       <div className="ctl-topbar-chips">
         {st && (
@@ -188,6 +190,21 @@ export function ModeTopBar({
           </span>
         )}
         {modeChip && <span className="ctl-chip plain">{modeChip}</span>}
+        {mode === 'control' && st?.health && (
+          <span
+            className={'ctl-chip ' + (st.health.ok ? 'ok' : 'warn')}
+            title={
+              st.health.ok
+                ? 'Усі перевірки health пройдено'
+                : (st.health.checks ?? [])
+                    .filter((c) => !c.ok && (c.severity === 'warning' || c.severity === 'alarm'))
+                    .map((c) => c.label || c.id)
+                    .join(', ') || 'Є відхилення'
+            }
+          >
+            {st.health.ok ? 'діагностика OK' : 'є відхилення'}
+          </span>
+        )}
         {mode === 'control' && manifest?.manifest_id && (
           <span
             className={
@@ -264,6 +281,9 @@ export function ModeTopBar({
           )}
         </div>
       )}
+
+      <ThemeToggle />
+      </div>
     </div>
     </div>
   )

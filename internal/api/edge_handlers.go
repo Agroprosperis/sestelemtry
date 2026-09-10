@@ -177,14 +177,17 @@ func (h *Handlers) edgeBatch(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// edgeHeartbeatRequest mirrors internal/edge.Heartbeat.
+// edgeHeartbeatRequest mirrors internal/edge.Heartbeat. Health is the
+// §8.3 diagnostics snapshot; optional so pre-diagnostics edge builds
+// keep working.
 type edgeHeartbeatRequest struct {
-	SiteID          string     `json:"site_id"`
-	EdgeID          string     `json:"edge_id"`
-	Status          string     `json:"status"`
-	BufferPending   int64      `json:"buffer_pending"`
-	LastSLPollOK    *time.Time `json:"last_sl_poll_ok"`
-	FirmwareVersion string     `json:"firmware_version"`
+	SiteID          string          `json:"site_id"`
+	EdgeID          string          `json:"edge_id"`
+	Status          string          `json:"status"`
+	BufferPending   int64           `json:"buffer_pending"`
+	LastSLPollOK    *time.Time      `json:"last_sl_poll_ok"`
+	FirmwareVersion string          `json:"firmware_version"`
+	Health          json.RawMessage `json:"health"`
 }
 
 // edgeHeartbeat handles POST /api/v1/edge/heartbeat.
@@ -199,7 +202,9 @@ func (h *Handlers) edgeHeartbeat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req edgeHeartbeatRequest
-	if err := decodeEdgeJSON(w, r, &req, 64<<10); err != nil {
+	// The health snapshot (checks + BESS + inverter fleet) can be a few
+	// hundred KB on large fleets — allow more than the bare heartbeat.
+	if err := decodeEdgeJSON(w, r, &req, 1<<20); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -211,6 +216,10 @@ func (h *Handlers) edgeHeartbeat(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
+	var health []byte
+	if len(req.Health) > 0 && string(req.Health) != "null" {
+		health = req.Health
+	}
 	err := storage.UpsertEdgeHeartbeat(r.Context(), e.Pool, storage.EdgeHeartbeat{
 		SiteID:          req.SiteID,
 		EdgeID:          req.EdgeID,
@@ -218,6 +227,7 @@ func (h *Handlers) edgeHeartbeat(w http.ResponseWriter, r *http.Request) {
 		BufferPending:   req.BufferPending,
 		LastSLPollOK:    req.LastSLPollOK,
 		FirmwareVersion: req.FirmwareVersion,
+		Health:          health,
 	})
 	if err != nil {
 		e.Log.Error("edge_heartbeat", "err", err)

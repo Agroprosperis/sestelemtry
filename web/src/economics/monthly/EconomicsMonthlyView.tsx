@@ -19,6 +19,7 @@ import type {
   EconomicsMonthlyTotals,
   EconomicsUzeCycle,
 } from '../../api'
+import { useChartChrome } from '../../theme/useChartChrome'
 import { UzeCyclesAccordion } from './UzeCycleChart'
 import { formatOrganizationLabel } from '../../dashboard/config'
 import {
@@ -441,6 +442,7 @@ function TrendTooltip({ active, payload, label }: TrendTooltipProps) {
 }
 
 function MonthlyTrend({ days, totals }: { days: EconomicsMonthlyDay[]; totals: EconomicsMonthlyTotals }) {
+  const chrome = useChartChrome()
   const rows = useMemo<TrendRow[]>(
     () =>
       days.map((d) => ({
@@ -508,11 +510,11 @@ function MonthlyTrend({ days, totals }: { days: EconomicsMonthlyDay[]; totals: E
       <div className="economics-month-chart">
         <ResponsiveContainer width="100%" height={300}>
           <BarChart data={rows} margin={{ top: 8, right: 8, bottom: 0, left: 0 }} stackOffset="sign" barCategoryGap="12%">
-            <CartesianGrid strokeDasharray="2 5" stroke="#e7ecf2" vertical={false} />
-            <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#8a94a6' }} interval={0} tickLine={false} axisLine={false} />
-            <YAxis tick={{ fontSize: 11, fill: '#98a2b3' }} width={40} tickLine={false} axisLine={false} />
-            <Tooltip content={<TrendTooltip />} cursor={{ fill: 'rgba(148, 163, 184, 0.12)' }} />
-            <ReferenceLine y={0} stroke="#98a2b3" />
+            <CartesianGrid strokeDasharray="2 5" stroke={chrome.grid} vertical={false} />
+            <XAxis dataKey="label" tick={{ fontSize: 10, fill: chrome.tick }} interval={0} tickLine={false} axisLine={false} />
+            <YAxis tick={{ fontSize: 11, fill: chrome.axis }} width={40} tickLine={false} axisLine={false} />
+            <Tooltip content={<TrendTooltip />} cursor={{ fill: chrome.cursor }} />
+            <ReferenceLine y={0} stroke={chrome.zero} />
             <Bar dataKey="pv" name="виробіток СЕС" stackId="pos" fill="#91d9aa" maxBarSize={28} shape={makeTrendCap('top', 'pv', TREND_POS_ORDER)} />
             <Bar dataKey="essDischarge" name="розряд УЗЕ" stackId="pos" fill="#5fc993" maxBarSize={28} shape={makeTrendCap('top', 'essDischarge', TREND_POS_ORDER)} />
             <Bar dataKey="gridImport" name="з мережі" stackId="pos" fill="#12b76a" maxBarSize={28} shape={makeTrendCap('top', 'gridImport', TREND_POS_ORDER)} />

@@ -88,6 +88,35 @@
     .plan-table-wrap { overflow-x: auto; max-height: 420px; overflow-y: auto; border: 1px solid var(--line); border-radius: 8px; }
     .mobile-tabs { display: none; gap: 6px; margin-bottom: 14px; flex-wrap: wrap; }
     @media (max-width: 900px) { .mobile-tabs { display: flex; } .mobile-tabs .btn.active { background: var(--blue); color: #fff; } }
+    /* План · shadow · факт (diagnostics spec §3.3/§8.1) */
+    .psf-strip { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 10px; }
+    @media (max-width: 700px) { .psf-strip { grid-template-columns: 1fr; } }
+    .psf-cell { background: var(--soft); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+    .psf-cell .k { font-size: 11px; font-weight: 600; color: var(--muted); }
+    .psf-cell .v { font-size: 24px; font-weight: 800; font-variant-numeric: tabular-nums; }
+    .psf-cell .v.pos { color: var(--green); } .psf-cell .v.neg { color: var(--blue); }
+    .psf-cell .sub { font-size: 10px; color: var(--muted); margin-top: 2px; }
+    .psf-flows { font-size: 13px; color: var(--muted); margin: 4px 0 0; }
+    .psf-clamps { font-size: 12px; color: var(--amber); margin: 6px 0 0; }
+    /* Панель УЗЕ (§7.2) */
+    .bess-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; font-size: 13px; }
+    .bess-head .sep { color: var(--line); }
+    .soc-track { position: relative; height: 10px; border-radius: 6px; background: var(--soft); border: 1px solid var(--line); margin: 4px 0 12px; }
+    .soc-window { position: absolute; top: -1px; bottom: -1px; background: rgba(37, 99, 235, 0.12); border-left: 1px dashed #93c5fd; border-right: 1px dashed #93c5fd; }
+    .soc-fill { position: absolute; top: 2px; bottom: 2px; width: 3px; border-radius: 2px; background: var(--violet); }
+    .soc-fill.out { background: var(--amber); }
+    details.diag-details summary { cursor: pointer; font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+    /* Панель інверторів (§6.3) */
+    .inv-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; font-size: 12px; }
+    .inv-stale { color: var(--amber); font-size: 12px; }
+    table.data tr.inv-row { cursor: pointer; }
+    table.data tr.inv-fault td { background: #fef2f2; }
+    table.data tr.inv-shutdown td { background: #fffbeb; }
+    tr.inv-detail td { background: var(--soft); font-family: ui-monospace, monospace; font-size: 11px; }
+    /* Канонна розшифровка Huawei-кодів: muted під hex, з трикрапкою. */
+    .inv-declabel { color: var(--muted); font-size: 10px; max-width: 130px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    /* Checks §4 */
+    #checks-table td.chk-detail { color: var(--muted); font-size: 11px; }
   </style>
 </head>
 <body>
@@ -139,6 +168,55 @@
         <div class="kpi-card bb"><div class="k">Black box</div><div class="v" id="kpi-bb">—</div><div class="sub">pending uplink</div></div>
       </div>
 
+      <div class="card">
+        <div class="btn-row" style="justify-content:space-between;margin-bottom:12px;flex-wrap:wrap">
+          <h2 style="margin:0">План · shadow · факт</h2>
+          <span class="badge gray" id="psf-reason">—</span>
+        </div>
+        <div class="psf-strip">
+          <div class="psf-cell"><div class="k">План</div><div class="v" id="psf-plan">—</div><div class="sub">інтервал manifest (p_bess_plan_kw)</div></div>
+          <div class="psf-cell"><div class="k">Shadow</div><div class="v" id="psf-shadow">—</div><div class="sub">would_write_40381 · віртуально</div></div>
+          <div class="psf-cell"><div class="k">Факт УЗЕ</div><div class="v" id="psf-fact">—</div><div class="sub">40392 · керує Encombi</div></div>
+        </div>
+        <p class="psf-flows" id="psf-flows">—</p>
+        <p class="psf-clamps" id="psf-clamps" hidden></p>
+      </div>
+
+      <!-- Панелі УЗЕ + інверторів живуть тут; «Діагностика» перетягує
+           той самий DOM-вузол (спільний рендер, не другий DOM). -->
+      <div id="shared-host-status">
+        <div id="shared-diag">
+          <div class="card">
+            <div class="btn-row" style="justify-content:space-between;margin-bottom:10px;flex-wrap:wrap">
+              <h2 style="margin:0">УЗЕ (BESS)</h2>
+              <span class="badge gray" id="bess-updated">—</span>
+            </div>
+            <div class="bess-head" id="bess-head">Немає знімка health…</div>
+            <div class="soc-track" id="bess-soc-track" hidden>
+              <div class="soc-window" id="bess-soc-window"></div>
+              <div class="soc-fill" id="bess-soc-fill"></div>
+            </div>
+            <details class="diag-details" open>
+              <summary>Деталі УЗЕ</summary>
+              <table class="data" id="bess-details"></table>
+            </details>
+          </div>
+          <div class="card" id="inv-card" hidden>
+            <div class="btn-row" style="justify-content:space-between;margin-bottom:10px;flex-wrap:wrap">
+              <h2 style="margin:0">Інвертори</h2>
+              <span class="inv-stale" id="inv-updated">—</span>
+            </div>
+            <div class="inv-chips" id="inv-chips"></div>
+            <div class="plan-table-wrap">
+              <table class="data">
+                <thead><tr><th>Addr</th><th>Мітка</th><th>Статус</th><th>P, кВт</th><th>Status hex</th><th>Major</th><th>Minor</th><th>Warning</th><th>t, °C</th><th>Poll</th></tr></thead>
+                <tbody id="inv-body"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div class="grid2">
         <div class="card">
           <h2>Здоровʼя пристрою</h2>
@@ -167,6 +245,16 @@
     </section>
 
     <section class="panel" id="panel-diag">
+      <div class="card">
+        <h2>Очікувано vs факт</h2>
+        <table class="data">
+          <thead><tr><th>Показник</th><th>Очікувано</th><th>Факт</th><th>Статус</th></tr></thead>
+          <tbody id="checks-body"><tr><td colspan="4" style="color:var(--muted)">Немає знімка health.</td></tr></tbody>
+        </table>
+      </div>
+
+      <div id="shared-host-diag"></div>
+
       <div class="card">
         <h2>Журнали</h2>
         <div class="log-tabs">
@@ -317,6 +405,187 @@ function renderStatus(st) {
     ['Активний пресет', '<code>' + esc(dec ? dec.preset : st.preset) + '</code>'],
     ['Останнє рішення', dec ? fmtClock(dec.ts) + ' · ' + esc(dec.reason_code || '') : '—'],
   ].map(([k, v]) => '<tr><td style="color:var(--muted)">' + k + '</td><td>' + v + '</td></tr>').join('');
+
+  renderPlanShadowFact(dec, t);
+  renderHealth(st.health);
+}
+
+// --- План · shadow · факт (spec §3.3/§8.1) ---
+const fmtSigned = (v) => v == null ? '—' : (v > 0 ? '+' : '') + (Math.round(v * 10) / 10).toLocaleString('uk-UA');
+
+function renderPlanShadowFact(dec, tick) {
+  const i = dec && dec.inputs ? dec.inputs : {};
+  const o = dec && dec.outputs ? dec.outputs : {};
+  const setV = (id, v) => {
+    const el = $(id);
+    el.textContent = v == null ? '—' : fmtSigned(v) + ' кВт';
+    el.className = 'v ' + (v > 0 ? 'pos' : v < 0 ? 'neg' : '');
+  };
+  setV('psf-plan', i.p_bess_plan_kw != null ? i.p_bess_plan_kw : null);
+  setV('psf-shadow', o.p_bess_virtual_kw != null ? o.p_bess_virtual_kw : null);
+  setV('psf-fact', i.ess_power_kw != null ? i.ess_power_kw : (tick ? tick.ess_power_kw : null));
+  $('psf-reason').textContent = dec ? (dec.reason_code || '—') : '—';
+  const pv = i.pv_power_kw != null ? i.pv_power_kw : (tick ? tick.pv_power_kw : null);
+  const load = i.load_power_kw != null ? i.load_power_kw : (tick ? tick.load_power_kw : null);
+  const grid = i.grid_power_kw != null ? i.grid_power_kw : (tick ? tick.grid_power_kw : null);
+  $('psf-flows').textContent = 'PV ' + fmtKw(pv) + ' · load ' + fmtKw(load) + ' · grid ' + fmtKw(grid) + ' · факт УЗЕ = Encombi, не EMS';
+  const clamps = (o.clamps || []);
+  $('psf-clamps').hidden = !clamps.length;
+  if (clamps.length) $('psf-clamps').textContent = 'CLAMP: ' + clamps.join('; ');
+}
+
+// --- Health: checks, УЗЕ, інвертори (spec §4, §6.3, §7) ---
+const SEV_BADGE = { ok: 'green', info: 'blue', warning: 'amber', alarm: 'red' };
+const BESS_BADGE = { discharging: 'green', charging: 'blue', hold: 'gray', shutdown: 'red', unreachable: 'red', unknown: 'amber' };
+const INV_BADGE = { on_grid: 'green', starting: 'blue', standby: 'gray', fault: 'red', shutdown: 'amber', unreachable: 'red', unknown: 'amber' };
+const INV_ORDER = { fault: 0, unreachable: 1, shutdown: 2, unknown: 3, starting: 4, on_grid: 5, standby: 6 };
+const openInvRows = new Set();
+
+function renderHealth(h) {
+  const checksBody = $('checks-body');
+  if (!h) {
+    checksBody.innerHTML = '<tr><td colspan="4" style="color:var(--muted)">Немає знімка health.</td></tr>';
+    return;
+  }
+  checksBody.innerHTML = (h.checks || []).map((c) => {
+    const badge = '<span class="badge ' + (SEV_BADGE[c.severity] || 'gray') + '">' + esc(c.severity) + '</span>';
+    const detail = c.detail ? '<div class="chk-detail" style="color:var(--muted);font-size:11px">' + esc(c.detail) + '</div>' : '';
+    return '<tr><td>' + esc(c.label || c.id) + '</td><td>' + esc(c.expected || '—') + '</td><td>' + esc(c.actual || '—') + detail + '</td><td>' + badge + '</td></tr>';
+  }).join('') || '<tr><td colspan="4" style="color:var(--muted)">Порожньо.</td></tr>';
+
+  renderBess(h.bess);
+  renderInverters(h.inverters);
+}
+
+function renderBess(b) {
+  if (!b) {
+    $('bess-head').textContent = 'Немає знімка health…';
+    $('bess-soc-track').hidden = true;
+    $('bess-details').innerHTML = '';
+    return;
+  }
+  const chip = '<span class="badge ' + (BESS_BADGE[b.class] || 'gray') + '">' + esc(b.class_label || b.class) + '</span>';
+  const parts = [
+    chip,
+    'SOC ' + (b.soc_percent != null ? b.soc_percent.toFixed(1) + '%' : '—'),
+    'факт ' + fmtSigned(b.p_kw) + ' кВт',
+    'shadow ' + fmtSigned(b.p_shadow_kw),
+    'план ' + fmtSigned(b.p_plan_kw),
+    'PCS: ' + esc(b.pcs_label || '—'),
+    'ліміти −' + (b.charge_max_kw != null ? b.charge_max_kw : '—') + ' / +' + (b.discharge_max_kw != null ? b.discharge_max_kw : '—') + ' кВт',
+  ];
+  $('bess-head').innerHTML = parts.join('<span class="sep">·</span>');
+  $('bess-updated').textContent = b.ts ? 'оновлено ' + fmtClock(b.ts) : '—';
+
+  const track = $('bess-soc-track');
+  if (b.soc_percent != null) {
+    track.hidden = false;
+    const min = b.soc_min_pct || 0, max = b.soc_max_pct || 100;
+    $('bess-soc-window').style.left = min + '%';
+    $('bess-soc-window').style.width = Math.max(0, max - min) + '%';
+    const fill = $('bess-soc-fill');
+    fill.style.left = 'calc(' + Math.min(100, Math.max(0, b.soc_percent)) + '% - 1px)';
+    fill.className = 'soc-fill' + (b.soc_percent < min || b.soc_percent > max ? ' out' : '');
+  } else {
+    track.hidden = true;
+  }
+
+  const fmtOr = (v, unit) => v == null ? '—' : v.toLocaleString('uk-UA') + (unit || '');
+  const rows = [
+    ['SOC / SOH / SOE', [b.soc_percent, b.soh_percent, b.soe_percent].map((v) => v == null ? '—' : v.toFixed(1) + '%').join(' / ')],
+    ['Робоче вікно SOC', (b.soc_min_pct || 0) + '–' + (b.soc_max_pct || 0) + '%'],
+    ['Факт P / Q', fmtSigned(b.p_kw) + ' кВт / ' + fmtSigned(b.q_kvar) + ' кВар'],
+    ['План / shadow', fmtSigned(b.p_plan_kw) + ' / ' + fmtSigned(b.p_shadow_kw) + ' кВт'],
+    ['Clamp', (b.clamps && b.clamps.length) ? esc(b.clamps.join('; ')) : '—'],
+    ['Max charge / discharge', fmtOr(b.charge_max_kw, ' кВт') + ' / ' + fmtOr(b.discharge_max_kw, ' кВт') + ' (40490/40492)'],
+    ['Chargeable / dischargeable', fmtOr(b.chargeable_kwh, ' кВт·год') + ' / ' + fmtOr(b.dischargeable_kwh, ' кВт·год')],
+    ['Rated (SL) P / E', fmtOr(b.rated_kw, ' кВт') + ' / ' + fmtOr(b.rated_kwh, ' кВт·год')],
+    ['Паспорт P / E / шаф', fmtOr(b.passport_kw, ' кВт') + ' / ' + fmtOr(b.passport_kwh, ' кВт·год') + ' / ' + fmtOr(b.passport_ess_count)],
+    ['К-сть ESS / PCS (40488/40489)', fmtOr(b.n_ess) + ' / ' + fmtOr(b.n_pcs)],
+    ['PCS in operation / shutdown', fmtOr(b.pcs_in_operation) + ' / ' + fmtOr(b.pcs_shutdown) + ' — ' + esc(b.pcs_label || '')],
+    ['Накопичено заряд / розряд', fmtOr(b.charged_kwh, ' кВт·год') + ' / ' + fmtOr(b.discharged_kwh, ' кВт·год')],
+    ['Poll', (b.poll_ok ? '<span class="badge green">OK</span>' : '<span class="badge red">' + esc(b.poll_error || 'fail') + '</span>') + ' · ' + fmtClock(b.ts)],
+  ];
+  $('bess-details').innerHTML = rows.map(([k, v]) => '<tr><td style="color:var(--muted);width:44%">' + k + '</td><td>' + v + '</td></tr>').join('');
+}
+
+function renderInverters(list) {
+  const card = $('inv-card');
+  if (!list || !list.length) { card.hidden = true; return; }
+  card.hidden = false;
+
+  const counts = {};
+  for (const r of list) counts[r.class] = (counts[r.class] || 0) + 1;
+  const chip = (label, n, red) => '<span class="badge ' + (n > 0 && red ? 'red' : n > 0 ? 'blue' : 'gray') + '">' + n + ' ' + label + '</span>';
+  $('inv-chips').innerHTML = [
+    '<span class="badge gray">' + list.length + ' інверторів</span>',
+    chip('у мережі', counts.on_grid || 0, false),
+    chip('пуск', counts.starting || 0, false),
+    chip('standby', counts.standby || 0, false),
+    chip('аварія', counts.fault || 0, true),
+    chip('вимкнено', counts.shutdown || 0, false),
+    chip('без зв\'язку', counts.unreachable || 0, true),
+  ].join(' ');
+
+  const newest = list.reduce((acc, r) => r.ts && (!acc || r.ts > acc) ? r.ts : acc, null);
+  const ageS = newest ? Math.round((Date.now() - new Date(newest).getTime()) / 1000) : null;
+  const staleAfterS = 2 * ((lastStatus && lastStatus.inverter_poll_s) || 30);
+  const stale = ageS != null && ageS > staleAfterS;
+  $('inv-updated').textContent = ageS == null ? '—' : (stale ? 'застаріло · ' : 'оновлено ') + ageS + ' с тому';
+  $('inv-updated').style.color = stale ? 'var(--amber)' : 'var(--muted)';
+
+  const sorted = [...list].sort((a, b) =>
+    (INV_ORDER[a.class] ?? 9) - (INV_ORDER[b.class] ?? 9) || a.device_address - b.device_address);
+  $('inv-body').innerHTML = sorted.map((r) => {
+    const cls = r.class === 'fault' || r.class === 'unreachable' ? 'inv-fault' : r.class === 'shutdown' ? 'inv-shutdown' : '';
+    const badge = '<span class="badge ' + (INV_BADGE[r.class] || 'gray') + '">' + esc(r.status_label_uk || r.status_label || r.class) + '</span>';
+    const num = (v, dec) => v == null ? '—' : v.toFixed(dec == null ? 1 : dec);
+    // Hex — джерело істини; канонна розшифровка muted-рядком під ним.
+    const hexOr = (v, label) => {
+      if (!v || v === '0x0') return v || '—';
+      let out = '<strong>' + esc(v) + '</strong>';
+      if (label) out += '<div class="inv-declabel" title="' + esc(label) + '">' + esc(label) + '</div>';
+      return out;
+    };
+    const main = '<tr class="inv-row ' + cls + '" data-addr="' + r.device_address + '">' +
+      '<td><strong>' + r.device_address + '</strong></td>' +
+      '<td>' + esc(r.label || 'addr ' + r.device_address) + '</td>' +
+      '<td>' + badge + '</td>' +
+      '<td>' + num(r.p_kw) + '</td>' +
+      '<td>' + esc(r.status_raw || '—') + '</td>' +
+      '<td>' + hexOr(r.major_fault, r.major_label_uk) + '</td>' +
+      '<td>' + hexOr(r.minor_fault, r.minor_label_uk) + '</td>' +
+      '<td>' + hexOr(r.warning, r.warning_label_uk) + '</td>' +
+      '<td>' + num(r.temp_c) + '</td>' +
+      '<td>' + (r.poll_ok ? '<span class="badge green">OK</span>' : '<span class="badge red">fail</span>') + '</td></tr>';
+    if (!openInvRows.has(r.device_address)) return main;
+    const det = [
+      'база регістрів: ' + r.register_base,
+      'P/Q: ' + num(r.p_kw) + ' кВт / ' + num(r.q_kvar) + ' кВар',
+      'P DC / I DC: ' + num(r.p_dc_kw) + ' кВт / ' + num(r.i_dc_a, 2) + ' А',
+      'cos φ: ' + num(r.pf, 3),
+      'ізоляція: ' + num(r.insulation_mohm, 3) + ' МОм',
+      't шафи: ' + num(r.temp_c) + ' °C',
+      'status: ' + (r.status_raw || '—') + ' (' + esc(r.status_label_uk || r.status_label || '') + ')',
+      'major/minor/warning: ' + (r.major_fault || '—') + ' / ' + (r.minor_fault || '—') + ' / ' + (r.warning || '—'),
+    ];
+    const decode = [
+      r.major_label_uk ? 'major: ' + r.major_label_uk : '',
+      r.minor_label_uk ? 'minor: ' + r.minor_label_uk : '',
+      r.warning_label_uk ? 'warning: ' + r.warning_label_uk : '',
+    ].filter(Boolean);
+    if (decode.length) det.push('декод: ' + esc(decode.join(' · ')));
+    det.push('poll: ' + (r.poll_ok ? 'OK' : 'fail' + (r.poll_error ? ' — ' + esc(r.poll_error) : '')) + ' · ' + (r.ts || '—'));
+    return main + '<tr class="inv-detail"><td colspan="10" style="white-space:pre-wrap">' + det.join('\n') + '</td></tr>';
+  }).join('');
+
+  document.querySelectorAll('#inv-body tr.inv-row').forEach((tr) => {
+    tr.addEventListener('click', () => {
+      const addr = Number(tr.dataset.addr);
+      if (openInvRows.has(addr)) openInvRows.delete(addr); else openInvRows.add(addr);
+      renderInverters(list);
+    });
+  });
 }
 
 async function refreshStatus() {
@@ -369,28 +638,66 @@ function renderPlanTable(intervals) {
   }).join('');
 }
 
+// Рядок журналу рішень за spec §3.3:
+// {ts} [{plan_source}] план · shadow · факт кВт PV/load soc reason rationale [CLAMP]
+function decisionLine(r) {
+  const o = r.outputs || {}, i = r.inputs || {};
+  const n = (v) => v == null ? '—' : v;
+  let s = (r.ts || '') + '  [' + (r.plan_source || '') + ']  план ' + n(i.p_bess_plan_kw) +
+    ' · shadow ' + n(o.p_bess_virtual_kw) + ' · факт ' + n(i.ess_power_kw) + ' кВт' +
+    '  PV ' + n(i.pv_power_kw) + ' / load ' + n(i.load_power_kw) +
+    '  soc ' + (i.soc_percent != null ? i.soc_percent + '%' : '—') +
+    '  ' + (r.reason_code || '') + '  ' + (r.rationale || '');
+  const clamps = o.clamps || [];
+  if (clamps.length) s += '  [CLAMP: ' + clamps.join('; ') + ']';
+  return s;
+}
+
+// Однакові підряд (reason, plan, shadow, clamps) згортаються в один
+// рядок ×N с — hold на годину не стіна з 3600 рядків (§3.3).
+function collapseDecisions(rows) {
+  const key = (r) => {
+    const o = r.outputs || {}, i = r.inputs || {};
+    return [r.reason_code, i.p_bess_plan_kw, o.p_bess_virtual_kw, (o.clamps || []).join('|')].join('§');
+  };
+  const out = [];
+  let head = null, count = 0;
+  for (const r of rows) { // newest first
+    if (head && key(r) === key(head)) { count++; continue; }
+    if (head) out.push(decisionLine(head) + (count > 1 ? '   ×' + count + ' с' : ''));
+    head = r; count = 1;
+  }
+  if (head) out.push(decisionLine(head) + (count > 1 ? '   ×' + count + ' с' : ''));
+  return out;
+}
+
 async function refreshLogs() {
-  const url = activeLog === 'decisions' ? '/api/decisions?limit=60' : '/api/events?limit=60';
+  const url = activeLog === 'decisions' ? '/api/decisions?limit=500' : '/api/events?limit=60';
   try {
     const body = await (await fetch(url)).json();
     const rows = body.decisions || body.events || [];
-    $('log-view').textContent = rows.map((r) => {
-      if (activeLog === 'decisions') {
-        const o = r.outputs || {};
-        return (r.ts || '') + '  [' + (r.plan_source || '') + '] p_bess=' + (o.p_bess_virtual_kw != null ? o.p_bess_virtual_kw : '—') +
-          ' kW  reason=' + (r.reason_code || '') + '  soc=' + ((r.inputs || {}).soc_percent != null ? r.inputs.soc_percent + '%' : '—') + '  ' + (r.rationale || '');
-      }
-      return (r.ts || '') + '  [' + (r.severity || '') + '] ' + (r.code || '') + '  ' + (r.message || '');
-    }).join('\n') || 'Порожньо.';
+    const lines = activeLog === 'decisions'
+      ? collapseDecisions(rows)
+      : rows.map((r) => (r.ts || '') + '  [' + (r.severity || '') + '] ' + (r.code || '') + '  ' + (r.message || ''));
+    $('log-view').textContent = lines.join('\n') || 'Порожньо.';
   } catch (e) {
     $('log-view').textContent = 'Помилка читання журналу: ' + e;
   }
+}
+
+// Панелі УЗЕ/інверторів — один DOM-вузол, який переїжджає між
+// вкладками Стан і Діагностика (spec §8.1: якір, не другий DOM).
+function mountShared(panel) {
+  const host = $(panel === 'diag' ? 'shared-host-diag' : 'shared-host-status');
+  const el = $('shared-diag');
+  if (el && host && el.parentElement !== host) host.appendChild(el);
 }
 
 function showPanel(panel) {
   document.querySelectorAll('.nav-item, .mobile-tabs .btn').forEach((n) => n.classList.toggle('active', n.dataset.panel === panel));
   document.querySelectorAll('.panel').forEach((p) => p.classList.toggle('active', p.id === 'panel-' + panel));
   if (location.hash !== '#' + panel) history.replaceState(null, '', '#' + panel);
+  if (panel === 'status' || panel === 'diag') mountShared(panel);
   if (panel === 'diag') refreshLogs();
   if (panel === 'manifest') refreshManifestPanel();
 }

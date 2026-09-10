@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   BatteryCharging,
   BatteryFull,
@@ -8,6 +8,8 @@ import {
   SunDim,
 } from '@phosphor-icons/react'
 import type { RegisterMeta } from '../../types'
+import { cssVar } from '../../theme/cssVar'
+import { useTheme } from '../../theme/theme'
 import { formatChartNumber } from '../format'
 import type {
   LiveAllocation,
@@ -85,16 +87,11 @@ const EDGE_SHAPES: Record<EdgeId, EdgeShape> = {
 
 const COLORS = {
   pv: '#3b82f6',
-  pvIdle: '#cbd5e1',
   load: '#7c3aed',
-  loadIdle: '#cbd5e1',
   essCharge: '#3b82f6',
   essDischarge: '#22c55e',
-  essIdle: '#cbd5e1',
   gridImport: '#f59e0b',
   gridExport: '#22c55e',
-  gridIdle: '#cbd5e1',
-  hub: '#0f172a',
 }
 
 // IDLE_OPACITY and the marching-speed bounds keep the diagram
@@ -140,7 +137,7 @@ type EdgeRender = {
   speedSec: number
 }
 
-function buildEdges(allocation: LiveAllocation): EdgeRender[] {
+function buildEdges(allocation: LiveAllocation, idle: string): EdgeRender[] {
   const pvActive = allocation.pvState !== 'idle'
   const loadActive = allocation.loadState !== 'idle'
   const essActive = allocation.essState !== 'idle'
@@ -153,7 +150,7 @@ function buildEdges(allocation: LiveAllocation): EdgeRender[] {
       // PV always feeds inward when generating; the corner→hub
       // direction matches the sun-as-source convention.
       d: pvActive ? EDGE_SHAPES.pv.d : EDGE_SHAPES.pv.d,
-      color: pvActive ? COLORS.pv : COLORS.pvIdle,
+      color: pvActive ? COLORS.pv : idle,
       active: pvActive,
       speedSec: clampSpeed(allocation.pvKw),
     },
@@ -161,7 +158,7 @@ function buildEdges(allocation: LiveAllocation): EdgeRender[] {
       id: 'load',
       // hub→load — energy always exits the hub toward the load.
       d: EDGE_SHAPES.load.dReverse,
-      color: loadActive ? COLORS.load : COLORS.loadIdle,
+      color: loadActive ? COLORS.load : idle,
       active: loadActive,
       speedSec: clampSpeed(allocation.loadKw),
     },
@@ -180,7 +177,7 @@ function buildEdges(allocation: LiveAllocation): EdgeRender[] {
           ? COLORS.essCharge
           : allocation.essState === 'discharging'
             ? COLORS.essDischarge
-            : COLORS.essIdle,
+            : idle,
       active: essActive,
       speedSec: clampSpeed(allocation.essKw),
     },
@@ -197,7 +194,7 @@ function buildEdges(allocation: LiveAllocation): EdgeRender[] {
           ? COLORS.gridExport
           : allocation.gridState === 'importing'
             ? COLORS.gridImport
-            : COLORS.gridIdle,
+            : idle,
       active: gridActive,
       speedSec: clampSpeed(allocation.gridKw),
     },
@@ -242,12 +239,16 @@ export function EnergyFlowLive({
     return () => window.clearInterval(id)
   }, [])
 
+  const { resolved } = useTheme()
+  const idle = useMemo(() => cssVar('--border-strong', '#cbd5e1'), [resolved])
+  // Hub chrome was COLORS.hub (#0f172a); .energy-flow-live-hub already uses var(--text).
+
   const ageSeconds =
     allocation.observedAt === null
       ? null
       : Math.max(0, Math.floor((now - allocation.observedAt.getTime()) / 1000))
 
-  const edges = buildEdges(allocation)
+  const edges = buildEdges(allocation, idle)
 
   const balanceLabel = describeBalance(allocation)
 
@@ -318,7 +319,7 @@ export function EnergyFlowLive({
             allocation.pvState === 'generating' ? (
               <Sun size={ICON_SIZE} weight="duotone" color={COLORS.pv} />
             ) : (
-              <SunDim size={ICON_SIZE} weight="duotone" color={COLORS.pvIdle} />
+              <SunDim size={ICON_SIZE} weight="duotone" color={idle} />
             )
           }
           title="СЕС"
@@ -361,7 +362,7 @@ export function EnergyFlowLive({
                 color={
                   allocation.essState === 'discharging'
                     ? COLORS.essDischarge
-                    : COLORS.essIdle
+                    : idle
                 }
               />
             )
@@ -398,7 +399,7 @@ export function EnergyFlowLive({
                   ? COLORS.gridImport
                   : allocation.gridState === 'exporting'
                     ? COLORS.gridExport
-                    : COLORS.gridIdle
+                    : idle
               }
             />
           }

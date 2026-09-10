@@ -123,11 +123,45 @@ func main() {
 			return
 		case <-time.After(time.Until(next)):
 		}
-		target := targetDate(time.Now(), tz, cfg.OREE.DeliveryOffsetDays)
-		if err := fetchAndStore(ctx, log, client, pool, cfg.OREE, target); err != nil {
-			log.Error("dam_fetch", "err", err)
-		}
+		fetchUntilPublished(ctx, log, client, pool, cfg.OREE, tz, 30*time.Minute)
 		backfillRecent(ctx, log, client, pool, cfg.OREE, tz)
+	}
+}
+
+// fetchUntilPublished keeps retrying the scheduled tomorrow-fetch until
+// it succeeds, the context is cancelled, or the delivery date rolls
+// over (the next scheduler run owns the new date). OREE regularly
+// uploads the DAM file minutes-to-hours after run_at: on 2026-09-03 the
+// 14:00 file existed but held zero hourly rows, the single-shot fetch
+// gave up until the next day and the edge planner spent half a day on
+// an empty price horizon.
+func fetchUntilPublished(
+	ctx context.Context,
+	log *slog.Logger,
+	client *oree.Client,
+	pool *pgxpool.Pool,
+	cfg config.OREE,
+	tz *time.Location,
+	retryEvery time.Duration,
+) {
+	target := targetDate(time.Now(), tz, cfg.DeliveryOffsetDays)
+	for {
+		err := fetchAndStore(ctx, log, client, pool, cfg, target)
+		if err == nil {
+			return
+		}
+		log.Error("dam_fetch", "err", err,
+			"delivery_date", target.Format("2006-01-02"),
+			"retry_in", retryEvery.String(),
+		)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(retryEvery):
+		}
+		if nt := targetDate(time.Now(), tz, cfg.DeliveryOffsetDays); !nt.Equal(target) {
+			return
+		}
 	}
 }
 
