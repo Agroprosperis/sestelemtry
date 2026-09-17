@@ -28,6 +28,7 @@ import {
   OptimumInfo,
 } from '../monthly/EconomicsMonthlyView'
 import { EconomicsTopSection, type EconomicsPvPlan } from '../components/EconomicsTopSection'
+import { EconomicsOverviewRow } from '../components/EconomicsOverviewRow'
 import {
   buildAiPanel,
   HEATMAP_METRIC_TIP,
@@ -96,6 +97,17 @@ export function EconomicsAnnualView({ data, organizationID, onSelectMonth, prior
         pvPlan={pvPlan}
         capexUah={capexUah}
         annualizeMonths={data.months_with_data}
+      />
+      <EconomicsOverviewRow
+        totals={t}
+        scope={scope}
+        profile={withData.map((m) => ({
+          label: formatMonthShort(m.month),
+          loadKwh: m.totals.load_kwh,
+          pvKwh: m.totals.pv_kwh,
+          gridImportKwh: m.totals.grid_import_kwh,
+          essDischargeKwh: m.totals.ess_discharged_kwh,
+        }))}
       />
       <QuarterCards quarters={data.quarters} />
       <div className="economics-month-grid2">

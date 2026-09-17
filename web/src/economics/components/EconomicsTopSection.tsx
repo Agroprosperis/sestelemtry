@@ -151,9 +151,10 @@ function DeltaBadge({
 
 type CardTone = 'steel' | 'blue' | 'green' | 'amber' | 'violet' | 'sky' | 'teal' | 'orange'
 
-// Card is one KPI tile: icon chip + label / big value / badge line /
-// caption block. The four rows live on shared subgrid tracks so values
-// and captions stay aligned across the strip however labels wrap.
+// Card is one KPI tile: icon chip + label, big value, then the badge
+// line and caption block. Badge/caption rows render only when present,
+// so content packs tightly under the value like in the client mock;
+// cards in one grid row still stretch to equal outer height.
 function Card({
   tone,
   icon,
@@ -183,8 +184,8 @@ function Card({
         </span>
       </div>
       <div className="eco-card-value">{value}</div>
-      <div className="eco-card-badges">{badge}</div>
-      <div className="eco-card-sub">{children}</div>
+      {badge ? <div className="eco-card-badges">{badge}</div> : null}
+      {children ? <div className="eco-card-sub">{children}</div> : null}
     </div>
   )
 }

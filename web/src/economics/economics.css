@@ -739,11 +739,9 @@
   border: 1px solid var(--border);
   border-radius: 14px;
   padding: 14px 16px;
-  display: grid;
-  grid-template-rows: subgrid;
-  grid-row: span 4;
-  row-gap: 6px;
-  align-content: start;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 /* Accent hairline along the top edge — the token-friendly echo of the
@@ -834,7 +832,6 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
-  min-height: 18px;
 }
 
 .eco-delta-line {
@@ -918,6 +915,159 @@
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+
+/* --- Overview row (mock bottom): coverage donut + consumption/
+   generation profile + «Робота УЗЕ» mini-cards. --- */
+
+.eco-overview {
+  display: grid;
+  grid-template-columns: minmax(300px, 3fr) minmax(380px, 5fr) minmax(280px, 3fr);
+  gap: 12px;
+  align-items: stretch;
+}
+
+@media (max-width: 1180px) {
+  .eco-overview {
+    grid-template-columns: 1fr;
+  }
+}
+
+.eco-overview-panel {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.eco-overview-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.eco-overview-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.eco-donut-wrap {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex: 1;
+}
+
+.eco-donut {
+  position: relative;
+  width: 170px;
+  flex: none;
+}
+
+.eco-donut-center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  line-height: 1.2;
+}
+
+.eco-donut-center b {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.eco-donut-center span {
+  font-size: 10px;
+  color: var(--text-faint);
+}
+
+.eco-donut-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.eco-donut-legend-row {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.eco-donut-legend-row i {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+
+.eco-donut-legend-name {
+  min-width: 0;
+  line-height: 1.25;
+}
+
+.eco-donut-legend-row b {
+  font-weight: 700;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.eco-donut-legend-mwh {
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.eco-profile-chart {
+  flex: 1;
+  min-height: 190px;
+}
+
+.eco-uze-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  flex: 1;
+}
+
+.eco-uze-card {
+  background: var(--bg-sunken);
+  border: 1px solid var(--border-muted);
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.eco-uze-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-subtle);
+}
+
+.eco-uze-value {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.eco-uze-sub {
+  font-size: 11px;
+  color: var(--text-faint);
 }
 
 .economics-table-wrap {

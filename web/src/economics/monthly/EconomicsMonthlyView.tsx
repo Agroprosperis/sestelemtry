@@ -22,6 +22,7 @@ import type {
 import { useChartChrome } from '../../theme/useChartChrome'
 import { UzeCyclesAccordion } from './UzeCycleChart'
 import { EconomicsTopSection, type EconomicsPvPlan } from '../components/EconomicsTopSection'
+import { EconomicsOverviewRow } from '../components/EconomicsOverviewRow'
 import { formatOrganizationLabel } from '../../dashboard/config'
 import {
   formatCycles,
@@ -79,6 +80,17 @@ export function EconomicsMonthlyView({ data, organizationID, prior, pvPlan, cape
         pvPlan={pvPlan}
         capexUah={capexUah}
         annualizeMonths={1}
+      />
+      <EconomicsOverviewRow
+        totals={t}
+        scope="month"
+        profile={data.days.map((d) => ({
+          label: formatDayOfMonth(d.date),
+          loadKwh: d.load_kwh,
+          pvKwh: d.pv_kwh,
+          gridImportKwh: d.grid_import_kwh,
+          essDischargeKwh: d.ess_discharged_kwh,
+        }))}
       />
       <MonthlyAiAnalysis totals={t} cycles={data.uze_cycles} organizationID={organizationID} month={data.month} />
       <div className="economics-month-grid2">
