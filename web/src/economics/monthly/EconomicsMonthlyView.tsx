@@ -21,6 +21,7 @@ import type {
 } from '../../api'
 import { useChartChrome } from '../../theme/useChartChrome'
 import { UzeCyclesAccordion } from './UzeCycleChart'
+import { EconomicsTopSection, type EconomicsPvPlan } from '../components/EconomicsTopSection'
 import { formatOrganizationLabel } from '../../dashboard/config'
 import {
   formatCycles,
@@ -59,13 +60,26 @@ import { downloadXlsx } from '../xlsx'
 type Props = {
   data: EconomicsMonthlyResponse
   organizationID: string
+  // prior — попередній календарний місяць для дельт верхніх карток.
+  prior?: EconomicsMonthlyTotals | null
+  // pvPlan — планова генерація СЕС за місяць (null ховає рядок плану).
+  pvPlan?: EconomicsPvPlan | null
+  // capexUah — інвестований капітал, що діє в цьому місяці (ROCE).
+  capexUah?: number
 }
 
-export function EconomicsMonthlyView({ data, organizationID }: Props) {
+export function EconomicsMonthlyView({ data, organizationID, prior, pvPlan, capexUah }: Props) {
   const t = data.totals
   return (
     <>
-      <MonthlyKpis totals={t} />
+      <EconomicsTopSection
+        totals={t}
+        scope="month"
+        prior={prior}
+        pvPlan={pvPlan}
+        capexUah={capexUah}
+        annualizeMonths={1}
+      />
       <MonthlyAiAnalysis totals={t} cycles={data.uze_cycles} organizationID={organizationID} month={data.month} />
       <div className="economics-month-grid2">
         <MonthlyFinance totals={t} />
@@ -78,192 +92,6 @@ export function EconomicsMonthlyView({ data, organizationID }: Props) {
       <MonthlyHeatmap margins={data.hourly_margin} />
       <MonthlyDailyTable days={data.days} totals={t} organizationID={organizationID} month={data.month} />
     </>
-  )
-}
-
-// --- KPI strip ---
-
-export function MonthlyKpis({ totals, scope = 'month' }: { totals: EconomicsMonthlyTotals; scope?: PeriodScope }) {
-  const w = PERIOD_WORDS[scope]
-  const avoidedImportKwh = totals.pv_to_load_kwh + totals.ess_to_load_kwh
-  const pvSelfConsumed = totals.pv_to_load_kwh + totals.pv_to_ess_kwh
-  const pvSelfShare = totals.pv_kwh > 0 ? pvSelfConsumed / totals.pv_kwh : 0
-  const ebitdaClass = totals.ebitda_uah >= 0 ? 'kpi-card kpi-card-success' : 'kpi-card kpi-card-danger'
-  const essClass = totals.ess_net_uah >= 0 ? 'kpi-card kpi-card-info' : 'kpi-card kpi-card-warning'
-  const savingShare = totals.baseline_cost_uah > 0 ? totals.ebitda_uah / totals.baseline_cost_uah : 0
-  // The import that went straight to the load is the remainder: the
-  // battery-charging leg is the only part booked as an EBITDA expense.
-  const purchaseToLoadUah = totals.import_cost_uah - totals.expense_grid_charge_uah
-  const purchaseTip =
-    `Фактично куплена з мережі електроенергія ${w.per} та її повна вартість за цінами РДН із розподілом, передачею, надбавкою постачальника і ПДВ. ` +
-    `На споживання — ${formatUah(purchaseToLoadUah)}, на заряд УЗЕ — ${formatUah(totals.expense_grid_charge_uah)}. ` +
-    'У EBITDA як витрата входить лише заряд УЗЕ: купівля на споживання вже врахована через дохід від самоспоживання.'
-  const unitCost = unitCostUahPerKwh(totals.import_cost_uah, totals.load_kwh)
-  // The same load valued as if every kWh came from the grid, so both
-  // prices share a denominator and the discount reduces to a cost ratio.
-  const baselineUnitCost = unitCostUahPerKwh(totals.baseline_cost_uah, totals.load_kwh)
-  const unitDiscount =
-    totals.baseline_cost_uah > 0 ? 1 - totals.import_cost_uah / totals.baseline_cost_uah : NaN
-  const unitCostTip =
-    `Уся куплена з мережі електроенергія (${formatUah(totals.import_cost_uah)}), поділена на все споживання ${w.of} (${formatMwh(totals.load_kwh)}). ` +
-    'Виходить дешевше за ринкову ціну імпорту, бо частину споживання безкоштовно закривають СЕС та УЗЕ. ' +
-    'Для порівняння наведено ціну без проєкту — якби всі кіловат-години купували з мережі.'
-  // The counterfactual the project is judged against: a bare PV plant
-  // selling everything at the spot export price. It normally comes out
-  // below EBITDA, because a kWh kept on site displaces the import price,
-  // which carries distribution, transmission, margin and VAT on top of
-  // the same RDN the export price is discounted from.
-  const potentialTip =
-    `Увесь виробіток СЕС ${w.per} (${formatMwh(totals.pv_kwh)}), оцінений ціною експорту тієї самої години — РДН мінус знижка, з ПДВ. ` +
-    'Це орієнтир «якби продавали все в мережу»: без УЗЕ і без власного споживання. ' +
-    `Фактично проєкт дає ${formatUah(totals.ebitda_uah)}, бо кіловат-година, залишена на об’єкті, заміщає дорожчий імпорт, а УЗЕ переносить її на дорожчі години.`
-  const essArbitrageGain = totals.pv_ess_export_potential_uah - totals.pv_export_potential_uah
-  const essPotentialTip =
-    'Те саме «все в мережу», але УЗЕ працює максимально ефективно: заряджається лише від СЕС і продає накопичене в найдорожчі години ' +
-    '(ідеальний графік із знанням цін наперед, у межах ємності та потужності своєї доби, з урахуванням ККД і зносу). ' +
-    'Різниця з «Потенціал СЕС» — максимум, який арбітраж УЗЕ здатен додати до простого продажу в мережу.'
-
-  return (
-    <section className="economics-kpis" aria-label={`Ключові показники ${w.of}`}>
-      <div className="kpi-strip">
-        <div className="kpi-card">
-          <span className="kpi-label">Базова вартість (без проєкту)</span>
-          <span className="kpi-value">{formatUah(totals.baseline_cost_uah)}</span>
-          <span className="kpi-sub">100% споживання з мережі · {formatMwh(totals.load_kwh)}</span>
-        </div>
-        <div className="kpi-card">
-          <span className="kpi-label">Фактична вартість</span>
-          <span className="kpi-value">{formatUah(totals.actual_cost_uah)}</span>
-          <span className="kpi-sub">імпорт − експорт + знос УЗЕ</span>
-        </div>
-        <div className={`${ebitdaClass} kpi-card-ebitda`} tabIndex={0}>
-          <span className="kpi-label">EBITDA {w.per}</span>
-          <span className="kpi-value">{formatUah(totals.ebitda_uah)}</span>
-          <span className="kpi-sub">економія {formatPercent(savingShare)} від бази · наведіть для розкладки</span>
-          <MonthlyEbitdaBreakdown totals={totals} />
-        </div>
-        <div className={essClass}>
-          <span className="kpi-label">Реалізований ефект УЗЕ</span>
-          <span className="kpi-value">{formatUah(totals.ess_net_uah)}</span>
-          <span className="kpi-sub">арбітраж РДН, пік, зменшення імпорту</span>
-        </div>
-        <div className="kpi-card">
-          <span className="kpi-label">
-            Потенціал СЕС
-            <OptimumInfo tip={potentialTip} />
-          </span>
-          <span className="kpi-value">{formatUah(totals.pv_export_potential_uah)}</span>
-          <span className="kpi-sub">
-            весь виробіток у мережу · {formatMwh(totals.pv_kwh)}
-          </span>
-        </div>
-        <div className="kpi-card">
-          <span className="kpi-label">
-            Потенціал СЕС + УЗЕ
-            <OptimumInfo tip={essPotentialTip} />
-          </span>
-          <span className="kpi-value">{formatUah(totals.pv_ess_export_potential_uah)}</span>
-          <span className="kpi-sub">
-            {Number.isFinite(essArbitrageGain)
-              ? `УЗЕ додає +${formatUah(essArbitrageGain)}`
-              : 'перенесення продажу на пік'}
-          </span>
-        </div>
-      </div>
-
-      <div className="kpi-secondary-strip">
-        <div className="kpi-card kpi-card-secondary">
-          <span className="kpi-label">
-            Куплено з мережі
-            <OptimumInfo tip={purchaseTip} />
-          </span>
-          <span className="kpi-value">{formatUah(totals.import_cost_uah)}</span>
-          <span className="kpi-sub">
-            {formatMwh(totals.grid_import_kwh)} · споживання {formatMwhNumber(totals.grid_to_load_kwh)} / УЗЕ{' '}
-            {formatMwhNumber(totals.grid_to_ess_kwh)}
-          </span>
-        </div>
-        <div className="kpi-card kpi-card-secondary">
-          <span className="kpi-label">
-            Факт. ціна 1 кВт·год
-            <OptimumInfo tip={unitCostTip} />
-          </span>
-          <span className="kpi-value">{formatPrice(unitCost)}</span>
-          <span className="kpi-sub">
-            грн/кВт·год · без проєкту {formatPrice(baselineUnitCost)} · дешевше на {formatPercent(unitDiscount)}
-          </span>
-        </div>
-        <div className="kpi-card kpi-card-secondary">
-          <span className="kpi-label">РДН: середня / max ціна</span>
-          <span className="kpi-value">
-            {formatPrice(totals.rdn_avg_uah_per_kwh)} / {formatPrice(totals.rdn_max_uah_per_kwh)}
-          </span>
-          <span className="kpi-sub">грн/кВт·год · зважено за обсягом імпорту</span>
-        </div>
-        <div className="kpi-card kpi-card-secondary">
-          <span className="kpi-label">Уникнутий імпорт</span>
-          <span className="kpi-value">{formatMwh(avoidedImportKwh)}</span>
-          <span className="kpi-sub">СЕС→споживання + УЗЕ→споживання</span>
-        </div>
-        <div className="kpi-card kpi-card-secondary">
-          <span className="kpi-label">Самоспоживання СЕС</span>
-          <span className="kpi-value">{formatPercent(pvSelfShare)}</span>
-          <span className="kpi-sub">
-            {formatMwh(pvSelfConsumed)} з {formatMwh(totals.pv_kwh)}
-          </span>
-        </div>
-        <div className="kpi-card kpi-card-secondary">
-          <span className="kpi-label">Еквівалентні цикли УЗЕ</span>
-          <span className="kpi-value">{formatCycles(totals.equivalent_cycles)}</span>
-          <span className="kpi-sub">розряд {formatMwh(totals.ess_discharged_kwh)}</span>
-        </div>
-      </div>
-    </section>
-  )
-}
-
-// MonthlyEbitdaBreakdown is the revenue/expense detail shown as a
-// hover/focus popover under the EBITDA KPI card, mirroring the daily view.
-function MonthlyEbitdaBreakdown({ totals }: { totals: EconomicsMonthlyTotals }) {
-  const revenueLines = [
-    { label: 'СЕС → мережа', amount: totals.revenue_pv_export_uah },
-    { label: 'СЕС → споживання', amount: totals.revenue_pv_self_uah },
-    { label: 'УЗЕ → мережа', amount: totals.revenue_ess_export_uah },
-    { label: 'УЗЕ → споживання', amount: totals.revenue_ess_self_uah },
-  ]
-  const expenseLines = [
-    { label: 'Заряд УЗЕ із мережі', amount: totals.expense_grid_charge_uah },
-    { label: 'Знос / ресурс УЗЕ', amount: Math.max(totals.ess_degradation_cost_uah, 0) },
-  ]
-  const expenseTotal = expenseLines.reduce((acc, l) => acc + l.amount, 0)
-
-  return (
-    <div className="economics-ebitda-breakdown" role="tooltip">
-      <div className="economics-ebitda-col">
-        <div className="economics-ebitda-col-head">
-          <span>Дохід</span>
-          <span>{formatUah(totals.revenue_total_uah)}</span>
-        </div>
-        {revenueLines.map((line) => (
-          <div className="economics-ebitda-line" key={line.label}>
-            <span>{line.label}</span>
-            <b>{formatUah(line.amount)}</b>
-          </div>
-        ))}
-      </div>
-      <div className="economics-ebitda-col">
-        <div className="economics-ebitda-col-head">
-          <span>Витрати</span>
-          <span>{formatUah(expenseTotal)}</span>
-        </div>
-        {expenseLines.map((line) => (
-          <div className="economics-ebitda-line" key={line.label}>
-            <span>{line.label}</span>
-            <b>{formatUah(line.amount)}</b>
-          </div>
-        ))}
-      </div>
-    </div>
   )
 }
 

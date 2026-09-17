@@ -671,6 +671,255 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* --- Redesigned top section (month/year): «Економічні показники» +
+   «Енергетичний баланс» card strips. Card accents ride a per-tone CSS
+   variable pair so the same markup works in both themes. --- */
+
+.economics-top {
+  display: grid;
+  gap: 16px;
+}
+
+.eco-kpi-section {
+  display: grid;
+  gap: 10px;
+}
+
+.eco-kpi-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.eco-kpi-head-icon {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--eco-accent-bg, var(--bg-muted));
+  color: var(--eco-accent, var(--text-muted));
+  flex: none;
+}
+
+.eco-kpi-head-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.eco-kpi-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.eco-kpi-subtitle {
+  font-size: 12px;
+  color: var(--text-subtle);
+}
+
+/* Cards on shared subgrid rows: head / value / badge line / caption.
+   The floor keeps seven cards on one line only on wide screens; below
+   that they wrap 4+3 (and 3+3 for the balance strip). */
+.eco-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(176px, 1fr));
+  gap: 12px;
+}
+
+.eco-card {
+  --eco-accent: var(--text-muted);
+  --eco-accent-bg: var(--bg-muted);
+  position: relative;
+  overflow: hidden;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 14px 16px;
+  display: grid;
+  grid-template-rows: subgrid;
+  grid-row: span 4;
+  row-gap: 6px;
+  align-content: start;
+}
+
+/* Accent hairline along the top edge — the token-friendly echo of the
+   mock's per-card glow. */
+.eco-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--eco-accent);
+  opacity: 0.65;
+}
+
+.eco-tone-blue {
+  --eco-accent: var(--info);
+  --eco-accent-bg: var(--info-bg);
+}
+
+.eco-tone-green {
+  --eco-accent: var(--ok-strong);
+  --eco-accent-bg: var(--ok-bg);
+}
+
+.eco-tone-amber {
+  --eco-accent: var(--warn-strong);
+  --eco-accent-bg: var(--warn-bg-soft);
+}
+
+.eco-tone-violet {
+  --eco-accent: var(--violet);
+  --eco-accent-bg: var(--violet-bg-soft);
+}
+
+.eco-tone-sky {
+  --eco-accent: var(--sky);
+  --eco-accent-bg: var(--info-sky);
+}
+
+.eco-tone-teal {
+  --eco-accent: var(--teal);
+  --eco-accent-bg: var(--ok-bg-soft);
+}
+
+.eco-tone-orange {
+  --eco-accent: var(--warn-orange);
+  --eco-accent-bg: var(--warn-surface);
+}
+
+.eco-card-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-height: 26px;
+}
+
+.eco-card-icon {
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--eco-accent-bg);
+  color: var(--eco-accent);
+  flex: none;
+}
+
+.eco-card-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-subtle);
+  align-self: center;
+}
+
+.eco-card-value {
+  font-size: 21px;
+  font-weight: 700;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.eco-card-badges {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 18px;
+}
+
+.eco-delta-line {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.eco-delta {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.eco-delta-good {
+  color: var(--ok-text);
+  background: var(--ok-bg);
+}
+
+.eco-delta-bad {
+  color: var(--err-text);
+  background: var(--err-bg);
+}
+
+.eco-delta-flat {
+  color: var(--text-muted);
+  background: var(--bg-muted);
+}
+
+.eco-delta-note {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+/* «N% від загального ефекту» chip on the СЕС/УЗЕ effect cards. */
+.eco-share {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--eco-accent);
+}
+
+.eco-card-sub {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+/* Realisation-of-potential card: progress bar + fact/potential/reserve. */
+.eco-progress {
+  display: block;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--bg-muted);
+  overflow: hidden;
+  align-self: center;
+  width: 100%;
+}
+
+.eco-progress-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--ok-strong);
+}
+
+.eco-fact-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.eco-fact-line b {
+  font-weight: 600;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 .economics-table-wrap {
   background: var(--bg-elevated);
   border: 1px solid var(--border);
