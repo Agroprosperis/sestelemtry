@@ -730,31 +730,23 @@
   gap: 12px;
 }
 
+/* Card surface follows the mock: a soft accent-tinted gradient over the
+   elevated background and a border washed with the same accent, so every
+   card carries its own colour like the client example. color-mix keeps
+   it theme-aware — in light mode the tints turn pastel. */
 .eco-card {
   --eco-accent: var(--text-muted);
   --eco-accent-bg: var(--bg-muted);
   position: relative;
   overflow: hidden;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  border-radius: 14px;
+  background:
+    linear-gradient(150deg, color-mix(in srgb, var(--eco-accent) 10%, var(--bg-elevated)), var(--bg-elevated) 58%);
+  border: 1px solid color-mix(in srgb, var(--eco-accent) 28%, var(--border));
+  border-radius: 12px;
   padding: 14px 16px;
   display: flex;
   flex-direction: column;
   gap: 6px;
-}
-
-/* Accent hairline along the top edge — the token-friendly echo of the
-   mock's per-card glow. */
-.eco-card::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 2px;
-  background: var(--eco-accent);
-  opacity: 0.65;
 }
 
 .eco-tone-blue {
@@ -803,16 +795,21 @@
   min-height: 30px;
 }
 
+/* Round neon chip like the mock: accent icon on an accent-washed disc
+   with a soft outer glow and a thin ring. */
 .eco-card-icon {
-  width: 26px;
-  height: 26px;
-  border-radius: 7px;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: var(--eco-accent-bg);
+  background: color-mix(in srgb, var(--eco-accent) 16%, var(--bg-elevated));
   color: var(--eco-accent);
   flex: none;
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--eco-accent) 40%, transparent),
+    0 0 10px color-mix(in srgb, var(--eco-accent) 30%, transparent);
 }
 
 .eco-card-label {
@@ -907,6 +904,7 @@
   height: 100%;
   border-radius: 999px;
   background: var(--ok-strong);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--ok-strong) 60%, transparent);
 }
 
 .eco-fact-line {
@@ -1047,13 +1045,38 @@
 }
 
 .eco-uze-card {
-  background: var(--bg-sunken);
-  border: 1px solid var(--border-muted);
+  --eco-accent: var(--text-muted);
+  background:
+    linear-gradient(150deg, color-mix(in srgb, var(--eco-accent) 9%, var(--bg-sunken)), var(--bg-sunken) 60%);
+  border: 1px solid color-mix(in srgb, var(--eco-accent) 24%, var(--border-muted));
   border-radius: 10px;
   padding: 10px 12px;
   display: flex;
+  align-items: flex-start;
+  gap: 9px;
+}
+
+.eco-uze-icon {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--eco-accent) 16%, var(--bg-sunken));
+  color: var(--eco-accent);
+  flex: none;
+  margin-top: 1px;
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--eco-accent) 40%, transparent),
+    0 0 8px color-mix(in srgb, var(--eco-accent) 28%, transparent);
+}
+
+.eco-uze-body {
+  display: flex;
   flex-direction: column;
   gap: 3px;
+  min-width: 0;
 }
 
 .eco-uze-label {

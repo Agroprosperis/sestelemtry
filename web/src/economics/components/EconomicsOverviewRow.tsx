@@ -3,6 +3,8 @@ import type { EconomicsMonthlyTotals } from '../../api'
 import { useChartChrome } from '../../theme/useChartChrome'
 import { formatCycles, formatMwh, formatMwhNumber, formatPercent } from '../monthly/format'
 import { PERIOD_WORDS, type PeriodScope } from '../monthly/rollup'
+import { KpiIcon } from './kpiIcons'
+import { KPI_ICONS } from './kpiIconPaths'
 
 // ProfilePoint is one X-axis bucket of the consumption/generation
 // profile: a day of the month view or a month of the annual view.
@@ -85,21 +87,29 @@ export function EconomicsOverviewRow({ totals, scope = 'month', profile }: Props
       label: 'Еквівалентні цикли',
       value: formatCycles(totals.equivalent_cycles),
       sub: `${formatCycles(totals.equivalent_cycles / days)} на добу`,
+      tone: 'teal',
+      icon: KPI_ICONS.cycle,
     },
     {
       label: 'Розряд УЗЕ',
       value: formatMwh(totals.ess_discharged_kwh),
       sub: `середньо ${mwhFmt.format(totals.ess_discharged_kwh / 1000 / days)} МВт·год/добу`,
+      tone: 'orange',
+      icon: KPI_ICONS.zap,
     },
     {
       label: 'Заряд УЗЕ',
       value: formatMwh(totals.ess_charged_kwh),
       sub: `СЕС: ${formatMwhNumber(totals.pv_to_ess_kwh)} | Мережа: ${formatMwhNumber(totals.grid_to_ess_kwh)}`,
+      tone: 'green',
+      icon: KPI_ICONS.battery,
     },
     {
       label: 'Ефективність (RTE)',
       value: formatPercent(rte),
       sub: 'розряд / заряд за період',
+      tone: 'sky',
+      icon: KPI_ICONS.chart,
     },
   ]
 
@@ -176,10 +186,15 @@ export function EconomicsOverviewRow({ totals, scope = 'month', profile }: Props
         <h3 className="eco-overview-title">Робота УЗЕ</h3>
         <div className="eco-uze-grid">
           {uzeCards.map((c) => (
-            <div className="eco-uze-card" key={c.label}>
-              <span className="eco-uze-label">{c.label}</span>
-              <span className="eco-uze-value">{c.value}</span>
-              <span className="eco-uze-sub">{c.sub}</span>
+            <div className={`eco-uze-card eco-tone-${c.tone}`} key={c.label}>
+              <span className="eco-uze-icon">
+                <KpiIcon d={c.icon} />
+              </span>
+              <div className="eco-uze-body">
+                <span className="eco-uze-label">{c.label}</span>
+                <span className="eco-uze-value">{c.value}</span>
+                <span className="eco-uze-sub">{c.sub}</span>
+              </div>
             </div>
           ))}
         </div>

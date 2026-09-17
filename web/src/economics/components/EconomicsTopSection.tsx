@@ -2,6 +2,8 @@ import type { ReactNode } from 'react'
 import type { EconomicsMonthlyTotals } from '../../api'
 import { formatMwh, formatPercent, formatPrice, formatUah } from '../monthly/format'
 import { PERIOD_WORDS, reserveSplit, uahShort, type PeriodScope } from '../monthly/rollup'
+import { KpiIcon as Icon } from './kpiIcons'
+import { KPI_ICONS as ICONS } from './kpiIconPaths'
 
 // EconomicsPvPlan is the planned PV generation of the visible period
 // from /api/v1/pv-plan-summary, narrowed to what the card renders.
@@ -70,44 +72,6 @@ function pvSelfShare(t: EconomicsMonthlyTotals): number | null {
 
 // --- Small building blocks ------------------------------------------------
 
-// Icon renders one 24×24 stroke path in the card accent colour.
-function Icon({ d }: { d: string }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      width="16"
-      height="16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d={d} />
-    </svg>
-  )
-}
-
-const ICONS = {
-  chart: 'M3 21h18M7 21V9m5 12V3m5 18v-8',
-  zap: 'M13 2 3 14h7l-1 8 11-13h-7z',
-  database:
-    'M4 6c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3zm0 0v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6m-16 6c0 1.7 3.6 3 8 3s8-1.3 8-3',
-  wallet: 'M3 7a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zm18 3h-6a2 2 0 0 0 0 4h6',
-  trendUp: 'm3 17 6-6 4 4 8-8m0 0h-5m5 0v5',
-  sun: 'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM12 2v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4m11.4-11.4 1.4-1.4',
-  battery: 'M3 9a2 2 0 0 1 2-2h11a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zm18 2v2M7 10v4m4-4v4',
-  percent: 'M19 5 5 19M7.5 5a1.8 1.8 0 1 0 0 3.6 1.8 1.8 0 0 0 0-3.6zm9 10.4a1.8 1.8 0 1 0 0 3.6 1.8 1.8 0 0 0 0-3.6z',
-  target:
-    'M12 12m-9 0a9 9 0 1 0 18 0a9 9 0 1 0-18 0M12 12m-5 0a5 5 0 1 0 10 0a5 5 0 1 0-10 0M12 12m-1 0a1 1 0 1 0 2 0a1 1 0 1 0-2 0',
-  home: 'M3 10.5 12 3l9 7.5M5 9.5V21h14V9.5',
-  importArrow: 'M12 3v10m0 0-4-4m4 4 4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2',
-  exportArrow: 'M12 13V3m0 0L8 7m4-4 4 4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2',
-  shield: 'M12 3l7 3v5c0 4.5-3 8.5-7 10-4-1.5-7-5.5-7-10V6zm-3 9 2 2 4-4',
-  cycle: 'M21 12a9 9 0 1 1-3-6.7M21 3v6h-6',
-} as const
-
 // InfoDot is the same "i" hover bubble the rollup sections use
 // (`.economics-info` + data-tip). Local copy to avoid importing a
 // component from the monthly view module (circular import).
@@ -138,7 +102,7 @@ function DeltaBadge({
   if (value === null || !Number.isFinite(value)) return null
   const improved = polarity === 'up-good' ? value > 0 : value < 0
   const tone = polarity === 'neutral' || value === 0 ? 'flat' : improved ? 'good' : 'bad'
-  const arrow = value > 0 ? '↑' : value < 0 ? '↓' : '→'
+  const arrow = value > 0 ? '▲' : value < 0 ? '▼' : '→'
   return (
     <span className="eco-delta-line">
       <span className={`eco-delta eco-delta-${tone}`}>
@@ -280,8 +244,8 @@ export function EconomicsTopSection({
           </Card>
 
           <Card
-            tone="blue"
-            icon={ICONS.wallet}
+            tone="teal"
+            icon={ICONS.briefcase}
             label="Фактична вартість"
             tip="Фактичні витрати на енергію: імпорт мінус дохід від експорту плюс знос УЗЕ."
             value={formatUah(totals.actual_cost_uah)}
@@ -411,7 +375,7 @@ export function EconomicsTopSection({
         </header>
         <div className="eco-kpi-grid">
           <Card
-            tone="steel"
+            tone="sky"
             icon={ICONS.home}
             label="Споживання об'єкта"
             value={formatMwh(totals.load_kwh)}
@@ -437,7 +401,7 @@ export function EconomicsTopSection({
 
           <Card
             tone="blue"
-            icon={ICONS.importArrow}
+            icon={ICONS.tower}
             label="Імпорт з мережі"
             value={formatMwh(totals.grid_import_kwh)}
             badge={<DeltaBadge value={importDelta} polarity="down-good" unit="pct" note={prevNote} />}
@@ -458,7 +422,7 @@ export function EconomicsTopSection({
 
           <Card
             tone="teal"
-            icon={ICONS.shield}
+            icon={ICONS.clock}
             label="Самозабезпечення"
             tip="Частка споживання об'єкта, покрита власними СЕС та УЗЕ замість імпорту."
             value={selfSuff === null ? '—' : formatPercent(selfSuff)}
