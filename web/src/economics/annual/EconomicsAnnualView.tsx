@@ -377,6 +377,10 @@ export function MonthHourHeatmap({ margins }: { margins: EconomicsAnnualMonthMar
 // with the two headline opportunities (elevator schedule, battery timing)
 // rendered as accordion items that each expand into a per-month list.
 
+// ЗАУВАЖ: chrome МАЄ братися з useChartChrome() у КОЖНОМУ компоненті,
+// який його читає. Звернення до неоголошеного `chrome` компілюється
+// (це глобал браузера), але в Safari/Firefox/jsdom дає ReferenceError
+// і валить цілий вью (інцидент «немає даних за рік», 2026-09-17).
 function AnnualAiAnalysis({
   totals,
   months,
@@ -390,6 +394,7 @@ function AnnualAiAnalysis({
   periodTitle: string
   scope: PeriodScope
 }) {
+  const chrome = useChartChrome()
   const heading = `${formatOrganizationLabel(organizationID)} · ${periodTitle}`
   const panel = useMemo(
     () =>
