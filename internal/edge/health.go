@@ -388,6 +388,16 @@ func (s *Service) bessInventoryCheck(b *BessHealth) *HealthCheck {
 		return nil // passport not configured — nothing to compare
 	}
 	var mismatches []string
+	// Семантика з'ясована на ze 2026-09-10 (закриття «відкритого
+	// питання» діагностик §7.3):
+	//   · 40398 «Rated ESS power» — Σ номіналів PCS-модулів заліза
+	//     (ze: 8 × 140.4 = 1123.2 кВт), НЕ експлуатаційний паспорт
+	//     (864). Тому потужність із паспортом НЕ порівнюємо — вона
+	//     показується в картці як довідка про залізо.
+	//   · 40484 (кВт·год) збігається з паспортом — порівнюємо.
+	//   · 40488 «Number of ESSs» на LUNA C&I буває 0 (шафи живуть як
+	//     PCS у 40489) — нуль = «не заповнено», фолбек на 40489
+	//     (одна шафа = один PCS).
 	cmpF := func(name string, passport, actual *float64) {
 		if passport == nil || actual == nil {
 			return
@@ -397,10 +407,18 @@ func (s *Service) bessInventoryCheck(b *BessHealth) *HealthCheck {
 			mismatches = append(mismatches, fmt.Sprintf("%s: SL %.0f ≠ паспорт %.0f", name, *actual, *passport))
 		}
 	}
-	cmpF("P, кВт", b.PassportKw, b.RatedKw)
 	cmpF("E, кВт·год", b.PassportKwh, b.RatedKwh)
-	if b.PassportEssCount != nil && b.NEss != nil && *b.NEss != *b.PassportEssCount {
-		mismatches = append(mismatches, fmt.Sprintf("шафи: SL %d ≠ паспорт %d", *b.NEss, *b.PassportEssCount))
+	if b.PassportEssCount != nil {
+		slCount := 0
+		switch {
+		case b.NEss != nil && *b.NEss > 0:
+			slCount = *b.NEss
+		case b.NPcs != nil && *b.NPcs > 0:
+			slCount = *b.NPcs
+		}
+		if slCount > 0 && slCount != *b.PassportEssCount {
+			mismatches = append(mismatches, fmt.Sprintf("шафи: SL %d ≠ паспорт %d", slCount, *b.PassportEssCount))
+		}
 	}
 	expected := passportSummary(b)
 	if len(mismatches) > 0 {

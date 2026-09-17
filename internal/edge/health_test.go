@@ -87,10 +87,11 @@ func TestHealthBessInventoryMismatchWarns(t *testing.T) {
 	cfg.Limits.Bess.PassportKw = 864
 	cfg.Limits.Bess.PassportKwh = 1720
 	cfg.Limits.Bess.PassportEssCount = 8
+	// kWh відрізняється (1500 ≠ 1720) і шафи (6 ≠ 8) → warning.
 	tick := testTick(map[string]float64{
 		"active_pv_power_kw": 100, "load_power_kw": 100, "soc_percent": 60,
 		"active_ess_power_kw": 0, "pcs_shutdown": 0, "pcs_in_operation": 1,
-		"ess_rated_kw": 800, "ess_rated_kwh": 1720, "ess_count": 6,
+		"ess_rated_kw": 800, "ess_rated_kwh": 1500, "ess_count": 6,
 	}, QualityOK)
 	s := healthTestService(cfg, &tick, nil)
 	h := s.buildHealth(testTS)
@@ -109,6 +110,39 @@ func TestHealthBessInventoryMismatchWarns(t *testing.T) {
 	s2 := healthTestService(cfg, &tick2, nil)
 	if c := findCheck(t, s2.buildHealth(testTS), "bess_inventory"); c == nil || c.Severity != CheckOK {
 		t.Fatalf("matching inventory = %+v, want ok", c)
+	}
+}
+
+// Живий кейс ze (закриття питання 40398/40488, 2026-09-10): 40398 =
+// Σ номіналів PCS (1123.2 ≠ паспорт 864) — НЕ порівнюється; 40488 = 0
+// (не заповнено) — шафи рахуються фолбеком по 40489. Чек має бути ok.
+func TestHealthBessInventoryZeCase(t *testing.T) {
+	cfg := testCfg()
+	cfg.Limits.Bess.PassportKw = 864
+	cfg.Limits.Bess.PassportKwh = 1720
+	cfg.Limits.Bess.PassportEssCount = 8
+	tick := testTick(map[string]float64{
+		"active_pv_power_kw": 100, "load_power_kw": 100, "soc_percent": 60,
+		"active_ess_power_kw": 0, "pcs_shutdown": 0, "pcs_in_operation": 1,
+		"ess_rated_kw": 1123.2, "ess_rated_kwh": 1720.32,
+		"ess_count": 0, "pcs_count": 8,
+	}, QualityOK)
+	s := healthTestService(cfg, &tick, nil)
+	c := findCheck(t, s.buildHealth(testTS), "bess_inventory")
+	if c == nil || !c.OK || c.Severity != CheckOK {
+		t.Fatalf("ze inventory = %+v, want ok (40398 ігнорується, шафи по 40489)", c)
+	}
+
+	// А реальна розбіжність шаф по 40489-фолбеку — таки warning.
+	tick2 := testTick(map[string]float64{
+		"active_pv_power_kw": 100, "load_power_kw": 100, "soc_percent": 60,
+		"active_ess_power_kw": 0, "pcs_shutdown": 0, "pcs_in_operation": 1,
+		"ess_rated_kw": 1123.2, "ess_rated_kwh": 1720.32,
+		"ess_count": 0, "pcs_count": 6,
+	}, QualityOK)
+	s2 := healthTestService(cfg, &tick2, nil)
+	if c := findCheck(t, s2.buildHealth(testTS), "bess_inventory"); c == nil || c.OK {
+		t.Fatalf("pcs fallback mismatch = %+v, want warning", c)
 	}
 }
 
