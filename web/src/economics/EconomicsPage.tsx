@@ -17,7 +17,9 @@ import './economics.css'
 import { useEconomicsData } from './useEconomicsData'
 import { useEconomicsMonthlyData } from './useEconomicsMonthlyData'
 import { useEconomicsAnnualData } from './useEconomicsAnnualData'
+import { usePvPlanSummary } from './usePvPlanSummary'
 import { useCapexSchedule } from './useCapexSchedule'
+import { capexResolver } from './payback'
 import { useOrgTariffs } from './useOrgTariffs'
 
 // DamRefreshState is the small UI state machine that drives the
@@ -93,6 +95,35 @@ const LEGACY_QUERY_KEYS = [
 // earliest imported archive (АСКОЕ Жмеринка) starts 2024-08; months
 // before the first data month come back empty and are skipped.
 const PAYBACK_WINDOW_FROM = '2024-08'
+
+// addMonths shifts a YYYY-MM month key by delta calendar months. Pure
+// string/index arithmetic — no Date, so no UTC-midnight drift.
+function addMonths(ym: string, delta: number): string {
+  const m = /^(\d{4})-(\d{2})$/.exec(ym)
+  if (!m) return ym
+  const idx = Number(m[1]) * 12 + (Number(m[2]) - 1) + delta
+  const y = Math.floor(idx / 12)
+  const mo = idx - y * 12 + 1
+  return `${String(y).padStart(4, '0')}-${String(mo).padStart(2, '0')}`
+}
+
+// monthsBetween counts the inclusive month length of a YYYY-MM window,
+// so the previous-period comparison can mirror the window exactly.
+function monthsBetween(from: string, to: string): number {
+  const f = /^(\d{4})-(\d{2})$/.exec(from)
+  const t = /^(\d{4})-(\d{2})$/.exec(to)
+  if (!f || !t) return 0
+  return Number(t[1]) * 12 + Number(t[2]) - (Number(f[1]) * 12 + Number(f[2])) + 1
+}
+
+// monthEndDay returns the YYYY-MM-DD of the last civil day of a YYYY-MM
+// month (Date.UTC day 0 of the next month).
+function monthEndDay(ym: string): string {
+  const m = /^(\d{4})-(\d{2})$/.exec(ym)
+  if (!m) return ''
+  const last = new Date(Date.UTC(Number(m[1]), Number(m[2]), 0)).getUTCDate()
+  return `${ym}-${String(last).padStart(2, '0')}`
+}
 
 // readRangeFromUrl picks the period granularity (day / month / year).
 // Defaults to 'day' so existing links and the common case stay unchanged.
@@ -226,6 +257,42 @@ export function EconomicsPage() {
     refreshKey,
   })
 
+  // Previous periods of the same length feed the "до попереднього …"
+  // deltas on the redesigned top cards. Loaded through the same hooks
+  // as the main period; their errors are never surfaced — an absent
+  // prior period only hides the deltas.
+  const monthlyPrior = useEconomicsMonthlyData({
+    organizationID: range === 'month' ? organizationID : '',
+    month: range === 'month' ? addMonths(month, -1) : '',
+    refreshKey,
+  })
+
+  const windowLen = useWindow ? monthsBetween(windowFrom, windowTo) : 12
+  const annualPrior = useEconomicsAnnualData({
+    organizationID: range === 'year' ? organizationID : '',
+    period: range === 'year' && !useWindow ? String(Number(period) - 1) : '',
+    from: range === 'year' && useWindow ? addMonths(windowFrom, -windowLen) : '',
+    to: range === 'year' && useWindow ? addMonths(windowFrom, -1) : '',
+    refreshKey,
+  })
+
+  // Planned PV generation of the visible period for the «Генерація СЕС»
+  // card (best-effort; null hides the plan line).
+  const pvPlanMonth = usePvPlanSummary({
+    organizationID: range === 'month' ? organizationID : '',
+    fromDay: range === 'month' ? `${month}-01` : '',
+    toDay: range === 'month' ? monthEndDay(month) : '',
+    refreshKey,
+  })
+  const yearFromMonth = useWindow ? windowFrom : `${period}-01`
+  const yearToMonth = useWindow ? windowTo : `${period}-12`
+  const pvPlanYear = usePvPlanSummary({
+    organizationID: range === 'year' ? organizationID : '',
+    fromDay: range === 'year' ? `${yearFromMonth}-01` : '',
+    toDay: range === 'year' ? monthEndDay(yearToMonth) : '',
+    refreshKey,
+  })
+
   // The payback page always looks at the whole operating history: a
   // fixed window from before the earliest site went live up to the
   // current month. Anything even earlier still arrives aggregated in
@@ -240,8 +307,14 @@ export function EconomicsPage() {
 
   // Staged projects grow their CAPEX over time, and each step is already
   // versioned in the tariff schedule; the payback page compares the
-  // cumulative EBITDA against the CAPEX standing in each month.
-  const capexSteps = useCapexSchedule(range === 'payback' ? organizationID : '', refreshKey)
+  // cumulative EBITDA against the CAPEX standing in each month, and the
+  // month/year top section divides the annualised EBITDA by the capital
+  // standing at the end of its period (ROCE card).
+  const capexSteps = useCapexSchedule(
+    range === 'payback' || range === 'month' || range === 'year' ? organizationID : '',
+    refreshKey,
+  )
+  const capexAt = useMemo(() => capexResolver(capexSteps, tariffs.capexUah), [capexSteps, tariffs.capexUah])
 
   // jumpToMonth switches the page to the month view of the given YYYY-MM
   // (drill-down from an annual trend bar / table row). We keep the day
@@ -395,6 +468,13 @@ export function EconomicsPage() {
               data={annual.year}
               organizationID={organizationID}
               onSelectMonth={jumpToMonth}
+              prior={
+                annualPrior.year && annualPrior.year.totals.hours_with_data > 0
+                  ? annualPrior.year.totals
+                  : null
+              }
+              pvPlan={pvPlanYear}
+              capexUah={capexAt(yearToMonth)}
             />
           ) : (
             <p className="economics-loading">Немає даних за рік.</p>
@@ -410,7 +490,17 @@ export function EconomicsPage() {
           {monthly.loading ? (
             <p className="economics-loading">Завантаження…</p>
           ) : monthly.month ? (
-            <EconomicsMonthlyView data={monthly.month} organizationID={organizationID} />
+            <EconomicsMonthlyView
+              data={monthly.month}
+              organizationID={organizationID}
+              prior={
+                monthlyPrior.month && monthlyPrior.month.totals.hours_with_data > 0
+                  ? monthlyPrior.month.totals
+                  : null
+              }
+              pvPlan={pvPlanMonth}
+              capexUah={capexAt(month)}
+            />
           ) : (
             <p className="economics-loading">Немає даних за місяць.</p>
           )}

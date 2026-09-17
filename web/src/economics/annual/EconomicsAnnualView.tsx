@@ -24,10 +24,10 @@ import {
   EssDataQualityNote,
   MonthlyBalance,
   MonthlyFinance,
-  MonthlyKpis,
   MonthlyWaterfall,
   OptimumInfo,
 } from '../monthly/EconomicsMonthlyView'
+import { EconomicsTopSection, type EconomicsPvPlan } from '../components/EconomicsTopSection'
 import {
   buildAiPanel,
   HEATMAP_METRIC_TIP,
@@ -64,9 +64,15 @@ type Props = {
   organizationID: string
   // onSelectMonth drills down to the month view of the clicked YYYY-MM.
   onSelectMonth: (month: string) => void
+  // prior — попереднє вікно тієї ж довжини для дельт верхніх карток.
+  prior?: EconomicsMonthlyTotals | null
+  // pvPlan — планова генерація СЕС за період (null ховає рядок плану).
+  pvPlan?: EconomicsPvPlan | null
+  // capexUah — інвестований капітал на кінець періоду (ROCE).
+  capexUah?: number
 }
 
-export function EconomicsAnnualView({ data, organizationID, onSelectMonth }: Props) {
+export function EconomicsAnnualView({ data, organizationID, onSelectMonth, prior, pvPlan, capexUah }: Props) {
   const t = data.totals
   const withData = useMemo(
     () => data.months.filter((m) => m.totals.hours_with_data > 0),
@@ -83,7 +89,14 @@ export function EconomicsAnnualView({ data, organizationID, onSelectMonth }: Pro
   const scope: PeriodScope = isCalendarYear ? 'year' : 'period'
   return (
     <>
-      <MonthlyKpis totals={t} scope={scope} />
+      <EconomicsTopSection
+        totals={t}
+        scope={scope}
+        prior={prior}
+        pvPlan={pvPlan}
+        capexUah={capexUah}
+        annualizeMonths={data.months_with_data}
+      />
       <QuarterCards quarters={data.quarters} />
       <div className="economics-month-grid2">
         <MonthlyFinance totals={t} scope={scope} />
