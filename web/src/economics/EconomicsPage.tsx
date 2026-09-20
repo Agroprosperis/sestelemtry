@@ -2,10 +2,10 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { refreshDAMPrices } from '../api'
 import { useOrganizationParam } from '../dashboard/hooks/useOrganizationParam'
 import { ModeTopBar, type TopBarMenuItem } from '../shell/ModeTopBar'
-import { dailyTotals, pvEssArbitrageGain } from './compute'
+import { dailyTotals } from './compute'
 import { EconomicsDamPricesModal } from './components/EconomicsDamPricesModal'
 import { EconomicsHeader, type EconomicsRange } from './components/EconomicsHeader'
-import { EconomicsKpis } from './components/EconomicsKpis'
+import { EconomicsDayTop } from './components/EconomicsDayTop'
 import { EconomicsRecomputeModal } from './components/EconomicsRecomputeModal'
 import { EconomicsTable } from './components/EconomicsTable'
 import { EconomicsMonthlyView } from './monthly/EconomicsMonthlyView'
@@ -232,10 +232,6 @@ export function EconomicsPage() {
   })
 
   const totals = useMemo(() => dailyTotals(data.rows), [data.rows])
-  const pvEssPotential = useMemo(
-    () => totals.pvExportPotential + pvEssArbitrageGain(data.rows, tariffs),
-    [totals, data.rows, tariffs],
-  )
 
   // month is the YYYY-MM derived from the day anchor.
   const month = date.slice(0, 7)
@@ -278,6 +274,12 @@ export function EconomicsPage() {
 
   // Planned PV generation of the visible period for the «Генерація СЕС»
   // card (best-effort; null hides the plan line).
+  const pvPlanDay = usePvPlanSummary({
+    organizationID: range === 'day' ? organizationID : '',
+    fromDay: range === 'day' ? date : '',
+    toDay: range === 'day' ? date : '',
+    refreshKey,
+  })
   const pvPlanMonth = usePvPlanSummary({
     organizationID: range === 'month' ? organizationID : '',
     fromDay: range === 'month' ? `${month}-01` : '',
@@ -540,7 +542,7 @@ export function EconomicsPage() {
             <p className="economics-loading">Завантаження…</p>
           ) : (
             <>
-              <EconomicsKpis totals={totals} tariffs={tariffs} pvEssPotential={pvEssPotential} />
+              <EconomicsDayTop totals={totals} rows={data.rows} tariffs={tariffs} pvPlan={pvPlanDay} />
               <EconomicsTable rows={data.rows} organizationID={organizationID} date={date} />
             </>
           )}

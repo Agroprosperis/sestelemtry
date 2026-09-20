@@ -74,8 +74,9 @@ function pvSelfShare(t: EconomicsMonthlyTotals): number | null {
 
 // InfoDot is the same "i" hover bubble the rollup sections use
 // (`.economics-info` + data-tip). Local copy to avoid importing a
-// component from the monthly view module (circular import).
-function InfoDot({ tip }: { tip: string }) {
+// component from the monthly view module (circular import). Exported
+// for the day-view cards.
+export function InfoDot({ tip }: { tip: string }) {
   return (
     <span className="economics-info" data-tip={tip} role="img" aria-label={tip}>
       i
@@ -113,13 +114,14 @@ function DeltaBadge({
   )
 }
 
-type CardTone = 'steel' | 'blue' | 'green' | 'amber' | 'violet' | 'sky' | 'teal' | 'orange'
+export type CardTone = 'steel' | 'blue' | 'green' | 'amber' | 'violet' | 'sky' | 'teal' | 'orange'
 
 // Card is one KPI tile: icon chip + label, big value, then the badge
 // line and caption block. Badge/caption rows render only when present,
 // so content packs tightly under the value like in the client mock;
-// cards in one grid row still stretch to equal outer height.
-function Card({
+// cards in one grid row still stretch to equal outer height. Exported
+// for the day view, which builds its own strips from the same tile.
+export function Card({
   tone,
   icon,
   label,
@@ -127,6 +129,7 @@ function Card({
   value,
   badge,
   children,
+  hero = false,
 }: {
   tone: CardTone
   icon: string
@@ -135,9 +138,12 @@ function Card({
   value: string
   badge?: ReactNode
   children?: ReactNode
+  // hero adds the bright accent border + glow the mock puts on the
+  // day-view effect cards.
+  hero?: boolean
 }) {
   return (
-    <div className={`eco-card eco-tone-${tone}`}>
+    <div className={`eco-card eco-tone-${tone}${hero ? ' eco-card-hero' : ''}`}>
       <div className="eco-card-head">
         <span className="eco-card-icon">
           <Icon d={icon} />

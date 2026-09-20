@@ -31,14 +31,16 @@ export function usePvPlanSummary(input: Input): EconomicsPvPlan | null {
         return
       }
       try {
-        // Noon-UTC anchors always fall inside the intended Kyiv civil
-        // day regardless of DST, so the server's civilDaySpan resolves
-        // the window to exactly [fromDay..toDay].
+        // Mid-day UTC anchors always fall inside the intended Kyiv
+        // civil day regardless of DST, so the server's civilDaySpan
+        // resolves the window to exactly [fromDay..toDay]. The morning
+        // /evening pair keeps `to` strictly after `from` even when the
+        // period is a single day (the server rejects to <= from).
         const resp = await fetchPvPlanSummary(
           {
             organizationID: input.organizationID,
-            from: `${input.fromDay}T12:00:00Z`,
-            to: `${input.toDay}T12:00:00Z`,
+            from: `${input.fromDay}T06:00:00Z`,
+            to: `${input.toDay}T18:00:00Z`,
             tz: LOCAL_TZ,
           },
           controller.signal,

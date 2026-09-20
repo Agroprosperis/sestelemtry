@@ -738,7 +738,9 @@
   --eco-accent: var(--text-muted);
   --eco-accent-bg: var(--bg-muted);
   position: relative;
-  overflow: hidden;
+  /* No overflow:hidden here — the .economics-info hover bubble pops
+     above the card top and must not be clipped; the gradient is
+     already clipped by border-radius. */
   background:
     linear-gradient(150deg, color-mix(in srgb, var(--eco-accent) 10%, var(--bg-elevated)), var(--bg-elevated) 58%);
   border: 1px solid color-mix(in srgb, var(--eco-accent) 28%, var(--border));
@@ -747,6 +749,34 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+/* Hero cards (day-view effect cards in the mock): brighter accent
+   border and an outer glow. */
+.eco-card-hero {
+  border-color: color-mix(in srgb, var(--eco-accent) 60%, var(--border));
+  box-shadow: 0 0 16px color-mix(in srgb, var(--eco-accent) 16%, transparent);
+}
+
+.eco-card-hero .eco-card-label {
+  color: var(--eco-accent);
+}
+
+/* Day view: the financial-breakdown cards need wider columns than the
+   month/year strips. */
+.eco-kpi-grid-day {
+  grid-template-columns: repeat(auto-fit, minmax(215px, 1fr));
+}
+
+/* «Середні ціни»: two stacked price tiles in one grid cell. */
+.eco-price-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.eco-price-stack .eco-card {
+  flex: 1;
 }
 
 .eco-tone-blue {
@@ -918,6 +948,18 @@
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+
+/* «Разом» closing line of a day-card breakdown. */
+.eco-fact-total {
+  border-top: 1px solid color-mix(in srgb, var(--eco-accent) 30%, var(--border));
+  padding-top: 4px;
+  margin-top: 2px;
+}
+
+.eco-fact-total b {
+  color: var(--text);
+  font-weight: 700;
 }
 
 /* --- Overview row (mock bottom): coverage donut + consumption/
