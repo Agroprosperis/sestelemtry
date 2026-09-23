@@ -329,6 +329,9 @@ func detectEssAnomalies(hourly []HourlyRecord, loc *time.Location, ratingsOn fun
 	badDays := make(map[string]bool)
 	reasonCounts := make(map[string]int)
 	anomalies := make([]AnomalyHour, 0)
+	// Civil date of each sorted hour, built on the first anomaly: the
+	// after_gap checks compare it against every earlier hour.
+	var dates []string
 	for i, h := range sorted {
 		limit := ratingsOn(h.HourStart).PowerLimitKw * tol // hourly granularity → 1h interval
 		if limit <= 0 {
@@ -355,19 +358,24 @@ func detectEssAnomalies(hourly []HourlyRecord, loc *time.Location, ratingsOn fun
 			}
 			reasons = append(reasons, AnomalyReasonHourlyOverLimit)
 		}
+		if dates == nil {
+			dates = make([]string, len(sorted))
+			for j, s := range sorted {
+				dates[j] = s.HourStart.In(loc).Format("2006-01-02")
+			}
+		}
 		local := h.HourStart.In(loc)
-		date := local.Format("2006-01-02")
+		date := dates[i]
 		// Tag after_gap when earlier the same civil day there was real
 		// activity, then a multi-hour idle hole (typical connection loss —
 		// economics still stores zero-filled hours, so HourStart gaps alone
 		// miss this), then this anomalous hour.
-		if hasIdleHoleAfterActivity(sorted, i, loc, date) {
+		if hasIdleHoleAfterActivity(sorted, dates, i) {
 			reasons = append(reasons, AnomalyReasonAfterGap)
 		} else {
 			// Fallback: multi-hour hole in HourStart sequence same day.
 			for j := i - 1; j >= 0; j-- {
-				prevLocal := sorted[j].HourStart.In(loc)
-				if prevLocal.Format("2006-01-02") != date {
+				if dates[j] != date {
 					break
 				}
 				nextStart := sorted[j+1].HourStart
@@ -416,12 +424,12 @@ func isIdleHour(h HourlyRecord) bool {
 
 // hasIdleHoleAfterActivity is true when, earlier the same civil day, there
 // was at least one non-idle hour followed by ≥2 consecutive idle hours
-// before index i (the anomalous hour).
-func hasIdleHoleAfterActivity(sorted []HourlyRecord, i int, loc *time.Location, date string) bool {
+// before index i (the anomalous hour). dates[j] is sorted[j]'s civil date.
+func hasIdleHoleAfterActivity(sorted []HourlyRecord, dates []string, i int) bool {
 	hadActive := false
 	idleRun := 0
 	for j := 0; j < i; j++ {
-		if sorted[j].HourStart.In(loc).Format("2006-01-02") != date {
+		if dates[j] != dates[i] {
 			continue
 		}
 		if !isIdleHour(sorted[j]) {
@@ -565,6 +573,18 @@ func pvEssArbitrageGain(
 // telemetry, rate its throughput against the old capacity, and solve the
 // optimum inside an envelope the plant has outgrown.
 func AggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly []HourlyRecord, ratingsFor func(day time.Time) EssRatings) StoredMonth {
+	return aggregateMonth(month, loc, days, hourly, ratingsFor, true)
+}
+
+// aggregateMonthTotals is AggregateMonth for the multi-month rollups,
+// which read only Totals and HourlyMargin: it skips the per-day optimum
+// ladder and the cycle charts (most of a month's DP work, and none of it
+// feeds Totals) and returns no Days or Cycles.
+func aggregateMonthTotals(month string, loc *time.Location, days []DailyRecord, hourly []HourlyRecord, ratingsFor func(day time.Time) EssRatings) StoredMonth {
+	return aggregateMonth(month, loc, days, hourly, ratingsFor, false)
+}
+
+func aggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly []HourlyRecord, ratingsFor func(day time.Time) EssRatings, perDay bool) StoredMonth {
 	ratingsOn := dailyRatings(loc, ratingsFor)
 	badHours, dq := detectEssAnomalies(hourly, loc, ratingsOn, essAnomalyTolerance)
 	dq.TotalDays = len(days)
@@ -716,7 +736,11 @@ func AggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly
 	var totals MonthlyTotals
 	var importNum, importDen, exportNum, exportDen float64
 	var bestSet, minSet bool
-	outDays := make([]MonthDay, 0, len(days))
+	var outDays []MonthDay
+	if perDay {
+		outDays = make([]MonthDay, 0, len(days))
+	}
+	dayKeys := make([]string, 0, len(days))
 	var uzeCycles []UzeCycle
 
 	// Chronological hour lists for the continuous monthly SOC DP (§3.2),
@@ -806,14 +830,34 @@ func AggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly
 		if do != nil && dq.AnomalousHours > 0 {
 			factEssNet = do.essNet
 		}
-		opt := computeOptimum(do, factEssNet, params)
-		totals.EssPvMissedKwh += opt.pvMissed
 		monthFact += factEssNet
-		if opt.reserve >= cycleReserveThresholdUah {
-			if cyc, ok := buildCycle(key, do, factEssNet, params, ratings.CapacityKwh, ratings.PowerLimitKw, loc); ok {
-				uzeCycles = append(uzeCycles, cyc)
+		if perDay {
+			opt := computeOptimum(do, factEssNet, params)
+			totals.EssPvMissedKwh += opt.pvMissed
+			if opt.reserve >= cycleReserveThresholdUah {
+				if cyc, ok := buildCycle(key, do, factEssNet, params, ratings.CapacityKwh, ratings.PowerLimitKw, loc); ok {
+					uzeCycles = append(uzeCycles, cyc)
+				}
 			}
+			outDays = append(outDays, MonthDay{
+				Date:             key,
+				Totals:           t,
+				RdnAvgUahPerKwh:  rdnAvg,
+				EquivalentCycles: cycles,
+				IsFinal:          d.IsFinal,
+				EssFact:          opt.fact,
+				EssOptimum:       opt.optimum,
+				EssReserve:       opt.reserve,
+				EssReserveTiming: opt.timing,
+				EssReserveSoc:    opt.soc,
+				EssReservePv:     opt.pv,
+				EssPvMissedKwh:   opt.pvMissed,
+			})
+		} else if do != nil {
+			// Same missed-PV figure computeOptimum reports, without its DPs.
+			totals.EssPvMissedKwh += math.Max(0, do.pvSurplus-do.actualPv)
 		}
+		dayKeys = append(dayKeys, key)
 		if do != nil {
 			if curRun == nil || ratings != curRatings {
 				curRun = &socRun{params: params, startKwh: params.socMinKwh}
@@ -825,21 +869,6 @@ func AggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly
 			}
 			curRun.hours = append(curRun.hours, do.hours[:]...)
 		}
-
-		outDays = append(outDays, MonthDay{
-			Date:             key,
-			Totals:           t,
-			RdnAvgUahPerKwh:  rdnAvg,
-			EquivalentCycles: cycles,
-			IsFinal:          d.IsFinal,
-			EssFact:          opt.fact,
-			EssOptimum:       opt.optimum,
-			EssReserve:       opt.reserve,
-			EssReserveTiming: opt.timing,
-			EssReserveSoc:    opt.soc,
-			EssReservePv:     opt.pv,
-			EssPvMissedKwh:   opt.pvMissed,
-		})
 	}
 
 	if importDen > 0 {
@@ -902,13 +931,13 @@ func AggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly
 
 	// Heatmap rows: one per calendar day present in the daily slice, in
 	// order, so the frontend renders a stable grid.
-	hm := make([]DayMargin, 0, len(outDays))
-	for _, d := range outDays {
-		grid := margins[d.Date]
+	hm := make([]DayMargin, 0, len(dayKeys))
+	for _, key := range dayKeys {
+		grid := margins[key]
 		if grid == nil {
 			grid = make([]*MarginHour, 24)
 		}
-		hm = append(hm, DayMargin{Date: d.Date, Hours: grid})
+		hm = append(hm, DayMargin{Date: key, Hours: grid})
 	}
 
 	sort.SliceStable(uzeCycles, func(i, j int) bool {
@@ -921,7 +950,7 @@ func AggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly
 		Totals:       totals,
 		Days:         outDays,
 		HourlyMargin: hm,
-		DaysInMonth:  len(outDays),
+		DaysInMonth:  len(dayKeys),
 		Cycles:       uzeCycles,
 	}
 }
@@ -931,6 +960,18 @@ func AggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly
 // responsible for keeping the month (including today) up to date, so the
 // read path never recomputes live. month is YYYY-MM in tz.
 func (s *Service) GetMonth(ctx context.Context, orgID, month, tz string) (StoredMonth, error) {
+	return s.getMonth(ctx, orgID, month, tz, true)
+}
+
+// GetMonthTotals is GetMonth for callers that read only the month's totals
+// (the portfolio): the same numbers, without the per-day optimum breakdown
+// and the cycle charts.
+func (s *Service) GetMonthTotals(ctx context.Context, orgID, month, tz string) (MonthlyTotals, error) {
+	m, err := s.getMonth(ctx, orgID, month, tz, false)
+	return m.Totals, err
+}
+
+func (s *Service) getMonth(ctx context.Context, orgID, month, tz string, perDay bool) (StoredMonth, error) {
 	loc, err := loadLocation(tz)
 	if err != nil {
 		return StoredMonth{}, err
@@ -957,7 +998,7 @@ func (s *Service) GetMonth(ctx context.Context, orgID, month, tz string) (Stored
 
 	schedule, _ := s.backend.TariffSchedule(ctx, orgID)
 
-	result := AggregateMonth(month, loc, daily, hourly, schedule.EssRatingsFor)
+	result := aggregateMonth(month, loc, daily, hourly, schedule.EssRatingsFor, perDay)
 	result.OrganizationID = orgID
 	return result, nil
 }

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/nesh/sestelemetry/internal/economics"
@@ -1089,6 +1090,11 @@ func reasonKeys(counts map[string]int) []string {
 	return out
 }
 
+// portfolioConcurrency caps how many objects the portfolio rolls up at
+// once; each period rollup already spreads its months across all cores,
+// so this mainly overlaps one object's DB reads with another's compute.
+const portfolioConcurrency = 4
+
 // portfolioSiteFromTotals builds one site row from a period's totals.
 func portfolioSiteFromTotals(id, name string, t economics.MonthlyTotals, hasData bool) EconomicsPortfolioSite {
 	sched := scheduleReserveUah(t)
@@ -1182,56 +1188,80 @@ func (h *Handlers) economicsPortfolio(w http.ResponseWriter, r *http.Request) {
 		Tz:    loc.String(),
 		Sites: make([]EconomicsPortfolioSite, 0, len(h.organizations)),
 	}
+	// The demo organization carries synthetic data and is not a real
+	// site, so it must never appear in the portfolio rollup.
+	orgs := make([]OrganizationInfo, 0, len(h.organizations))
+	for _, org := range h.organizations {
+		if org.ID != demoOrgID {
+			orgs = append(orgs, org)
+		}
+	}
+
+	// Objects are rolled up concurrently (each is independent and mostly
+	// CPU-bound in the УЗЕ optimizer) and folded below in config order, so
+	// the response does not depend on which finished first.
+	type siteRollup struct {
+		totals  economics.MonthlyTotals
+		hasData bool
+		year    economics.StoredYear
+	}
+	rollups := make([]siteRollup, len(orgs))
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, portfolioConcurrency)
+	for i, org := range orgs {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			ctx := r.Context()
+			if scope == "month" {
+				t, err := h.economics.GetMonthTotals(ctx, org.ID, monthStr, loc.String())
+				if err != nil {
+					h.log.Warn("api_economics_portfolio_org", "organization_id", org.ID, "month", monthStr, "err", err)
+					return
+				}
+				rollups[i] = siteRollup{totals: t, hasData: t.DaysWithData > 0}
+				return
+			}
+			var y economics.StoredYear
+			var err error
+			if fromStr != "" || toStr != "" {
+				y, err = h.economics.GetPeriod(ctx, org.ID, fromStr, toStr, loc.String())
+			} else {
+				y, err = h.economics.GetYear(ctx, org.ID, periodStr, loc.String())
+			}
+			if err != nil {
+				h.log.Warn("api_economics_portfolio_org", "organization_id", org.ID, "period", periodStr, "err", err)
+				return
+			}
+			rollups[i] = siteRollup{totals: y.Totals, hasData: y.MonthsWithData > 0, year: y}
+		}()
+	}
+	wg.Wait()
+
 	var totals economics.MonthlyTotals
 	var maxMonthsWithData int
 	trendAcc := make(map[string]*EconomicsPortfolioTrendMonth)
 	var trendOrder []string
 
-	for _, org := range h.organizations {
-		// The demo organization carries synthetic data and is not a real
-		// site, so it must never appear in the portfolio rollup.
-		if org.ID == demoOrgID {
-			continue
+	for i, org := range orgs {
+		t, hasData, y := rollups[i].totals, rollups[i].hasData, rollups[i].year
+		if y.MonthsWithData > maxMonthsWithData {
+			maxMonthsWithData = y.MonthsWithData
 		}
-		var t economics.MonthlyTotals
-		hasData := false
-		if scope == "month" {
-			m, err := h.economics.GetMonth(r.Context(), org.ID, monthStr, loc.String())
-			if err != nil {
-				h.log.Warn("api_economics_portfolio_org", "organization_id", org.ID, "month", monthStr, "err", err)
-			} else {
-				t = m.Totals
-				hasData = t.DaysWithData > 0
+		for _, mr := range y.Months {
+			row := trendAcc[mr.Month]
+			if row == nil {
+				row = &EconomicsPortfolioTrendMonth{Month: mr.Month}
+				trendAcc[mr.Month] = row
+				trendOrder = append(trendOrder, mr.Month)
 			}
-		} else {
-			var y economics.StoredYear
-			if fromStr != "" || toStr != "" {
-				y, err = h.economics.GetPeriod(r.Context(), org.ID, fromStr, toStr, loc.String())
-			} else {
-				y, err = h.economics.GetYear(r.Context(), org.ID, periodStr, loc.String())
-			}
-			if err != nil {
-				h.log.Warn("api_economics_portfolio_org", "organization_id", org.ID, "period", periodStr, "err", err)
-			} else {
-				t = y.Totals
-				hasData = y.MonthsWithData > 0
-				if y.MonthsWithData > maxMonthsWithData {
-					maxMonthsWithData = y.MonthsWithData
-				}
-				for _, mr := range y.Months {
-					row := trendAcc[mr.Month]
-					if row == nil {
-						row = &EconomicsPortfolioTrendMonth{Month: mr.Month}
-						trendAcc[mr.Month] = row
-						trendOrder = append(trendOrder, mr.Month)
-					}
-					row.PvKwh += mr.Totals.PV
-					row.LoadKwh += mr.Totals.Load
-					row.GridImportKwh += mr.Totals.GridImport
-					row.GridExportKwh += mr.Totals.GridExport
-					row.EbitdaUah += mr.Totals.Ebitda
-				}
-			}
+			row.PvKwh += mr.Totals.PV
+			row.LoadKwh += mr.Totals.Load
+			row.GridImportKwh += mr.Totals.GridImport
+			row.GridExportKwh += mr.Totals.GridExport
+			row.EbitdaUah += mr.Totals.Ebitda
 		}
 
 		resp.Sites = append(resp.Sites, portfolioSiteFromTotals(org.ID, org.Name, t, hasData))

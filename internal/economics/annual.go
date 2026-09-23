@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"runtime"
+	"sync"
 	"time"
 )
 
@@ -75,12 +77,16 @@ func AggregateYear(
 	hourly []HourlyRecord,
 	ratingsFor func(day time.Time) EssRatings,
 ) StoredYear {
-	year := parseYear(period)
+	return AggregatePeriod(period, calendarYearKeys(parseYear(period)), loc, days, hourly, ratingsFor)
+}
+
+// calendarYearKeys lists the twelve YYYY-MM keys of a calendar year.
+func calendarYearKeys(year int) []string {
 	keys := make([]string, 0, 12)
 	for m := 1; m <= 12; m++ {
 		keys = append(keys, fmt.Sprintf("%04d-%02d", year, m))
 	}
-	return AggregatePeriod(period, keys, loc, days, hourly, ratingsFor)
+	return keys
 }
 
 // AggregatePeriod is the generalized rollup behind AggregateYear: it folds
@@ -97,6 +103,21 @@ func AggregatePeriod(
 	hourly []HourlyRecord,
 	ratingsFor func(day time.Time) EssRatings,
 ) StoredYear {
+	year, _ := aggregatePeriod(context.Background(), periodLabel, monthKeys, loc, days, hourly, ratingsFor)
+	return year
+}
+
+// aggregatePeriod is AggregatePeriod that stops solving months once ctx is
+// done (the client went away) and returns ctx's error instead.
+func aggregatePeriod(
+	ctx context.Context,
+	periodLabel string,
+	monthKeys []string,
+	loc *time.Location,
+	days []DailyRecord,
+	hourly []HourlyRecord,
+	ratingsFor func(day time.Time) EssRatings,
+) (StoredYear, error) {
 	// Bucket the daily / hourly records by calendar month so each month
 	// is aggregated against exactly its own slice.
 	daysByMonth := make(map[string][]DailyRecord, len(monthKeys))
@@ -108,6 +129,47 @@ func AggregatePeriod(
 	for _, h := range hourly {
 		k := h.HourStart.In(loc).Format("2006-01")
 		hourlyByMonth[k] = append(hourlyByMonth[k], h)
+	}
+
+	type periodMonth struct {
+		key         string
+		year, month int
+	}
+	valid := make([]periodMonth, 0, len(monthKeys))
+	for _, monthKey := range monthKeys {
+		var ky, km int
+		if _, err := fmt.Sscanf(monthKey, "%4d-%2d", &ky, &km); err != nil || km < 1 || km > 12 {
+			continue
+		}
+		valid = append(valid, periodMonth{key: monthKey, year: ky, month: km})
+	}
+
+	// Months share no state — each runs its own anomaly filter, envelope
+	// and SOC DP — so they are solved concurrently; the fold below stays in
+	// calendar order.
+	rollups := make([]StoredMonth, len(valid))
+	next := make(chan int)
+	var wg sync.WaitGroup
+	for range min(runtime.GOMAXPROCS(0), len(valid)) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range next {
+				k := valid[i].key
+				rollups[i] = aggregateMonthTotals(k, loc, daysByMonth[k], hourlyByMonth[k], ratingsFor)
+			}
+		}()
+	}
+	for i := range valid {
+		if ctx.Err() != nil {
+			break
+		}
+		next <- i
+	}
+	close(next)
+	wg.Wait()
+	if err := ctx.Err(); err != nil {
+		return StoredYear{}, err
 	}
 
 	var (
@@ -125,23 +187,19 @@ func AggregatePeriod(
 		monthsWithData         int
 	)
 
-	for _, monthKey := range monthKeys {
-		var ky, km int
-		if _, err := fmt.Sscanf(monthKey, "%4d-%2d", &ky, &km); err != nil || km < 1 || km > 12 {
-			continue
-		}
-		sm := AggregateMonth(monthKey, loc, daysByMonth[monthKey], hourlyByMonth[monthKey], ratingsFor)
+	for i, pm := range valid {
+		sm := rollups[i]
 		mt := sm.Totals
-		months = append(months, MonthRollup{Month: monthKey, Totals: mt})
+		months = append(months, MonthRollup{Month: pm.key, Totals: mt})
 		monthlyMargin = append(monthlyMargin, MonthMargin{
-			Month: monthKey,
+			Month: pm.key,
 			Hours: monthHourMargin(sm.HourlyMargin),
 		})
 
-		qkey := [2]int{ky, (km-1)/3 + 1}
+		qkey := [2]int{pm.year, (pm.month-1)/3 + 1}
 		qi, ok := quarterIdx[qkey]
 		if !ok {
-			quarters = append(quarters, QuarterSummary{Year: ky, Quarter: qkey[1]})
+			quarters = append(quarters, QuarterSummary{Year: pm.year, Quarter: qkey[1]})
 			qi = len(quarters) - 1
 			quarterIdx[qkey] = qi
 		}
@@ -295,7 +353,7 @@ func AggregatePeriod(
 		Quarters:       quarters,
 		MonthlyMargin:  monthlyMargin,
 		MonthsWithData: monthsWithData,
-	}
+	}, nil
 }
 
 // monthHourMargin folds a month's daily heatmap rows into 24 hour-of-day
@@ -373,7 +431,10 @@ func (s *Service) GetYear(ctx context.Context, orgID, period, tz string) (Stored
 
 	schedule, _ := s.backend.TariffSchedule(ctx, orgID)
 
-	result := AggregateYear(period, loc, daily, hourly, schedule.EssRatingsFor)
+	result, err := aggregatePeriod(ctx, period, calendarYearKeys(year), loc, daily, hourly, schedule.EssRatingsFor)
+	if err != nil {
+		return StoredYear{}, err
+	}
 	result.OrganizationID = orgID
 	if prior, priorMonths, perr := s.backend.SumEbitdaBefore(ctx, orgID, firstDay); perr == nil {
 		result.PriorEbitda = prior
@@ -388,8 +449,9 @@ const maxWindowMonths = 36
 
 // GetPeriod returns economics for an arbitrary inclusive month window
 // [from..to] (both YYYY-MM in tz), reading the persisted daily/hourly
-// records the same read-only way as GetYear. The window is clamped to
-// maxWindowMonths and from/to are ordered if passed reversed.
+// records the same read-only way as GetYear. from/to are ordered if passed
+// reversed, and a window longer than maxWindowMonths keeps its most recent
+// months — the earlier ones still count through PriorEbitda.
 func (s *Service) GetPeriod(ctx context.Context, orgID, from, to, tz string) (StoredYear, error) {
 	loc, err := loadLocation(tz)
 	if err != nil {
@@ -406,13 +468,13 @@ func (s *Service) GetPeriod(ctx context.Context, orgID, from, to, tz string) (St
 	if end.Before(start) {
 		start, end = end, start
 	}
+	if span := (end.Year()-start.Year())*12 + int(end.Month()) - int(start.Month()) + 1; span > maxWindowMonths {
+		start = end.AddDate(0, -(maxWindowMonths - 1), 0)
+	}
 
-	// Build the ordered month keys, clamping the span to the cap.
 	keys := make([]string, 0, 12)
-	cur := start
-	for !cur.After(end) && len(keys) < maxWindowMonths {
+	for cur := start; !cur.After(end); cur = cur.AddDate(0, 1, 0) {
 		keys = append(keys, cur.Format("2006-01"))
-		cur = cur.AddDate(0, 1, 0)
 	}
 
 	firstDay := time.Date(start.Year(), start.Month(), 1, 0, 0, 0, 0, loc)
@@ -429,7 +491,10 @@ func (s *Service) GetPeriod(ctx context.Context, orgID, from, to, tz string) (St
 	schedule, _ := s.backend.TariffSchedule(ctx, orgID)
 
 	label := keys[0] + ".." + keys[len(keys)-1]
-	result := AggregatePeriod(label, keys, loc, daily, hourly, schedule.EssRatingsFor)
+	result, err := aggregatePeriod(ctx, label, keys, loc, daily, hourly, schedule.EssRatingsFor)
+	if err != nil {
+		return StoredYear{}, err
+	}
 	result.OrganizationID = orgID
 	if prior, priorMonths, perr := s.backend.SumEbitdaBefore(ctx, orgID, firstDay); perr == nil {
 		result.PriorEbitda = prior

@@ -289,6 +289,42 @@ func TestAggregatePeriodSlidingWindow(t *testing.T) {
 	}
 }
 
+// TestGetPeriodKeepsLatestMonths checks a window longer than the cap: it
+// ends at the requested month (the payback page asks for the whole
+// history up to today) and the months cut from its start still count
+// through PriorEbitda.
+func TestGetPeriodKeepsLatestMonths(t *testing.T) {
+	b, loc := newKyivBackend(t)
+	svc := NewService(b)
+	for _, d := range []struct {
+		when   time.Time
+		ebitda float64
+	}{
+		{time.Date(2020, 1, 15, 0, 0, 0, 0, loc), 300},
+		{time.Date(2023, 6, 10, 0, 0, 0, 0, loc), 500},
+	} {
+		b.SaveDay(context.Background(), StoredDay{
+			Day:     d.when,
+			IsFinal: true,
+			Totals:  DailyTotals{Ebitda: d.ebitda, RevenueTotal: d.ebitda, RevenuePvSelf: d.ebitda, HoursWithData: 24},
+		})
+	}
+
+	got, err := svc.GetPeriod(context.Background(), "org-a", "2020-01", "2023-06", loc.String())
+	if err != nil {
+		t.Fatalf("GetPeriod: %v", err)
+	}
+	if len(got.Months) != maxWindowMonths || got.From != "2020-07" || got.To != "2023-06" {
+		t.Fatalf("window = %d months %s..%s, want %d months 2020-07..2023-06", len(got.Months), got.From, got.To, maxWindowMonths)
+	}
+	if got.Totals.Ebitda != 500 {
+		t.Fatalf("window EBITDA = %v, want 500", got.Totals.Ebitda)
+	}
+	if got.PriorEbitda != 300 || got.PriorMonthsWithData != 1 {
+		t.Fatalf("prior = %v over %d months, want 300 over 1", got.PriorEbitda, got.PriorMonthsWithData)
+	}
+}
+
 // TestGetYearReadOnly verifies GetYear is a pure read: it serves whatever
 // the daemon persisted across the calendar year, never recomputes, and
 // rolls the stored months into the year totals.

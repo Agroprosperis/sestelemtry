@@ -242,8 +242,11 @@ type dispatchStep struct {
 // backtracks the optimal action per hour. It returns the per-hour dispatch,
 // the start residual (kWh), the total effect, and ok=false when the SOC
 // window is degenerate. mode bounds the charge sources (use modeFull for the
-// displayed optimum cycle). Mirrors runOptimumDP's transition costs exactly,
-// adding per-(hour, level) parent pointers for path reconstruction.
+// displayed optimum cycle). Same transitions as runOptimumDP plus per-(hour,
+// level) parent pointers, but each move is priced from its own start level
+// rather than once per hour: when several hours share a price, which of the
+// equally optimal schedules gets drawn hinges on that rounding, and the
+// cycle charts and day plans must not reshuffle. Effects agree to rounding.
 func optimizeDaySchedule(hours []optimumHour, startResidualKwh float64, p optimumParams, mode chargeMode) (steps []dispatchStep, startKwh, effect float64, ok bool) {
 	span := p.socMaxKwh - p.socMinKwh
 	if span <= 0 || len(hours) == 0 {

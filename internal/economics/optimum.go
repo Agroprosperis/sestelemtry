@@ -189,6 +189,108 @@ func pvChargePriceFor(h optimumHour) float64 {
 	return h.exportPrice
 }
 
+// socGrid is the SOC discretisation the DP solvers share: optimumSocLevels
+// evenly spaced levels over [socMinKwh, socMaxKwh], the level nearest the
+// start residual, and how many levels one hour can climb / drop.
+type socGrid struct {
+	levels     int
+	step       float64
+	start      int
+	etaC, etaD float64
+	upLevels   int
+	downLevels int
+}
+
+func newSocGrid(startResidualKwh float64, p optimumParams) (socGrid, bool) {
+	span := p.socMaxKwh - p.socMinKwh
+	if span <= 0 {
+		return socGrid{}, false
+	}
+	g := socGrid{levels: optimumSocLevels}
+	g.step = span / float64(g.levels-1)
+	g.start = int(math.Round((clampFloat(startResidualKwh, p.socMinKwh, p.socMaxKwh) - p.socMinKwh) / g.step))
+	g.start = max(0, min(g.start, g.levels-1))
+	g.etaC = math.Sqrt(p.rte)
+	g.etaD = math.Sqrt(p.rte)
+	// Per-hour reachable store-delta in grid steps; no move spans more
+	// than the whole grid.
+	g.upLevels = min(max(1, int(math.Ceil((p.maxChargeKwh*g.etaC)/g.step))), g.levels-1)
+	g.downLevels = min(max(1, int(math.Ceil((p.maxDischargeKwh*g.etaD)/g.step))), g.levels-1)
+	return g, true
+}
+
+func (g socGrid) socOf(p optimumParams, level int) float64 {
+	return p.socMinKwh + float64(level)*g.step
+}
+
+// chargeSplit is the AC energy that climbs d levels, split PV first
+// (project_net cost), then grid. ok is false once the move exceeds the
+// power ceiling or the grid cap — and so does every larger move.
+func (g socGrid) chargeSplit(d int, pvCap, gridCap float64, p optimumParams) (cp, cg float64, ok bool) {
+	chargeAC := float64(d) * g.step / g.etaC
+	if chargeAC > p.maxChargeKwh+1e-9 {
+		return 0, 0, false
+	}
+	cp = chargeAC
+	if pvCap < cp {
+		cp = pvCap
+	}
+	cg = chargeAC - cp
+	if cg > gridCap+1e-9 {
+		return 0, 0, false
+	}
+	return cp, cg, true
+}
+
+// dischargeSplit is the AC energy that dropping d levels delivers,
+// displacing load first, the rest exported. ok is false once the move
+// exceeds the power ceiling (and so does every larger move).
+func (g socGrid) dischargeSplit(d int, displaceableKwh float64, p optimumParams) (dl, dg, dischargeAC float64, ok bool) {
+	dischargeAC = float64(d) * g.step * g.etaD
+	if dischargeAC > p.maxDischargeKwh+1e-9 {
+		return 0, 0, 0, false
+	}
+	dl = dischargeAC
+	if displaceableKwh < dl {
+		dl = displaceableKwh
+	}
+	return dl, dischargeAC - dl, dischargeAC, true
+}
+
+// hourMoves prices one hour's feasible SOC moves. A move's value depends
+// only on how many levels it spans, never on the level it starts from, so
+// each is priced once per hour and the DP sweep is a plain add-and-compare.
+// chargeCost[d-1] is the cost of climbing d levels, dischargeGain[d-1] the
+// net revenue of dropping d levels; a non-tradable hour has neither.
+type hourMoves struct {
+	chargeCost    []float64
+	dischargeGain []float64
+}
+
+func (m *hourMoves) price(h optimumHour, g socGrid, p optimumParams, mode chargeMode) {
+	m.chargeCost = m.chargeCost[:0]
+	m.dischargeGain = m.dischargeGain[:0]
+	if !h.tradable {
+		return
+	}
+	pvPrice := pvChargePriceFor(h)
+	pvCap, gridCap := h.chargeCaps(mode)
+	for d := 1; d <= g.upLevels; d++ {
+		cp, cg, ok := g.chargeSplit(d, pvCap, gridCap, p)
+		if !ok {
+			break
+		}
+		m.chargeCost = append(m.chargeCost, cp*pvPrice+cg*h.importPrice)
+	}
+	for d := 1; d <= g.downLevels; d++ {
+		dl, dg, dischargeAC, ok := g.dischargeSplit(d, h.displaceableKwh, p)
+		if !ok {
+			break
+		}
+		m.dischargeGain = append(m.dischargeGain, dl*h.importPrice+dg*h.exportPrice-dischargeAC*p.degradationUahPerKwh)
+	}
+}
+
 // runOptimumDP solves the forward SOC dynamic program over the given hours
 // and returns the best achievable effect at every terminal SOC level (plus
 // the start level). project_net accounting: charging from PV costs the
@@ -198,100 +300,56 @@ func pvChargePriceFor(h optimumHour) float64 {
 // reduces to a single greedy source/sink split; mode bounds how much PV /
 // grid may be used.
 func runOptimumDP(hours []optimumHour, startResidualKwh float64, p optimumParams, mode chargeMode) (f []float64, start int, ok bool) {
-	span := p.socMaxKwh - p.socMinKwh
-	if span <= 0 || len(hours) == 0 {
+	if len(hours) == 0 {
 		return nil, 0, false
 	}
-	levels := optimumSocLevels
-	step := span / float64(levels-1)
-	socOf := func(i int) float64 { return p.socMinKwh + float64(i)*step }
-
-	start = int(math.Round((clampFloat(startResidualKwh, p.socMinKwh, p.socMaxKwh) - p.socMinKwh) / step))
-	if start < 0 {
-		start = 0
-	}
-	if start >= levels {
-		start = levels - 1
+	g, ok := newSocGrid(startResidualKwh, p)
+	if !ok {
+		return nil, 0, false
 	}
 
 	negInf := math.Inf(-1)
-	f = make([]float64, levels)
+	f = make([]float64, g.levels)
+	nf := make([]float64, g.levels)
 	for i := range f {
 		f[i] = negInf
 	}
-	f[start] = 0
+	f[g.start] = 0
 
-	etaC := math.Sqrt(p.rte)
-	etaD := math.Sqrt(p.rte)
-	// Per-hour reachable store-delta in grid steps.
-	upLevels := int(math.Ceil((p.maxChargeKwh * etaC) / step))
-	downLevels := int(math.Ceil((p.maxDischargeKwh * etaD) / step))
-	if upLevels < 1 {
-		upLevels = 1
-	}
-	if downLevels < 1 {
-		downLevels = 1
-	}
-
+	var mv hourMoves
 	for _, h := range hours {
-		nf := make([]float64, levels)
-		for i := range nf {
-			nf[i] = negInf
+		mv.price(h, g, p, mode)
+		if len(mv.chargeCost) == 0 && len(mv.dischargeGain) == 0 {
+			// Idle is the only move, so every level keeps its value.
+			continue
 		}
-		pvPrice := pvChargePriceFor(h)
-		for s := 0; s < levels; s++ {
-			if math.IsInf(f[s], -1) {
+		copy(nf, f) // idle is always feasible
+		for s, fs := range f {
+			if fs == negInf {
 				continue
 			}
-			// Idle is always feasible.
-			if f[s] > nf[s] {
-				nf[s] = f[s]
-			}
-			if !h.tradable {
-				continue
-			}
-			pvCap, gridCap := h.chargeCaps(mode)
 			// Charge: climb to a higher SOC level.
-			for d := 1; d <= upLevels; d++ {
-				ns := s + d
-				if ns >= levels {
-					break
-				}
-				chargeAC := (socOf(ns) - socOf(s)) / etaC
-				if chargeAC > p.maxChargeKwh+1e-9 {
-					break
-				}
-				cp := math.Min(pvCap, chargeAC) // PV first (project_net cost)
-				cg := chargeAC - cp
-				if cg > gridCap+1e-9 {
-					break // beyond this the grid cap is exceeded
-				}
-				v := f[s] - cp*pvPrice - cg*h.importPrice
-				if v > nf[ns] {
-					nf[ns] = v
+			if n := min(len(mv.chargeCost), g.levels-1-s); n > 0 {
+				up := nf[s+1 : s+1+n]
+				for i, c := range mv.chargeCost[:n] {
+					if v := fs - c; v > up[i] {
+						up[i] = v
+					}
 				}
 			}
 			// Discharge: drop to a lower SOC level.
-			for d := 1; d <= downLevels; d++ {
-				ns := s - d
-				if ns < 0 {
-					break
-				}
-				dischargeAC := (socOf(s) - socOf(ns)) * etaD
-				if dischargeAC > p.maxDischargeKwh+1e-9 {
-					break
-				}
-				dl := math.Min(h.displaceableKwh, dischargeAC)
-				dg := dischargeAC - dl
-				v := f[s] + dl*h.importPrice + dg*h.exportPrice - dischargeAC*p.degradationUahPerKwh
-				if v > nf[ns] {
-					nf[ns] = v
+			if n := min(len(mv.dischargeGain), s); n > 0 {
+				down := nf[s-n : s]
+				for i, gain := range mv.dischargeGain[:n] {
+					if v := fs + gain; v > down[n-1-i] {
+						down[n-1-i] = v
+					}
 				}
 			}
 		}
-		f = nf
+		f, nf = nf, f
 	}
-	return f, start, true
+	return f, g.start, true
 }
 
 // optimizeDay returns the maximum achievable ESS effect for one civil day
