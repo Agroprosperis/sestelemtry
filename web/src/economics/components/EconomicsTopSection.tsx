@@ -116,17 +116,19 @@ function DeltaBadge({
 
 export type CardTone = 'steel' | 'blue' | 'green' | 'amber' | 'violet' | 'sky' | 'teal' | 'orange'
 
-// Card is one KPI tile: icon chip + label, big value, then the badge
-// line and caption block. Badge/caption rows render only when present,
-// so content packs tightly under the value like in the client mock;
-// cards in one grid row still stretch to equal outer height. Exported
-// for the day view, which builds its own strips from the same tile.
+// Card is one KPI tile: icon chip + label, big value, then a body with
+// the badge line and caption block. Head, value and body sit on rows
+// shared with the neighbouring cards (CSS subgrid), so values line up
+// however the labels wrap, while badges and captions stay packed right
+// under the value like in the client mock. Exported for the day view,
+// which builds its own strips from the same tile.
 export function Card({
   tone,
   icon,
   label,
   tip,
   value,
+  unit,
   badge,
   children,
   hero = false,
@@ -136,6 +138,9 @@ export function Card({
   label: string
   tip?: string
   value: string
+  // unit renders smaller after the value, so a long unit such as
+  // «грн/кВт·год» doesn't overflow a narrow tile.
+  unit?: string
   badge?: ReactNode
   children?: ReactNode
   // hero adds the bright accent border + glow the mock puts on the
@@ -153,9 +158,14 @@ export function Card({
           {tip ? <InfoDot tip={tip} /> : null}
         </span>
       </div>
-      <div className="eco-card-value">{value}</div>
-      {badge ? <div className="eco-card-badges">{badge}</div> : null}
-      {children ? <div className="eco-card-sub">{children}</div> : null}
+      <div className="eco-card-value">
+        {value}
+        {unit ? <small className="eco-card-unit">{unit}</small> : null}
+      </div>
+      <div className="eco-card-body">
+        {badge ? <div className="eco-card-badges">{badge}</div> : null}
+        {children ? <div className="eco-card-sub">{children}</div> : null}
+      </div>
     </div>
   )
 }
@@ -237,7 +247,7 @@ export function EconomicsTopSection({
             <span className="eco-kpi-subtitle">Фінансовий результат та ефективність проєкту {w.per}</span>
           </div>
         </header>
-        <div className="eco-kpi-grid">
+        <div className="eco-kpi-grid eco-kpi-grid-7">
           <Card
             tone="steel"
             icon={ICONS.database}
@@ -379,7 +389,7 @@ export function EconomicsTopSection({
             <span className="eco-kpi-subtitle">Основні показники енергетичного балансу об'єкта {w.per}</span>
           </div>
         </header>
-        <div className="eco-kpi-grid">
+        <div className="eco-kpi-grid eco-kpi-grid-6">
           <Card
             tone="sky"
             icon={ICONS.home}

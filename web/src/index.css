@@ -144,6 +144,16 @@
   --chart-cursor-stroke: #94a3b8;
   --chart-zero: #64748b;
 
+  /* Energy Trend SOC (right axis): a faint wash is enough on light
+     surfaces; the dark theme needs a lighter violet, a denser fill and
+     an edge line, or the band sinks into the navy background. The AI
+     plan's SOC stays in the same violet family so both read as state
+     of charge. */
+  --chart-soc: #a855f7;
+  --chart-soc-fill-opacity: 0.12;
+  --chart-soc-stroke-width: 0;
+  --chart-soc-plan: #9333ea;
+
   /* Heatmap intensity scale (economics) */
   --hm0-bg: #f1f5f9;
   --hm0-fg: #64748b;
@@ -291,6 +301,11 @@
   --chart-cursor: rgba(148, 163, 184, 0.12);
   --chart-cursor-stroke: #64748b;
   --chart-zero: #64748b;
+
+  --chart-soc: #c084fc;
+  --chart-soc-fill-opacity: 0.2;
+  --chart-soc-stroke-width: 1.75;
+  --chart-soc-plan: #d8b4fe;
 
   --hm0-bg: #1a2438;
   --hm0-fg: #94a3b8;

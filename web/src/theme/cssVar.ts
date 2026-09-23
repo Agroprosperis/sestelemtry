@@ -21,5 +21,9 @@ export function chartChrome() {
     neutral: cssVar('--border-strong', '#cbd5e1'),
     onAccent: cssVar('--on-accent', '#ffffff'),
     weatherBand: cssVar('--bg-muted', '#f1f5f9'),
+    soc: cssVar('--chart-soc', '#a855f7'),
+    socPlan: cssVar('--chart-soc-plan', '#9333ea'),
+    socFillOpacity: Number(cssVar('--chart-soc-fill-opacity', '0.12')),
+    socStrokeWidth: Number(cssVar('--chart-soc-stroke-width', '0')),
   }
 }

@@ -1,10 +1,10 @@
-import { Cell, Line, LineChart, CartesianGrid, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import { Line, LineChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import type { EconomicsMonthlyTotals } from '../../api'
 import { useChartChrome } from '../../theme/useChartChrome'
-import { formatCycles, formatMwh, formatMwhNumber, formatPercent } from '../monthly/format'
+import { formatCycles, formatMwhNumber, formatPercent } from '../monthly/format'
 import { PERIOD_WORDS, type PeriodScope } from '../monthly/rollup'
-import { KpiIcon } from './kpiIcons'
 import { KPI_ICONS } from './kpiIconPaths'
+import { CoverageDonutPanel, UzeWorkPanel, type CoverageSegment, type UzeWorkCard } from './OverviewPanels'
 
 // ProfilePoint is one X-axis bucket of the consumption/generation
 // profile: a day of the month view or a month of the annual view.
@@ -62,12 +62,11 @@ export function EconomicsOverviewRow({ totals, scope = 'month', profile }: Props
 
   // Coverage: who served the load. Segments sum to the served load, so
   // the donut shares and the legend МВт·год always agree.
-  const coverage = [
+  const coverage: CoverageSegment[] = [
     { key: 'pv', name: 'СЕС → споживання', kwh: totals.pv_to_load_kwh, color: COLOR_PV },
     { key: 'ess', name: 'УЗЕ → споживання', kwh: totals.ess_to_load_kwh, color: COLOR_ESS },
     { key: 'grid', name: 'Імпорт з мережі', kwh: totals.grid_to_load_kwh, color: COLOR_IMPORT },
   ]
-  const coverageTotal = coverage.reduce((acc, s) => acc + s.kwh, 0)
 
   const rows = profile.map((p) => ({
     label: p.label,
@@ -82,7 +81,7 @@ export function EconomicsOverviewRow({ totals, scope = 'month', profile }: Props
   // fact-vs-optimum and cost-basis sections below.
   const days = Math.max(1, totals.days_with_data)
   const rte = totals.ess_charged_kwh > 0 ? totals.ess_discharged_kwh / totals.ess_charged_kwh : NaN
-  const uzeCards = [
+  const uzeCards: UzeWorkCard[] = [
     {
       label: 'Еквівалентні цикли',
       value: formatCycles(totals.equivalent_cycles),
@@ -92,14 +91,16 @@ export function EconomicsOverviewRow({ totals, scope = 'month', profile }: Props
     },
     {
       label: 'Розряд УЗЕ',
-      value: formatMwh(totals.ess_discharged_kwh),
+      value: formatMwhNumber(totals.ess_discharged_kwh),
+      unit: 'МВт·год',
       sub: `середньо ${mwhFmt.format(totals.ess_discharged_kwh / 1000 / days)} МВт·год/добу`,
       tone: 'orange',
       icon: KPI_ICONS.zap,
     },
     {
       label: 'Заряд УЗЕ',
-      value: formatMwh(totals.ess_charged_kwh),
+      value: formatMwhNumber(totals.ess_charged_kwh),
+      unit: 'МВт·год',
       sub: `СЕС: ${formatMwhNumber(totals.pv_to_ess_kwh)} | Мережа: ${formatMwhNumber(totals.grid_to_ess_kwh)}`,
       tone: 'green',
       icon: KPI_ICONS.battery,
@@ -115,47 +116,12 @@ export function EconomicsOverviewRow({ totals, scope = 'month', profile }: Props
 
   return (
     <div className="eco-overview">
-      <section className="economics-card eco-overview-panel" aria-label="Структура покриття споживання">
-        <h3 className="eco-overview-title">Структура покриття споживання</h3>
-        <div className="eco-donut-wrap">
-          <div className="eco-donut">
-            <ResponsiveContainer width="100%" height={170}>
-              <PieChart>
-                <Pie
-                  data={coverage}
-                  dataKey="kwh"
-                  nameKey="name"
-                  innerRadius={52}
-                  outerRadius={78}
-                  strokeWidth={0}
-                  paddingAngle={2}
-                >
-                  {coverage.map((s) => (
-                    <Cell key={s.key} fill={s.color} />
-                  ))}
-                </Pie>
-              </PieChart>
-            </ResponsiveContainer>
-            <div className="eco-donut-center">
-              <b>{formatMwhNumber(coverageTotal)}</b>
-              <span>МВт·год</span>
-              <span>всього</span>
-            </div>
-          </div>
-          <div className="eco-donut-legend">
-            {coverage.map((s) => (
-              <div className="eco-donut-legend-row" key={s.key}>
-                <i style={{ background: s.color }} />
-                <span className="eco-donut-legend-name">{s.name}</span>
-                <b>{coverageTotal > 0 ? formatPercent(s.kwh / coverageTotal) : '—'}</b>
-                <span className="eco-donut-legend-mwh">{formatMwhNumber(s.kwh)}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
+      <CoverageDonutPanel segments={coverage} unit="МВт·год" formatValue={formatMwhNumber} />
 
-      <section className="economics-card eco-overview-panel" aria-label="Профіль споживання та генерації">
+      <section
+        className="economics-card eco-overview-panel eco-overview-chart"
+        aria-label="Профіль споживання та генерації"
+      >
         <div className="eco-overview-head">
           <h3 className="eco-overview-title">Профіль споживання та генерації</h3>
           <span className="economics-month-muted">МВт·год {w.per}</span>
@@ -182,23 +148,7 @@ export function EconomicsOverviewRow({ totals, scope = 'month', profile }: Props
         </div>
       </section>
 
-      <section className="economics-card eco-overview-panel" aria-label="Робота УЗЕ">
-        <h3 className="eco-overview-title">Робота УЗЕ</h3>
-        <div className="eco-uze-grid">
-          {uzeCards.map((c) => (
-            <div className={`eco-uze-card eco-tone-${c.tone}`} key={c.label}>
-              <span className="eco-uze-icon">
-                <KpiIcon d={c.icon} />
-              </span>
-              <div className="eco-uze-body">
-                <span className="eco-uze-label">{c.label}</span>
-                <span className="eco-uze-value">{c.value}</span>
-                <span className="eco-uze-sub">{c.sub}</span>
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>
+      <UzeWorkPanel cards={uzeCards} />
     </div>
   )
 }

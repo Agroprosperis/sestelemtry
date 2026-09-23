@@ -59,11 +59,6 @@ export const PV_FORECAST_COLOR = '#16a34a'
 // unmistakably a different series rather than a shade of the same one.
 export const AI_PLAN_COLOR = '#db2777'
 
-// The recommended SOC trajectory stays in the SOC family (the actual SOC
-// band is #a855f7) so both read as "state of charge" on the right axis.
-// Matches the `socOpt` violet of the monthly cycle chart.
-export const AI_PLAN_SOC_COLOR = '#9333ea'
-
 // The recommended consumption stays in the load family — a darker amber
 // than the actual load line (#f59e0b), the same planned-vs-actual pairing
 // the PV forecast uses with its darker green.

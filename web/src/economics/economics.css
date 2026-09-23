@@ -721,13 +721,57 @@
   color: var(--text-subtle);
 }
 
-/* Cards on shared subgrid rows: head / value / badge line / caption.
-   The floor keeps seven cards on one line only on wide screens; below
-   that they wrap 4+3 (and 3+3 for the balance strip). */
+/* Each card spans three rows — head / value / body — shared with its
+   neighbours through subgrid, so the amounts line up however the labels
+   wrap. The body row is the flexible one: a taller item (the day view's
+   stacked price tiles) grows the bodies, never the space between a
+   label and its value. Column counts are explicit per strip: auto-fit
+   left a single card alone on its own row whenever the page lost a few
+   pixels (7 cards as 6 + 1, the day row as 5 + price tiles). */
 .eco-kpi-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(176px, 1fr));
   gap: 12px;
+  grid-auto-rows: auto auto 1fr;
+}
+
+.eco-kpi-grid-6 {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+.eco-kpi-grid-7 {
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+/* Day view: five breakdown cards plus a narrower price column. */
+.eco-kpi-grid-day {
+  grid-template-columns: repeat(5, minmax(0, 1fr)) minmax(0, 0.85fr);
+}
+
+@media (max-width: 1280px) {
+  .eco-kpi-grid-6,
+  .eco-kpi-grid-day {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .eco-kpi-grid-7 {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 860px) {
+  .eco-kpi-grid-6,
+  .eco-kpi-grid-7,
+  .eco-kpi-grid-day {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 520px) {
+  .eco-kpi-grid-6,
+  .eco-kpi-grid-7,
+  .eco-kpi-grid-day {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 /* Card surface follows the mock: a soft accent-tinted gradient over the
@@ -746,9 +790,10 @@
   border: 1px solid color-mix(in srgb, var(--eco-accent) 28%, var(--border));
   border-radius: 12px;
   padding: 14px 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+  display: grid;
+  grid-template-rows: subgrid;
+  grid-row: span 3;
+  row-gap: 6px;
 }
 
 /* Hero cards (day-view effect cards in the mock): brighter accent
@@ -762,14 +807,10 @@
   color: var(--eco-accent);
 }
 
-/* Day view: the financial-breakdown cards need wider columns than the
-   month/year strips. */
-.eco-kpi-grid-day {
-  grid-template-columns: repeat(auto-fit, minmax(215px, 1fr));
-}
-
-/* «Середні ціни»: two stacked price tiles in one grid cell. */
+/* «Середні ціни»: two stacked price tiles in one grid cell. The tiles
+   are not subgrid rows of the strip, so they lay out their own. */
 .eco-price-stack {
+  grid-row: span 3;
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -777,6 +818,8 @@
 
 .eco-price-stack .eco-card {
   flex: 1;
+  grid-row: auto;
+  grid-template-rows: auto auto 1fr;
 }
 
 .eco-tone-blue {
@@ -814,15 +857,10 @@
   --eco-accent-bg: var(--warn-surface);
 }
 
-/* The head reserves two label lines, so the big value below starts at
-   the same y in every card of the strip — labels wrap to one or two
-   lines depending on length, and without the reserve the amounts
-   would sit at different heights. */
 .eco-card-head {
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  min-height: 30px;
 }
 
 /* Round neon chip like the mock: accent icon on an accent-washed disc
@@ -852,12 +890,28 @@
   align-self: center;
 }
 
+/* Scales down with the viewport so seven-figure annual amounts still
+   fit a seven-column strip on a 1366px laptop. */
 .eco-card-value {
-  font-size: 21px;
+  font-size: clamp(17px, 1.4vw, 21px);
   font-weight: 700;
   color: var(--text);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+
+.eco-card-unit {
+  margin-left: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-subtle);
+}
+
+.eco-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
 }
 
 .eco-card-badges {
@@ -937,9 +991,12 @@
   box-shadow: 0 0 8px color-mix(in srgb, var(--ok-strong) 60%, transparent);
 }
 
+/* A label that wraps keeps its amount on its last line, like a table
+   of contents, instead of leaving the amount hanging at the top. */
 .eco-fact-line {
   display: flex;
   justify-content: space-between;
+  align-items: flex-end;
   gap: 8px;
 }
 
@@ -967,14 +1024,41 @@
 
 .eco-overview {
   display: grid;
-  grid-template-columns: minmax(300px, 3fr) minmax(380px, 5fr) minmax(280px, 3fr);
+  grid-template-columns: minmax(0, 3fr) minmax(0, 4fr) minmax(0, 3fr);
   gap: 12px;
   align-items: stretch;
 }
 
-@media (max-width: 1180px) {
+/* Narrower screens keep the two compact panels side by side and give
+   the chart the full width under them. */
+@media (max-width: 1280px) {
   .eco-overview {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-areas:
+      'donut uze'
+      'chart chart';
+  }
+
+  .eco-overview-donut {
+    grid-area: donut;
+  }
+
+  .eco-overview-chart {
+    grid-area: chart;
+  }
+
+  .eco-overview-uze {
+    grid-area: uze;
+  }
+}
+
+@media (max-width: 760px) {
+  .eco-overview {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      'donut'
+      'uze'
+      'chart';
   }
 }
 
@@ -999,16 +1083,19 @@
   color: var(--text);
 }
 
+/* The legend wraps under the donut once the panel can't hold both. */
 .eco-donut-wrap {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
+  justify-content: center;
   gap: 14px;
   flex: 1;
 }
 
 .eco-donut {
   position: relative;
-  width: 170px;
+  width: 160px;
   flex: none;
 }
 
@@ -1038,40 +1125,47 @@
 .eco-donut-legend {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
   min-width: 0;
-  flex: 1;
+  flex: 1 1 150px;
 }
 
 .eco-donut-legend-row {
-  display: grid;
-  grid-template-columns: 10px minmax(0, 1fr) auto auto;
-  align-items: center;
-  gap: 7px;
-  font-size: 11px;
-  color: var(--text-muted);
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
 }
 
 .eco-donut-legend-row i {
   width: 10px;
   height: 10px;
   border-radius: 3px;
+  margin-top: 3px;
+  flex: none;
+}
+
+.eco-donut-legend-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
 }
 
 .eco-donut-legend-name {
-  min-width: 0;
-  line-height: 1.25;
+  font-size: 12px;
+  line-height: 1.3;
+  color: var(--text-secondary);
 }
 
-.eco-donut-legend-row b {
-  font-weight: 700;
-  color: var(--text);
-  font-variant-numeric: tabular-nums;
-}
-
-.eco-donut-legend-mwh {
+.eco-donut-legend-value {
+  font-size: 11px;
   color: var(--text-faint);
   font-variant-numeric: tabular-nums;
+}
+
+.eco-donut-legend-value b {
+  font-weight: 700;
+  color: var(--text);
 }
 
 .eco-profile-chart {
@@ -1079,26 +1173,37 @@
   min-height: 190px;
 }
 
+/* Same row scheme as the KPI strips: label / value / caption shared
+   between the two cards of a row, so a wrapped label doesn't drop its
+   value below the neighbour's. */
 .eco-uze-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
+  grid-auto-rows: auto auto 1fr;
   gap: 10px;
   flex: 1;
 }
 
 .eco-uze-card {
   --eco-accent: var(--text-muted);
+  position: relative;
   background:
     linear-gradient(150deg, color-mix(in srgb, var(--eco-accent) 9%, var(--bg-sunken)), var(--bg-sunken) 60%);
   border: 1px solid color-mix(in srgb, var(--eco-accent) 24%, var(--border-muted));
   border-radius: 10px;
   padding: 10px 12px;
-  display: flex;
-  align-items: flex-start;
-  gap: 9px;
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr);
+  grid-template-rows: subgrid;
+  grid-row: span 3;
+  column-gap: 9px;
+  row-gap: 3px;
 }
 
 .eco-uze-icon {
+  grid-column: 1;
+  grid-row: 1 / span 3;
+  align-self: start;
   width: 26px;
   height: 26px;
   border-radius: 50%;
@@ -1115,29 +1220,66 @@
 }
 
 .eco-uze-body {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
+  display: contents;
+}
+
+.eco-uze-label,
+.eco-uze-value,
+.eco-uze-sub {
+  grid-column: 2;
   min-width: 0;
 }
 
 .eco-uze-label {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  font-size: 12px;
+  line-height: 1.3;
   color: var(--text-subtle);
 }
 
+/* Number and unit are separate flex items: in a narrow card the unit
+   moves under the number instead of splitting it. */
 .eco-uze-value {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 4px;
+}
+
+.eco-uze-value b {
   font-size: 17px;
   font-weight: 700;
   color: var(--text);
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.eco-uze-value small {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-subtle);
+  white-space: nowrap;
 }
 
 .eco-uze-sub {
   font-size: 11px;
   color: var(--text-faint);
+}
+
+/* Card tooltips span the card instead of centring on the «i»: centred,
+   a card at the page edge pushed the bubble off-screen. */
+.eco-card .economics-info,
+.eco-uze-card .economics-info {
+  position: static;
+}
+
+.eco-card .economics-info::after,
+.eco-uze-card .economics-info::after {
+  left: 8px;
+  right: 8px;
+  bottom: calc(100% + 6px);
+  width: auto;
+  max-width: none;
+  transform: none;
 }
 
 .economics-table-wrap {

@@ -1,11 +1,11 @@
-import { Cell, Line, LineChart, CartesianGrid, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import { Line, LineChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import type { DailyTotals, HourEconomicsRow } from '../compute'
 import type { Tariffs } from '../tariffs'
 import { useChartChrome } from '../../theme/useChartChrome'
-import { Card, InfoDot } from './EconomicsTopSection'
+import { Card } from './EconomicsTopSection'
 import type { EconomicsPvPlan } from './EconomicsTopSection'
-import { KpiIcon } from './kpiIcons'
 import { KPI_ICONS as ICONS } from './kpiIconPaths'
+import { CoverageDonutPanel, UzeWorkPanel, type CoverageSegment, type UzeWorkCard } from './OverviewPanels'
 
 type Props = {
   totals: DailyTotals
@@ -143,12 +143,11 @@ export function EconomicsDayTop({ totals: t, rows, tariffs, pvPlan = null }: Pro
   const planDone = Number.isFinite(planKwh) ? t.pv / planKwh : NaN
 
   // Донат покриття споживання.
-  const coverage = [
-    { key: 'pv', name: 'СЕС — навантаження', kwhValue: t.pvToLoad, color: COLOR_PV },
-    { key: 'ess', name: 'УЗЕ — навантаження', kwhValue: t.essToLoad, color: COLOR_ESS },
-    { key: 'grid', name: 'Імпорт з мережі', kwhValue: t.gridToLoad, color: COLOR_IMPORT },
+  const coverage: CoverageSegment[] = [
+    { key: 'pv', name: 'СЕС — навантаження', kwh: t.pvToLoad, color: COLOR_PV },
+    { key: 'ess', name: 'УЗЕ — навантаження', kwh: t.essToLoad, color: COLOR_ESS },
+    { key: 'grid', name: 'Імпорт з мережі', kwh: t.gridToLoad, color: COLOR_IMPORT },
   ]
-  const coverageTotal = coverage.reduce((acc, s) => acc + s.kwhValue, 0)
 
   // Погодинний економічний ефект: СЕС-нога (власне споживання +
   // експорт за цінами години), УЗЕ-нога (essNet) і сукупний effect.
@@ -171,7 +170,7 @@ export function EconomicsDayTop({ totals: t, rows, tariffs, pvPlan = null }: Pro
   // Робота УЗЕ.
   const cycles = tariffs.essCapacityKwh > 0 ? t.essDischarged / tariffs.essCapacityKwh : NaN
   const dischargeMargin = t.essDischarged > 0 ? t.essNet / t.essDischarged : NaN
-  const uzeCards = [
+  const uzeCards: UzeWorkCard[] = [
     {
       label: 'Коефіцієнт циклів',
       value: Number.isFinite(cycles) ? cyclesFmt.format(cycles) : '—',
@@ -181,24 +180,28 @@ export function EconomicsDayTop({ totals: t, rows, tariffs, pvPlan = null }: Pro
     },
     {
       label: 'Розряд УЗЕ',
-      value: kwh(t.essDischarged),
+      value: kwhFmt.format(t.essDischarged),
+      unit: 'кВт·год',
       sub: `навантаження ${kwhFmt.format(t.essToLoad)} · мережа ${kwhFmt.format(t.essToGrid)}`,
       tone: 'orange',
       icon: ICONS.zap,
     },
     {
       label: 'Заряд УЗЕ',
-      value: kwh(t.essCharged),
+      value: kwhFmt.format(t.essCharged),
+      unit: 'кВт·год',
       sub: `СЕС: ${kwhFmt.format(t.pvToEss)} | Мережа: ${kwhFmt.format(t.gridToEss)}`,
       tone: 'green',
       icon: ICONS.battery,
     },
     {
       label: 'Сер. маржа розряду',
-      value: `${price(dischargeMargin)} грн/кВт·год`,
+      value: price(dischargeMargin),
+      unit: 'грн/кВт·год',
       sub: `${uahFmt.format(Math.round(t.essNet))} грн / ${kwhFmt.format(t.essDischarged)} кВт·год`,
       tone: 'sky',
       icon: ICONS.chart,
+      tip: 'Чистий ефект УЗЕ, поділений на відданий розряд: скільки заробила кожна віддана кВт·год.',
     },
   ]
 
@@ -270,22 +273,22 @@ export function EconomicsDayTop({ totals: t, rows, tariffs, pvPlan = null }: Pro
             tone="sky"
             icon={ICONS.tag}
             label="Сер. ціна імпорту"
-            value={`${price(t.avgImportPriceUahPerKwh)} грн/кВт·год`}
-          >
-            <span>зважена за обсягом імпорту</span>
-          </Card>
+            tip="Повна ціна імпорту (РДН + передача, розподіл, надбавка, ПДВ), зважена за обсягом імпорту кожної години доби."
+            value={price(t.avgImportPriceUahPerKwh)}
+            unit="грн/кВт·год"
+          />
           <Card
             tone="blue"
             icon={ICONS.tag}
             label="Сер. ціна експорту"
-            value={`${price(t.avgExportPriceUahPerKwh)} грн/кВт·год`}
-          >
-            <span>зважена за обсягом експорту</span>
-          </Card>
+            tip="Ціна експорту (РДН мінус знижка), зважена за обсягом експорту кожної години доби."
+            value={price(t.avgExportPriceUahPerKwh)}
+            unit="грн/кВт·год"
+          />
         </div>
       </div>
 
-      <div className="eco-kpi-grid">
+      <div className="eco-kpi-grid eco-kpi-grid-6">
         <Card tone="sky" icon={ICONS.home} label="Споживання об'єкта" value={kwh(t.load)}>
           <span>
             Пік: {kw(peakLoadKw)} · Сер: {kw(avgLoadKw)}
@@ -336,47 +339,12 @@ export function EconomicsDayTop({ totals: t, rows, tariffs, pvPlan = null }: Pro
       </div>
 
       <div className="eco-overview">
-        <section className="economics-card eco-overview-panel" aria-label="Структура покриття споживання">
-          <h3 className="eco-overview-title">Структура покриття споживання</h3>
-          <div className="eco-donut-wrap">
-            <div className="eco-donut">
-              <ResponsiveContainer width="100%" height={170}>
-                <PieChart>
-                  <Pie
-                    data={coverage}
-                    dataKey="kwhValue"
-                    nameKey="name"
-                    innerRadius={52}
-                    outerRadius={78}
-                    strokeWidth={0}
-                    paddingAngle={2}
-                  >
-                    {coverage.map((s) => (
-                      <Cell key={s.key} fill={s.color} />
-                    ))}
-                  </Pie>
-                </PieChart>
-              </ResponsiveContainer>
-              <div className="eco-donut-center">
-                <b>{kwhFmt.format(coverageTotal)}</b>
-                <span>кВт·год</span>
-                <span>усього</span>
-              </div>
-            </div>
-            <div className="eco-donut-legend">
-              {coverage.map((s) => (
-                <div className="eco-donut-legend-row" key={s.key}>
-                  <i style={{ background: s.color }} />
-                  <span className="eco-donut-legend-name">{s.name}</span>
-                  <b>{coverageTotal > 0 ? pct(s.kwhValue / coverageTotal) : '—'}</b>
-                  <span className="eco-donut-legend-mwh">{kwhFmt.format(s.kwhValue)}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </section>
+        <CoverageDonutPanel segments={coverage} unit="кВт·год" formatValue={(v) => kwhFmt.format(v)} />
 
-        <section className="economics-card eco-overview-panel" aria-label="Погодинний економічний ефект">
+        <section
+          className="economics-card eco-overview-panel eco-overview-chart"
+          aria-label="Погодинний економічний ефект"
+        >
           <div className="eco-overview-head">
             <h3 className="eco-overview-title">Погодинний економічний ефект</h3>
             <span className="economics-month-muted">грн/год</span>
@@ -401,28 +369,7 @@ export function EconomicsDayTop({ totals: t, rows, tariffs, pvPlan = null }: Pro
           </div>
         </section>
 
-        <section className="economics-card eco-overview-panel" aria-label="Робота УЗЕ">
-          <h3 className="eco-overview-title">Робота УЗЕ</h3>
-          <div className="eco-uze-grid">
-            {uzeCards.map((c) => (
-              <div className={`eco-uze-card eco-tone-${c.tone}`} key={c.label}>
-                <span className="eco-uze-icon">
-                  <KpiIcon d={c.icon} />
-                </span>
-                <div className="eco-uze-body">
-                  <span className="eco-uze-label">
-                    {c.label}
-                    {c.label === 'Сер. маржа розряду' ? (
-                      <InfoDot tip="Чистий ефект УЗЕ, поділений на відданий розряд: скільки заробила кожна віддана кВт·год." />
-                    ) : null}
-                  </span>
-                  <span className="eco-uze-value">{c.value}</span>
-                  <span className="eco-uze-sub">{c.sub}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
+        <UzeWorkPanel cards={uzeCards} />
       </div>
     </div>
   )

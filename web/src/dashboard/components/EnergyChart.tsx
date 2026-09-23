@@ -19,7 +19,6 @@ import type { DashboardMetric } from '../../types'
 import {
   AI_PLAN_COLOR,
   AI_PLAN_LOAD_COLOR,
-  AI_PLAN_SOC_COLOR,
   dayPowerColor,
   energyColor,
   PV_FORECAST_COLOR,
@@ -73,7 +72,6 @@ const DAM_PRICE_KEY = 'dam_price_uah_per_mwh'
 const DAM_PRICE_COLOR = '#0ea5e9'
 const DAM_PRICE_LABEL = 'Ціна РДН'
 const SOC_KEY = 'soc_percent'
-const SOC_COLOR = '#a855f7'
 const SOC_LABEL = 'SOC'
 // PV_FORECAST_KEY is the dataKey used to attach hourly forecast values onto
 // the day-chart rows. We anchor one non-null sample per hour at the HH:30
@@ -284,13 +282,13 @@ export function EnergyChart({
     }
     items.push({ id: DAM_PRICE_KEY, label: DAM_PRICE_LABEL, color: DAM_PRICE_COLOR })
     if (hasSoc) {
-      items.push({ id: SOC_KEY, label: SOC_LABEL, color: SOC_COLOR })
+      items.push({ id: SOC_KEY, label: SOC_LABEL, color: chrome.soc })
     }
     if (hasAiPlan) {
-      items.push({ id: AI_SOC_KEY, label: aiSocLabel, color: AI_PLAN_SOC_COLOR })
+      items.push({ id: AI_SOC_KEY, label: aiSocLabel, color: chrome.socPlan })
     }
     return items
-  }, [hasSoc, hasPvForecast, hasAiPlan, hasAiLoad, aiEssLabel, aiSocLabel])
+  }, [hasSoc, hasPvForecast, hasAiPlan, hasAiLoad, aiEssLabel, aiSocLabel, chrome.soc, chrome.socPlan])
 
   const renderDayLegend = useCallback(
     () => (
@@ -351,9 +349,9 @@ export function EnergyChart({
                   orientation="right"
                   domain={[0, 100]}
                   tickFormatter={(v) => `${v}%`}
-                  tick={{ fill: SOC_COLOR, fontSize: 11 }}
-                  axisLine={{ stroke: SOC_COLOR, opacity: 0.4 }}
-                  tickLine={{ stroke: SOC_COLOR, opacity: 0.4 }}
+                  tick={{ fill: chrome.soc, fontSize: 11 }}
+                  axisLine={{ stroke: chrome.soc, opacity: 0.4 }}
+                  tickLine={{ stroke: chrome.soc, opacity: 0.4 }}
                   width={48}
                 />
                 <YAxis
@@ -378,9 +376,10 @@ export function EnergyChart({
                     type="monotone"
                     dataKey={SOC_KEY}
                     name={SOC_LABEL}
-                    stroke="none"
-                    fill={SOC_COLOR}
-                    fillOpacity={0.12}
+                    stroke={chrome.socStrokeWidth > 0 ? chrome.soc : 'none'}
+                    strokeWidth={chrome.socStrokeWidth}
+                    fill={chrome.soc}
+                    fillOpacity={chrome.socFillOpacity}
                     isAnimationActive={false}
                     connectNulls
                   />
@@ -483,7 +482,7 @@ export function EnergyChart({
                     type="monotone"
                     dataKey={AI_SOC_KEY}
                     name={aiSocLabel}
-                    stroke={AI_PLAN_SOC_COLOR}
+                    stroke={chrome.socPlan}
                     strokeWidth={2}
                     strokeDasharray="4 4"
                     dot={false}
