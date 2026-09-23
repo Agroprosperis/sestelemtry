@@ -41,8 +41,10 @@ func syntheticKeysRequested(keys []string) bool {
 //
 //   - If the caller didn't request any synthetic key, resp.Flows
 //     stays nil.
-//   - Windows up to maxEnergyFlowWindow run the allocator live over
-//     raw Modbus counters.
+//   - Whole past civil days that the economics daemon has finalised
+//     are read from its per-day totals.
+//   - Other windows up to maxEnergyFlowWindow run the allocator live
+//     over raw Modbus counters.
 //   - Wider windows are summed from the per-day totals the economics
 //     daemon persisted; resp.Flows stays nil when it has no day in
 //     range at all.
@@ -72,6 +74,9 @@ func (h *Handlers) maybeAttachEnergyFlow(
 	}
 	if to.Sub(from) > maxEnergyFlowWindow {
 		h.attachEnergyFlowFromDailyCache(ctx, resp, orgID, from, to, loc)
+		return
+	}
+	if h.attachFinalDaysFromCache(ctx, resp, orgID, from, to, loc) {
 		return
 	}
 	flowStart := time.Now()
@@ -157,6 +162,59 @@ func (h *Handlers) attachEnergyFlowFromDailyCache(
 		"days_covered", covered,
 		"days_expected", expected,
 	)
+}
+
+// attachFinalDaysFromCache serves a window of whole past civil days from
+// the per-day totals when every one of those days is final and was cut
+// at the same midnights: the numbers a live allocator run would
+// reproduce (see attachEnergyFlowFromDailyCache) for an indexed read
+// instead of a pass over a day of 1 Hz samples. It reports false and
+// leaves resp alone whenever the live run is still needed — a window cut
+// mid-day or reaching into today, or a day not finalised yet (the daemon
+// finalises yesterday on its nightly pass).
+func (h *Handlers) attachFinalDaysFromCache(
+	ctx context.Context,
+	resp *EnergySummaryResponse,
+	orgID string,
+	from, to time.Time,
+	loc *time.Location,
+) bool {
+	if loc == nil {
+		loc = time.UTC
+	}
+	if !from.Equal(startOfCivilDay(from, loc)) || !to.Equal(startOfCivilDay(to, loc)) {
+		return false
+	}
+	if to.After(startOfCivilDay(time.Now(), loc)) {
+		return false
+	}
+	_, _, expected := civilDaySpan(from, to, loc)
+	if expected <= 0 {
+		return false
+	}
+	totals, covered, err := h.store.EnergyFlowFinalDays(ctx, orgID, from, to)
+	if err != nil {
+		h.log.Warn("api_energy_summary_flow_final_days_cache",
+			"organization_id", orgID, "err", err,
+			"from", from, "to", to,
+		)
+		return false
+	}
+	if covered != expected {
+		return false
+	}
+	resp.Flows = &totals
+	resp.FlowsMeta = &EnergyFlowMeta{
+		Source:       EnergyFlowSourceDailyCache,
+		DaysCovered:  covered,
+		DaysExpected: expected,
+	}
+	h.log.Info("api_energy_summary_flow_daily_cache_ok",
+		"organization_id", orgID,
+		"days_covered", covered,
+		"days_expected", expected,
+	)
+	return true
 }
 
 // civilDaySpan maps the half-open instant window [from, to) onto the

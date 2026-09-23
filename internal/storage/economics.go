@@ -660,6 +660,52 @@ func SumEconomicsDailyFlows(
 	return out, nil
 }
 
+// SumFinalEconomicsDailyFlows sums the four directional flow totals of
+// the final economics_daily rows whose civil day — bounded by midnights
+// in the tz the row was computed in — lies wholly inside the instant
+// window [from, to), and counts those rows. Checking the instants rather
+// than the date keeps a caller in another zone (or a zone alias) from
+// being handed days cut at different midnights than its own.
+func SumFinalEconomicsDailyFlows(
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	organizationID string,
+	from, to time.Time,
+) (EnergyFlowDailySums, error) {
+	var out EnergyFlowDailySums
+	if pool == nil {
+		return out, fmt.Errorf("storage: nil pool")
+	}
+	if organizationID == "" {
+		return out, fmt.Errorf("storage: empty organization_id")
+	}
+	err := pool.QueryRow(ctx, `
+		SELECT
+			COALESCE(SUM(pv_to_ess_kwh), 0),
+			COALESCE(SUM(grid_to_ess_kwh), 0),
+			COALESCE(SUM(ess_to_load_kwh), 0),
+			COALESCE(SUM(ess_to_grid_kwh), 0),
+			COUNT(*)
+		FROM economics_daily
+		WHERE organization_id = $1
+			AND day BETWEEN ($2::timestamptz AT TIME ZONE 'UTC')::date - 1
+				AND ($3::timestamptz AT TIME ZONE 'UTC')::date + 1
+			AND is_final
+			AND (day::timestamp AT TIME ZONE tz) >= $2
+			AND ((day + 1)::timestamp AT TIME ZONE tz) <= $3
+	`, organizationID, from.UTC(), to.UTC()).Scan(
+		&out.PVToESSKwh,
+		&out.GridToESSKwh,
+		&out.ESSToLoadKwh,
+		&out.ESSToGridKwh,
+		&out.Days,
+	)
+	if err != nil {
+		return EnergyFlowDailySums{}, fmt.Errorf("storage: sum final economics daily flows: %w", err)
+	}
+	return out, nil
+}
+
 // GetEconomicsDailyRange returns every persisted per-day summary for the
 // inclusive civil-date span [from, to], ordered by day ascending. An
 // empty slice (no error) means the org has no stored days in the range.

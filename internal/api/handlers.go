@@ -145,6 +145,10 @@ type storeReader interface {
 	// [fromDay, toDay], and reports how many stored days contributed.
 	// Serves windows too wide for a live allocator run.
 	EnergyFlowDailyTotals(ctx context.Context, organizationID string, fromDay, toDay time.Time) (EnergyFlowTotals, int, error)
+	// EnergyFlowFinalDays sums the persisted flows of the final days whose
+	// civil day lies wholly inside [from, to), and reports how many there
+	// are. Serves past days without a live allocator run.
+	EnergyFlowFinalDays(ctx context.Context, organizationID string, from, to time.Time) (EnergyFlowTotals, int, error)
 	// PvPlanDays returns the cached per-day PV plan rows for the
 	// inclusive civil-date span [fromDay, toDay], and SavePvPlanDays
 	// writes back the days just fetched from the forecast flow. Together

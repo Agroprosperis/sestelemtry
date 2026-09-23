@@ -45,6 +45,14 @@ const maxCounterDeltaPowerKw = 10000
 // "last" aggregation), so this is safe for the accumulators that do.
 const counterResetZeroTolKwh = 1.0
 
+// rawScanWorkMem is the work_mem the day chart's raw-telemetry scans run
+// with. One site-day of 1 Hz samples spreads over ~130k heap pages of an
+// uncompressed chunk. Under the server default (10MB) the planner walks
+// them in index order — a page visit per row, random I/O — and spills the
+// bucket aggregate to disk; once the page bitmap fits (32MB+) it reads
+// each page once, in physical order.
+const rawScanWorkMem = "64MB"
+
 type Store struct {
 	pool        *pgxpool.Pool
 	useDailyCAG bool
@@ -52,6 +60,29 @@ type Store struct {
 
 func NewStore(pool *pgxpool.Pool) *Store {
 	return &Store{pool: pool}
+}
+
+// queryRawScan runs one raw-telemetry scan in a read-only transaction
+// whose work_mem is rawScanWorkMem; scan consumes the rows before the
+// transaction ends, so the setting never leaks back into the pool.
+func (s *Store) queryRawScan(ctx context.Context, scan func(pgx.Rows) error, sql string, args ...any) error {
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, "SET LOCAL work_mem = '"+rawScanWorkMem+"'"); err != nil {
+		return err
+	}
+	rows, err := tx.Query(ctx, sql, args...)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	if err := scan(rows); err != nil {
+		return err
+	}
+	return rows.Err()
 }
 
 // EnableDailyCAGG marks the daily continuous aggregate as available so
@@ -268,7 +299,24 @@ func (s *Store) timeseriesDelta(ctx context.Context, organizationID string, metr
 	// first sample of the bucket to the last sample. The bucket then
 	// renders the energy actually recorded that day instead of an
 	// invisible zero bar.
-	rows, err := s.pool.Query(ctx, `
+	out := TimeseriesResponse{
+		OrganizationID: organizationID,
+		MetricKeys:     metricKeys,
+		Bucket:         bucket,
+		From:           from.UTC(),
+		To:             to.UTC(),
+		Points:         make([]TimeseriesPoint, 0),
+	}
+	err := s.queryRawScan(ctx, func(rows pgx.Rows) error {
+		for rows.Next() {
+			var p TimeseriesPoint
+			if err := rows.Scan(&p.Time, &p.MetricKey, &p.Value); err != nil {
+				return err
+			}
+			out.Points = append(out.Points, p)
+		}
+		return nil
+	}, `
 		WITH bucketed AS (
 			SELECT
 				time_bucket($1::interval, time, $6::text) AS bucket_time,
@@ -328,26 +376,6 @@ func (s *Store) timeseriesDelta(ctx context.Context, organizationID string, metr
 		ORDER BY bucket_time ASC, metric_key ASC
 	`, bucket, organizationID, metricKeys, from.UTC(), to.UTC(), tz, float64(maxCounterDeltaPowerKw), float64(counterResetZeroTolKwh))
 	if err != nil {
-		return TimeseriesResponse{}, err
-	}
-	defer rows.Close()
-
-	out := TimeseriesResponse{
-		OrganizationID: organizationID,
-		MetricKeys:     metricKeys,
-		Bucket:         bucket,
-		From:           from.UTC(),
-		To:             to.UTC(),
-		Points:         make([]TimeseriesPoint, 0),
-	}
-	for rows.Next() {
-		var p TimeseriesPoint
-		if err := rows.Scan(&p.Time, &p.MetricKey, &p.Value); err != nil {
-			return TimeseriesResponse{}, err
-		}
-		out.Points = append(out.Points, p)
-	}
-	if err := rows.Err(); err != nil {
 		return TimeseriesResponse{}, err
 	}
 	return out, nil
@@ -550,12 +578,6 @@ func (s *Store) timeseriesInstant(ctx context.Context, organizationID string, me
 		GROUP BY bucket_time, metric_key
 		ORDER BY bucket_time ASC, metric_key ASC
 	`, valueExpr)
-	rows, err := s.pool.Query(ctx, sql, bucket, organizationID, metricKeys, from.UTC(), to.UTC(), tz)
-	if err != nil {
-		return TimeseriesResponse{}, err
-	}
-	defer rows.Close()
-
 	out := TimeseriesResponse{
 		OrganizationID: organizationID,
 		MetricKeys:     metricKeys,
@@ -564,14 +586,17 @@ func (s *Store) timeseriesInstant(ctx context.Context, organizationID string, me
 		To:             to.UTC(),
 		Points:         make([]TimeseriesPoint, 0),
 	}
-	for rows.Next() {
-		var p TimeseriesPoint
-		if err := rows.Scan(&p.Time, &p.MetricKey, &p.Value); err != nil {
-			return TimeseriesResponse{}, err
+	err := s.queryRawScan(ctx, func(rows pgx.Rows) error {
+		for rows.Next() {
+			var p TimeseriesPoint
+			if err := rows.Scan(&p.Time, &p.MetricKey, &p.Value); err != nil {
+				return err
+			}
+			out.Points = append(out.Points, p)
 		}
-		out.Points = append(out.Points, p)
-	}
-	if err := rows.Err(); err != nil {
+		return nil
+	}, sql, bucket, organizationID, metricKeys, from.UTC(), to.UTC(), tz)
+	if err != nil {
 		return TimeseriesResponse{}, err
 	}
 	return out, nil
@@ -1203,6 +1228,25 @@ func (s *Store) EnergyFlowDailyTotals(
 	fromDay, toDay time.Time,
 ) (EnergyFlowTotals, int, error) {
 	sums, err := storage.SumEconomicsDailyFlows(ctx, s.pool, organizationID, fromDay, toDay)
+	if err != nil {
+		return EnergyFlowTotals{}, 0, err
+	}
+	return EnergyFlowTotals{
+		PVToESSKwh:   sums.PVToESSKwh,
+		GridToESSKwh: sums.GridToESSKwh,
+		ESSToLoadKwh: sums.ESSToLoadKwh,
+		ESSToGridKwh: sums.ESSToGridKwh,
+	}, sums.Days, nil
+}
+
+// EnergyFlowFinalDays sums the persisted flows of the final days lying
+// wholly inside [from, to) and reports how many there are.
+func (s *Store) EnergyFlowFinalDays(
+	ctx context.Context,
+	organizationID string,
+	from, to time.Time,
+) (EnergyFlowTotals, int, error) {
+	sums, err := storage.SumFinalEconomicsDailyFlows(ctx, s.pool, organizationID, from, to)
 	if err != nil {
 		return EnergyFlowTotals{}, 0, err
 	}

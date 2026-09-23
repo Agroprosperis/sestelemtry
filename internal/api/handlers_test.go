@@ -70,6 +70,12 @@ type mockStore struct {
 	flowDailyFromDay time.Time
 	flowDailyToDay   time.Time
 
+	flowFinalTotals EnergyFlowTotals
+	flowFinalDays   int
+	flowFinalOrg    string
+	flowFinalFrom   time.Time
+	flowFinalTo     time.Time
+
 	pvPlanDays     []PvPlanDayTotal
 	pvPlanErr      error
 	pvPlanOrg      string
@@ -205,6 +211,13 @@ func (m *mockStore) EnergyFlowSources(_ context.Context, orgID string, from, to 
 		return nil, m.flowSourcesErr
 	}
 	return m.flowSources, nil
+}
+
+func (m *mockStore) EnergyFlowFinalDays(_ context.Context, orgID string, from, to time.Time) (EnergyFlowTotals, int, error) {
+	m.flowFinalOrg = orgID
+	m.flowFinalFrom = from
+	m.flowFinalTo = to
+	return m.flowFinalTotals, m.flowFinalDays, nil
 }
 
 func (m *mockStore) EnergyFlowDailyTotals(_ context.Context, orgID string, fromDay, toDay time.Time) (EnergyFlowTotals, int, error) {
@@ -1469,6 +1482,92 @@ func TestEnergySummaryFlowWideWindowWithoutCachedDays(t *testing.T) {
 	if resp.Flows != nil {
 		t.Errorf("resp.Flows = %+v, want nil when no day is cached", resp.Flows)
 	}
+}
+
+// getFlowSummary asks /energy-summary for the flow keys over [from, to)
+// in Kyiv time and decodes the answer.
+func getFlowSummary(t *testing.T, h *Handlers, from, to time.Time) EnergySummaryResponse {
+	t.Helper()
+	reqURL := fmt.Sprintf("/api/v1/energy-summary?organization_id=org-a&metric_keys=pv_to_ess_kwh,ess_to_load_kwh&tz=Europe/Kyiv&from=%s&to=%s",
+		neturl.QueryEscape(from.Format(time.RFC3339)), neturl.QueryEscape(to.Format(time.RFC3339)))
+	rec := httptest.NewRecorder()
+	h.Router().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, reqURL, nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200 got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var resp EnergySummaryResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	return resp
+}
+
+// TestEnergySummaryFlowPastDaySource pins which pipeline answers a
+// day-sized window: a whole past day the daemon has finalised comes from
+// its per-day totals without touching raw rows, while a day the cache
+// can't vouch for (not final yet, or cut at other midnights), a window
+// cut mid-day, or today still runs the allocator live.
+func TestEnergySummaryFlowPastDaySource(t *testing.T) {
+	kyiv, err := time.LoadLocation("Europe/Kyiv")
+	if err != nil {
+		t.Skipf("tzdata unavailable: %v", err)
+	}
+	pastFrom := time.Date(2026, 4, 15, 0, 0, 0, 0, kyiv)
+	pastTo := pastFrom.AddDate(0, 0, 1)
+	cached := EnergyFlowTotals{PVToESSKwh: 410, ESSToLoadKwh: 380}
+
+	t.Run("finalised past day reads the cache", func(t *testing.T) {
+		store := &mockStore{flowFinalTotals: cached, flowFinalDays: 1}
+		h := NewHandlers(store, "*")
+		resp := getFlowSummary(t, h, pastFrom, pastTo)
+		if store.flowSourcesOrg != "" {
+			t.Errorf("EnergyFlowSources called for a finalised past day")
+		}
+		if !store.flowFinalFrom.Equal(pastFrom) || !store.flowFinalTo.Equal(pastTo) {
+			t.Errorf("cache window = %s..%s, want %s..%s", store.flowFinalFrom, store.flowFinalTo, pastFrom, pastTo)
+		}
+		if resp.Flows == nil || *resp.Flows != cached {
+			t.Fatalf("resp.Flows = %+v, want the cached day %+v", resp.Flows, cached)
+		}
+		if resp.FlowsMeta == nil || resp.FlowsMeta.Source != EnergyFlowSourceDailyCache ||
+			resp.FlowsMeta.DaysCovered != 1 || resp.FlowsMeta.DaysExpected != 1 {
+			t.Errorf("flows_meta = %+v, want daily_cache 1/1", resp.FlowsMeta)
+		}
+	})
+
+	t.Run("day the cache can't vouch for runs the allocator", func(t *testing.T) {
+		store := &mockStore{flowFinalTotals: cached, flowFinalDays: 0}
+		h := NewHandlers(store, "*")
+		resp := getFlowSummary(t, h, pastFrom, pastTo)
+		if store.flowSourcesOrg != "org-a" {
+			t.Errorf("allocator not run when the cache has no final day")
+		}
+		if resp.FlowsMeta == nil || resp.FlowsMeta.Source != EnergyFlowSourceAllocator {
+			t.Errorf("flows_meta = %+v, want the allocator", resp.FlowsMeta)
+		}
+	})
+
+	t.Run("window cut mid-day runs the allocator", func(t *testing.T) {
+		store := &mockStore{flowFinalTotals: cached, flowFinalDays: 1}
+		h := NewHandlers(store, "*")
+		getFlowSummary(t, h, pastFrom.Add(6*time.Hour), pastTo)
+		if store.flowFinalOrg != "" || store.flowSourcesOrg != "org-a" {
+			t.Errorf("partial day served from the cache (cache org %q, allocator org %q)", store.flowFinalOrg, store.flowSourcesOrg)
+		}
+	})
+
+	t.Run("today runs the allocator", func(t *testing.T) {
+		store := &mockStore{flowFinalTotals: cached, flowFinalDays: 1}
+		h := NewHandlers(store, "*")
+		now := time.Now().In(kyiv)
+		resp := getFlowSummary(t, h, startOfCivilDay(now, kyiv), now)
+		if store.flowFinalOrg != "" {
+			t.Errorf("cache consulted for a window reaching into today")
+		}
+		if store.flowSourcesOrg != "org-a" || resp.FlowsMeta == nil || resp.FlowsMeta.Source != EnergyFlowSourceAllocator {
+			t.Errorf("today not served by the allocator: meta %+v", resp.FlowsMeta)
+		}
+	})
 }
 
 // TestCivilDaySpan nails the two boundaries that silently corrupt a
