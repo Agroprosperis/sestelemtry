@@ -233,23 +233,27 @@ func (h *Handlers) authPassword(w http.ResponseWriter, r *http.Request) {
 
 // userJSON is one account on the user-management page.
 type userJSON struct {
-	ID           int64       `json:"id"`
-	Email        string      `json:"email"`
-	Name         string      `json:"name"`
-	Disabled     bool        `json:"disabled"`
-	AuthProvider string      `json:"auth_provider"`
-	Grants       []grantJSON `json:"grants"`
-	CreatedAt    time.Time   `json:"created_at"`
+	ID           int64  `json:"id"`
+	Email        string `json:"email"`
+	Name         string `json:"name"`
+	Disabled     bool   `json:"disabled"`
+	AuthProvider string `json:"auth_provider"`
+	// MustChangePassword: the account still has the password it was
+	// handed and sets its own at the next sign-in.
+	MustChangePassword bool        `json:"must_change_password"`
+	Grants             []grantJSON `json:"grants"`
+	CreatedAt          time.Time   `json:"created_at"`
 }
 
 func toUserJSON(u storage.UserRow, grants []auth.Grant) userJSON {
 	return userJSON{
-		ID:           u.ID,
-		Email:        u.Email,
-		Name:         u.Name,
-		Disabled:     u.Disabled,
-		AuthProvider: u.AuthProvider,
-		Grants:       grantsJSON(grants),
-		CreatedAt:    u.CreatedAt.UTC(),
+		ID:                 u.ID,
+		Email:              u.Email,
+		Name:               u.Name,
+		Disabled:           u.Disabled,
+		AuthProvider:       u.AuthProvider,
+		MustChangePassword: u.MustChangePassword,
+		Grants:             grantsJSON(grants),
+		CreatedAt:          u.CreatedAt.UTC(),
 	}
 }

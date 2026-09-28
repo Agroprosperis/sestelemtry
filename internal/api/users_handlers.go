@@ -102,7 +102,10 @@ func (h *Handlers) createUser(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	id, err := h.auth.store.CreateUser(r.Context(), storage.UserRow{Email: email, Name: name, PasswordHash: hash}, grants)
+	// The administrator hands this password out, so it only lets the
+	// user in to set their own.
+	user := storage.UserRow{Email: email, Name: name, PasswordHash: hash, MustChangePassword: true}
+	id, err := h.auth.store.CreateUser(r.Context(), user, grants)
 	if errors.Is(err, storage.ErrEmailTaken) {
 		http.Error(w, "користувач з таким email уже існує", http.StatusConflict)
 		return
@@ -112,7 +115,7 @@ func (h *Handlers) createUser(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
-	user, _, err := h.auth.store.UserByID(r.Context(), id)
+	user, _, err = h.auth.store.UserByID(r.Context(), id)
 	if err != nil {
 		h.log.Error("api_users_create", "err", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
@@ -167,6 +170,10 @@ func (h *Handlers) updateUser(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		upd.PasswordHash = &hash
+		// A password set for someone else is handed out, so it is
+		// temporary; setting your own here is not.
+		pending := id != principalFrom(ctx).UserID
+		upd.MustChangePassword = &pending
 	}
 	// The edit form always sends the grants; only a real change counts,
 	// so fixing a name doesn't sign the user out.

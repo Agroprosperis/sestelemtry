@@ -149,6 +149,7 @@ paths:
     post:
       summary: Create an account
       operationId: createUser
+      description: The password is temporary; the user sets their own at the first sign-in.
       security:
         - sessionCookie: []
       parameters:
@@ -188,8 +189,10 @@ paths:
       operationId: updateUser
       description: |
         Only the fields present change. A new password, new grants or
-        disabling sign the account out everywhere. The last enabled
-        administrator of every organization can't be disabled or demoted.
+        disabling sign the account out everywhere. A password set for
+        another account is temporary, like one given at creation. The last
+        enabled administrator of every organization can't be disabled or
+        demoted.
       security:
         - sessionCookie: []
       parameters:
@@ -1174,6 +1177,9 @@ components:
         auth_provider:
           type: string
           example: local
+        must_change_password:
+          type: boolean
+          description: Still on a temporary password; set at the next sign-in.
         grants:
           type: array
           items:

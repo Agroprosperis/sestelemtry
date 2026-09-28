@@ -45,7 +45,9 @@ organizations added to `config.yaml` later). Telemetry reads longer than
   right after the first start: until that account sets its own password
   (≥ 10 characters), nothing else opens. Setting `AUTH_BOOTSTRAP_EMAIL` and
   `AUTH_BOOTSTRAP_PASSWORD` together creates that administrator instead.
-  Further accounts are managed on `?view=users`.
+  Further accounts are managed on `?view=users`, which generates a password
+  for each; a password an administrator sets for someone is temporary, and
+  that user sets their own at the first sign-in.
 - The API needs `-config`: its organizations scope every grant.
 - When the browser calls the API on another origin (`VITE_API_BASE_URL`),
   `-allow-origin` must name the web origin exactly; the cookie never crosses

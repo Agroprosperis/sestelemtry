@@ -5,8 +5,9 @@ import './auth.css'
 const MIN_PASSWORD_LEN = 10
 
 // PasswordDialog changes the signed-in user's password. forced is the
-// full-page variant for the factory admin/admin: no way around it but
-// signing out, and onClose runs right after a successful change.
+// full-page variant for a temporary password (admin/admin, or one an
+// administrator handed out): no way around it but signing out, and
+// onClose runs right after a successful change.
 export function PasswordDialog({
   onClose,
   forced = false,
@@ -70,10 +71,7 @@ export function PasswordDialog({
       {forced ? <img src="/logo_agroprosperis.png" alt="Агропросперіс" className="auth-logo" /> : null}
       <h1>{forced ? 'Задайте свій пароль' : 'Зміна пароля'}</h1>
       {forced ? (
-        <p>
-          Ви увійшли стандартним обліковим записом admin/admin. Поки не задасте власний
-          пароль, дашборд не відкриється.
-        </p>
+        <p>Ви увійшли з тимчасовим паролем. Поки не задасте власний, дашборд не відкриється.</p>
       ) : null}
       {done ? (
         <>

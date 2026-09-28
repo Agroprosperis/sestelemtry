@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useId, useMemo, useState, type FormEvent } from 'react'
 import '../alerts/alerts.css'
 import { useAuth } from '../auth/authContext'
 import { ROLES, type Role } from '../auth/permissions'
@@ -12,12 +12,17 @@ import {
   type RoleScope,
   type RoleScopes,
 } from './grantScopes'
+import { copyText, generatePassword } from './password'
 import { createUser, fetchUsers, updateUser, type UserAccount } from './usersClient'
 import './users.css'
 
 const MIN_PASSWORD_LEN = 10
 
 type OrgOption = { id: string; name: string }
+
+// Issued is a temporary password just handed out, shown once so the
+// administrator can pass it on.
+type Issued = { email: string; password: string; created: boolean }
 
 export function UsersPage() {
   const { organizationID, options, change } = useOrganizationParam('service')
@@ -34,6 +39,7 @@ export function UsersPage() {
   const [users, setUsers] = useState<UserAccount[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [editing, setEditing] = useState<UserAccount | 'new' | null>(null)
+  const [issued, setIssued] = useState<Issued | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
 
   useEffect(() => {
@@ -74,6 +80,8 @@ export function UsersPage() {
         </div>
       ) : null}
 
+      {issued ? <IssuedCredentials issued={issued} onClose={() => setIssued(null)} /> : null}
+
       {editing ? (
         <UserForm
           key={editing === 'new' ? 'new' : editing.id}
@@ -81,14 +89,22 @@ export function UsersPage() {
           self={editing !== 'new' && auth?.me.user.id === editing.id}
           organizations={organizations}
           onCancel={() => setEditing(null)}
-          onSaved={() => {
+          onSaved={(handedOut) => {
             setEditing(null)
+            setIssued(handedOut ?? null)
             setReloadKey((k) => k + 1)
           }}
         />
       ) : (
         <div className="users-toolbar">
-          <button type="button" className="alerts-save" onClick={() => setEditing('new')}>
+          <button
+            type="button"
+            className="alerts-save"
+            onClick={() => {
+              setIssued(null)
+              setEditing('new')
+            }}
+          >
             Новий користувач
           </button>
         </div>
@@ -132,7 +148,13 @@ export function UsersPage() {
                       )}
                     </td>
                     <td>
-                      {u.disabled ? <span className="users-status-off">вимкнено</span> : 'активний'}
+                      {u.disabled ? (
+                        <span className="users-status-off">вимкнено</span>
+                      ) : u.must_change_password ? (
+                        <span className="users-status-pending">ще не задав свій пароль</span>
+                      ) : (
+                        'активний'
+                      )}
                     </td>
                     <td>
                       <button type="button" className="alerts-secondary" onClick={() => setEditing(u)}>
@@ -150,6 +172,49 @@ export function UsersPage() {
   )
 }
 
+function IssuedCredentials({ issued, onClose }: { issued: Issued; onClose: () => void }) {
+  const [copied, setCopied] = useState<boolean | null>(null)
+  const address = window.location.origin
+  const text = `Адреса: ${address}\nЛогін: ${issued.email}\nТимчасовий пароль: ${issued.password}`
+  return (
+    <section className="alerts-card" role="status">
+      <span className="alerts-card-accent" />
+      <div className="alerts-card-head">
+        <h2 className="alerts-section-title">{issued.created ? 'Користувача створено' : 'Пароль змінено'}</h2>
+      </div>
+      <p className="alerts-section-sub">
+        Передайте ці дані користувачу. При першому вході дашборд попросить задати власний
+        пароль; цей більше ніде не показується.
+      </p>
+      <dl className="users-credentials">
+        <dt>Адреса</dt>
+        <dd>
+          <code>{address}</code>
+        </dd>
+        <dt>Логін</dt>
+        <dd>
+          <code>{issued.email}</code>
+        </dd>
+        <dt>Пароль</dt>
+        <dd>
+          <code>{issued.password}</code>
+        </dd>
+      </dl>
+      <div className="alerts-actions">
+        {copied === false ? (
+          <span className="alerts-dirty-note">Не вдалося скопіювати — виділіть дані й скопіюйте вручну.</span>
+        ) : null}
+        <button type="button" className="alerts-secondary" onClick={() => void copyText(text).then(setCopied)}>
+          {copied ? 'Скопійовано' : 'Копіювати'}
+        </button>
+        <button type="button" className="alerts-save" onClick={onClose}>
+          Готово
+        </button>
+      </div>
+    </section>
+  )
+}
+
 function UserForm({
   user,
   self,
@@ -161,11 +226,15 @@ function UserForm({
   self: boolean
   organizations: OrgOption[]
   onCancel: () => void
-  onSaved: () => void
+  // handedOut is set when the save gave someone a temporary password.
+  onSaved: (handedOut?: Issued) => void
 }) {
+  const passwordLabel = useId()
   const [email, setEmail] = useState(user?.email ?? '')
   const [name, setName] = useState(user?.name ?? '')
-  const [password, setPassword] = useState('')
+  // A new account starts with a generated password the administrator
+  // can keep, regenerate or replace.
+  const [password, setPassword] = useState(() => (user === null ? generatePassword() : ''))
   const [disabled, setDisabled] = useState(user?.disabled ?? false)
   const [scopes, setScopes] = useState<RoleScopes>(() => scopesFromGrants(user?.grants ?? []))
   const [busy, setBusy] = useState(false)
@@ -196,11 +265,14 @@ function UserForm({
     try {
       const grants = grantsFromScopes(scopes)
       if (user === null) {
-        await createUser({ email, name, password, grants })
+        const saved = await createUser({ email, name, password, grants })
+        onSaved({ email: saved.email, password, created: true })
       } else {
         await updateUser(user.id, { name, disabled, grants, ...(password ? { password } : {}) })
+        // Your own new password is not handed out, and the change signs
+        // you out anyway.
+        onSaved(password && !self ? { email: user.email, password, created: false } : undefined)
       }
-      onSaved()
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Не вдалося зберегти користувача')
       setBusy(false)
@@ -241,18 +313,30 @@ function UserForm({
           <span>Імʼя</span>
           <input className="alerts-input" value={name} onChange={(e) => setName(e.target.value)} />
         </label>
-        <label className="alerts-field">
-          <span>{user ? 'Новий пароль' : 'Пароль'}</span>
-          <input
-            className="alerts-input"
-            type="password"
-            autoComplete="new-password"
-            required={user === null}
-            placeholder={user ? 'порожньо — без змін' : `щонайменше ${MIN_PASSWORD_LEN} символів`}
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-          />
-        </label>
+        <div className="alerts-field alerts-field-wide">
+          <span id={passwordLabel}>
+            {self ? 'Новий пароль' : user ? 'Новий тимчасовий пароль' : 'Тимчасовий пароль'}
+          </span>
+          <div className="users-password">
+            {/* Shown in clear: it is meant to be passed on, and a password
+                field would make the browser offer to save it as yours. */}
+            <input
+              className="alerts-input users-password-input"
+              type="text"
+              autoComplete="off"
+              spellCheck={false}
+              aria-labelledby={passwordLabel}
+              required={user === null}
+              placeholder={user ? 'порожньо — без змін' : `щонайменше ${MIN_PASSWORD_LEN} символів`}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+            <button type="button" className="alerts-secondary" onClick={() => setPassword(generatePassword())}>
+              Згенерувати
+            </button>
+          </div>
+          {!self ? <small className="users-hint">При першому вході користувач задасть власний пароль.</small> : null}
+        </div>
       </div>
 
       {user ? (

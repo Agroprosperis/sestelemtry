@@ -83,6 +83,47 @@
   font-weight: 600;
 }
 
+.users-status-pending {
+  color: var(--warn-text);
+}
+
+.users-password {
+  display: flex;
+  gap: 8px;
+}
+
+.users-password-input {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  letter-spacing: 0.02em;
+}
+
+.users-hint {
+  font-size: 0.75rem;
+  color: var(--text-subtle);
+}
+
+.users-credentials {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 6px 14px;
+  margin: 14px 0 0;
+  font-size: 0.9rem;
+}
+
+.users-credentials dt {
+  color: var(--text-subtle);
+}
+
+.users-credentials dd {
+  margin: 0;
+}
+
+.users-credentials code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.95rem;
+  user-select: all;
+}
+
 .users-table td:last-child {
   text-align: right;
   white-space: nowrap;

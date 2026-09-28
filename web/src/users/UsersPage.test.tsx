@@ -18,6 +18,7 @@ const engineer = {
   name: 'Інженер Зміни',
   disabled: false,
   auth_provider: 'local',
+  must_change_password: false,
   // "old" was removed from config.yaml after the grant was made.
   grants: [{ role: 'engineer', organization_id: 'old' }],
   created_at: '2026-09-01T00:00:00Z',
@@ -29,9 +30,11 @@ function json(body: unknown) {
 
 describe('UsersPage', () => {
   let puts: unknown[]
+  let posts: { email: string; password: string; grants: unknown[] }[]
 
   beforeEach(() => {
     puts = []
+    posts = []
     vi.stubGlobal(
       'fetch',
       vi.fn<typeof fetch>(async (input, init) => {
@@ -40,21 +43,50 @@ describe('UsersPage', () => {
           puts.push(JSON.parse(String(init.body)))
           return json(engineer)
         }
+        if (url.includes('/api/v1/users') && init?.method === 'POST') {
+          const body = JSON.parse(String(init.body))
+          posts.push(body)
+          return json({ ...engineer, id: 3, email: body.email, grants: body.grants, must_change_password: true })
+        }
         if (url.includes('/api/v1/users')) return json({ users: [engineer] })
         return json({ sites: [] })
       }),
     )
+  })
+
+  function renderPage() {
+    render(
+      <AuthContext.Provider value={{ me: root, access: accessFor(root), logout: vi.fn(async () => {}) }}>
+        <UsersPage />
+      </AuthContext.Provider>,
+    )
+  }
+
+  it('hands out a generated temporary password and shows it once', async () => {
+    renderPage()
+    fireEvent.click(await screen.findByRole('button', { name: 'Новий користувач' }))
+
+    const field = screen.getByLabelText('Тимчасовий пароль') as HTMLInputElement
+    const first = field.value
+    expect(first).toMatch(/^[a-zA-Z2-9]{4}(-[a-zA-Z2-9]{4}){3}$/)
+    fireEvent.click(screen.getByRole('button', { name: 'Згенерувати' }))
+    const generated = field.value
+    expect(generated).not.toBe(first)
+
+    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'new@example.com' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Створити' }))
+
+    await waitFor(() => expect(posts).toHaveLength(1))
+    expect(posts[0]).toMatchObject({ email: 'new@example.com', password: generated })
+    expect(await screen.findByText('Користувача створено')).toBeInTheDocument()
+    expect(screen.getByText(generated)).toBeInTheDocument()
   })
   afterEach(() => {
     vi.unstubAllGlobals()
   })
 
   it('lets an administrator take off a grant whose object left the config', async () => {
-    render(
-      <AuthContext.Provider value={{ me: root, access: accessFor(root), logout: vi.fn(async () => {}) }}>
-        <UsersPage />
-      </AuthContext.Provider>,
-    )
+    renderPage()
     expect(await screen.findByText('Інженер: old')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Змінити' }))
 

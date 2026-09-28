@@ -7,6 +7,8 @@ export type UserAccount = {
   name: string
   disabled: boolean
   auth_provider: string
+  // Still on the temporary password it was given.
+  must_change_password: boolean
   grants: AuthGrant[]
   created_at: string
 }

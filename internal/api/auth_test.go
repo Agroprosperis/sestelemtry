@@ -256,6 +256,15 @@ func authOnlyRouter(h *Handlers) http.Handler {
 	return h.withAuth(mux, access, mux)
 }
 
+func loginCookie(t *testing.T, router http.Handler, email, password string) *http.Cookie {
+	t.Helper()
+	rec := serve(router, http.MethodPost, "/api/v1/auth/login", nil, authLoginRequest{Email: email, Password: password})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("login %s: status = %d (%s)", email, rec.Code, rec.Body.String())
+	}
+	return sessionFromResponse(t, rec)
+}
+
 func sessionFromResponse(t *testing.T, rec *httptest.ResponseRecorder) *http.Cookie {
 	t.Helper()
 	for _, c := range rec.Result().Cookies() {
@@ -667,6 +676,9 @@ func TestUsersAPI(t *testing.T) {
 	if created.Email != "economist@example.com" || len(created.Grants) != 2 {
 		t.Fatalf("created = %+v; want a lowercased email and the pe grant folded into «all»", created)
 	}
+	if !created.MustChangePassword {
+		t.Fatal("a password handed out by an administrator must be temporary")
+	}
 
 	bad := []userCreateRequest{
 		{Email: "economist@example.com", Password: "economics rules"},
@@ -682,10 +694,20 @@ func TestUsersAPI(t *testing.T) {
 		}
 	}
 
-	// The account's live session ends when its grants change.
+	// Until the user sets their own password, the temporary one opens
+	// nothing but the password form.
 	token, digest := auth.NewSessionToken()
 	_ = accounts.CreateSession(context.Background(), digest, created.ID, time.Now().Add(time.Hour))
 	userCookie := &http.Cookie{Name: sessionCookieName, Value: token}
+	if rec := serve(router, http.MethodGet, "/api/v1/economics/daily?organization_id=ze", userCookie, nil); rec.Code != http.StatusForbidden {
+		t.Fatalf("economist with the temporary password: status = %d, want 403", rec.Code)
+	}
+	if rec := serve(router, http.MethodPost, "/api/v1/auth/password", userCookie,
+		authPasswordRequest{CurrentPassword: "economics rules", NewPassword: "my own passphrase"}); rec.Code != http.StatusNoContent {
+		t.Fatalf("set own password: status = %d (%s)", rec.Code, rec.Body.String())
+	}
+
+	// The account's live session ends when its grants change.
 	if rec := serve(router, http.MethodGet, "/api/v1/economics/daily?organization_id=ze", userCookie, nil); rec.Code == http.StatusUnauthorized || rec.Code == http.StatusForbidden {
 		t.Fatalf("economist before the change: status = %d", rec.Code)
 	}
@@ -724,8 +746,21 @@ func TestUsersAPI(t *testing.T) {
 		t.Fatalf("users = %d, want 2", len(list.Users))
 	}
 
-	// The last administrator of every organization can't lock everyone out.
+	// A reset by an administrator is temporary again; setting your own
+	// password on this page is not.
 	rootTarget := "/api/v1/users?user_id=" + jsonNumber(list.Users[0].ID)
+	var reset userJSON
+	rec = serve(router, http.MethodPut, target, global, map[string]any{"password": "reset by admin 1"})
+	if err := json.Unmarshal(rec.Body.Bytes(), &reset); err != nil || !reset.MustChangePassword {
+		t.Fatalf("reset: status = %d, body %s; want a temporary password", rec.Code, rec.Body.String())
+	}
+	rec = serve(router, http.MethodPut, rootTarget, global, map[string]any{"password": "my own new one"})
+	if err := json.Unmarshal(rec.Body.Bytes(), &reset); err != nil || reset.MustChangePassword {
+		t.Fatalf("own reset: status = %d, body %s; want a permanent password", rec.Code, rec.Body.String())
+	}
+	global = loginCookie(t, router, "root@example.com", "my own new one")
+
+	// The last administrator of every organization can't lock everyone out.
 	if rec := serve(router, http.MethodPut, rootTarget, global, map[string]any{"disabled": true}); rec.Code != http.StatusConflict {
 		t.Fatalf("disable last global admin: status = %d, want 409", rec.Code)
 	}
