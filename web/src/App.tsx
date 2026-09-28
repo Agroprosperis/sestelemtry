@@ -1,16 +1,16 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { AlertsPage } from './alerts/AlertsPage'
-import { UNAUTHORIZED_EVENT } from './api'
 import { AuthNotice } from './auth/AuthNotice'
-import { AuthContext, type AuthContextValue } from './auth/authContext'
-import { fetchMe, logout } from './auth/authClient'
+import { AuthContext } from './auth/authContext'
+import { ForcedPasswordPage } from './auth/ForcedPasswordPage'
 import { LoginPage } from './auth/LoginPage'
-import { PasswordDialog } from './auth/PasswordDialog'
-import { accessFor, firstAllowedView, type AppView, type AuthMe } from './auth/permissions'
+import { firstAllowedView, type AppView } from './auth/permissions'
+import { useSession } from './auth/useSession'
 import { ControlPage } from './control/ControlPage'
 import { Dashboard } from './dashboard/Dashboard'
 import { EconomicsPage } from './economics/EconomicsPage'
 import { ImportPage } from './import/ImportPage'
+import { replaceView } from './shell/navigation'
 import { StationPage } from './station/StationPage'
 import { UsersPage } from './users/UsersPage'
 
@@ -49,78 +49,20 @@ function readView(): View {
   return 'dashboard'
 }
 
-// replaceView points the URL at a view the user may open, without
-// adding a history entry for the one they may not.
-function replaceView(view: View) {
-  const url = new URL(window.location.href)
-  if (view === 'dashboard') url.searchParams.delete('view')
-  else url.searchParams.set('view', view)
-  url.searchParams.delete('tab')
-  window.history.replaceState({}, '', url)
-}
-
-type Session =
-  | { status: 'loading' }
-  | { status: 'anonymous' }
-  | { status: 'unreachable'; message: string }
-  | { status: 'signed-in'; me: AuthMe }
-
 function App() {
   const [view, setView] = useState<View>(readView)
-  const [session, setSession] = useState<Session>({ status: 'loading' })
-  const [bootKey, setBootKey] = useState(0)
+  const { session, auth, onSignedIn, refresh, signOut } = useSession()
 
   // Listen for back/forward navigation so the lightweight query-param
   // routing still feels native: hitting the back button after going to
   // ?view=economics returns to the main dashboard without a full page
-  // reload. The header switch link below uses `pushState` directly to
-  // get the same behaviour going forward.
+  // reload. navigateView (shell/navigation.ts) uses `pushState` to get
+  // the same behaviour going forward.
   useEffect(() => {
     const handler = () => setView(readView())
     window.addEventListener('popstate', handler)
     return () => window.removeEventListener('popstate', handler)
   }, [])
-
-  useEffect(() => {
-    const ac = new AbortController()
-    fetchMe(ac.signal)
-      .then((me) => setSession(me ? { status: 'signed-in', me } : { status: 'anonymous' }))
-      .catch((e: unknown) => {
-        if (e instanceof DOMException && e.name === 'AbortError') return
-        setSession({
-          status: 'unreachable',
-          message: e instanceof TypeError ? 'Сервер не відповідає.' : e instanceof Error ? e.message : '',
-        })
-      })
-    return () => ac.abort()
-  }, [bootKey])
-
-  // A session that expires or is revoked mid-use: reload rather than
-  // swap in the login form, so nothing the previous session loaded
-  // (module caches, open forms) outlives it.
-  const signedIn = session.status === 'signed-in'
-  useEffect(() => {
-    if (!signedIn) return
-    const onUnauthorized = () => window.location.reload()
-    window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized)
-    return () => window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized)
-  }, [signedIn])
-
-  const signOut = useCallback(async () => {
-    try {
-      await logout()
-    } finally {
-      window.location.reload()
-    }
-  }, [])
-
-  const auth = useMemo<AuthContextValue | null>(
-    () =>
-      session.status === 'signed-in'
-        ? { me: session.me, access: accessFor(session.me), logout: signOut }
-        : null,
-    [session, signOut],
-  )
 
   // A view the user may not open (an old link, the default dashboard for
   // an economist) shows their first allowed one instead.
@@ -136,14 +78,7 @@ function App() {
       <AuthNotice
         title="Немає звʼязку з сервером"
         actions={
-          <button
-            type="button"
-            className="auth-primary"
-            onClick={() => {
-              setSession({ status: 'loading' })
-              setBootKey((k) => k + 1)
-            }}
-          >
+          <button type="button" className="auth-primary" onClick={refresh}>
             Спробувати знову
           </button>
         }
@@ -153,20 +88,11 @@ function App() {
     )
   }
   if (!auth) {
-    return <LoginPage onSignedIn={(me) => setSession({ status: 'signed-in', me })} />
+    return <LoginPage onSignedIn={onSignedIn} />
   }
 
   if (auth.me.must_change_password) {
-    return (
-      <PasswordDialog
-        forced
-        onSignOut={() => void signOut()}
-        onClose={() => {
-          setSession({ status: 'loading' })
-          setBootKey((k) => k + 1)
-        }}
-      />
-    )
+    return <ForcedPasswordPage onSignOut={() => void signOut()} onChanged={refresh} />
   }
 
   if (!shown) {

@@ -2,6 +2,7 @@ import { lazy, Suspense, useState } from 'react'
 import { useAccess } from '../auth/authContext'
 import './dashboard.css'
 import { ModeTopBar, type TopBarMenuItem } from '../shell/ModeTopBar'
+import { navigateView } from '../shell/navigation'
 import { DashboardControls } from './components/DashboardControls'
 import { EnergyChart } from './components/EnergyChart'
 import { MetricsPanel } from './components/MetricsPanel'
@@ -27,15 +28,6 @@ const RevenueChart = lazy(() =>
 const ExportDialog = lazy(() =>
   import('./components/ExportDialog').then((mod) => ({ default: mod.ExportDialog })),
 )
-
-// goToView rewrites ?view= (preserving organization_id etc) for the
-// service pages reachable from the «Сервіс» menu.
-function goToView(view: 'station' | 'alerts' | 'import') {
-  const url = new URL(window.location.href)
-  url.searchParams.set('view', view)
-  window.history.pushState({}, '', url.toString())
-  window.dispatchEvent(new PopStateEvent('popstate'))
-}
 
 export function Dashboard() {
   const { organizationID, options, change: onOrganizationChange } = useOrganizationParam('analytics.day')
@@ -90,9 +82,9 @@ export function Dashboard() {
 
   const serviceMenu: TopBarMenuItem[] = canService
     ? [
-        { id: 'station', label: 'Паспорт станції', onSelect: () => goToView('station') },
-        { id: 'alerts', label: 'Сповіщення', onSelect: () => goToView('alerts') },
-        { id: 'import', label: 'Імпорт архіву', onSelect: () => goToView('import') },
+        { id: 'station', label: 'Паспорт станції', onSelect: () => navigateView('station') },
+        { id: 'alerts', label: 'Сповіщення', onSelect: () => navigateView('alerts') },
+        { id: 'import', label: 'Імпорт архіву', onSelect: () => navigateView('import') },
         { id: 'export', label: 'Експорт даних', onSelect: () => setExportOpen(true) },
       ]
     : []

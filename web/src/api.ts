@@ -66,6 +66,14 @@ export async function apiFetch(input: string, init: RequestInit = {}): Promise<R
   return res
 }
 
+// apiError turns a failed response into an Error carrying the API's
+// own text: the API answers errors in plain text, in Ukrainian where a
+// person is meant to read them. fallback is used for an empty body.
+export async function apiError(res: Response, fallback: string): Promise<Error> {
+  const text = (await res.text().catch(() => '')).trim()
+  return new Error(text || `${fallback}: ${res.status}`)
+}
+
 export async function fetchDashboardConfig(signal?: AbortSignal): Promise<DashboardConfig> {
   const res = await apiFetch(withBase('/api/v1/dashboard-config'), { signal })
   if (!res.ok) {

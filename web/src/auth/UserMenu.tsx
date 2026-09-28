@@ -1,16 +1,9 @@
 import { UserCircle } from '@phosphor-icons/react'
 import { useEffect, useRef, useState } from 'react'
+import { navigateView } from '../shell/navigation'
 import { useAuth } from './authContext'
 import { PasswordDialog } from './PasswordDialog'
 import './auth.css'
-
-function openView(view: string) {
-  const url = new URL(window.location.href)
-  url.searchParams.set('view', view)
-  url.searchParams.delete('tab')
-  window.history.pushState({}, '', url)
-  window.dispatchEvent(new PopStateEvent('popstate'))
-}
 
 // UserMenu is the signed-in user's dropdown in the top bar: who is
 // signed in, user management for administrators of every organization,
@@ -67,7 +60,7 @@ export function UserMenu() {
               role="menuitem"
               onClick={() => {
                 setOpen(false)
-                openView('users')
+                navigateView('users')
               }}
             >
               Користувачі

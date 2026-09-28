@@ -9,23 +9,12 @@ import { UserMenu } from '../auth/UserMenu'
 import { fetchEdgeFleet, type EdgeSiteStatus } from '../control/controlClient'
 import { formatOrganizationLabel } from '../dashboard/config'
 import { ThemeToggle } from '../theme/ThemeToggle'
+import { navigateView } from './navigation'
 import './shell.css'
 
 // 'none' is for the service pages (station, import): no mode is
 // highlighted, every button navigates.
 export type ConsoleMode = 'analytics' | 'economics' | 'control' | 'none'
-
-// navigateView switches between the modes without a full reload,
-// preserving the rest of the query string (organization_id etc).
-export function navigateView(view: 'dashboard' | 'economics' | 'control', tab?: string) {
-  const url = new URL(window.location.href)
-  if (view === 'dashboard') url.searchParams.delete('view')
-  else url.searchParams.set('view', view)
-  if (tab) url.searchParams.set('tab', tab)
-  else url.searchParams.delete('tab')
-  window.history.pushState({}, '', url)
-  window.dispatchEvent(new PopStateEvent('popstate'))
-}
 
 // TopBarMenuItem is an entry of the «Сервіс» dropdown — rare admin
 // actions (imports, exports, passport, alert settings) that don't

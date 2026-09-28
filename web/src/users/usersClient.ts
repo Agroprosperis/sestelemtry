@@ -1,4 +1,4 @@
-import { apiFetch, buildURL, withBase } from '../api'
+import { apiError, apiFetch, buildURL, withBase } from '../api'
 import type { AuthGrant } from '../auth/permissions'
 
 export type UserAccount = {
@@ -21,14 +21,9 @@ export type UserPatch = {
   grants?: AuthGrant[]
 }
 
-async function failure(res: Response, fallback: string): Promise<Error> {
-  const text = (await res.text().catch(() => '')).trim()
-  return new Error(text || `${fallback}: ${res.status}`)
-}
-
 export async function fetchUsers(signal?: AbortSignal): Promise<UserAccount[]> {
   const res = await apiFetch(withBase('/api/v1/users'), { signal })
-  if (!res.ok) throw await failure(res, 'users request failed')
+  if (!res.ok) throw await apiError(res, 'users request failed')
   const body = (await res.json()) as { users: UserAccount[] }
   return body.users ?? []
 }
@@ -44,7 +39,7 @@ export async function createUser(input: {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
   })
-  if (!res.ok) throw await failure(res, 'Не вдалося створити користувача')
+  if (!res.ok) throw await apiError(res, 'Не вдалося створити користувача')
   return (await res.json()) as UserAccount
 }
 
@@ -54,6 +49,6 @@ export async function updateUser(id: number, patch: UserPatch): Promise<UserAcco
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(patch),
   })
-  if (!res.ok) throw await failure(res, 'Не вдалося зберегти користувача')
+  if (!res.ok) throw await apiError(res, 'Не вдалося зберегти користувача')
   return (await res.json()) as UserAccount
 }

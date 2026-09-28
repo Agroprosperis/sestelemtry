@@ -25,9 +25,8 @@ export const ROLES: { id: Role; label: string; hint: string }[] = [
   },
 ]
 
-export function roleLabel(role: Role): string {
-  return ROLES.find((r) => r.id === role)?.label ?? role
-}
+// MIN_PASSWORD_LEN is the API's minimum password length, in characters.
+export const MIN_PASSWORD_LEN = 10
 
 // A null organization_id grants the role on every organization.
 export type AuthGrant = { role: Role; organization_id: string | null }

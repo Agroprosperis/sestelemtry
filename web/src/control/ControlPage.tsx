@@ -13,6 +13,7 @@ import { fetchEdgeSites } from '../planner/plannerClient'
 import { fetchEdgeStatus, type EdgeSiteStatus } from './controlClient'
 import { JournalTab } from './JournalTab'
 import { ModeTopBar, type TopBarMenuItem } from '../shell/ModeTopBar'
+import { navigateView } from '../shell/navigation'
 import { ModesTab } from './ModesTab'
 import { SettingsTab } from './SettingsTab'
 import { StateTab } from './StateTab'
@@ -94,22 +95,14 @@ export function ControlPage() {
     window.history.replaceState({}, '', url)
   }
 
-  const goTo = (view: string) => {
-    const url = new URL(window.location.href)
-    url.searchParams.set('view', view)
-    url.searchParams.delete('tab')
-    window.history.pushState({}, '', url)
-    window.dispatchEvent(new PopStateEvent('popstate'))
-  }
-
   const siteOptions = useMemo(() => (sites.length > 0 ? sites : [organizationID]), [sites, organizationID])
 
   // Cross-page navigation only; the planner and the journal live in
   // the tabs, so no menu entries for them.
   const serviceMenu: TopBarMenuItem[] = access.can('service', organizationID)
     ? [
-        { id: 'station', label: 'Паспорт станції', onSelect: () => goTo('station') },
-        { id: 'alerts', label: 'Сповіщення', onSelect: () => goTo('alerts') },
+        { id: 'station', label: 'Паспорт станції', onSelect: () => navigateView('station') },
+        { id: 'alerts', label: 'Сповіщення', onSelect: () => navigateView('alerts') },
       ]
     : []
 
