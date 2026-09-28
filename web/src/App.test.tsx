@@ -5,6 +5,7 @@ import App from './App'
 const globalAdmin = {
   user: { id: 1, email: 'root@example.com', name: 'Root' },
   global_admin: true,
+  must_change_password: false,
   grants: [{ role: 'admin', organization_id: null }],
   organizations: [],
 }
@@ -30,7 +31,7 @@ describe('App session gate', () => {
         const body = JSON.parse(String(init?.body))
         return body.password === 'correct horse battery'
           ? json(globalAdmin)
-          : new Response('невірний email або пароль', { status: 401 })
+          : new Response('невірний логін або пароль', { status: 401 })
       }
       if (url.includes('/api/v1/users')) {
         return json({ users: [{ ...globalAdmin.user, disabled: false, auth_provider: 'local', grants: globalAdmin.grants, created_at: '2026-09-01T00:00:00Z' }] })
@@ -40,10 +41,10 @@ describe('App session gate', () => {
     vi.stubGlobal('fetch', fetchMock)
     render(<App />)
 
-    fireEvent.change(await screen.findByLabelText('Email'), { target: { value: 'root@example.com' } })
+    fireEvent.change(await screen.findByLabelText('Email або логін'), { target: { value: 'root@example.com' } })
     fireEvent.change(screen.getByLabelText('Пароль'), { target: { value: 'wrong password' } })
     fireEvent.click(screen.getByRole('button', { name: 'Увійти' }))
-    expect(await screen.findByRole('alert')).toHaveTextContent('невірний email або пароль')
+    expect(await screen.findByRole('alert')).toHaveTextContent('невірний логін або пароль')
 
     fireEvent.change(screen.getByLabelText('Пароль'), { target: { value: 'correct horse battery' } })
     fireEvent.click(screen.getByRole('button', { name: 'Увійти' }))
@@ -55,6 +56,35 @@ describe('App session gate', () => {
 
     const login = fetchMock.mock.calls.find(([u]) => String(u).includes('/auth/login'))
     expect(new Headers(login?.[1]?.headers).get('X-Requested-With')).toBe('fetch')
+  })
+
+  it('shows nothing but the password form to admin/admin until the password changes', async () => {
+    let changed = false
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+      const url = String(input)
+      if (url.includes('/api/v1/auth/me')) {
+        return json({ ...globalAdmin, user: { id: 1, email: 'admin', name: '' }, must_change_password: !changed })
+      }
+      if (url.includes('/api/v1/auth/password')) {
+        changed = true
+        expect(JSON.parse(String(init?.body))).toEqual({ current_password: 'admin', new_password: 'a proper passphrase' })
+        return new Response(null, { status: 204 })
+      }
+      if (url.includes('/api/v1/users')) return json({ users: [] })
+      return json({})
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    render(<App />)
+
+    expect(await screen.findByText('Задайте свій пароль')).toBeInTheDocument()
+    expect(screen.queryByText('Облікові записи')).toBeNull()
+    fireEvent.change(screen.getByLabelText('Поточний пароль'), { target: { value: 'admin' } })
+    fireEvent.change(screen.getByLabelText('Новий пароль'), { target: { value: 'a proper passphrase' } })
+    fireEvent.change(screen.getByLabelText('Повторіть новий пароль'), { target: { value: 'a proper passphrase' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Змінити пароль' }))
+
+    expect(await screen.findByText('Облікові записи')).toBeInTheDocument()
+    expect(changed).toBe(true)
   })
 
   it('tells a signed-in user without roles to ask an administrator', async () => {

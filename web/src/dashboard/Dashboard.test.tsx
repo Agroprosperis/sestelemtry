@@ -69,6 +69,7 @@ describe('Dashboard', () => {
     const engineer: AuthMe = {
       user: { id: 3, email: 'eng@example.com', name: '' },
       global_admin: false,
+      must_change_password: false,
       grants: [{ role: 'engineer', organization_id: 'ze' }],
       organizations: [{ id: 'ze', name: 'ZE', permissions: ['analytics.day'] }],
     }

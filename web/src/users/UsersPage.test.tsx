@@ -7,6 +7,7 @@ import { UsersPage } from './UsersPage'
 const root: AuthMe = {
   user: { id: 1, email: 'root@example.com', name: 'Root' },
   global_admin: true,
+  must_change_password: false,
   grants: [{ role: 'admin', organization_id: null }],
   organizations: [{ id: 'ze', name: 'Жмеринський елеватор', permissions: ['analytics.day', 'service'] }],
 }

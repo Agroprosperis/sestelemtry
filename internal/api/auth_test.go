@@ -124,6 +124,9 @@ func (m *memAuthStore) UpdateUser(_ context.Context, id int64, upd userUpdate) (
 	if upd.PasswordHash != nil {
 		u.PasswordHash = *upd.PasswordHash
 	}
+	if upd.MustChangePassword != nil {
+		u.MustChangePassword = *upd.MustChangePassword
+	}
 	m.users[id] = u
 	if upd.Grants != nil {
 		m.grants[id] = append([]auth.Grant(nil), (*upd.Grants)...)
@@ -454,10 +457,10 @@ func TestAuthRequiresCSRFHeader(t *testing.T) {
 func TestAuthLoginSessionLogout(t *testing.T) {
 	h, accounts := authTestHandlers(t, nil)
 	created, err := h.auth.Bootstrap(context.Background(), " Admin@Example.com ", "correct horse battery")
-	if err != nil || !created {
+	if err != nil || created != BootstrapFromEnv {
 		t.Fatalf("Bootstrap = %v, %v", created, err)
 	}
-	if again, err := h.auth.Bootstrap(context.Background(), "other@example.com", "correct horse battery"); err != nil || again {
+	if again, err := h.auth.Bootstrap(context.Background(), "", ""); err != nil || again != BootstrapNone {
 		t.Fatalf("second Bootstrap = %v, %v; want a no-op", again, err)
 	}
 	router := h.Router()
@@ -538,16 +541,62 @@ func TestAuthLoginThrottleAndDisabled(t *testing.T) {
 	}
 }
 
-func TestAuthBootstrapNeedsVariables(t *testing.T) {
+func TestAuthBootstrapRejectsBadVariables(t *testing.T) {
 	a := NewAuth(newMemAuthStore(), AuthOptions{})
-	if _, err := a.Bootstrap(context.Background(), "", ""); !errors.Is(err, errNoAccounts) {
-		t.Fatalf("no variables: err = %v", err)
-	}
 	if _, err := a.Bootstrap(context.Background(), "admin@example.com", "short"); !errors.Is(err, auth.ErrPasswordTooShort) {
 		t.Fatalf("short password: err = %v", err)
 	}
 	if _, err := a.Bootstrap(context.Background(), "not-an-email", "correct horse battery"); err == nil {
 		t.Fatal("malformed email accepted")
+	}
+}
+
+func TestAuthDefaultAdminMustChangePassword(t *testing.T) {
+	h, accounts := authTestHandlers(t, nil)
+	// Only half of the variables set counts as none.
+	result, err := h.auth.Bootstrap(context.Background(), "ops@example.com", "")
+	if err != nil || result != BootstrapDefaultAdmin {
+		t.Fatalf("Bootstrap = %v, %v; want the admin/admin account", result, err)
+	}
+	router := h.Router()
+
+	rec := serve(router, http.MethodPost, "/api/v1/auth/login", nil, authLoginRequest{Email: "Admin", Password: "admin"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("login admin/admin: status = %d (%s)", rec.Code, rec.Body.String())
+	}
+	cookie := sessionFromResponse(t, rec)
+	var me AuthMeResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &me); err != nil {
+		t.Fatal(err)
+	}
+	if !me.MustChangePassword || !me.GlobalAdmin {
+		t.Fatalf("login body: %+v; want a global admin with a pending password change", me)
+	}
+
+	for _, target := range []string{"/api/v1/current?organization_id=ze", "/api/v1/users", "/api/v1/organizations"} {
+		if rec := serve(router, http.MethodGet, target, cookie, nil); rec.Code != http.StatusForbidden {
+			t.Fatalf("%s before the change: status = %d, want 403", target, rec.Code)
+		}
+	}
+	if rec := serve(router, http.MethodGet, "/api/v1/auth/me", cookie, nil); rec.Code != http.StatusOK {
+		t.Fatalf("me before the change: status = %d, want 200", rec.Code)
+	}
+
+	// "admin" itself is below the length policy, so it can't be kept.
+	rec = serve(router, http.MethodPost, "/api/v1/auth/password", cookie, authPasswordRequest{CurrentPassword: "admin", NewPassword: "admin"})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("keeping admin: status = %d, want 400", rec.Code)
+	}
+	rec = serve(router, http.MethodPost, "/api/v1/auth/password", cookie, authPasswordRequest{CurrentPassword: "admin", NewPassword: "a proper passphrase"})
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("change: status = %d (%s)", rec.Code, rec.Body.String())
+	}
+	if rec := serve(router, http.MethodGet, "/api/v1/users", cookie, nil); rec.Code != http.StatusOK {
+		t.Fatalf("users after the change: status = %d, want 200", rec.Code)
+	}
+	user, _, _ := accounts.UserByEmail(context.Background(), "admin")
+	if user.MustChangePassword {
+		t.Fatal("the pending flag must clear with the change")
 	}
 }
 

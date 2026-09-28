@@ -37,6 +37,8 @@ export type AuthOrganization = { id: string; name: string; permissions: Permissi
 export type AuthMe = {
   user: { id: number; email: string; name: string }
   global_admin: boolean
+  // The factory admin/admin: nothing opens until the password changes.
+  must_change_password: boolean
   grants: AuthGrant[]
   organizations: AuthOrganization[]
 }

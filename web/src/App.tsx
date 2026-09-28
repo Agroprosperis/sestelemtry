@@ -5,6 +5,7 @@ import { AuthNotice } from './auth/AuthNotice'
 import { AuthContext, type AuthContextValue } from './auth/authContext'
 import { fetchMe, logout } from './auth/authClient'
 import { LoginPage } from './auth/LoginPage'
+import { PasswordDialog } from './auth/PasswordDialog'
 import { accessFor, firstAllowedView, type AppView, type AuthMe } from './auth/permissions'
 import { ControlPage } from './control/ControlPage'
 import { Dashboard } from './dashboard/Dashboard'
@@ -153,6 +154,19 @@ function App() {
   }
   if (!auth) {
     return <LoginPage onSignedIn={(me) => setSession({ status: 'signed-in', me })} />
+  }
+
+  if (auth.me.must_change_password) {
+    return (
+      <PasswordDialog
+        forced
+        onSignOut={() => void signOut()}
+        onClose={() => {
+          setSession({ status: 'loading' })
+          setBootKey((k) => k + 1)
+        }}
+      />
+    )
   }
 
   if (!shown) {

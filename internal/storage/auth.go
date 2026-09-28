@@ -32,9 +32,11 @@ func InitAuthSchema(ctx context.Context, pool *pgxpool.Pool) error {
 			disabled         boolean NOT NULL DEFAULT false,
 			auth_provider    text NOT NULL DEFAULT 'local',
 			external_subject text NOT NULL DEFAULT '',
+			must_change_password boolean NOT NULL DEFAULT false,
 			created_at       timestamptz NOT NULL DEFAULT now(),
 			updated_at       timestamptz NOT NULL DEFAULT now()
 		)`,
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password boolean NOT NULL DEFAULT false`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS users_email_lower ON users (lower(email))`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS users_external_subject
 			ON users (auth_provider, external_subject) WHERE external_subject <> ''`,
@@ -63,7 +65,8 @@ func InitAuthSchema(ctx context.Context, pool *pgxpool.Pool) error {
 }
 
 // UserRow is one account. PasswordHash is empty for accounts that sign
-// in through an external provider.
+// in through an external provider. Email is the sign-in name; the
+// factory account's is plain "admin".
 type UserRow struct {
 	ID              int64
 	Email           string
@@ -72,8 +75,11 @@ type UserRow struct {
 	Disabled        bool
 	AuthProvider    string
 	ExternalSubject string
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	// MustChangePassword locks the account out of everything but a
+	// password change (the factory admin/admin).
+	MustChangePassword bool
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
 }
 
 // RoleGrantRow is one role assignment. An empty OrganizationID (NULL in
@@ -84,12 +90,12 @@ type RoleGrantRow struct {
 	OrganizationID string
 }
 
-const userColumns = `id, email, name, password_hash, disabled, auth_provider, external_subject, created_at, updated_at`
+const userColumns = `id, email, name, password_hash, disabled, auth_provider, external_subject, must_change_password, created_at, updated_at`
 
 func scanUser(row pgx.Row) (UserRow, error) {
 	var u UserRow
 	err := row.Scan(&u.ID, &u.Email, &u.Name, &u.PasswordHash, &u.Disabled,
-		&u.AuthProvider, &u.ExternalSubject, &u.CreatedAt, &u.UpdatedAt)
+		&u.AuthProvider, &u.ExternalSubject, &u.MustChangePassword, &u.CreatedAt, &u.UpdatedAt)
 	return u, err
 }
 
@@ -123,10 +129,10 @@ func InsertUser(ctx context.Context, pool *pgxpool.Pool, u UserRow, grants []Rol
 
 	var id int64
 	err = tx.QueryRow(ctx, `
-		INSERT INTO users (email, name, password_hash, disabled, auth_provider, external_subject)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO users (email, name, password_hash, disabled, auth_provider, external_subject, must_change_password)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		RETURNING id
-	`, u.Email, u.Name, u.PasswordHash, u.Disabled, provider, u.ExternalSubject).Scan(&id)
+	`, u.Email, u.Name, u.PasswordHash, u.Disabled, provider, u.ExternalSubject, u.MustChangePassword).Scan(&id)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return 0, ErrEmailTaken
@@ -199,9 +205,10 @@ func ListUsers(ctx context.Context, pool *pgxpool.Pool) ([]UserRow, error) {
 
 // UserUpdate lists the fields to change; nil leaves a field as it is.
 type UserUpdate struct {
-	Name         *string
-	Disabled     *bool
-	PasswordHash *string
+	Name               *string
+	Disabled           *bool
+	PasswordHash       *string
+	MustChangePassword *bool
 	// Grants, when set, replaces every grant of the user.
 	Grants *[]RoleGrantRow
 	// RevokeSessions signs the user out everywhere in the same
@@ -224,12 +231,13 @@ func UpdateUser(ctx context.Context, pool *pgxpool.Pool, id int64, upd UserUpdat
 
 	tag, err := tx.Exec(ctx, `
 		UPDATE users SET
-			name          = COALESCE($2, name),
-			disabled      = COALESCE($3, disabled),
-			password_hash = COALESCE($4, password_hash),
-			updated_at    = now()
+			name                 = COALESCE($2, name),
+			disabled             = COALESCE($3, disabled),
+			password_hash        = COALESCE($4, password_hash),
+			must_change_password = COALESCE($5, must_change_password),
+			updated_at           = now()
 		WHERE id = $1
-	`, id, upd.Name, upd.Disabled, upd.PasswordHash)
+	`, id, upd.Name, upd.Disabled, upd.PasswordHash, upd.MustChangePassword)
 	if err != nil {
 		return false, fmt.Errorf("storage: update user: %w", err)
 	}

@@ -127,16 +127,24 @@ func main() {
 
 	svc := api.NewHandlers(store, *allowOrigin)
 	// Every route but the health probes, login and the edge uplink
-	// needs a session. With no account yet, AUTH_BOOTSTRAP_EMAIL /
-	// AUTH_BOOTSTRAP_PASSWORD create an administrator of every
-	// organization; the API keeps serving the edge uplink either way.
+	// needs a session. With no account yet, the first administrator of
+	// every organization is the one AUTH_BOOTSTRAP_EMAIL /
+	// AUTH_BOOTSTRAP_PASSWORD name, or admin/admin that must set its own
+	// password before anything else opens.
 	authn := api.NewAuth(api.NewAuthStore(pool), api.AuthOptions{CookieSecure: *cookieSecure, Log: log})
 	svc.SetAuth(authn)
 	bootstrapEmail := strings.TrimSpace(os.Getenv("AUTH_BOOTSTRAP_EMAIL"))
-	if created, err := authn.Bootstrap(ctx, bootstrapEmail, os.Getenv("AUTH_BOOTSTRAP_PASSWORD")); err != nil {
+	bootstrapPassword := os.Getenv("AUTH_BOOTSTRAP_PASSWORD")
+	if (bootstrapEmail == "") != (bootstrapPassword == "") {
+		log.Warn("auth_bootstrap_incomplete", "hint", "set AUTH_BOOTSTRAP_EMAIL and AUTH_BOOTSTRAP_PASSWORD together; falling back to admin/admin")
+	}
+	switch result, err := authn.Bootstrap(ctx, bootstrapEmail, bootstrapPassword); {
+	case err != nil:
 		log.Error("auth_bootstrap", "err", err)
-	} else if created {
+	case result == api.BootstrapFromEnv:
 		log.Info("auth_bootstrap_admin_created", "email", bootstrapEmail)
+	case result == api.BootstrapDefaultAdmin:
+		log.Warn("auth_bootstrap_default_admin", "login", "admin", "hint", "sign in as admin/admin now and set a new password")
 	}
 	// Per-day PV plan totals for the month/year plan-vs-actual card,
 	// read from the same n8n forecast flow the day chart plots.

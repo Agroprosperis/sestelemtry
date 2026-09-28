@@ -48,10 +48,29 @@ const (
 	maxDayWindow = 49 * time.Hour
 )
 
+// The factory account created on a database without accounts when
+// AUTH_BOOTSTRAP_* are not set. It can do nothing but change its
+// password until it does.
+const (
+	defaultAdminLogin    = "admin"
+	defaultAdminPassword = "admin"
+)
+
 var (
-	errBadCredentials  = errors.New("невірний email або пароль")
+	errBadCredentials  = errors.New("невірний логін або пароль")
 	errAccountDisabled = errors.New("обліковий запис вимкнено")
-	errNoAccounts      = errors.New("no accounts yet: set AUTH_BOOTSTRAP_EMAIL and AUTH_BOOTSTRAP_PASSWORD to create the first administrator")
+)
+
+// BootstrapResult says which first account Bootstrap created.
+type BootstrapResult int
+
+const (
+	// BootstrapNone: accounts already exist, nothing was created.
+	BootstrapNone BootstrapResult = iota
+	// BootstrapFromEnv: the administrator named by AUTH_BOOTSTRAP_*.
+	BootstrapFromEnv
+	// BootstrapDefaultAdmin: admin/admin, password change pending.
+	BootstrapDefaultAdmin
 )
 
 // throttledError reports a login refused because of recent failures.
@@ -64,10 +83,11 @@ func (e *throttledError) Error() string {
 // userUpdate lists the account fields to change; nil leaves a field
 // as it is.
 type userUpdate struct {
-	Name         *string
-	Disabled     *bool
-	PasswordHash *string
-	Grants       *[]auth.Grant
+	Name               *string
+	Disabled           *bool
+	PasswordHash       *string
+	MustChangePassword *bool
+	Grants             *[]auth.Grant
 	// RevokeSessions signs the user out everywhere except the session
 	// whose token hash is KeepSession.
 	RevokeSessions bool
@@ -148,11 +168,12 @@ func (s *AuthStore) AllGrants(ctx context.Context) (map[int64][]auth.Grant, erro
 
 func (s *AuthStore) UpdateUser(ctx context.Context, id int64, upd userUpdate) (bool, error) {
 	su := storage.UserUpdate{
-		Name:           upd.Name,
-		Disabled:       upd.Disabled,
-		PasswordHash:   upd.PasswordHash,
-		RevokeSessions: upd.RevokeSessions,
-		KeepSession:    upd.KeepSession,
+		Name:               upd.Name,
+		Disabled:           upd.Disabled,
+		PasswordHash:       upd.PasswordHash,
+		MustChangePassword: upd.MustChangePassword,
+		RevokeSessions:     upd.RevokeSessions,
+		KeepSession:        upd.KeepSession,
 	}
 	if upd.Grants != nil {
 		rows := grantRows(*upd.Grants)
@@ -246,32 +267,43 @@ func (h *Handlers) SetAuth(a *Auth) {
 }
 
 // Bootstrap creates an administrator of every organization when no
-// account exists yet, and reports whether it did. Once any account
-// exists it changes nothing, so the variables can stay set.
-func (a *Auth) Bootstrap(ctx context.Context, email, password string) (bool, error) {
+// account exists yet: the one AUTH_BOOTSTRAP_EMAIL/PASSWORD name when
+// both are set, otherwise admin/admin with a password change pending.
+// Once any account exists it changes nothing, so the variables can stay
+// set.
+func (a *Auth) Bootstrap(ctx context.Context, email, password string) (BootstrapResult, error) {
 	n, err := a.store.CountUsers(ctx)
 	if err != nil {
-		return false, err
+		return BootstrapNone, err
 	}
 	if n > 0 {
-		return false, nil
+		return BootstrapNone, nil
 	}
+	grants := []auth.Grant{{Role: auth.RoleAdmin}}
 	email = normalizeEmail(email)
 	if email == "" || password == "" {
-		return false, errNoAccounts
+		hash, err := auth.HashTemporaryPassword(defaultAdminPassword)
+		if err != nil {
+			return BootstrapNone, err
+		}
+		user := storage.UserRow{Email: defaultAdminLogin, Name: "Адміністратор", PasswordHash: hash, MustChangePassword: true}
+		if _, err := a.store.CreateUser(ctx, user, grants); err != nil {
+			return BootstrapNone, err
+		}
+		return BootstrapDefaultAdmin, nil
 	}
 	if err := validateEmail(email); err != nil {
-		return false, fmt.Errorf("AUTH_BOOTSTRAP_EMAIL: %w", err)
+		return BootstrapNone, fmt.Errorf("AUTH_BOOTSTRAP_EMAIL: %w", err)
 	}
 	hash, err := auth.HashPassword(password)
 	if err != nil {
-		return false, fmt.Errorf("AUTH_BOOTSTRAP_PASSWORD: %w", err)
+		return BootstrapNone, fmt.Errorf("AUTH_BOOTSTRAP_PASSWORD: %w", err)
 	}
 	user := storage.UserRow{Email: email, Name: "Адміністратор", PasswordHash: hash}
-	if _, err := a.store.CreateUser(ctx, user, []auth.Grant{{Role: auth.RoleAdmin}}); err != nil {
-		return false, err
+	if _, err := a.store.CreateUser(ctx, user, grants); err != nil {
+		return BootstrapNone, err
 	}
-	return true, nil
+	return BootstrapFromEnv, nil
 }
 
 // login checks the credentials and opens a session.
@@ -313,7 +345,7 @@ func (a *Auth) login(ctx context.Context, email, password string) (*auth.Princip
 	if err := a.store.DeleteExpiredSessions(ctx, now); err != nil {
 		a.log.Warn("auth_expired_sessions_cleanup", "err", err)
 	}
-	p := &auth.Principal{UserID: user.ID, Email: user.Email, Name: user.Name, Grants: grants}
+	p := principalOf(user, grants)
 	a.mu.Lock()
 	a.storeLocked(string(digest), cachedSession{principal: p, expiresAt: expires, lastSeen: now, loadedAt: now}, now)
 	a.mu.Unlock()
@@ -405,11 +437,21 @@ func (a *Auth) loadSession(ctx context.Context, digest []byte, now time.Time) (c
 		return cachedSession{}, false, err
 	}
 	return cachedSession{
-		principal: &auth.Principal{UserID: user.ID, Email: user.Email, Name: user.Name, Grants: grants},
+		principal: principalOf(user, grants),
 		expiresAt: sess.ExpiresAt,
 		lastSeen:  sess.LastSeenAt,
 		loadedAt:  now,
 	}, true, nil
+}
+
+func principalOf(user storage.UserRow, grants []auth.Grant) *auth.Principal {
+	return &auth.Principal{
+		UserID:             user.ID,
+		Email:              user.Email,
+		Name:               user.Name,
+		Grants:             grants,
+		MustChangePassword: user.MustChangePassword,
+	}
 }
 
 // storeLocked caches s under key; a.mu must be held.

@@ -51,8 +51,9 @@ services:
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       EDGE_SITE_TOKENS: ${EDGE_SITE_TOKENS:-}
       EDGE_ORG_SUFFIX: ${EDGE_ORG_SUFFIX:--edge}
-      # First administrator of every organization, created only while
-      # the database has no account at all.
+      # Optional first administrator, created only while the database
+      # has no account at all; without them it is admin/admin, which
+      # must set its own password at the first sign-in.
       AUTH_BOOTSTRAP_EMAIL: ${AUTH_BOOTSTRAP_EMAIL:-}
       AUTH_BOOTSTRAP_PASSWORD: ${AUTH_BOOTSTRAP_PASSWORD:-}
     # Mount the same YAML the collector reads so the API can populate

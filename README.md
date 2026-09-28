@@ -41,9 +41,11 @@ A role is granted on one organization, several, or all of them (including
 organizations added to `config.yaml` later). Telemetry reads longer than
 49 h need `admin` (the month and year presets).
 
-- The first administrator is created on API start while the database has no
-  account: set `AUTH_BOOTSTRAP_EMAIL` and `AUTH_BOOTSTRAP_PASSWORD` (≥ 10
-  characters). Further accounts are managed on `?view=users`.
+- On a database without accounts the API creates `admin` / `admin`. Sign in
+  right after the first start: until that account sets its own password
+  (≥ 10 characters), nothing else opens. Setting `AUTH_BOOTSTRAP_EMAIL` and
+  `AUTH_BOOTSTRAP_PASSWORD` together creates that administrator instead.
+  Further accounts are managed on `?view=users`.
 - The API needs `-config`: its organizations scope every grant.
 - When the browser calls the API on another origin (`VITE_API_BASE_URL`),
   `-allow-origin` must name the web origin exactly; the cookie never crosses
@@ -57,9 +59,10 @@ organizations added to `config.yaml` later). Telemetry reads longer than
 
 ```bash
 cd deploy
-AUTH_BOOTSTRAP_EMAIL=admin@example.com AUTH_BOOTSTRAP_PASSWORD='choose-a-long-one' \
-  docker compose up --build
+docker compose up --build
 ```
+
+Then sign in as `admin` / `admin` and set a new password.
 
 API will be available at `http://localhost:8080`.
 Web dashboard will be available at `http://localhost:5173/?organization_id=docker-demo`.
@@ -435,7 +438,7 @@ cp service.env.example .env.service
 # set DB credentials and SESTELEMETRY_DATABASE_URL
 # set SESTELEMETRY_API_ALLOW_ORIGIN to your web URL (no "*")
 # set SESTELEMETRY_WEB_API_BASE_URL to your server URL, e.g. http://SERVER_IP:8080
-# set AUTH_BOOTSTRAP_EMAIL / AUTH_BOOTSTRAP_PASSWORD for the first administrator
+# optional: AUTH_BOOTSTRAP_EMAIL / AUTH_BOOTSTRAP_PASSWORD (otherwise admin/admin)
 # keep collector config outside repo:
 #   SESTELEMETRY_HOST_CONFIG_PATH=/etc/sestelemetry/config.yaml
 #   SESTELEMETRY_HOST_REGISTERS_PATH=/etc/sestelemetry/registers

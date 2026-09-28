@@ -135,7 +135,8 @@
   border-color: var(--border-strong);
 }
 
-.auth-card .auth-primary {
+/* The sign-in button spans the card; buttons in an action row don't. */
+.auth-card > .auth-primary {
   width: 100%;
   margin-top: 4px;
 }

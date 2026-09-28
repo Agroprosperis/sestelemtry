@@ -33,10 +33,12 @@ export function LoginPage({ onSignedIn }: { onSignedIn: (me: AuthMe) => void }) 
         <img src="/logo_agroprosperis.png" alt="Агропросперіс" className="auth-logo" />
         <h1>Вхід</h1>
         <label className="auth-field">
-          <span>Email</span>
+          <span>Email або логін</span>
           <input
-            type="email"
+            type="text"
             autoComplete="username"
+            autoCapitalize="none"
+            spellCheck={false}
             required
             autoFocus
             value={email}

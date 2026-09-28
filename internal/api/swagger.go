@@ -35,7 +35,9 @@ info:
     (Bearer token) needs the ses_session cookie from POST /api/v1/auth/login.
     POST, PUT and DELETE requests must also send an X-Requested-With header.
     Routes return 401 without a session and 403 when the caller's roles don't
-    cover the organization in organization_id / site_id.
+    cover the organization in organization_id / site_id. The factory account
+    admin/admin (created when no account exists) gets 403 everywhere except
+    /api/v1/auth/me and /api/v1/auth/password until it sets its own password.
 servers:
   - url: http://localhost:8080
 paths:
@@ -1137,6 +1139,9 @@ components:
               type: string
         global_admin:
           type: boolean
+        must_change_password:
+          type: boolean
+          description: The account may do nothing but change its password.
         grants:
           type: array
           items:

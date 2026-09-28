@@ -5,6 +5,7 @@ function me(overrides: Partial<AuthMe>): AuthMe {
   return {
     user: { id: 1, email: 'u@example.com', name: '' },
     global_admin: false,
+    must_change_password: false,
     grants: [],
     organizations: [],
     ...overrides,

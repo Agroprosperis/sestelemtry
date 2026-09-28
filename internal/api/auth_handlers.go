@@ -46,10 +46,13 @@ type authOrganization struct {
 // AuthMeResponse is what the dashboard boots from: who is signed in and
 // what they may do on each configured organization.
 type AuthMeResponse struct {
-	User          authUserInfo       `json:"user"`
-	GlobalAdmin   bool               `json:"global_admin"`
-	Grants        []grantJSON        `json:"grants"`
-	Organizations []authOrganization `json:"organizations"`
+	User        authUserInfo `json:"user"`
+	GlobalAdmin bool         `json:"global_admin"`
+	// MustChangePassword: the dashboard shows only the password form;
+	// every other route answers 403 until the change.
+	MustChangePassword bool               `json:"must_change_password"`
+	Grants             []grantJSON        `json:"grants"`
+	Organizations      []authOrganization `json:"organizations"`
 }
 
 func grantsJSON(grants []auth.Grant) []grantJSON {
@@ -67,10 +70,11 @@ func grantsJSON(grants []auth.Grant) []grantJSON {
 
 func (h *Handlers) meResponse(p *auth.Principal) AuthMeResponse {
 	resp := AuthMeResponse{
-		User:          authUserInfo{ID: p.UserID, Email: p.Email, Name: p.Name},
-		GlobalAdmin:   p.IsGlobalAdmin(),
-		Grants:        grantsJSON(p.Grants),
-		Organizations: []authOrganization{},
+		User:               authUserInfo{ID: p.UserID, Email: p.Email, Name: p.Name},
+		GlobalAdmin:        p.IsGlobalAdmin(),
+		MustChangePassword: p.MustChangePassword,
+		Grants:             grantsJSON(p.Grants),
+		Organizations:      []authOrganization{},
 	}
 	for _, org := range h.organizations {
 		perms := p.PermissionsOn(org.ID)
@@ -210,10 +214,12 @@ func (h *Handlers) authPassword(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	changed := false
 	upd := userUpdate{
-		PasswordHash:   &hash,
-		RevokeSessions: true,
-		KeepSession:    auth.TokenDigest(sessionToken(r)),
+		PasswordHash:       &hash,
+		MustChangePassword: &changed,
+		RevokeSessions:     true,
+		KeepSession:        auth.TokenDigest(sessionToken(r)),
 	}
 	if _, err := h.auth.store.UpdateUser(r.Context(), p.UserID, upd); err != nil {
 		h.log.Error("api_auth_password", "err", err)

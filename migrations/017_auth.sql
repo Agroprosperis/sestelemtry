@@ -4,10 +4,12 @@
 -- migrations by hand.
 -- Apply locally with: supabase migration up
 
--- Local accounts. email is unique case-insensitively; password_hash is
--- empty for accounts that will sign in through an external provider
+-- Local accounts. email is the sign-in name, unique case-insensitively
+-- (the factory account is plain "admin"); password_hash is empty for
+-- accounts that will sign in through an external provider
 -- (auth_provider + external_subject), so OIDC can be added without a
--- schema change.
+-- schema change. must_change_password locks an account out of
+-- everything but a password change — the factory admin/admin starts so.
 CREATE TABLE IF NOT EXISTS users (
     id               bigserial PRIMARY KEY,
     email            text NOT NULL,
@@ -16,9 +18,12 @@ CREATE TABLE IF NOT EXISTS users (
     disabled         boolean NOT NULL DEFAULT false,
     auth_provider    text NOT NULL DEFAULT 'local',
     external_subject text NOT NULL DEFAULT '',
+    must_change_password boolean NOT NULL DEFAULT false,
     created_at       timestamptz NOT NULL DEFAULT now(),
     updated_at       timestamptz NOT NULL DEFAULT now()
 );
+
+ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password boolean NOT NULL DEFAULT false;
 
 CREATE UNIQUE INDEX IF NOT EXISTS users_email_lower ON users (lower(email));
 CREATE UNIQUE INDEX IF NOT EXISTS users_external_subject

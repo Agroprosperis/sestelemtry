@@ -38,11 +38,22 @@ func HashPassword(password string) (string, error) {
 	if err := ValidatePassword(password); err != nil {
 		return "", err
 	}
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcryptCost)
+	return hash(password)
+}
+
+// HashTemporaryPassword hashes a password that has to be replaced at the
+// first sign-in (the factory admin/admin), so the length policy does not
+// apply to it.
+func HashTemporaryPassword(password string) (string, error) {
+	return hash(password)
+}
+
+func hash(password string) (string, error) {
+	h, err := bcrypt.GenerateFromPassword([]byte(password), bcryptCost)
 	if err != nil {
 		return "", fmt.Errorf("auth: hash password: %w", err)
 	}
-	return string(hash), nil
+	return string(h), nil
 }
 
 var (

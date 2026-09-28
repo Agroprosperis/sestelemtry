@@ -15,7 +15,10 @@ import (
 type routeAccess struct {
 	public bool // no session: health probes, login, logout
 	edge   bool // the handler checks the site's Bearer token itself
-	rules  map[string]accessRule
+	// pendingOK keeps the route open to a session whose password has to
+	// be changed first; every other route refuses it.
+	pendingOK bool
+	rules     map[string]accessRule
 }
 
 type accessRule struct {
@@ -42,10 +45,11 @@ func (a routeAccess) rule(method string) accessRule {
 }
 
 var (
-	publicRoute = routeAccess{public: true}
-	edgeRoute   = routeAccess{edge: true}
-	signedIn    = need(accessRule{})
-	globalOnly  = need(accessRule{global: true})
+	publicRoute    = routeAccess{public: true}
+	edgeRoute      = routeAccess{edge: true}
+	signedIn       = need(accessRule{})
+	passwordChange = routeAccess{pendingOK: true, rules: map[string]accessRule{"": {}}}
+	globalOnly     = need(accessRule{global: true})
 )
 
 func need(r accessRule) routeAccess {
@@ -102,8 +106,8 @@ func (h *Handlers) routes() []route {
 		{"/readyz", h.readyz, publicRoute},
 		{"/api/v1/auth/login", h.authLogin, publicRoute},
 		{"/api/v1/auth/logout", h.authLogout, publicRoute},
-		{"/api/v1/auth/me", h.authMe, signedIn},
-		{"/api/v1/auth/password", h.authPassword, signedIn},
+		{"/api/v1/auth/me", h.authMe, passwordChange},
+		{"/api/v1/auth/password", h.authPassword, passwordChange},
 		{"/api/v1/users", h.users, globalOnly},
 		{"/api/v1/dashboard-config", h.dashboardConfig, signedIn},
 		{"/api/v1/organizations", h.organizationsList, signedIn},
@@ -205,6 +209,10 @@ func (h *Handlers) withAuth(mux *http.ServeMux, access map[string]routeAccess, n
 		}
 		if p == nil {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		if p.MustChangePassword && !acc.pendingOK {
+			http.Error(w, "forbidden: change the password first", http.StatusForbidden)
 			return
 		}
 		if msg, ok := h.authorize(p, acc.rule(r.Method), r); !ok {

@@ -34,6 +34,7 @@ Environment overrides:
   VITE_API_BASE_URL Web API base URL (default: http://localhost:8080)
   AUTH_BOOTSTRAP_EMAIL, AUTH_BOOTSTRAP_PASSWORD
                     First administrator, created while no account exists
+                    (default: admin/admin, password change at first sign-in)
 EOF
 }
 

@@ -97,6 +97,9 @@ type Principal struct {
 	Email  string
 	Name   string
 	Grants []Grant
+	// MustChangePassword: until the password is changed the session may
+	// do nothing else, whatever its grants say.
+	MustChangePassword bool
 }
 
 // Can reports whether some grant covering org carries perm.

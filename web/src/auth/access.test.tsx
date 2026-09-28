@@ -9,6 +9,7 @@ import { accessFor, type AuthMe, type Permission } from './permissions'
 const mixed: AuthMe = {
   user: { id: 7, email: 'olena@example.com', name: 'Олена' },
   global_admin: false,
+  must_change_password: false,
   grants: [
     { role: 'economist', organization_id: 'ze' },
     { role: 'engineer', organization_id: 'pe' },

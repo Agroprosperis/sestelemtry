@@ -68,7 +68,8 @@ Set at least:
   - SESTELEMETRY_DATABASE_URL
   - SESTELEMETRY_WEB_API_BASE_URL
   - SESTELEMETRY_API_ALLOW_ORIGIN
-  - AUTH_BOOTSTRAP_EMAIL, AUTH_BOOTSTRAP_PASSWORD (first administrator)
+  - optionally AUTH_BOOTSTRAP_EMAIL, AUTH_BOOTSTRAP_PASSWORD
+    (otherwise sign in as admin/admin and set a new password)
 
 Then start service:
   sudo systemctl restart sestelemetry
