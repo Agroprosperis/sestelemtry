@@ -14,8 +14,10 @@ services:
     shm_size: 1gb
     volumes:
       - timescaledb_data:/var/lib/postgresql/data
+    # Host only: the password above is the default one. From another
+    # machine go through SSH: ssh -L 5432:localhost:5432 <user>@<host>.
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d telemetry"]
       interval: 5s
@@ -67,7 +69,11 @@ services:
       # Docker bind-mount a directory). Defaults next to config.yaml.
       - ${SESTELEMETRY_HOST_FUSIONSOLAR_PATH:-/etc/sestelemetry/fusionsolar.yaml}:/etc/sestelemetry/fusionsolar.yaml:ro
     entrypoint: ["/usr/local/bin/api"]
-    command: ["-listen", ":8080", "-allow-origin", "*", "-config", "/etc/sestelemetry/config.yaml", "-fusionsolar-config", "/etc/sestelemetry/fusionsolar.yaml"]
+    # The dashboard reaches the API through web on 443, so the session
+    # cookie is Secure.
+    command: ["-listen", ":8080", "-allow-origin", "*", "-cookie-secure", "-config", "/etc/sestelemetry/config.yaml", "-fusionsolar-config", "/etc/sestelemetry/fusionsolar.yaml"]
+    # Stays published for the edge devices: the IOT2050 uplink posts
+    # straight to :8080 with its site Bearer token.
     ports:
       - "8080:8080"
 
@@ -149,16 +155,21 @@ services:
       - ${SESTELEMETRY_HOST_CONFIG_PATH:-/etc/sestelemetry/config.yaml}:/etc/sestelemetry/config.yaml:ro
       - ${SESTELEMETRY_HOST_REGISTERS_PATH:-/etc/sestelemetry/registers}:/etc/sestelemetry/registers:ro
 
+  # The dashboard over HTTPS (80 redirects to 443): nginx serves the built
+  # bundle and proxies /api to the api service. It needs tls.crt (server
+  # certificate + intermediate CA) and tls.key in
+  # SESTELEMETRY_HOST_TLS_PATH; README «Run with Docker Compose».
   web:
     build:
       context: ../web
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.prod
     depends_on:
       - api
-    environment:
-      VITE_API_BASE_URL: ""
+    volumes:
+      - ${SESTELEMETRY_HOST_TLS_PATH:-/etc/sestelemetry/tls}:/etc/nginx/tls:ro
     ports:
-      - "5173:5173"
+      - "80:80"
+      - "443:443"
 
 volumes:
   timescaledb_data:

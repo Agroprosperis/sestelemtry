@@ -51,21 +51,37 @@ organizations added to `config.yaml` later). Telemetry reads longer than
   `-allow-origin` must name the web origin exactly; the cookie never crosses
   origins to `*`. Behind the Vite proxy (empty `VITE_API_BASE_URL`) the
   dashboard and API share one origin.
-- Pass `-cookie-secure` only when the dashboard is served over HTTPS. Over
-  plain HTTP the password travels unencrypted, so put an HTTPS proxy in front
-  of anything reachable beyond the plant network.
+- Pass `-cookie-secure` only when the dashboard is served over HTTPS (as
+  `deploy/docker-compose.yml` does). Over plain HTTP the password travels
+  unencrypted.
 
 ## Run with Docker Compose (DB + collector + API + web)
 
+The `web` service is nginx: it serves the built dashboard over HTTPS on 443
+(80 redirects) and proxies `/api` to the API. It reads the certificate from
+`/etc/sestelemetry/tls` (override with `SESTELEMETRY_HOST_TLS_PATH`):
+`tls.crt` is the server certificate followed by the intermediate CA,
+`tls.key` its private key. From a corporate PFX:
+
 ```bash
-cd deploy
-docker compose up --build
+sudo install -d -m 700 /etc/sestelemetry/tls
+openssl pkcs12 -in cert.pfx -nokeys | sudo tee /etc/sestelemetry/tls/tls.crt >/dev/null
+openssl pkcs12 -in cert.pfx -nocerts -nodes | openssl pkey | sudo tee /etc/sestelemetry/tls/tls.key >/dev/null
+sudo chmod 600 /etc/sestelemetry/tls/tls.key
 ```
 
-Then sign in as `admin` / `admin` and set a new password.
+For a local try-out a self-signed certificate will do:
 
-API will be available at `http://localhost:8080`.
-Web dashboard will be available at `http://localhost:5173/?organization_id=docker-demo`.
+```bash
+mkdir -p /tmp/ses-tls && openssl req -x509 -newkey rsa:2048 -nodes -days 30 \
+  -subj /CN=localhost -keyout /tmp/ses-tls/tls.key -out /tmp/ses-tls/tls.crt
+cd deploy
+SESTELEMETRY_HOST_TLS_PATH=/tmp/ses-tls docker compose up --build
+```
+
+Open `https://localhost/?organization_id=docker-demo`, sign in as `admin` /
+`admin` and set a new password. The API stays published on `:8080` for the
+edge devices' uplink; Postgres listens on the host's `127.0.0.1:5432` only.
 
 ## Run web dashboard separately
 
