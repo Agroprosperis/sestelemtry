@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { fetchOrganizations } from '../api'
+import { useAccess } from '../auth/authContext'
 import { KNOWN_ORGANIZATIONS, formatOrganizationLabel } from '../dashboard/config'
 import { useOrganizationParam } from '../dashboard/hooks/useOrganizationParam'
 import { ModeTopBar } from '../shell/ModeTopBar'
@@ -49,13 +50,18 @@ type TestState =
   | null
 
 export function AlertsPage() {
+  const access = useAccess()
+  // SMTP and the default recipients reach every organization, so only an
+  // administrator of all of them sees and edits that block.
+  const siteWide = access.globalAdmin
   const {
     organizationID,
     options: orgOptions,
     change: onOrganizationChange,
-  } = useOrganizationParam()
+  } = useOrganizationParam('service')
   const {
     settings,
+    loaded,
     saved,
     passwordConfigured,
     organizations,
@@ -70,8 +76,8 @@ export function AlertsPage() {
     setPassword,
     password,
     save,
-  } = useAlertSettings()
-  const orgs = useOrganizationList()
+  } = useAlertSettings({ siteWide })
+  const orgs = useOrganizationList().filter((org) => access.can('service', org.id))
   const [test, setTest] = useState<TestState>(null)
 
   // The test email is sent by the server from the stored settings, so
@@ -108,16 +114,18 @@ export function AlertsPage() {
       />
 
       <p className="alerts-subtitle">
-        Лист на пошту, коли обладнання перестає надсилати дані. Налаштування спільні
-        для всіх обʼєктів.
+        Лист на пошту, коли обладнання перестає надсилати дані.{' '}
+        {siteWide
+          ? 'Налаштування спільні для всіх обʼєктів.'
+          : 'Поштовий сервер і загальний список адрес змінює адміністратор усіх обʼєктів.'}
       </p>
 
       {loading ? <p className="alerts-muted">Завантаження…</p> : null}
       {error ? <div className="alerts-banner alerts-banner-error">{error}</div> : null}
 
-      {settings ? (
+      {loaded ? (
         <>
-          {!saved ? (
+          {siteWide && settings && !saved ? (
             <div className="alerts-banner alerts-banner-info">
               Показано значення з <code>config.yaml</code>. Після збереження
               налаштування зберігаються в базі, і служба сповіщень підхоплює їх
@@ -125,15 +133,17 @@ export function AlertsPage() {
             </div>
           ) : null}
 
-          <GeneralCard
-            settings={settings}
-            passwordConfigured={passwordConfigured}
-            password={password}
-            savedAt={savedAt}
-            update={update}
-            updateSmtp={updateSmtp}
-            setPassword={setPassword}
-          />
+          {siteWide && settings ? (
+            <GeneralCard
+              settings={settings}
+              passwordConfigured={passwordConfigured}
+              password={password}
+              savedAt={savedAt}
+              update={update}
+              updateSmtp={updateSmtp}
+              setPassword={setPassword}
+            />
+          ) : null}
 
           <section className="alerts-card">
             <span className="alerts-card-accent alerts-card-accent-violet" />
@@ -217,17 +227,19 @@ export function AlertsPage() {
                 збереженими налаштуваннями.
               </span>
             ) : null}
-            <button
-              type="button"
-              className="alerts-secondary"
-              disabled={dirty || (test?.target === '' && test.status === 'sending')}
-              title={testHint}
-              onClick={() => runTest()}
-            >
-              {test?.target === '' && test.status === 'sending'
-                ? 'Надсилаємо…'
-                : 'Надіслати тестовий лист'}
-            </button>
+            {siteWide ? (
+              <button
+                type="button"
+                className="alerts-secondary"
+                disabled={dirty || (test?.target === '' && test.status === 'sending')}
+                title={testHint}
+                onClick={() => runTest()}
+              >
+                {test?.target === '' && test.status === 'sending'
+                  ? 'Надсилаємо…'
+                  : 'Надіслати тестовий лист'}
+              </button>
+            ) : null}
             <button
               type="button"
               className="alerts-save"
@@ -249,10 +261,10 @@ export function AlertsPage() {
             «Зберегти», потім «Тест».
           </p>
           <p className="alerts-hint">
-            <strong>Доступ.</strong> API дашборда не має автентифікації, а пароль
-            SMTP зберігається в базі у відкритому вигляді. Не публікуйте порт
-            API назовні — тримайте його у внутрішній мережі або за проксі з
-            авторизацією.
+            <strong>Доступ.</strong> Сторінка доступна адміністраторам, але пароль
+            SMTP зберігається в базі у відкритому вигляді, а без HTTPS пароль
+            входу йде мережею відкрито. Не публікуйте порт API назовні без
+            HTTPS-проксі.
           </p>
         </>
       ) : null}

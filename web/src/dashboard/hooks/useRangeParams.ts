@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useState } from 'react'
 import { startOfPeriod, type RangePreset } from '../range'
 
 const VALID_PRESETS: ReadonlyArray<RangePreset> = ['day', 'month', 'year']
@@ -11,10 +11,10 @@ function isPreset(value: string): value is RangePreset {
 // popstate / hashchange because the dashboard doesn't navigate away —
 // browser back/forward through user-driven preset changes would surprise
 // users. URL sync is one-way: state -> URL.
-function readSearch(now: Date): { preset: RangePreset; anchor: Date } {
+function readSearch(now: Date, dayOnly: boolean): { preset: RangePreset; anchor: Date } {
   const search = new URLSearchParams(window.location.search)
   const rawPreset = (search.get('preset') ?? '').toLowerCase()
-  const preset = isPreset(rawPreset) ? rawPreset : 'day'
+  const preset = !dayOnly && isPreset(rawPreset) ? rawPreset : 'day'
   const rawAnchor = (search.get('anchor') ?? '').trim()
   let anchor = startOfPeriod(preset, now)
   if (rawAnchor) {
@@ -42,12 +42,17 @@ function writeSearch(preset: RangePreset, anchor: Date): void {
 // useRangeParams owns the active preset + anchor and keeps them in sync
 // with the URL so refresh / share-link preserves the selection.
 //
+// dayOnly pins the preset to a day for roles that may only read the day
+// chart; the API refuses them month- and year-sized windows anyway.
+//
 // `change`-style callbacks are stable across renders so they can sit in
 // effect dependency arrays without retriggering.
-export function useRangeParams() {
-  const initial = useMemo(() => readSearch(new Date()), [])
-  const [preset, setPresetState] = useState<RangePreset>(initial.preset)
+export function useRangeParams(options: { dayOnly?: boolean } = {}) {
+  const dayOnly = options.dayOnly ?? false
+  const [initial] = useState(() => readSearch(new Date(), dayOnly))
+  const [presetState, setPresetState] = useState<RangePreset>(initial.preset)
   const [anchor, setAnchorState] = useState<Date>(initial.anchor)
+  const preset: RangePreset = dayOnly ? 'day' : presetState
 
   const setPreset = useCallback((next: RangePreset) => {
     const nextAnchor = startOfPeriod(next, new Date())

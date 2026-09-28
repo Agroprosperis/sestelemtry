@@ -7,6 +7,7 @@ require (
 	github.com/grid-x/modbus v0.0.0-20260325140807-cf9e1b9daae0
 	github.com/jackc/pgx/v5 v5.9.2
 	github.com/richardlehane/mscfb v1.0.6
+	golang.org/x/crypto v0.46.0
 	golang.org/x/sys v0.47.0
 	golang.org/x/text v0.40.0
 	gopkg.in/yaml.v3 v3.0.1

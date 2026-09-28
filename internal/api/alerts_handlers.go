@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/nesh/sestelemetry/internal/alerts"
+	"github.com/nesh/sestelemetry/internal/auth"
 )
 
 // maxAlertSettingsBody caps a settings payload. The largest legitimate
@@ -148,10 +149,13 @@ func (h *Handlers) getOrganizationAlertSettings(w http.ResponseWriter, r *http.R
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
-	if overrides == nil {
-		overrides = map[string]alerts.OrgSettings{}
+	visible := make(map[string]alerts.OrgSettings, len(overrides))
+	for id, s := range overrides {
+		if h.visibleTo(r, id, auth.PermService) {
+			visible[id] = s
+		}
 	}
-	writeJSON(w, http.StatusOK, OrgAlertSettingsResponse{Organizations: overrides})
+	writeJSON(w, http.StatusOK, OrgAlertSettingsResponse{Organizations: visible})
 }
 
 func (h *Handlers) putOrganizationAlertSettings(w http.ResponseWriter, r *http.Request) {

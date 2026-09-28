@@ -1,4 +1,4 @@
-import { buildURL, withBase } from '../api'
+import { apiFetch, buildURL, withBase } from '../api'
 
 // Wire types for /api/v1/alert-settings. Durations travel as Go
 // duration strings ("10m") so the settings page, the database and
@@ -49,7 +49,7 @@ async function failure(res: Response, what: string): Promise<Error> {
 }
 
 export async function fetchAlertSettings(signal?: AbortSignal): Promise<AlertSettingsState> {
-  const res = await fetch(withBase('/api/v1/alert-settings'), { signal })
+  const res = await apiFetch(withBase('/api/v1/alert-settings'), { signal })
   if (!res.ok) throw await failure(res, 'alert-settings request failed')
   return (await res.json()) as AlertSettingsState
 }
@@ -65,7 +65,7 @@ export async function saveAlertSettings(
 ): Promise<void> {
   const body: AlertSettings & { smtp_password?: string } = { ...settings }
   if (password !== null) body.smtp_password = password
-  const res = await fetch(withBase('/api/v1/alert-settings'), {
+  const res = await apiFetch(withBase('/api/v1/alert-settings'), {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -77,7 +77,7 @@ export async function saveAlertSettings(
 export async function fetchOrgAlertSettings(
   signal?: AbortSignal,
 ): Promise<Record<string, OrgAlertSettings>> {
-  const res = await fetch(withBase('/api/v1/organization-alert-settings'), { signal })
+  const res = await apiFetch(withBase('/api/v1/organization-alert-settings'), { signal })
   if (!res.ok) throw await failure(res, 'organization-alert-settings request failed')
   const body = (await res.json()) as { organizations?: Record<string, OrgAlertSettings> }
   return body.organizations ?? {}
@@ -91,7 +91,7 @@ export async function saveOrgAlertSettings(
   const url = buildURL('/api/v1/organization-alert-settings', {
     organization_id: organizationID,
   })
-  const res = await fetch(url, {
+  const res = await apiFetch(url, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(settings),
@@ -110,7 +110,7 @@ export async function sendAlertTestEmail(
   const url = buildURL('/api/v1/alert-settings/test-email', {
     organization_id: organizationID,
   })
-  const res = await fetch(url, { method: 'POST', signal })
+  const res = await apiFetch(url, { method: 'POST', signal })
   if (!res.ok) throw await failure(res, 'test-email failed')
   const body = (await res.json()) as { recipients?: string[] }
   return body.recipients ?? []

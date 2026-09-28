@@ -6,10 +6,13 @@ import { RangeSwitch } from './RangeSwitch'
 type Props = {
   preset: RangePreset
   onPresetChange: (next: RangePreset) => void
+  // presetLocked hides the Day/Month/Year switch for day-chart roles.
+  presetLocked?: boolean
   anchor: Date
   onAnchorChange: (next: Date) => void
   debug: boolean
-  onDebugToggle: () => void
+  // Without a handler the debug toggle is not offered.
+  onDebugToggle?: () => void
 }
 
 // DashboardControls is the strip of interactive widgets that sits
@@ -19,6 +22,7 @@ type Props = {
 export function DashboardControls({
   preset,
   onPresetChange,
+  presetLocked = false,
   anchor,
   onAnchorChange,
   debug,
@@ -26,8 +30,9 @@ export function DashboardControls({
 }: Props) {
   return (
     <div className="dashboard-controls">
-      <RangeSwitch value={preset} onChange={onPresetChange} />
+      {!presetLocked && <RangeSwitch value={preset} onChange={onPresetChange} />}
       <PeriodPicker preset={preset} anchor={anchor} onChange={onAnchorChange} />
+      {onDebugToggle && (
       <button
         type="button"
         className={`debug-toggle${debug ? ' is-active' : ''}`}
@@ -42,6 +47,7 @@ export function DashboardControls({
         <Bug size={14} weight={debug ? 'fill' : 'regular'} />
         <span>Debug</span>
       </button>
+      )}
     </div>
   )
 }

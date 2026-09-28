@@ -81,6 +81,9 @@ type Handlers struct {
 	// pv_plan_daily cache alone (no upstream fill), which is what tests
 	// and offline deployments get.
 	pvPlan *pvplan.Client
+	// auth enforces sessions and the route table's permissions. nil
+	// serves every route openly (handler tests).
+	auth *Auth
 }
 
 // SetPvPlanClient installs the forecast-flow client that fills the
@@ -355,58 +358,6 @@ func (h *Handlers) SetOrganizations(orgs []OrganizationInfo) {
 	h.organizations = out
 }
 
-func (h *Handlers) Router() http.Handler {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/healthz", h.healthz)
-	mux.HandleFunc("/readyz", h.readyz)
-	mux.HandleFunc("/api/v1/dashboard-config", h.dashboardConfig)
-	mux.HandleFunc("/api/v1/organizations", h.organizationsList)
-	mux.HandleFunc("/api/v1/current", h.current)
-	mux.HandleFunc("/api/v1/timeseries", h.timeseries)
-	mux.HandleFunc("/api/v1/samples", h.samples)
-	mux.HandleFunc("/api/v1/registers", h.registers)
-	mux.HandleFunc("/api/v1/energy-summary", h.energySummary)
-	mux.HandleFunc("/api/v1/energy-flow-hourly", h.energyFlowHourly)
-	mux.HandleFunc("/api/v1/pv-plan-summary", h.pvPlanSummary)
-	mux.HandleFunc("/api/v1/dam-prices", h.damPrices)
-	mux.HandleFunc("/api/v1/dam-prices/refresh", h.damPricesRefresh)
-	mux.HandleFunc("/api/v1/dam-prices/refresh-range", h.damPricesRefreshRange)
-	mux.HandleFunc("/api/v1/fusionsolar/import", h.fusionSolarImport)
-	mux.HandleFunc("/api/v1/fusionsolar/config", h.fusionSolarConfig)
-	mux.HandleFunc("/api/v1/askoe/import", h.askoeImport)
-	mux.HandleFunc("/api/v1/weather-forecast", h.weatherForecast)
-	mux.HandleFunc("/api/v1/plant-inventory/history", h.plantInventoryHistory)
-	mux.HandleFunc("/api/v1/plant-inventory", h.plantInventory)
-	mux.HandleFunc("/api/v1/organization-tariffs", h.organizationTariffs)
-	mux.HandleFunc("/api/v1/organization-tariff-schedule", h.organizationTariffSchedule)
-	mux.HandleFunc("/api/v1/alert-settings", h.alertSettings)
-	mux.HandleFunc("/api/v1/alert-settings/test-email", h.alertSettingsTestEmail)
-	mux.HandleFunc("/api/v1/organization-alert-settings", h.organizationAlertSettings)
-	mux.HandleFunc("/api/v1/economics/daily", h.economicsDaily)
-	mux.HandleFunc("/api/v1/economics/monthly", h.economicsMonthly)
-	mux.HandleFunc("/api/v1/economics/annual", h.economicsAnnual)
-	mux.HandleFunc("/api/v1/economics/portfolio", h.economicsPortfolio)
-	mux.HandleFunc("/api/v1/economics/recompute", h.economicsRecompute)
-	mux.HandleFunc("/api/v1/economics/data-range", h.economicsDataRange)
-	mux.HandleFunc("/api/v1/uze-plan", h.uzePlan)
-	mux.HandleFunc("/api/v1/edge/batch", h.edgeBatch)
-	mux.HandleFunc("/api/v1/edge/heartbeat", h.edgeHeartbeat)
-	mux.HandleFunc("/api/v1/edge/manifest", h.edgeManifest)
-	mux.HandleFunc("/api/v1/edge/manifest/publish", h.edgeManifestPublish)
-	mux.HandleFunc("/api/v1/edge/manifest/publish-manual", h.edgeManifestPublishManual)
-	mux.HandleFunc("/api/v1/edge/sites", h.edgeSites)
-	mux.HandleFunc("/api/v1/edge/load-plan", h.edgeLoadPlan)
-	mux.HandleFunc("/api/v1/edge/plan/preview", h.edgePlanPreview)
-	mux.HandleFunc("/api/v1/edge/manifests", h.edgeManifestJournal)
-	mux.HandleFunc("/api/v1/edge/settings", h.edgeSettings)
-	mux.HandleFunc("/api/v1/edge/status", h.edgeStatus)
-	mux.HandleFunc("/api/v1/edge/fleet", h.edgeFleet)
-	mux.HandleFunc("/swagger", h.swaggerUI)
-	mux.HandleFunc("/swagger/", h.swaggerUI)
-	mux.HandleFunc("/swagger/openapi.yaml", h.swaggerSpec)
-	return h.withSecurityHeaders(h.withCORS(h.withGzip(mux)))
-}
-
 func (h *Handlers) healthz(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
@@ -435,22 +386,24 @@ func (h *Handlers) dashboardConfig(w http.ResponseWriter, r *http.Request) {
 }
 
 // organizationsList returns the public metadata for every configured
-// organization (id, display name, optional location). The dashboard
-// uses this to populate the org switcher and to look up coordinates
-// for per-site features (e.g. the weather widget) without hard-coding
-// them in the frontend.
+// organization the caller holds any role on (id, display name, optional
+// location). The dashboard uses this to populate the org switcher and
+// to look up coordinates for per-site features (e.g. the weather
+// widget) without hard-coding them in the frontend.
 func (h *Handlers) organizationsList(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	resp := OrganizationsResponse{Organizations: h.organizations}
-	if resp.Organizations == nil {
-		// Always emit an explicit empty array so JSON consumers can
-		// iterate without a nil-check.
-		resp.Organizations = []OrganizationInfo{}
+	// Always an explicit array so JSON consumers can iterate without a
+	// nil-check.
+	orgs := make([]OrganizationInfo, 0, len(h.organizations))
+	for _, o := range h.organizations {
+		if h.auth == nil || principalFrom(r.Context()).Covers(o.ID) {
+			orgs = append(orgs, o)
+		}
 	}
-	writeJSON(w, http.StatusOK, resp)
+	writeJSON(w, http.StatusOK, OrganizationsResponse{Organizations: orgs})
 }
 
 // registers serves the static metric_key → Modbus register map used
@@ -1840,8 +1793,13 @@ func (h *Handlers) withCORS(next http.Handler) http.Handler {
 			origin = "*"
 		}
 		w.Header().Set("Access-Control-Allow-Origin", origin)
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		// The session cookie crosses origins only to an explicitly named
+		// dashboard origin: browsers refuse credentials against "*".
+		if origin != "*" {
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
+		}
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, "+csrfHeader)
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return

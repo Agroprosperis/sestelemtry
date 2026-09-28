@@ -1,11 +1,62 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  apiFetch,
+  apiRequest,
   fetchRawSamplesCsv,
   fetchRegisters,
   fetchWeatherForecastFromAPI,
   refreshDAMPrices,
   resetRegistersCache,
+  UNAUTHORIZED_EVENT,
 } from './api'
+
+describe('apiRequest / apiFetch', () => {
+  beforeEach(() => {
+    vi.unstubAllGlobals()
+  })
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  function stub(status = 200) {
+    const spy = vi.fn<typeof fetch>(async () => new Response('{}', { status }))
+    vi.stubGlobal('fetch', spy)
+    return spy
+  }
+
+  it('sends the session cookie and marks state-changing requests only', async () => {
+    const spy = stub()
+    await apiRequest('/api/v1/current?organization_id=ze')
+    await apiRequest('/api/v1/organization-tariffs?organization_id=ze', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+    })
+    const [get, put] = spy.mock.calls.map((c) => c[1] as RequestInit)
+    expect(get.credentials).toBe('include')
+    expect(new Headers(get.headers).has('X-Requested-With')).toBe(false)
+    expect(put.credentials).toBe('include')
+    expect(put.body).toBe('{}')
+    const headers = new Headers(put.headers)
+    expect(headers.get('X-Requested-With')).toBe('fetch')
+    expect(headers.get('Content-Type')).toBe('application/json')
+  })
+
+  it('reports a 401 from a data call, but not from apiRequest', async () => {
+    stub(401)
+    const onUnauthorized = vi.fn()
+    window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized)
+    try {
+      await apiRequest('/api/v1/auth/me')
+      expect(onUnauthorized).not.toHaveBeenCalled()
+      const res = await apiFetch('/api/v1/current?organization_id=ze')
+      expect(res.status).toBe(401)
+      expect(onUnauthorized).toHaveBeenCalledTimes(1)
+    } finally {
+      window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized)
+    }
+  })
+})
 
 // fetchRawSamplesCsv post-processes the response body just enough to
 // detect the server's truncation sentinel and pull the suggested

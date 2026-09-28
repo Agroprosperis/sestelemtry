@@ -2,7 +2,7 @@
 // internal/api/edge_fleet_handlers.go and the settings / manual-publish
 // endpoints in internal/api/edge_plan_handlers.go + edge_planner.go).
 
-import { buildURL, withBase } from '../api'
+import { apiFetch, buildURL, withBase } from '../api'
 
 export type EdgeHeartbeatInfo = {
   online: boolean
@@ -241,7 +241,7 @@ export async function fetchEdgeStatus(
   signal?: AbortSignal,
 ): Promise<EdgeSiteStatus> {
   const res = await ensureOK(
-    await fetch(buildURL('/api/v1/edge/status', { site_id: siteID, events: String(events) }), {
+    await apiFetch(buildURL('/api/v1/edge/status', { site_id: siteID, events: String(events) }), {
       signal,
     }),
     'edge status',
@@ -250,7 +250,7 @@ export async function fetchEdgeStatus(
 }
 
 export async function fetchEdgeFleet(signal?: AbortSignal): Promise<EdgeFleet> {
-  const res = await ensureOK(await fetch(withBase('/api/v1/edge/fleet'), { signal }), 'edge fleet')
+  const res = await ensureOK(await apiFetch(withBase('/api/v1/edge/fleet'), { signal }), 'edge fleet')
   return (await res.json()) as EdgeFleet
 }
 
@@ -259,7 +259,7 @@ export async function fetchEdgeSettings(
   signal?: AbortSignal,
 ): Promise<{ saved: boolean; settings: EdgeSiteSettings }> {
   const res = await ensureOK(
-    await fetch(buildURL('/api/v1/edge/settings', { site_id: siteID }), { signal }),
+    await apiFetch(buildURL('/api/v1/edge/settings', { site_id: siteID }), { signal }),
     'edge settings',
   )
   return (await res.json()) as { saved: boolean; settings: EdgeSiteSettings }
@@ -270,7 +270,7 @@ export async function saveEdgeSettings(
   settings: EdgeSiteSettings,
 ): Promise<void> {
   await ensureOK(
-    await fetch(buildURL('/api/v1/edge/settings', { site_id: siteID }), {
+    await apiFetch(buildURL('/api/v1/edge/settings', { site_id: siteID }), {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(settings),
@@ -284,7 +284,7 @@ export async function publishManualManifest(
   req: ManualPublishRequest,
 ): Promise<PublishResult> {
   const res = await ensureOK(
-    await fetch(buildURL('/api/v1/edge/manifest/publish-manual', { site_id: siteID }), {
+    await apiFetch(buildURL('/api/v1/edge/manifest/publish-manual', { site_id: siteID }), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(req),
@@ -296,7 +296,7 @@ export async function publishManualManifest(
 
 export async function publishAutoManifest(siteID: string): Promise<PublishResult> {
   const res = await ensureOK(
-    await fetch(buildURL('/api/v1/edge/manifest/publish', { site_id: siteID }), {
+    await apiFetch(buildURL('/api/v1/edge/manifest/publish', { site_id: siteID }), {
       method: 'POST',
     }),
     'publish manifest',

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { refreshDAMPrices } from '../api'
+import { useAccess } from '../auth/authContext'
 import { useOrganizationParam } from '../dashboard/hooks/useOrganizationParam'
 import { ModeTopBar, type TopBarMenuItem } from '../shell/ModeTopBar'
 import { dailyTotals } from './compute'
@@ -172,7 +173,8 @@ function updateUrl(date: string, range: EconomicsRange, windowFrom: string, wind
 }
 
 export function EconomicsPage() {
-  const { organizationID, options, change: onOrganizationChange } = useOrganizationParam()
+  const { organizationID, options, change: onOrganizationChange } = useOrganizationParam('economics.read')
+  const canEdit = useAccess().can('economics.write', organizationID)
   const [date, setDate] = useState<string>(readDateFromUrl)
   const [range, setRange] = useState<EconomicsRange>(readRangeFromUrl)
   const initialWindow = readWindowFromUrl()
@@ -360,11 +362,13 @@ export function EconomicsPage() {
 
   // The economics-specific admin actions live in the shell's «Сервіс»
   // menu (the DAM buttons left the header toolbar).
-  const serviceMenu: TopBarMenuItem[] = [
-    { id: 'dam-refresh', label: 'Оновити ціни РДН', onSelect: () => void onRefreshDam() },
-    { id: 'dam-import', label: 'Імпорт цін РДН', onSelect: () => setDamImportOpen(true) },
-    { id: 'recompute', label: 'Перерахунок економіки', onSelect: () => setRecomputeOpen(true) },
-  ]
+  const serviceMenu: TopBarMenuItem[] = canEdit
+    ? [
+        { id: 'dam-refresh', label: 'Оновити ціни РДН', onSelect: () => void onRefreshDam() },
+        { id: 'dam-import', label: 'Імпорт цін РДН', onSelect: () => setDamImportOpen(true) },
+        { id: 'recompute', label: 'Перерахунок економіки', onSelect: () => setRecomputeOpen(true) },
+      ]
+    : []
 
   return (
     <main className="economics-page">
@@ -407,6 +411,7 @@ export function EconomicsPage() {
         onTariffsChange={setTariffs}
         tariffsStatus={tariffsStatus}
         tariffsError={tariffsError}
+        readOnly={!canEdit}
       />
 
       {recomputeOpen && (

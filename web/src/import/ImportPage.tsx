@@ -41,7 +41,7 @@ export function ImportPage() {
   // One page-level object picker (in the shared top bar); both import
   // cards receive the same organization, so they can no longer drift
   // apart like the two per-card selects used to.
-  const { organizationID, options, change: onOrganizationChange } = useOrganizationParam()
+  const { organizationID, options, change: onOrganizationChange } = useOrganizationParam('service')
 
   return (
     <main className="import-page">

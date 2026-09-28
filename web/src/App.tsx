@@ -1,12 +1,19 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AlertsPage } from './alerts/AlertsPage'
+import { UNAUTHORIZED_EVENT } from './api'
+import { AuthNotice } from './auth/AuthNotice'
+import { AuthContext, type AuthContextValue } from './auth/authContext'
+import { fetchMe, logout } from './auth/authClient'
+import { LoginPage } from './auth/LoginPage'
+import { accessFor, firstAllowedView, type AppView, type AuthMe } from './auth/permissions'
 import { ControlPage } from './control/ControlPage'
 import { Dashboard } from './dashboard/Dashboard'
 import { EconomicsPage } from './economics/EconomicsPage'
 import { ImportPage } from './import/ImportPage'
 import { StationPage } from './station/StationPage'
+import { UsersPage } from './users/UsersPage'
 
-type View = 'dashboard' | 'economics' | 'import' | 'station' | 'alerts' | 'control'
+type View = AppView
 
 // readView reads the `?view=` query parameter on every render and
 // returns the active page id. We deliberately avoid pulling in
@@ -22,6 +29,7 @@ function readView(): View {
   if (view === 'station') return 'station'
   if (view === 'alerts') return 'alerts'
   if (view === 'control') return 'control'
+  if (view === 'users') return 'users'
   // The standalone planner moved into the control mode's «План УЗЕ»
   // tab; old ?view=planner links (bookmarks, dashboard header) land
   // there. The URL is normalised so back/forward stays coherent.
@@ -40,8 +48,26 @@ function readView(): View {
   return 'dashboard'
 }
 
+// replaceView points the URL at a view the user may open, without
+// adding a history entry for the one they may not.
+function replaceView(view: View) {
+  const url = new URL(window.location.href)
+  if (view === 'dashboard') url.searchParams.delete('view')
+  else url.searchParams.set('view', view)
+  url.searchParams.delete('tab')
+  window.history.replaceState({}, '', url)
+}
+
+type Session =
+  | { status: 'loading' }
+  | { status: 'anonymous' }
+  | { status: 'unreachable'; message: string }
+  | { status: 'signed-in'; me: AuthMe }
+
 function App() {
   const [view, setView] = useState<View>(readView)
+  const [session, setSession] = useState<Session>({ status: 'loading' })
+  const [bootKey, setBootKey] = useState(0)
 
   // Listen for back/forward navigation so the lightweight query-param
   // routing still feels native: hitting the back button after going to
@@ -54,6 +80,101 @@ function App() {
     return () => window.removeEventListener('popstate', handler)
   }, [])
 
+  useEffect(() => {
+    const ac = new AbortController()
+    fetchMe(ac.signal)
+      .then((me) => setSession(me ? { status: 'signed-in', me } : { status: 'anonymous' }))
+      .catch((e: unknown) => {
+        if (e instanceof DOMException && e.name === 'AbortError') return
+        setSession({
+          status: 'unreachable',
+          message: e instanceof TypeError ? 'Сервер не відповідає.' : e instanceof Error ? e.message : '',
+        })
+      })
+    return () => ac.abort()
+  }, [bootKey])
+
+  // A session that expires or is revoked mid-use: reload rather than
+  // swap in the login form, so nothing the previous session loaded
+  // (module caches, open forms) outlives it.
+  const signedIn = session.status === 'signed-in'
+  useEffect(() => {
+    if (!signedIn) return
+    const onUnauthorized = () => window.location.reload()
+    window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized)
+    return () => window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized)
+  }, [signedIn])
+
+  const signOut = useCallback(async () => {
+    try {
+      await logout()
+    } finally {
+      window.location.reload()
+    }
+  }, [])
+
+  const auth = useMemo<AuthContextValue | null>(
+    () =>
+      session.status === 'signed-in'
+        ? { me: session.me, access: accessFor(session.me), logout: signOut }
+        : null,
+    [session, signOut],
+  )
+
+  // A view the user may not open (an old link, the default dashboard for
+  // an economist) shows their first allowed one instead.
+  const landing = auth ? firstAllowedView(auth.access) : null
+  const shown = auth && landing ? (auth.access.canView(view) ? view : landing) : null
+  useEffect(() => {
+    if (shown && shown !== view) replaceView(shown)
+  }, [shown, view])
+
+  if (session.status === 'loading') return null
+  if (session.status === 'unreachable') {
+    return (
+      <AuthNotice
+        title="Немає звʼязку з сервером"
+        actions={
+          <button
+            type="button"
+            className="auth-primary"
+            onClick={() => {
+              setSession({ status: 'loading' })
+              setBootKey((k) => k + 1)
+            }}
+          >
+            Спробувати знову
+          </button>
+        }
+      >
+        Не вдалося перевірити сеанс. {session.message}
+      </AuthNotice>
+    )
+  }
+  if (!auth) {
+    return <LoginPage onSignedIn={(me) => setSession({ status: 'signed-in', me })} />
+  }
+
+  if (!shown) {
+    return (
+      <AuthNotice
+        title="Немає доступу"
+        actions={
+          <button type="button" className="auth-secondary" onClick={() => void signOut()}>
+            Вийти
+          </button>
+        }
+      >
+        Вашому обліковому запису ще не призначено ролей на жоден обʼєкт. Зверніться до
+        адміністратора.
+      </AuthNotice>
+    )
+  }
+
+  return <AuthContext.Provider value={auth}>{renderView(shown)}</AuthContext.Provider>
+}
+
+function renderView(view: View) {
   if (view === 'economics') {
     return <EconomicsPage />
   }
@@ -68,6 +189,9 @@ function App() {
   }
   if (view === 'control') {
     return <ControlPage />
+  }
+  if (view === 'users') {
+    return <UsersPage />
   }
   return <Dashboard />
 }

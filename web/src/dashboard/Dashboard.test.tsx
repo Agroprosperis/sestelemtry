@@ -1,5 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
+import { AuthContext } from '../auth/authContext'
+import { accessFor, type AuthMe } from '../auth/permissions'
 import { Dashboard } from './Dashboard'
 import { EMPTY_FLOWS } from './transforms/flows'
 import { NO_DATA_ALLOCATION } from './transforms/liveAllocation'
@@ -61,5 +63,30 @@ describe('Dashboard', () => {
     // standalone diagram on the right also renders the same SOC,
     // so we expect at least one match.
     expect(screen.getAllByText(/SOC\s+88/).length).toBeGreaterThan(0)
+  })
+
+  it('gives an engineer the day chart without the admin and money tools', () => {
+    const engineer: AuthMe = {
+      user: { id: 3, email: 'eng@example.com', name: '' },
+      global_admin: false,
+      grants: [{ role: 'engineer', organization_id: 'ze' }],
+      organizations: [{ id: 'ze', name: 'ZE', permissions: ['analytics.day'] }],
+    }
+    render(
+      <AuthContext.Provider value={{ me: engineer, access: accessFor(engineer), logout: vi.fn(async () => {}) }}>
+        <Dashboard />
+      </AuthContext.Provider>,
+    )
+    expect(screen.queryByRole('button', { name: 'Month' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Debug' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Сервіс' })).toBeNull()
+    expect(screen.queryByRole('tablist', { name: 'Режим інтерфейсу' })).toBeNull()
+    expect(screen.queryByText('Loading…')).toBeNull()
+  })
+
+  it('keeps the full toolset outside the signed-in app', () => {
+    render(<Dashboard />)
+    expect(screen.getAllByRole('button', { name: 'Month' }).length).toBeGreaterThan(0)
+    expect(screen.getAllByRole('button', { name: 'Debug' }).length).toBeGreaterThan(0)
   })
 })

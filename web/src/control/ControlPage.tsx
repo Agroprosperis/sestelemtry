@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import '../dashboard/dashboard.css'
 import './control.css'
 import { PlannerPage } from '../planner/PlannerPage'
+import { useAccess } from '../auth/authContext'
 import { useOrganizationParam } from '../dashboard/hooks/useOrganizationParam'
 import { fetchEdgeSites } from '../planner/plannerClient'
 import { fetchEdgeStatus, type EdgeSiteStatus } from './controlClient'
@@ -35,7 +36,8 @@ function readTab(): Tab {
 }
 
 export function ControlPage() {
-  const { organizationID, change: changeOrganization } = useOrganizationParam()
+  const { organizationID, change: changeOrganization } = useOrganizationParam('control')
+  const access = useAccess()
   const [sites, setSites] = useState<string[]>([])
   const [sitesLoaded, setSitesLoaded] = useState(false)
   const [tab, setTab] = useState<Tab>(readTab)
@@ -104,10 +106,12 @@ export function ControlPage() {
 
   // Cross-page navigation only; the planner and the journal live in
   // the tabs, so no menu entries for them.
-  const serviceMenu: TopBarMenuItem[] = [
-    { id: 'station', label: 'Паспорт станції', onSelect: () => goTo('station') },
-    { id: 'alerts', label: 'Сповіщення', onSelect: () => goTo('alerts') },
-  ]
+  const serviceMenu: TopBarMenuItem[] = access.can('service', organizationID)
+    ? [
+        { id: 'station', label: 'Паспорт станції', onSelect: () => goTo('station') },
+        { id: 'alerts', label: 'Сповіщення', onSelect: () => goTo('alerts') },
+      ]
+    : []
 
   return (
     <main className="dashboard-page">
@@ -148,7 +152,11 @@ export function ControlPage() {
       ) : tab === 'modes' ? (
         <ModesTab site={site} status={status} onChanged={refreshStatus} />
       ) : tab === 'limits' ? (
-        <SettingsTab site={site} onChanged={refreshStatus} />
+        <SettingsTab
+          site={site}
+          canEdit={access.can('technical.write', site)}
+          onChanged={refreshStatus}
+        />
       ) : (
         <JournalTab site={site} status={status} />
       )}

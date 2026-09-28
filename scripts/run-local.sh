@@ -7,6 +7,9 @@ CONFIG_FILE="${CONFIG_FILE:-$ROOT_DIR/config.yaml}"
 MODE="${1:-all}"
 API_LISTEN="${API_LISTEN:-:8080}"
 VITE_API_BASE_URL="${VITE_API_BASE_URL:-http://localhost:8080}"
+# The web calls the API cross-origin here, so the session cookie only
+# travels when the API names the web origin explicitly (never "*").
+API_ALLOW_ORIGIN="${API_ALLOW_ORIGIN:-http://localhost:5173}"
 
 collector_pid=""
 api_pid=""
@@ -27,7 +30,10 @@ Environment overrides:
   CONFIG_FILE       Path to collector config (default: ./config.yaml)
   DATABASE_URL      PostgreSQL URL (required for collector/api if missing in config)
   API_LISTEN        API listen address (default: :8080)
+  API_ALLOW_ORIGIN  Web origin the API accepts credentials from (default: http://localhost:5173)
   VITE_API_BASE_URL Web API base URL (default: http://localhost:8080)
+  AUTH_BOOTSTRAP_EMAIL, AUTH_BOOTSTRAP_PASSWORD
+                    First administrator, created while no account exists
 EOF
 }
 
@@ -92,7 +98,8 @@ start_api() {
   echo "Starting api on $API_LISTEN..."
   (
     cd "$ROOT_DIR"
-    DATABASE_URL="$DATABASE_URL" go run ./cmd/api -listen "$API_LISTEN"
+    DATABASE_URL="$DATABASE_URL" go run ./cmd/api -listen "$API_LISTEN" \
+      -config "$CONFIG_FILE" -allow-origin "$API_ALLOW_ORIGIN"
   ) &
   api_pid="$!"
 }

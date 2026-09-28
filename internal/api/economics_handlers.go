@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/nesh/sestelemetry/internal/auth"
 	"github.com/nesh/sestelemetry/internal/economics"
 )
 
@@ -1189,10 +1190,11 @@ func (h *Handlers) economicsPortfolio(w http.ResponseWriter, r *http.Request) {
 		Sites: make([]EconomicsPortfolioSite, 0, len(h.organizations)),
 	}
 	// The demo organization carries synthetic data and is not a real
-	// site, so it must never appear in the portfolio rollup.
+	// site, so it must never appear in the portfolio rollup. The rollup
+	// covers only the organizations the caller may read economics of.
 	orgs := make([]OrganizationInfo, 0, len(h.organizations))
 	for _, org := range h.organizations {
-		if org.ID != demoOrgID {
+		if org.ID != demoOrgID && h.visibleTo(r, org.ID, auth.PermEconomicsRead) {
 			orgs = append(orgs, org)
 		}
 	}

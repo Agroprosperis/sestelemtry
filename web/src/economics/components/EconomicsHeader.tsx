@@ -50,6 +50,9 @@ type Props = {
   onTariffsChange: (next: Tariffs) => void
   tariffsStatus: OrgTariffsStatus
   tariffsError: string | null
+  // readOnly shows the tariffs without letting them change (no
+  // economics.write on this object).
+  readOnly?: boolean
 }
 
 // statusLabel maps the hook's coarse state machine to the inline
@@ -204,6 +207,7 @@ export function EconomicsHeader({
   onTariffsChange,
   tariffsStatus,
   tariffsError,
+  readOnly = false,
 }: Props) {
   const update = (patch: Partial<Tariffs>) => onTariffsChange({ ...tariffs, ...patch })
   const statusText = statusLabel(tariffsStatus)
@@ -283,6 +287,7 @@ export function EconomicsHeader({
             </span>
           )}
         </summary>
+        <fieldset className="economics-tariffs-body" disabled={readOnly}>
         <div className="economics-tariffs-grid">
           <NumericField
             label="Розподіл (Distribution)"
@@ -409,6 +414,7 @@ export function EconomicsHeader({
           defaultEffectiveFrom={date}
           onLoadVersion={onTariffsChange}
         />
+        </fieldset>
       </details>
       )}
     </header>

@@ -1,4 +1,5 @@
 import { lazy, Suspense, useState } from 'react'
+import { useAccess } from '../auth/authContext'
 import './dashboard.css'
 import { ModeTopBar, type TopBarMenuItem } from '../shell/ModeTopBar'
 import { DashboardControls } from './components/DashboardControls'
@@ -37,11 +38,18 @@ function goToView(view: 'station' | 'alerts' | 'import') {
 }
 
 export function Dashboard() {
-  const { preset, anchor, setPreset, setAnchor } = useRangeParams()
+  const { organizationID, options, change: onOrganizationChange } = useOrganizationParam('analytics.day')
+  const access = useAccess()
+  // Engineers get the day chart only; money stays with the roles that
+  // may read economics, and the service tools with administrators.
+  const fullRange = access.can('analytics.full', organizationID)
+  const showRevenue = access.can('economics.read', organizationID)
+  const canService = access.can('service', organizationID)
+  const { preset, anchor, setPreset, setAnchor } = useRangeParams({ dayOnly: !fullRange })
   const [metricsAt, setMetricsAt] = useState<Date | null>(null)
   const [exportOpen, setExportOpen] = useState(false)
-  const { organizationID, options, change: onOrganizationChange } = useOrganizationParam()
-  const { debug, toggleDebug } = useDebugMode()
+  const { debug: debugWanted, toggleDebug } = useDebugMode()
+  const debug = canService && debugWanted
   const registers = useRegistersWhenDebug(debug)
 
   const {
@@ -80,12 +88,14 @@ export function Dashboard() {
     enabled: preset === 'day',
   })
 
-  const serviceMenu: TopBarMenuItem[] = [
-    { id: 'station', label: 'Паспорт станції', onSelect: () => goToView('station') },
-    { id: 'alerts', label: 'Сповіщення', onSelect: () => goToView('alerts') },
-    { id: 'import', label: 'Імпорт архіву', onSelect: () => goToView('import') },
-    { id: 'export', label: 'Експорт даних', onSelect: () => setExportOpen(true) },
-  ]
+  const serviceMenu: TopBarMenuItem[] = canService
+    ? [
+        { id: 'station', label: 'Паспорт станції', onSelect: () => goToView('station') },
+        { id: 'alerts', label: 'Сповіщення', onSelect: () => goToView('alerts') },
+        { id: 'import', label: 'Імпорт архіву', onSelect: () => goToView('import') },
+        { id: 'export', label: 'Експорт даних', onSelect: () => setExportOpen(true) },
+      ]
+    : []
 
   return (
     <main className="dashboard-page">
@@ -128,10 +138,11 @@ export function Dashboard() {
           <DashboardControls
             preset={preset}
             onPresetChange={setPreset}
+            presetLocked={!fullRange}
             anchor={anchor}
             onAnchorChange={setAnchor}
             debug={debug}
-            onDebugToggle={toggleDebug}
+            onDebugToggle={canService ? toggleDebug : undefined}
           />
           <WeatherCard
             organizationID={organizationID}
@@ -150,22 +161,24 @@ export function Dashboard() {
             pvForecastSeries={pvForecastSeries}
             aiPlan={aiPlan}
           />
-          <Suspense
-            fallback={
-              <div className="chart-card">
-                <div className="chart-wrap">
-                  <p className="chart-placeholder">Loading…</p>
+          {showRevenue && (
+            <Suspense
+              fallback={
+                <div className="chart-card">
+                  <div className="chart-wrap">
+                    <p className="chart-placeholder">Loading…</p>
+                  </div>
                 </div>
-              </div>
-            }
-          >
-            <RevenueChart
-              energySeries={energySeries}
-              damSeries={damSeries}
-              preset={preset}
-              loading={loading}
-            />
-          </Suspense>
+              }
+            >
+              <RevenueChart
+                energySeries={energySeries}
+                damSeries={damSeries}
+                preset={preset}
+                loading={loading}
+              />
+            </Suspense>
+          )}
         </div>
       </div>
 

@@ -51,6 +51,10 @@ services:
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       EDGE_SITE_TOKENS: ${EDGE_SITE_TOKENS:-}
       EDGE_ORG_SUFFIX: ${EDGE_ORG_SUFFIX:--edge}
+      # First administrator of every organization, created only while
+      # the database has no account at all.
+      AUTH_BOOTSTRAP_EMAIL: ${AUTH_BOOTSTRAP_EMAIL:-}
+      AUTH_BOOTSTRAP_PASSWORD: ${AUTH_BOOTSTRAP_PASSWORD:-}
     # Mount the same YAML the collector reads so the API can populate
     # /api/v1/organizations (org id, display name, location). Without
     # the mount + -config flag the endpoint returns an empty list and

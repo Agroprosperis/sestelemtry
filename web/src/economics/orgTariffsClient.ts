@@ -1,4 +1,4 @@
-import { buildURL } from '../api'
+import { apiFetch, buildURL } from '../api'
 import type { Tariffs } from './tariffs'
 
 // OrgTariffsApi mirrors the snake_case JSON shape served by
@@ -90,7 +90,7 @@ export async function fetchOrgTariffs(
   const url = buildURL('/api/v1/organization-tariffs', {
     organization_id: organizationID,
   })
-  const res = await fetch(url, { signal })
+  const res = await apiFetch(url, { signal })
   if (res.status === 404) return null
   if (!res.ok) {
     throw new Error(`organization-tariffs request failed: ${res.status}`)
@@ -125,7 +125,7 @@ export async function fetchTariffSchedule(
   const url = buildURL('/api/v1/organization-tariff-schedule', {
     organization_id: organizationID,
   })
-  const res = await fetch(url, { signal })
+  const res = await apiFetch(url, { signal })
   if (!res.ok) {
     throw new Error(`tariff-schedule request failed: ${res.status}`)
   }
@@ -148,7 +148,7 @@ export async function saveTariffScheduleVersion(
   const url = buildURL('/api/v1/organization-tariff-schedule', {
     organization_id: organizationID,
   })
-  const res = await fetch(url, {
+  const res = await apiFetch(url, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ effective_from: effectiveFrom, tariffs: tariffsToApi(tariffs) }),
@@ -173,7 +173,7 @@ export async function deleteTariffScheduleVersion(
     organization_id: organizationID,
     effective_from: effectiveFrom,
   })
-  const res = await fetch(url, { method: 'DELETE', signal })
+  const res = await apiFetch(url, { method: 'DELETE', signal })
   if (!res.ok && res.status !== 404) {
     throw new Error(`tariff-schedule delete failed: ${res.status}`)
   }
@@ -192,7 +192,7 @@ export async function saveOrgTariffs(
   const url = buildURL('/api/v1/organization-tariffs', {
     organization_id: organizationID,
   })
-  const res = await fetch(url, {
+  const res = await apiFetch(url, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(tariffsToApi(tariffs)),

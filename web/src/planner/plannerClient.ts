@@ -3,7 +3,7 @@
 // the same way economics/orgTariffsClient.ts is: the planner is the
 // only consumer of these endpoints.
 
-import { buildURL, withBase } from '../api'
+import { apiFetch, buildURL, withBase } from '../api'
 import type { TimeseriesResponse } from '../types'
 
 export type LoadPlanEntry = {
@@ -123,7 +123,7 @@ async function ensureOK(res: Response, what: string): Promise<Response> {
 
 export async function fetchEdgeSites(signal?: AbortSignal): Promise<string[]> {
   const res = await ensureOK(
-    await fetch(withBase('/api/v1/edge/sites'), { signal }),
+    await apiFetch(withBase('/api/v1/edge/sites'), { signal }),
     'edge sites',
   )
   const body = (await res.json()) as { sites: string[] | null }
@@ -132,7 +132,7 @@ export async function fetchEdgeSites(signal?: AbortSignal): Promise<string[]> {
 
 export async function fetchLoadPlan(siteID: string, signal?: AbortSignal): Promise<LoadPlanEntry[]> {
   const res = await ensureOK(
-    await fetch(buildURL('/api/v1/edge/load-plan', { site_id: siteID }), { signal }),
+    await apiFetch(buildURL('/api/v1/edge/load-plan', { site_id: siteID }), { signal }),
     'load plan',
   )
   const body = (await res.json()) as { entries: LoadPlanEntry[] | null }
@@ -141,7 +141,7 @@ export async function fetchLoadPlan(siteID: string, signal?: AbortSignal): Promi
 
 export async function saveLoadPlan(siteID: string, entries: LoadPlanEntry[]): Promise<void> {
   await ensureOK(
-    await fetch(buildURL('/api/v1/edge/load-plan', { site_id: siteID }), {
+    await apiFetch(buildURL('/api/v1/edge/load-plan', { site_id: siteID }), {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ entries }),
@@ -152,7 +152,7 @@ export async function saveLoadPlan(siteID: string, entries: LoadPlanEntry[]): Pr
 
 export async function clearLoadPlan(siteID: string): Promise<void> {
   await ensureOK(
-    await fetch(buildURL('/api/v1/edge/load-plan', { site_id: siteID }), { method: 'DELETE' }),
+    await apiFetch(buildURL('/api/v1/edge/load-plan', { site_id: siteID }), { method: 'DELETE' }),
     'clear load plan',
   )
 }
@@ -163,7 +163,7 @@ export async function fetchPlanPreview(
   signal?: AbortSignal,
 ): Promise<PlanPreview> {
   const res = await ensureOK(
-    await fetch(buildURL('/api/v1/edge/plan/preview', { site_id: siteID }), {
+    await apiFetch(buildURL('/api/v1/edge/plan/preview', { site_id: siteID }), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ draft }),
@@ -176,7 +176,7 @@ export async function fetchPlanPreview(
 
 export async function publishManifest(siteID: string): Promise<PublishResult> {
   const res = await ensureOK(
-    await fetch(buildURL('/api/v1/edge/manifest/publish', { site_id: siteID }), {
+    await apiFetch(buildURL('/api/v1/edge/manifest/publish', { site_id: siteID }), {
       method: 'POST',
     }),
     'publish manifest',
@@ -189,7 +189,7 @@ export async function fetchManifestJournal(
   signal?: AbortSignal,
 ): Promise<ManifestJournal> {
   const res = await ensureOK(
-    await fetch(buildURL('/api/v1/edge/manifests', { site_id: siteID, limit: '20' }), { signal }),
+    await apiFetch(buildURL('/api/v1/edge/manifests', { site_id: siteID, limit: '20' }), { signal }),
     'manifest journal',
   )
   return (await res.json()) as ManifestJournal
@@ -213,7 +213,7 @@ export async function fetchYesterdayLoadByHour(
     bucket: '1h',
     tz: timezone,
   })
-  const res = await ensureOK(await fetch(url, { signal }), 'yesterday load')
+  const res = await ensureOK(await apiFetch(url, { signal }), 'yesterday load')
   const body = (await res.json()) as TimeseriesResponse
   const out = new Map<number, number>()
   const fmt = new Intl.DateTimeFormat('en-GB', {

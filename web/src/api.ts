@@ -40,8 +40,34 @@ export function buildURL(path: string, params: Record<string, string | undefined
   return url.toString()
 }
 
+// UNAUTHORIZED_EVENT fires on window when the API answers 401 to a
+// data request: the session expired or an administrator revoked it.
+export const UNAUTHORIZED_EVENT = 'ses:unauthorized'
+
+// apiRequest is fetch for this dashboard's own API. The session cookie
+// goes along even when VITE_API_BASE_URL puts the API on another
+// origin, and state-changing requests carry the header the API demands
+// of them (a cross-site form can't set it). External services (n8n,
+// Open-Meteo) stay on plain fetch: the header would trigger a CORS
+// preflight they don't answer.
+export function apiRequest(input: string, init: RequestInit = {}): Promise<Response> {
+  const method = (init.method ?? 'GET').toUpperCase()
+  const headers = new Headers(init.headers)
+  if (method !== 'GET' && method !== 'HEAD') headers.set('X-Requested-With', 'fetch')
+  return fetch(input, { ...init, headers, credentials: 'include' })
+}
+
+// apiFetch is apiRequest for data calls: a 401 also raises
+// UNAUTHORIZED_EVENT so the app can send the user back to the login
+// form instead of every poller failing on its own.
+export async function apiFetch(input: string, init: RequestInit = {}): Promise<Response> {
+  const res = await apiRequest(input, init)
+  if (res.status === 401) window.dispatchEvent(new Event(UNAUTHORIZED_EVENT))
+  return res
+}
+
 export async function fetchDashboardConfig(signal?: AbortSignal): Promise<DashboardConfig> {
-  const res = await fetch(withBase('/api/v1/dashboard-config'), { signal })
+  const res = await apiFetch(withBase('/api/v1/dashboard-config'), { signal })
   if (!res.ok) {
     throw new Error(`dashboard-config request failed: ${res.status}`)
   }
@@ -59,7 +85,7 @@ let organizationsCache: Promise<OrganizationsResponse> | null = null
 export async function fetchOrganizations(signal?: AbortSignal): Promise<OrganizationsResponse> {
   if (organizationsCache) return organizationsCache
   organizationsCache = (async () => {
-    const res = await fetch(withBase('/api/v1/organizations'), { signal })
+    const res = await apiFetch(withBase('/api/v1/organizations'), { signal })
     if (!res.ok) {
       throw new Error(`organizations request failed: ${res.status}`)
     }
@@ -89,7 +115,7 @@ export async function fetchPlantInventory(
   const url = buildURL('/api/v1/plant-inventory', {
     organization_id: organizationID,
   })
-  const res = await fetch(url, { signal })
+  const res = await apiFetch(url, { signal })
   if (res.status === 404) {
     return null
   }
@@ -109,7 +135,7 @@ export async function fetchPlantInventoryHistory(
     organization_id: organizationID,
     limit: opts?.limit != null ? String(opts.limit) : undefined,
   })
-  const res = await fetch(url, { signal: opts?.signal })
+  const res = await apiFetch(url, { signal: opts?.signal })
   if (!res.ok) {
     throw new Error(`plant-inventory history request failed: ${res.status}`)
   }
@@ -127,7 +153,7 @@ let registersCache: Promise<RegistersResponse> | null = null
 export async function fetchRegisters(signal?: AbortSignal): Promise<RegistersResponse> {
   if (registersCache) return registersCache
   registersCache = (async () => {
-    const res = await fetch(withBase('/api/v1/registers'), { signal })
+    const res = await apiFetch(withBase('/api/v1/registers'), { signal })
     if (!res.ok) {
       throw new Error(`registers request failed: ${res.status}`)
     }
@@ -156,7 +182,7 @@ export async function fetchCurrent(
     organization_id: params.organizationID,
     at: params.at,
   })
-  const res = await fetch(url, { signal })
+  const res = await apiFetch(url, { signal })
   if (!res.ok) {
     throw new Error(`current request failed: ${res.status}`)
   }
@@ -184,7 +210,7 @@ export async function fetchTimeseries(
     tz: input.tz || Intl.DateTimeFormat().resolvedOptions().timeZone || undefined,
     aggregation: input.aggregation,
   })
-  const res = await fetch(url, { signal })
+  const res = await apiFetch(url, { signal })
   if (!res.ok) {
     throw new Error(`timeseries request failed: ${res.status}`)
   }
@@ -246,7 +272,7 @@ export async function fetchEnergySummary(
     metric_keys: input.metricKeys && input.metricKeys.length > 0 ? input.metricKeys.join(',') : undefined,
     tz: input.tz || Intl.DateTimeFormat().resolvedOptions().timeZone || undefined,
   })
-  const res = await fetch(url, { signal })
+  const res = await apiFetch(url, { signal })
   if (!res.ok) {
     throw new Error(`energy-summary request failed: ${res.status}`)
   }
@@ -297,7 +323,7 @@ export async function fetchPvPlanSummary(
     to: input.to,
     tz: input.tz || Intl.DateTimeFormat().resolvedOptions().timeZone || undefined,
   })
-  const res = await fetch(url, { signal })
+  const res = await apiFetch(url, { signal })
   if (!res.ok) {
     throw new Error(`pv-plan-summary request failed: ${res.status}`)
   }
@@ -352,7 +378,7 @@ export async function fetchRawSamplesZip(
   },
   opts?: { signal?: AbortSignal; onProgress?: (bytes: number) => void },
 ): Promise<{ blob: Blob; filename: string }> {
-  const res = await fetch(rawSamplesZipURL(input), { signal: opts?.signal })
+  const res = await apiFetch(rawSamplesZipURL(input), { signal: opts?.signal })
   if (!res.ok) {
     const body = await res.text().catch(() => '')
     const trimmed = body.trim()
@@ -446,7 +472,7 @@ export async function fetchRawSamplesCsv(
     limit: input.limit !== undefined ? String(input.limit) : undefined,
     tz: input.tz,
   })
-  const res = await fetch(url, { signal })
+  const res = await apiFetch(url, { signal })
   if (!res.ok) {
     const body = await res.text().catch(() => '')
     const trimmed = body.trim()
@@ -498,7 +524,7 @@ export async function fetchEnergyFlowHourly(
     date: input.date,
     tz: input.tz || Intl.DateTimeFormat().resolvedOptions().timeZone || undefined,
   })
-  const res = await fetch(url, { signal })
+  const res = await apiFetch(url, { signal })
   if (!res.ok) {
     throw new Error(`energy-flow-hourly request failed: ${res.status}`)
   }
@@ -578,7 +604,7 @@ export async function fetchEconomicsDaily(
     date: input.date,
     tz: input.tz || undefined,
   })
-  const res = await fetch(url, { signal })
+  const res = await apiFetch(url, { signal })
   if (!res.ok) {
     const body = await res.text().catch(() => '')
     const suffix = body ? ` — ${body.trim()}` : ''
@@ -655,7 +681,7 @@ export async function fetchUzeDayPlan(
     date: input.date,
     tz: input.tz || undefined,
   })
-  const res = await fetch(url, { signal })
+  const res = await apiFetch(url, { signal })
   if (!res.ok) {
     const body = await res.text().catch(() => '')
     const suffix = body ? ` — ${body.trim()}` : ''
@@ -907,7 +933,7 @@ export async function fetchEconomicsMonthly(
     month: input.month,
     tz: input.tz || undefined,
   })
-  const res = await fetch(url, { signal })
+  const res = await apiFetch(url, { signal })
   if (!res.ok) {
     const body = await res.text().catch(() => '')
     const suffix = body ? ` — ${body.trim()}` : ''
@@ -978,7 +1004,7 @@ export async function fetchEconomicsAnnual(
     to: input.to || undefined,
     tz: input.tz || undefined,
   })
-  const res = await fetch(url, { signal })
+  const res = await apiFetch(url, { signal })
   if (!res.ok) {
     const body = await res.text().catch(() => '')
     const suffix = body ? ` — ${body.trim()}` : ''
@@ -1049,7 +1075,7 @@ export async function fetchEconomicsPortfolio(
     to: input.to || undefined,
     tz: input.tz || undefined,
   })
-  const res = await fetch(url, { signal })
+  const res = await apiFetch(url, { signal })
   if (!res.ok) {
     const body = await res.text().catch(() => '')
     const suffix = body ? ` — ${body.trim()}` : ''
@@ -1081,7 +1107,7 @@ export async function recomputeEconomics(
     to: input.to,
     tz: input.tz || undefined,
   })
-  const res = await fetch(url, { method: 'POST', signal: opts?.signal })
+  const res = await apiFetch(url, { method: 'POST', signal: opts?.signal })
   try {
     return await consumeImportStream<EconomicsRecomputeResult>(res, opts?.onProgress)
   } catch (err) {
@@ -1110,7 +1136,7 @@ export async function fetchEconomicsDataRange(
     organization_id: input.organizationID,
     tz: input.tz || undefined,
   })
-  const res = await fetch(url, { signal })
+  const res = await apiFetch(url, { signal })
   if (!res.ok) {
     throw new Error(`economics data-range request failed: ${res.status}`)
   }
@@ -1126,7 +1152,7 @@ export async function fetchDAMPrices(
     from: input.from,
     to: input.to,
   })
-  const res = await fetch(url, { signal })
+  const res = await apiFetch(url, { signal })
   if (!res.ok) {
     throw new Error(`dam-prices request failed: ${res.status}`)
   }
@@ -1153,7 +1179,7 @@ export async function refreshDAMPrices(
     date: input.date,
     zone: input.zone !== undefined ? String(input.zone) : undefined,
   })
-  const res = await fetch(url, { method: 'POST', signal })
+  const res = await apiFetch(url, { method: 'POST', signal })
   if (!res.ok) {
     const body = await res.text().catch(() => '')
     const suffix = body ? ` — ${body.trim()}` : ''
@@ -1190,7 +1216,7 @@ export async function refreshDAMPricesRange(
     to: input.to,
     zone: input.zone !== undefined ? String(input.zone) : undefined,
   })
-  const res = await fetch(url, { method: 'POST', signal: opts?.signal })
+  const res = await apiFetch(url, { method: 'POST', signal: opts?.signal })
   try {
     return await consumeImportStream<DAMRefreshRangeResult>(res, opts?.onProgress)
   } catch (err) {
@@ -1213,7 +1239,7 @@ export type FusionSolarConfig = {
 }
 
 export async function fetchFusionSolarConfig(signal?: AbortSignal): Promise<FusionSolarConfig> {
-  const res = await fetch(buildURL('/api/v1/fusionsolar/config', {}), { signal })
+  const res = await apiFetch(buildURL('/api/v1/fusionsolar/config', {}), { signal })
   if (!res.ok) throw new Error(`fusionsolar config failed: ${res.status}`)
   return res.json()
 }
@@ -1363,7 +1389,7 @@ export async function runFusionSolarImport(
     from: input.from,
     to: input.to,
   })
-  const res = await fetch(url, {
+  const res = await apiFetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -1395,7 +1421,7 @@ export async function runAskoeImport(
   })
   const body = new FormData()
   body.append('file', input.file)
-  const res = await fetch(url, {
+  const res = await apiFetch(url, {
     method: 'POST',
     body,
     signal: opts?.signal,
@@ -1504,7 +1530,7 @@ export async function fetchWeatherForecastFromAPI(
     from: input.from,
     to: input.to,
   })
-  const res = await fetch(url, { signal })
+  const res = await apiFetch(url, { signal })
   if (!res.ok) {
     throw new Error(`weather-forecast request failed: ${res.status}`)
   }

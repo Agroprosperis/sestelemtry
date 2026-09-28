@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/nesh/sestelemetry/internal/alerts"
 )
 
@@ -526,6 +528,17 @@ func TestSwaggerSpecEndpoint(t *testing.T) {
 	body := rec.Body.String()
 	if !strings.Contains(body, "openapi: 3.0.3") {
 		t.Fatalf("expected openapi version in body, got %q", body)
+	}
+	var spec struct {
+		Paths map[string]any `yaml:"paths"`
+	}
+	if err := yaml.Unmarshal(rec.Body.Bytes(), &spec); err != nil {
+		t.Fatalf("spec is not valid YAML: %v", err)
+	}
+	for _, p := range []string{"/api/v1/auth/login", "/api/v1/auth/me", "/api/v1/users"} {
+		if _, ok := spec.Paths[p]; !ok {
+			t.Errorf("spec does not document %s", p)
+		}
 	}
 }
 

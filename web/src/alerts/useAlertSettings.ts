@@ -17,7 +17,10 @@ function message(e: unknown, fallback: string): string {
 }
 
 export type UseAlertSettings = {
+  /** null until loaded, and always without siteWide. */
   settings: AlertSettings | null
+  /** True once the settings the caller may see have loaded. */
+  loaded: boolean
   /** False while the page is still showing the config.yaml fallback. */
   saved: boolean
   passwordConfigured: boolean
@@ -45,8 +48,13 @@ export type UseAlertSettings = {
 // save-on-demand: it carries mail credentials and a switch that decides
 // whether anyone gets told about an outage, so a half-typed SMTP host
 // must not reach the watchdog.
-export function useAlertSettings(): UseAlertSettings {
+//
+// siteWide=false is for administrators of some organizations only: the
+// site-wide block (SMTP, default recipients) belongs to administrators
+// of every organization, so it is neither loaded nor saved.
+export function useAlertSettings({ siteWide = true }: { siteWide?: boolean } = {}): UseAlertSettings {
   const [settings, setSettings] = useState<AlertSettings | null>(null)
+  const [loaded, setLoaded] = useState(false)
   const [organizations, setOrganizations] = useState<Record<string, OrgAlertSettings>>({})
   const [passwordConfigured, setPasswordConfigured] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -68,16 +76,22 @@ export function useAlertSettings(): UseAlertSettings {
   // effect from triggering a cascading render on every mount.
   useEffect(() => {
     const ac = new AbortController()
-    Promise.all([fetchAlertSettings(ac.signal), fetchOrgAlertSettings(ac.signal)])
+    Promise.all([
+      siteWide ? fetchAlertSettings(ac.signal) : Promise.resolve(null),
+      fetchOrgAlertSettings(ac.signal),
+    ])
       .then(([state, orgs]) => {
-        const { smtp_password_configured, saved: isSaved, ...rest } = state
-        setSettings(rest)
-        setPasswordConfigured(smtp_password_configured)
-        setSaved(isSaved)
+        if (state) {
+          const { smtp_password_configured, saved: isSaved, ...rest } = state
+          setSettings(rest)
+          setPasswordConfigured(smtp_password_configured)
+          setSaved(isSaved)
+        }
         setOrganizations(orgs)
         setPassword(null)
         touchedOrgs.current = new Set()
         setDirty(false)
+        setLoaded(true)
         setLoading(false)
       })
       .catch((e: unknown) => {
@@ -86,7 +100,7 @@ export function useAlertSettings(): UseAlertSettings {
         setLoading(false)
       })
     return () => ac.abort()
-  }, [reloadKey])
+  }, [reloadKey, siteWide])
 
   const update = useCallback((patch: Partial<AlertSettings>) => {
     setSettings((prev) => (prev ? { ...prev, ...patch } : prev))
@@ -116,11 +130,11 @@ export function useAlertSettings(): UseAlertSettings {
   }, [])
 
   const save = useCallback(async () => {
-    if (!settings) return
+    if (siteWide && !settings) return
     setSaving(true)
     setError(null)
     try {
-      await saveAlertSettings(settings, password)
+      if (siteWide && settings) await saveAlertSettings(settings, password)
       for (const organizationID of touchedOrgs.current) {
         const entry = organizations[organizationID]
         if (!entry) continue
@@ -137,7 +151,7 @@ export function useAlertSettings(): UseAlertSettings {
     } finally {
       setSaving(false)
     }
-  }, [settings, organizations, password])
+  }, [siteWide, settings, organizations, password])
 
   const reload = useCallback(() => {
     setLoading(true)
@@ -148,6 +162,7 @@ export function useAlertSettings(): UseAlertSettings {
   return useMemo(
     () => ({
       settings,
+      loaded,
       saved,
       passwordConfigured,
       organizations,
@@ -166,6 +181,7 @@ export function useAlertSettings(): UseAlertSettings {
     }),
     [
       settings,
+      loaded,
       saved,
       passwordConfigured,
       organizations,

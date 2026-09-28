@@ -36,8 +36,9 @@ func main() {
 	listenAddr := flag.String("listen", ":8080", "HTTP listen address")
 	defaultDB := flag.String("database-url", "", "PostgreSQL connection string (fallback if DATABASE_URL is unset)")
 	allowOrigin := flag.String("allow-origin", "*", "Allowed CORS origin")
-	configPath := flag.String("config", "", "YAML config path (optional; enables /api/v1/organizations)")
+	configPath := flag.String("config", "", "YAML config path: its organizations are the object list and the scope of every role grant")
 	fusionConfigPath := flag.String("fusionsolar-config", "", "Separate YAML with FusionSolar import defaults (optional; falls back to FUSIONSOLAR_CONFIG)")
+	cookieSecure := flag.Bool("cookie-secure", false, "Mark the session cookie Secure (enable only when the dashboard is served over HTTPS)")
 	flag.Parse()
 
 	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
@@ -104,6 +105,12 @@ func main() {
 		log.Error("db_init_pv_plan", "err", err)
 		os.Exit(1)
 	}
+	// Dashboard accounts, sessions and role grants. Idempotent; mirrored
+	// by 017_auth.sql.
+	if err := storage.InitAuthSchema(ctx, pool); err != nil {
+		log.Error("db_init_auth", "err", err)
+		os.Exit(1)
+	}
 
 	store := api.NewStore(pool)
 	// Boot-time feature detection: if the collector has run migration 004
@@ -119,6 +126,18 @@ func main() {
 	log.Info("api_features", "daily_cagg", hasCAGG)
 
 	svc := api.NewHandlers(store, *allowOrigin)
+	// Every route but the health probes, login and the edge uplink
+	// needs a session. With no account yet, AUTH_BOOTSTRAP_EMAIL /
+	// AUTH_BOOTSTRAP_PASSWORD create an administrator of every
+	// organization; the API keeps serving the edge uplink either way.
+	authn := api.NewAuth(api.NewAuthStore(pool), api.AuthOptions{CookieSecure: *cookieSecure, Log: log})
+	svc.SetAuth(authn)
+	bootstrapEmail := strings.TrimSpace(os.Getenv("AUTH_BOOTSTRAP_EMAIL"))
+	if created, err := authn.Bootstrap(ctx, bootstrapEmail, os.Getenv("AUTH_BOOTSTRAP_PASSWORD")); err != nil {
+		log.Error("auth_bootstrap", "err", err)
+	} else if created {
+		log.Info("auth_bootstrap_admin_created", "email", bootstrapEmail)
+	}
 	// Per-day PV plan totals for the month/year plan-vs-actual card,
 	// read from the same n8n forecast flow the day chart plots.
 	svc.SetPvPlanClient(pvplan.NewClient(strings.TrimSpace(os.Getenv("PV_FORECAST_WEBHOOK_URL")), nil))
@@ -144,14 +163,18 @@ func main() {
 		svc.SetEdgeIngest(edgeIngest)
 		log.Info("api_edge_ingest_enabled", "sites", len(tokens), "org_suffix", orgSuffix)
 	}
-	// Optional: load org metadata from YAML so /api/v1/organizations
-	// can return display names + coordinates. The API server runs
-	// fine without a config (telemetry data lives in the DB), so a
-	// missing or malformed config logs a warning rather than aborting
-	// startup — the org list endpoint just returns an empty array.
+	// Load org metadata from YAML so /api/v1/organizations can return
+	// display names + coordinates. The organizations are also the scope
+	// of every role grant and the object list /api/v1/auth/me hands the
+	// dashboard, so without them nobody gets an object to pick. A
+	// missing or malformed config is still not fatal: the edge uplink
+	// must keep accepting telemetry.
 	cfgPath := strings.TrimSpace(*configPath)
 	if cfgPath == "" {
 		cfgPath = strings.TrimSpace(os.Getenv("CONFIG_PATH"))
+	}
+	if cfgPath == "" {
+		log.Error("api_config_missing", "hint", "pass -config (or CONFIG_PATH): role grants are scoped to its organizations")
 	}
 	var loadedCfg *config.Root
 	if cfgPath != "" {

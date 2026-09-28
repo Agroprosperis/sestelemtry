@@ -1,0 +1,191 @@
+/* Sign-in screen, access notices, the top-bar user menu and the
+   password dialog. */
+
+.auth-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+  box-sizing: border-box;
+  color: var(--text);
+}
+
+.auth-card {
+  width: 100%;
+  max-width: 380px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 28px 26px 24px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: 0 1px 2px rgba(var(--shadow-color), 0.04), 0 18px 40px -24px rgba(var(--shadow-color), 0.45);
+}
+
+.auth-logo {
+  height: 36px;
+  width: auto;
+  align-self: flex-start;
+  filter: var(--logo-filter);
+}
+
+.auth-card h1 {
+  margin: 4px 0 2px;
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.auth-card p {
+  margin: 0;
+  font-size: 0.87rem;
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+
+.auth-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.auth-field > span {
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--text-subtle);
+}
+
+.auth-field input {
+  background: var(--input-bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 10px 12px;
+  font: inherit;
+  font-size: 0.95rem;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.auth-field input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
+
+.auth-error {
+  padding: 10px 12px;
+  border-radius: 9px;
+  border: 1px solid var(--err-border);
+  background: var(--err-bg-soft);
+  color: var(--err-text);
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+
+.auth-ok {
+  padding: 10px 12px;
+  border-radius: 9px;
+  border: 1px solid var(--ok-border);
+  background: var(--ok-chip);
+  color: var(--ok-text);
+  font-size: 0.85rem;
+}
+
+.auth-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.auth-primary {
+  background: var(--info-fill);
+  color: var(--on-accent);
+  border: none;
+  border-radius: 9px;
+  padding: 11px 20px;
+  font: inherit;
+  font-size: 0.92rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.auth-primary:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.auth-secondary {
+  background: var(--bg-elevated);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 10px 16px;
+  font: inherit;
+  font-size: 0.88rem;
+  cursor: pointer;
+}
+
+.auth-secondary:hover:not(:disabled) {
+  background: var(--bg-muted);
+  border-color: var(--border-strong);
+}
+
+.auth-card .auth-primary {
+  width: 100%;
+  margin-top: 4px;
+}
+
+/* --- top-bar user menu --- */
+
+.auth-user-btn {
+  max-width: 190px;
+}
+
+.auth-user-btn span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.auth-user-head {
+  padding: 8px 12px 10px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--text-subtle);
+  overflow-wrap: anywhere;
+}
+
+.auth-user-head strong {
+  display: block;
+  font-size: 13px;
+  color: var(--text);
+}
+
+@container (max-width: 1120px) {
+  .auth-user-btn span {
+    display: none;
+  }
+}
+
+/* --- modal --- */
+
+.auth-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 72px 16px;
+  background: var(--overlay-strong);
+  overflow-y: auto;
+}
+
+.auth-modal-overlay .auth-card {
+  max-width: 400px;
+}

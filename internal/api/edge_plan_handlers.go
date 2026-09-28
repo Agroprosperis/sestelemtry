@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nesh/sestelemetry/internal/auth"
 	"github.com/nesh/sestelemetry/internal/economics"
 	"github.com/nesh/sestelemetry/internal/storage"
 )
@@ -67,7 +68,9 @@ func (h *Handlers) edgeSites(w http.ResponseWriter, r *http.Request) {
 	}
 	sites := make([]string, 0, len(h.edge.Tokens))
 	for s := range h.edge.Tokens {
-		sites = append(sites, s)
+		if h.visibleTo(r, s, auth.PermControl) {
+			sites = append(sites, s)
+		}
 	}
 	sort.Strings(sites)
 	writeJSON(w, http.StatusOK, map[string]any{"sites": sites})

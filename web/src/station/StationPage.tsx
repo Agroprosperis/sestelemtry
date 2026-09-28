@@ -205,7 +205,7 @@ function InventoryBody({
 }
 
 export function StationPage() {
-  const { organizationID, options, change: onOrganizationChange } = useOrganizationParam()
+  const { organizationID, options, change: onOrganizationChange } = useOrganizationParam('service')
   const { data, loading, error } = usePlantInventory(organizationID)
   const {
     data: history,

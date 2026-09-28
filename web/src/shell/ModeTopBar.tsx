@@ -4,6 +4,8 @@
 // online, active mode, manifest delivery state).
 
 import { useEffect, useRef, useState } from 'react'
+import { useAccess } from '../auth/authContext'
+import { UserMenu } from '../auth/UserMenu'
 import { fetchEdgeFleet, type EdgeSiteStatus } from '../control/controlClient'
 import { formatOrganizationLabel } from '../dashboard/config'
 import { ThemeToggle } from '../theme/ThemeToggle'
@@ -51,6 +53,12 @@ type Props = {
 
 const FLEET_POLL_MS = 60_000
 
+const MODES: { mode: Exclude<ConsoleMode, 'none'>; view: 'dashboard' | 'economics' | 'control'; label: string }[] = [
+  { mode: 'analytics', view: 'dashboard', label: 'Аналітика' },
+  { mode: 'economics', view: 'economics', label: 'Економіка' },
+  { mode: 'control', view: 'control', label: 'Керування' },
+]
+
 function shortManifestID(id: string): string {
   // ze-20260826-a1b2c3d4 → ZE-a1b2 (mock: «Manifest ZE-0642»)
   const parts = id.split('-')
@@ -71,6 +79,10 @@ export function ModeTopBar({
   const [fleetStatus, setFleetStatus] = useState<EdgeSiteStatus | null>(null)
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement | null>(null)
+  const access = useAccess()
+  // Only the modes the user may open; with just one there is nothing to
+  // switch to, so the switch is left out.
+  const modes = MODES.filter((m) => access.canView(m.view))
 
   useEffect(() => {
     if (!menuOpen) return
@@ -147,38 +159,25 @@ export function ModeTopBar({
         </select>
       </label>
 
+      {modes.length > 1 && (
       <div className="ctl-topbar-mode">
         <span className="ctl-topbar-label">Режим</span>
         <div className="ctl-mode-switch" role="tablist" aria-label="Режим інтерфейсу">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={mode === 'analytics'}
-            className={mode === 'analytics' ? 'active' : ''}
-            onClick={() => mode !== 'analytics' && navigateView('dashboard')}
-          >
-            Аналітика
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={mode === 'economics'}
-            className={mode === 'economics' ? 'active' : ''}
-            onClick={() => mode !== 'economics' && navigateView('economics')}
-          >
-            Економіка
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={mode === 'control'}
-            className={mode === 'control' ? 'active' : ''}
-            onClick={() => mode !== 'control' && navigateView('control')}
-          >
-            Керування
-          </button>
+          {modes.map((m) => (
+            <button
+              key={m.mode}
+              type="button"
+              role="tab"
+              aria-selected={mode === m.mode}
+              className={mode === m.mode ? 'active' : ''}
+              onClick={() => mode !== m.mode && navigateView(m.view)}
+            >
+              {m.label}
+            </button>
+          ))}
         </div>
       </div>
+      )}
 
       <div className="ctl-topbar-end">
       {showChips && (
@@ -282,6 +281,7 @@ export function ModeTopBar({
         </div>
       )}
 
+      <UserMenu />
       <ThemeToggle />
       </div>
     </div>

@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/nesh/sestelemetry/internal/auth"
 	"github.com/nesh/sestelemetry/internal/storage"
 )
 
@@ -182,7 +183,9 @@ func (h *Handlers) edgeFleet(w http.ResponseWriter, r *http.Request) {
 	}
 	sites := make([]string, 0, len(h.edge.Tokens))
 	for s := range h.edge.Tokens {
-		sites = append(sites, s)
+		if h.visibleTo(r, s, auth.PermAnalyticsDay, auth.PermControl) {
+			sites = append(sites, s)
+		}
 	}
 	sort.Strings(sites)
 

@@ -161,6 +161,15 @@
   display: none;
 }
 
+/* Groups the tariff inputs so one `disabled` turns the whole panel
+   read-only; it must not add a frame of its own. */
+.economics-tariffs-body {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
 .economics-tariffs-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));

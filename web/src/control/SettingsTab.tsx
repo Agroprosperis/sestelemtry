@@ -13,6 +13,9 @@ import {
 
 type Props = {
   site: string
+  // canEdit is technical.write on the site; without it the limits are
+  // shown read-only.
+  canEdit?: boolean
   onChanged: () => void
 }
 
@@ -30,7 +33,7 @@ const FIELDS: { key: FieldKey; label: string; hint: string }[] = [
   { key: 'island_discharge_max_kw', label: 'Розряд (острів), кВт', hint: 'резерв на автономний режим' },
 ]
 
-export function SettingsTab({ site, onChanged }: Props) {
+export function SettingsTab({ site, canEdit = true, onChanged }: Props) {
   const [form, setForm] = useState<Record<string, string>>({})
   const [saved, setSaved] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -140,26 +143,30 @@ export function SettingsTab({ site, onChanged }: Props) {
                 inputMode="decimal"
                 placeholder="не задано"
                 value={form[f.key] ?? ''}
-                disabled={loading || busy}
+                disabled={loading || busy || !canEdit}
                 onChange={(e) => setForm({ ...form, [f.key]: e.target.value })}
               />
               <small>{f.hint}</small>
             </label>
           ))}
         </div>
-        <div className="ctl-form-actions">
-          <button type="button" className="ctl-btn" disabled={busy || loading} onClick={() => void save()}>
-            Зберегти
-          </button>
-          <button
-            type="button"
-            className="ctl-btn primary"
-            disabled={busy || loading}
-            onClick={() => void saveAndPublish()}
-          >
-            Зберегти й опублікувати manifest
-          </button>
-        </div>
+        {canEdit ? (
+          <div className="ctl-form-actions">
+            <button type="button" className="ctl-btn" disabled={busy || loading} onClick={() => void save()}>
+              Зберегти
+            </button>
+            <button
+              type="button"
+              className="ctl-btn primary"
+              disabled={busy || loading}
+              onClick={() => void saveAndPublish()}
+            >
+              Зберегти й опублікувати manifest
+            </button>
+          </div>
+        ) : (
+          <p className="ctl-card-sub">Змінювати обмеження може інженер-керування або адміністратор обʼєкта.</p>
+        )}
       </section>
     </div>
   )

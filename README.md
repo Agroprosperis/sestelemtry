@@ -21,11 +21,44 @@ Modbus telemetry collector for Huawei SmartLogger + dashboard stack.
 - `GET /swagger` (Swagger UI)
 - `GET /swagger/openapi.yaml` (OpenAPI spec)
 
+## Authentication and roles
+
+Every route except `/healthz`, `/readyz`, `POST /api/v1/auth/login|logout`
+and the Bearer-authenticated edge uplink (`/api/v1/edge/batch`,
+`/heartbeat`, `/manifest`) needs a session cookie (`ses_session`, httpOnly,
+SameSite=Lax, 14 days, sliding). State-changing requests must also carry an
+`X-Requested-With` header. The access table lives in
+`internal/api/routes.go`; roles and permissions in `internal/auth`.
+
+| Role | Access |
+| --- | --- |
+| `admin` | everything within its organizations; on all organizations also users and site-wide alert settings |
+| `economist` | economics mode, tariffs, recompute, DAM price refresh |
+| `engineer` | the analytics day chart |
+| `control_engineer` | the day chart, the «Керування» mode and the per-site limits |
+
+A role is granted on one organization, several, or all of them (including
+organizations added to `config.yaml` later). Telemetry reads longer than
+49 h need `admin` (the month and year presets).
+
+- The first administrator is created on API start while the database has no
+  account: set `AUTH_BOOTSTRAP_EMAIL` and `AUTH_BOOTSTRAP_PASSWORD` (≥ 10
+  characters). Further accounts are managed on `?view=users`.
+- The API needs `-config`: its organizations scope every grant.
+- When the browser calls the API on another origin (`VITE_API_BASE_URL`),
+  `-allow-origin` must name the web origin exactly; the cookie never crosses
+  origins to `*`. Behind the Vite proxy (empty `VITE_API_BASE_URL`) the
+  dashboard and API share one origin.
+- Pass `-cookie-secure` only when the dashboard is served over HTTPS. Over
+  plain HTTP the password travels unencrypted, so put an HTTPS proxy in front
+  of anything reachable beyond the plant network.
+
 ## Run with Docker Compose (DB + collector + API + web)
 
 ```bash
 cd deploy
-docker compose up --build
+AUTH_BOOTSTRAP_EMAIL=admin@example.com AUTH_BOOTSTRAP_PASSWORD='choose-a-long-one' \
+  docker compose up --build
 ```
 
 API will be available at `http://localhost:8080`.
@@ -301,9 +334,11 @@ container. The SMTP password is stored in its own column and is never returned
 by the API: the page only learns whether one is set, and saving without
 touching the field leaves it alone.
 
-> **Access.** The API has no authentication, and the password sits in Postgres
-> as plain text. Do not expose the API port to the internet — keep it on an
-> internal network or behind an authenticating proxy.
+> **Access.** Per-organization lists need an administrator of that
+> organization; the SMTP server and the default list need an administrator of
+> every organization. The mail password still sits in Postgres as plain text,
+> and without HTTPS the dashboard login travels unencrypted — do not expose the
+> API port to the internet without an HTTPS proxy.
 
 The `alerts:` block in `config.yaml` is the fallback used until the page is
 saved for the first time (the page shows those values, so a first save does not
@@ -400,6 +435,7 @@ cp service.env.example .env.service
 # set DB credentials and SESTELEMETRY_DATABASE_URL
 # set SESTELEMETRY_API_ALLOW_ORIGIN to your web URL (no "*")
 # set SESTELEMETRY_WEB_API_BASE_URL to your server URL, e.g. http://SERVER_IP:8080
+# set AUTH_BOOTSTRAP_EMAIL / AUTH_BOOTSTRAP_PASSWORD for the first administrator
 # keep collector config outside repo:
 #   SESTELEMETRY_HOST_CONFIG_PATH=/etc/sestelemetry/config.yaml
 #   SESTELEMETRY_HOST_REGISTERS_PATH=/etc/sestelemetry/registers

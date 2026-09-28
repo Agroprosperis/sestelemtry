@@ -30,9 +30,202 @@ info:
   version: 1.0.0
   description: |
     API for dashboard graphics (timeseries) and current values for external resources.
+
+    Every route except /healthz, /readyz, login/logout and the edge uplink
+    (Bearer token) needs the ses_session cookie from POST /api/v1/auth/login.
+    POST, PUT and DELETE requests must also send an X-Requested-With header.
+    Routes return 401 without a session and 403 when the caller's roles don't
+    cover the organization in organization_id / site_id.
 servers:
   - url: http://localhost:8080
 paths:
+  /api/v1/auth/login:
+    post:
+      summary: Sign in
+      operationId: login
+      description: |
+        Checks the credentials and sets the session cookie. Five failed
+        attempts lock the email out for 15 minutes.
+      parameters:
+        - $ref: "#/components/parameters/CSRFHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                password:
+                  type: string
+      responses:
+        "200":
+          description: Signed in; same body as /api/v1/auth/me
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthMe"
+        "401":
+          description: Wrong email or password
+        "403":
+          description: Account disabled, or the X-Requested-With header is missing
+        "429":
+          description: Too many failed attempts (see Retry-After)
+  /api/v1/auth/logout:
+    post:
+      summary: Sign out
+      operationId: logout
+      parameters:
+        - $ref: "#/components/parameters/CSRFHeader"
+      responses:
+        "204":
+          description: Session ended and cookie cleared
+  /api/v1/auth/me:
+    get:
+      summary: Signed-in user and their permissions per organization
+      operationId: getMe
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Current principal
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthMe"
+        "401":
+          description: Not signed in
+  /api/v1/auth/password:
+    post:
+      summary: Change own password
+      operationId: changePassword
+      description: Signs the user out of every other session.
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/CSRFHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [current_password, new_password]
+              properties:
+                current_password:
+                  type: string
+                new_password:
+                  type: string
+                  minLength: 10
+      responses:
+        "204":
+          description: Password changed
+        "400":
+          description: New password too short or too long
+        "403":
+          description: Current password is wrong
+  /api/v1/users:
+    get:
+      summary: List accounts (administrators of every organization)
+      operationId: listUsers
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Accounts with their grants
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  users:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/User"
+    post:
+      summary: Create an account
+      operationId: createUser
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/CSRFHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                name:
+                  type: string
+                password:
+                  type: string
+                  minLength: 10
+                grants:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/Grant"
+      responses:
+        "201":
+          description: Account created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          description: Invalid email, password, role or organization
+        "409":
+          description: Email already registered
+    put:
+      summary: Change an account
+      operationId: updateUser
+      description: |
+        Only the fields present change. A new password, new grants or
+        disabling sign the account out everywhere. The last enabled
+        administrator of every organization can't be disabled or demoted.
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/CSRFHeader"
+        - name: user_id
+          in: query
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                disabled:
+                  type: boolean
+                password:
+                  type: string
+                  description: Empty keeps the current password.
+                grants:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/Grant"
+      responses:
+        "200":
+          description: Account updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "404":
+          description: No such account
+        "409":
+          description: Would leave no enabled administrator of every organization
   /healthz:
     get:
       summary: Health check
@@ -905,7 +1098,84 @@ paths:
                 type: string
                 example: internal server error
 components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: ses_session
+  parameters:
+    CSRFHeader:
+      name: X-Requested-With
+      in: header
+      required: true
+      schema:
+        type: string
+        example: fetch
   schemas:
+    Grant:
+      type: object
+      required: [role]
+      properties:
+        role:
+          type: string
+          enum: [admin, economist, engineer, control_engineer]
+        organization_id:
+          type: string
+          nullable: true
+          description: null grants the role on every organization.
+    AuthMe:
+      type: object
+      properties:
+        user:
+          type: object
+          properties:
+            id:
+              type: integer
+            email:
+              type: string
+            name:
+              type: string
+        global_admin:
+          type: boolean
+        grants:
+          type: array
+          items:
+            $ref: "#/components/schemas/Grant"
+        organizations:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+              name:
+                type: string
+              permissions:
+                type: array
+                items:
+                  type: string
+                  enum: [analytics.day, analytics.full, economics.read, economics.write, control, technical.write, service]
+    User:
+      type: object
+      properties:
+        id:
+          type: integer
+        email:
+          type: string
+        name:
+          type: string
+        disabled:
+          type: boolean
+        auth_provider:
+          type: string
+          example: local
+        grants:
+          type: array
+          items:
+            $ref: "#/components/schemas/Grant"
+        created_at:
+          type: string
+          format: date-time
     DashboardMetric:
       type: object
       properties:
