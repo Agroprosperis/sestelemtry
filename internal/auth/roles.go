@@ -90,6 +90,54 @@ func (g Grant) Covers(org string) bool {
 	return g.AllOrganizations() || g.OrganizationID == org
 }
 
+// NormalizeGrants returns grants without duplicates, in the order of
+// Roles and then organization. A role granted on every organization
+// absorbs its per-organization grants.
+func NormalizeGrants(grants []Grant) []Grant {
+	everywhere := map[Role]bool{}
+	for _, g := range grants {
+		if g.AllOrganizations() {
+			everywhere[g.Role] = true
+		}
+	}
+	out := make([]Grant, 0, len(grants))
+	seen := map[Grant]bool{}
+	for _, g := range grants {
+		if seen[g] || (everywhere[g.Role] && !g.AllOrganizations()) {
+			continue
+		}
+		seen[g] = true
+		out = append(out, g)
+	}
+	rank := make(map[Role]int, len(Roles))
+	for i, role := range Roles {
+		rank[role] = i
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Role != out[j].Role {
+			return rank[out[i].Role] < rank[out[j].Role]
+		}
+		return out[i].OrganizationID < out[j].OrganizationID
+	})
+	return out
+}
+
+// SameGrants reports whether a and b hold the same grants, in any order.
+func SameGrants(a, b []Grant) bool {
+	set := make(map[Grant]bool, len(a))
+	for _, g := range a {
+		set[g] = true
+	}
+	seen := make(map[Grant]bool, len(b))
+	for _, g := range b {
+		if !set[g] {
+			return false
+		}
+		seen[g] = true
+	}
+	return len(seen) == len(set)
+}
+
 // Principal is the signed-in user a request acts as. A nil *Principal
 // is allowed everywhere and holds no permissions.
 type Principal struct {

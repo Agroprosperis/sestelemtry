@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -184,7 +183,7 @@ func (h *Handlers) updateUser(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		if !sameGrants(current, parsed) {
+		if !auth.SameGrants(current, parsed) {
 			upd.Grants = &parsed
 		}
 		grants = parsed
@@ -236,15 +235,13 @@ func (h *Handlers) updateUser(w http.ResponseWriter, r *http.Request) {
 }
 
 // parseGrants validates the grants of a create/update request against
-// the roles and the configured organizations. A role granted on every
-// organization absorbs its per-organization grants.
+// the roles and the configured organizations.
 func (h *Handlers) parseGrants(in []grantJSON) ([]auth.Grant, error) {
 	known := make(map[string]bool, len(h.organizations))
 	for _, o := range h.organizations {
 		known[o.ID] = true
 	}
-	everywhere := map[auth.Role]bool{}
-	specific := make([]auth.Grant, 0, len(in))
+	out := make([]auth.Grant, 0, len(in))
 	for _, g := range in {
 		if !g.Role.Valid() {
 			return nil, fmt.Errorf("невідома роль %q", g.Role)
@@ -253,61 +250,16 @@ func (h *Handlers) parseGrants(in []grantJSON) ([]auth.Grant, error) {
 		if g.OrganizationID != nil {
 			org = strings.TrimSpace(*g.OrganizationID)
 		}
-		if org == "" {
-			everywhere[g.Role] = true
-			continue
-		}
-		if !known[org] {
+		if org != "" && !known[org] {
 			return nil, fmt.Errorf("невідома організація %q", org)
 		}
-		specific = append(specific, auth.Grant{Role: g.Role, OrganizationID: org})
+		out = append(out, auth.Grant{Role: g.Role, OrganizationID: org})
 	}
-	rank := make(map[auth.Role]int, len(auth.Roles))
-	for i, role := range auth.Roles {
-		rank[role] = i
-	}
-	out := make([]auth.Grant, 0, len(in))
-	seen := map[auth.Grant]bool{}
-	for _, role := range auth.Roles {
-		if everywhere[role] {
-			out = append(out, auth.Grant{Role: role})
-		}
-	}
-	for _, g := range specific {
-		if everywhere[g.Role] || seen[g] {
-			continue
-		}
-		seen[g] = true
-		out = append(out, g)
-	}
-	sort.SliceStable(out, func(i, j int) bool {
-		if out[i].Role != out[j].Role {
-			return rank[out[i].Role] < rank[out[j].Role]
-		}
-		return out[i].OrganizationID < out[j].OrganizationID
-	})
-	return out, nil
+	return auth.NormalizeGrants(out), nil
 }
 
 func isGlobalAdmin(grants []auth.Grant) bool {
 	return (&auth.Principal{Grants: grants}).IsGlobalAdmin()
-}
-
-// sameGrants compares two grant lists as sets: the store and
-// parseGrants order them differently.
-func sameGrants(a, b []auth.Grant) bool {
-	set := make(map[auth.Grant]bool, len(a))
-	for _, g := range a {
-		set[g] = true
-	}
-	seen := make(map[auth.Grant]bool, len(b))
-	for _, g := range b {
-		if !set[g] {
-			return false
-		}
-		seen[g] = true
-	}
-	return len(seen) == len(set)
 }
 
 // otherGlobalAdmins counts the enabled administrators of every

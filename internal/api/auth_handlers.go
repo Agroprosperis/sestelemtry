@@ -114,8 +114,7 @@ func (h *Handlers) authLogin(w http.ResponseWriter, r *http.Request) {
 	var throttled *throttledError
 	switch {
 	case errors.As(err, &throttled):
-		w.Header().Set("Retry-After", strconv.Itoa(int(math.Ceil(throttled.retryAfter.Seconds()))))
-		http.Error(w, err.Error(), http.StatusTooManyRequests)
+		writeThrottled(w, throttled)
 		return
 	case errors.Is(err, errBadCredentials):
 		http.Error(w, err.Error(), http.StatusUnauthorized)
@@ -183,30 +182,27 @@ func (h *Handlers) authPassword(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid JSON body", http.StatusBadRequest)
 		return
 	}
-	now := h.auth.now()
-	key := normalizeEmail(p.Email)
-	if blocked, wait := h.auth.throttle.Blocked(key, now); blocked {
-		w.Header().Set("Retry-After", strconv.Itoa(int(math.Ceil(wait.Seconds()))))
-		http.Error(w, (&throttledError{}).Error(), http.StatusTooManyRequests)
-		return
-	}
 	user, ok, err := h.auth.store.UserByID(r.Context(), p.UserID)
 	if err != nil {
 		h.log.Error("api_auth_password", "err", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
-	match := false
+	stored := ""
 	if ok {
-		if match, err = h.auth.checkPassword(r.Context(), user.PasswordHash, req.CurrentPassword); err != nil {
-			h.log.Error("api_auth_password", "err", err)
-			http.Error(w, "internal server error", http.StatusInternalServerError)
-			return
-		}
+		stored = user.PasswordHash
 	}
-	if !match {
-		h.auth.throttle.Fail(key, now)
+	var throttled *throttledError
+	switch err := h.auth.verifyPassword(r.Context(), normalizeEmail(p.Email), stored, req.CurrentPassword); {
+	case errors.As(err, &throttled):
+		writeThrottled(w, throttled)
+		return
+	case errors.Is(err, errBadCredentials):
 		http.Error(w, "поточний пароль невірний", http.StatusForbidden)
+		return
+	case err != nil:
+		h.log.Error("api_auth_password", "err", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 	hash, err := auth.HashPassword(req.NewPassword)
@@ -226,9 +222,15 @@ func (h *Handlers) authPassword(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
-	h.auth.throttle.Reset(key)
 	h.auth.forgetUser(p.UserID)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// writeThrottled answers a password check refused by the failed-attempt
+// throttle.
+func writeThrottled(w http.ResponseWriter, e *throttledError) {
+	w.Header().Set("Retry-After", strconv.Itoa(int(math.Ceil(e.retryAfter.Seconds()))))
+	http.Error(w, e.Error(), http.StatusTooManyRequests)
 }
 
 // userJSON is one account on the user-management page.

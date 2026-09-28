@@ -85,6 +85,52 @@ func TestPrincipalScopes(t *testing.T) {
 	}
 }
 
+func TestNormalizeGrants(t *testing.T) {
+	got := NormalizeGrants([]Grant{
+		{Role: RoleEngineer, OrganizationID: "pe"},
+		{Role: RoleEconomist, OrganizationID: "ze"},
+		{Role: RoleEngineer, OrganizationID: "ab"},
+		{Role: RoleEconomist},
+		{Role: RoleEngineer, OrganizationID: "pe"},
+		{Role: RoleAdmin, OrganizationID: "ze"},
+	})
+	want := []Grant{
+		{Role: RoleAdmin, OrganizationID: "ze"},
+		{Role: RoleEconomist},
+		{Role: RoleEngineer, OrganizationID: "ab"},
+		{Role: RoleEngineer, OrganizationID: "pe"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("NormalizeGrants = %v, want %v", got, want)
+	}
+	if got := NormalizeGrants(nil); len(got) != 0 {
+		t.Fatalf("NormalizeGrants(nil) = %v, want none", got)
+	}
+}
+
+func TestSameGrants(t *testing.T) {
+	a := []Grant{{Role: RoleAdmin}, {Role: RoleEngineer, OrganizationID: "ze"}}
+	cases := []struct {
+		name string
+		b    []Grant
+		want bool
+	}{
+		{"reordered", []Grant{{Role: RoleEngineer, OrganizationID: "ze"}, {Role: RoleAdmin}}, true},
+		{"duplicated", []Grant{{Role: RoleAdmin}, {Role: RoleAdmin}, {Role: RoleEngineer, OrganizationID: "ze"}}, true},
+		{"subset", []Grant{{Role: RoleAdmin}}, false},
+		{"superset", append([]Grant{{Role: RoleEconomist}}, a...), false},
+		{"other organization", []Grant{{Role: RoleAdmin}, {Role: RoleEngineer, OrganizationID: "pe"}}, false},
+	}
+	for _, c := range cases {
+		if got := SameGrants(a, c.b); got != c.want {
+			t.Errorf("%s: SameGrants = %v, want %v", c.name, got, c.want)
+		}
+	}
+	if !SameGrants(nil, []Grant{}) {
+		t.Fatal("two empty lists are the same")
+	}
+}
+
 func TestPasswordPolicy(t *testing.T) {
 	if err := ValidatePassword("short"); !errors.Is(err, ErrPasswordTooShort) {
 		t.Fatalf("short password: err = %v", err)

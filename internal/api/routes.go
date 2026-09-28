@@ -9,14 +9,26 @@ import (
 	"github.com/nesh/sestelemetry/internal/auth"
 )
 
-// routeAccess says who may call a route. Rules are keyed by HTTP
-// method; the "" rule covers every method without its own entry, so a
-// handler still answers 405 for the methods it doesn't serve.
+// accessKind says how a route establishes who is calling.
+type accessKind int
+
+const (
+	// accessSession: a signed-in user, checked against the rules.
+	accessSession accessKind = iota
+	// accessPublic: no session (health probes, login, logout).
+	accessPublic
+	// accessEdge: the handler checks the site's Bearer token itself.
+	accessEdge
+)
+
+// routeAccess says who may call a route. Rules apply to session routes
+// and are keyed by HTTP method; the "" rule covers every method without
+// its own entry, so a handler still answers 405 for the methods it
+// doesn't serve.
 type routeAccess struct {
-	public bool // no session: health probes, login, logout
-	edge   bool // the handler checks the site's Bearer token itself
-	// pendingOK keeps the route open to a session whose password has to
-	// be changed first; every other route refuses it.
+	kind accessKind
+	// pendingOK keeps a session route open to a user whose password has
+	// to be changed first; every other route refuses them.
 	pendingOK bool
 	rules     map[string]accessRule
 }
@@ -45,15 +57,15 @@ func (a routeAccess) rule(method string) accessRule {
 }
 
 var (
-	publicRoute    = routeAccess{public: true}
-	edgeRoute      = routeAccess{edge: true}
+	publicRoute    = routeAccess{kind: accessPublic}
+	edgeRoute      = routeAccess{kind: accessEdge}
 	signedIn       = need(accessRule{})
-	passwordChange = routeAccess{pendingOK: true, rules: map[string]accessRule{"": {}}}
+	passwordChange = routeAccess{kind: accessSession, pendingOK: true, rules: map[string]accessRule{"": {}}}
 	globalOnly     = need(accessRule{global: true})
 )
 
 func need(r accessRule) routeAccess {
-	return routeAccess{rules: map[string]accessRule{"": r}}
+	return routeAccess{kind: accessSession, rules: map[string]accessRule{"": r}}
 }
 
 // on returns a copy of a with a stricter rule for one method.
@@ -187,17 +199,16 @@ func (h *Handlers) withAuth(mux *http.ServeMux, access map[string]routeAccess, n
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, pattern := mux.Handler(r)
 		acc, known := access[pattern]
-		if !known || acc.edge {
+		switch {
+		case !known || acc.kind == accessEdge:
 			// Unknown paths get the mux's 404; the edge uplink checks
 			// its Bearer token itself.
 			next.ServeHTTP(w, r)
 			return
-		}
-		if isUnsafeMethod(r.Method) && strings.TrimSpace(r.Header.Get(csrfHeader)) == "" {
+		case isUnsafeMethod(r.Method) && strings.TrimSpace(r.Header.Get(csrfHeader)) == "":
 			http.Error(w, "forbidden: missing "+csrfHeader+" header", http.StatusForbidden)
 			return
-		}
-		if acc.public {
+		case acc.kind == accessPublic:
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -258,6 +269,42 @@ func (h *Handlers) authorize(p *auth.Principal, rule accessRule, r *http.Request
 		return fmt.Sprintf("forbidden: this role reads at most %s of telemetry per request", maxDayWindow), false
 	}
 	return "", true
+}
+
+// canOnOrg reports whether p holds any of perms on org. Edge shadow
+// telemetry ("<site>" + EDGE_ORG_SUFFIX) is covered by the site's grant.
+func (h *Handlers) canOnOrg(p *auth.Principal, org string, perms ...auth.Permission) bool {
+	site, shadow := h.edgeShadowSite(org)
+	for _, perm := range perms {
+		if p.Can(perm, org) || (shadow && p.Can(perm, site)) {
+			return true
+		}
+	}
+	return false
+}
+
+// edgeShadowSite maps a shadow organization back to its edge site. Only
+// sites with an edge token have shadow telemetry, so "<org>-edge" of
+// any other organization maps to nothing.
+func (h *Handlers) edgeShadowSite(org string) (string, bool) {
+	if h.edge == nil || h.edge.OrgSuffix == "" {
+		return "", false
+	}
+	site, ok := strings.CutSuffix(org, h.edge.OrgSuffix)
+	if !ok || site == "" {
+		return "", false
+	}
+	_, isEdge := h.edge.Tokens[site]
+	return site, isEdge
+}
+
+// visibleTo reports whether a list entry for org may be shown to the
+// request's principal. Without SetAuth everything is visible.
+func (h *Handlers) visibleTo(r *http.Request, org string, perms ...auth.Permission) bool {
+	if h.auth == nil {
+		return true
+	}
+	return h.canOnOrg(principalFrom(r.Context()), org, perms...)
 }
 
 // telemetryWindow is the span a telemetry request asks for, with the
