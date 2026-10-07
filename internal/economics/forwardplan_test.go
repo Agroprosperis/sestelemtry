@@ -21,6 +21,46 @@ func fwdHours(n int, start time.Time, price func(i int) *float64, pv, load func(
 
 func pricePtr(v float64) *float64 { return &v }
 
+// With ηd < 1 the plan must still reach the AC discharge limit (within
+// one SOC level): a level drop delivers step·ηd AC. ze passport: 864 kW,
+// 1720 kWh, round trip 0.913.
+func TestForwardPlanDischargeReachesPowerLimit(t *testing.T) {
+	start := time.Date(2026, 6, 3, 0, 0, 0, 0, time.UTC)
+	// One expensive hour, then cheap ones (low terminal value): selling as
+	// much as possible in hour 0 is strictly best, so the power limit binds.
+	hours := fwdHours(3, start,
+		func(i int) *float64 {
+			if i == 0 {
+				return pricePtr(15.0)
+			}
+			return pricePtr(1.0)
+		},
+		func(int) float64 { return 0 },
+		func(int) float64 { return 0 },
+	)
+	p := ForwardParams{
+		Tariffs:       Tariffs{RoundtripEfficiency: 0.913},
+		CapacityKwh:   1720,
+		PowerKw:       864,
+		SocMinPct:     20,
+		SocMaxPct:     90,
+		StartSocPct:   90,
+		ExportAllowed: true,
+	}
+	steps, err := BuildForwardPlan(hours, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	maxDischarge := 0.0
+	for _, s := range steps {
+		maxDischarge = math.Max(maxDischarge, s.DischargeKwh)
+	}
+	level := (p.SocMaxPct - p.SocMinPct) / 100 * p.CapacityKwh / float64(forwardSocLevels-1)
+	if lo := p.PowerKw - level*math.Sqrt(0.913); maxDischarge < lo || maxDischarge > p.PowerKw+1e-9 {
+		t.Fatalf("max discharge = %.1f kW, want within one level of the %.0f kW limit (≥ %.1f)", maxDischarge, p.PowerKw, lo)
+	}
+}
+
 func TestForwardPlanExportsWhenAllowed(t *testing.T) {
 	// Zero load and zero PV: nothing to displace locally. Cheap night
 	// (hours 0–5) then an expensive evening. With export allowed the

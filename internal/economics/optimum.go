@@ -213,9 +213,10 @@ func newSocGrid(startResidualKwh float64, p optimumParams) (socGrid, bool) {
 	g.etaC = math.Sqrt(p.rte)
 	g.etaD = math.Sqrt(p.rte)
 	// Per-hour reachable store-delta in grid steps; no move spans more
-	// than the whole grid.
+	// than the whole grid. Charging a level draws step/ηc AC, discharging
+	// one delivers step·ηd AC — so ×ηc up but ÷ηd down.
 	g.upLevels = min(max(1, int(math.Ceil((p.maxChargeKwh*g.etaC)/g.step))), g.levels-1)
-	g.downLevels = min(max(1, int(math.Ceil((p.maxDischargeKwh*g.etaD)/g.step))), g.levels-1)
+	g.downLevels = min(max(1, int(math.Ceil(p.maxDischargeKwh/(g.etaD*g.step)))), g.levels-1)
 	return g, true
 }
 
