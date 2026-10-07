@@ -329,6 +329,31 @@ func TestOptimizeDayScheduleMatchesOptimizeDay(t *testing.T) {
 	}
 }
 
+// With ηd < 1 both DP solvers must still reach the AC discharge limit
+// (within one SOC level) and agree on the effect. ze passport: 864 kW,
+// 1720 kWh, round trip 0.913.
+func TestOptimumDischargeReachesPowerLimit(t *testing.T) {
+	p := optimumParams{
+		capacityKwh: 1720, maxChargeKwh: 864, maxDischargeKwh: 864,
+		socMinKwh: 0.2 * 1720, socMaxKwh: 0.9 * 1720, rte: 0.913,
+	}
+	hours := make([]optimumHour, 3)
+	hours[0] = optimumHour{tradable: true, importPrice: 20, exportPrice: 20, displaceableKwh: 900}
+
+	steps, _, effect, ok := optimizeDaySchedule(hours, p.socMaxKwh, p, modeFull)
+	if !ok {
+		t.Fatal("optimizeDaySchedule not ok")
+	}
+	got := steps[0].toLoadKwh + steps[0].toGridKwh
+	level := (p.socMaxKwh - p.socMinKwh) / float64(optimumSocLevels-1)
+	if lo := p.maxDischargeKwh - level*math.Sqrt(p.rte); got < lo || got > p.maxDischargeKwh+1e-9 {
+		t.Fatalf("hour0 discharge = %.1f kWh, want within one level of %.0f (≥ %.1f)", got, p.maxDischargeKwh, lo)
+	}
+	if want := optimizeDay(hours, p.socMaxKwh, p, modeFull); math.Abs(effect-want) > 1e-6 {
+		t.Fatalf("schedule effect %v != optimizeDay %v", effect, want)
+	}
+}
+
 // TestAggregateMonthCycles checks the significant-cycle list: a day with a
 // big timing reserve appears as a cycle whose chart summary reconciles
 // (optimal effect ≈ schedule, reserve = max(0, opt − fact)).

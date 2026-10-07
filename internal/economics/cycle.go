@@ -273,8 +273,10 @@ func optimizeDaySchedule(hours []optimumHour, startResidualKwh float64, p optimu
 
 	etaC := math.Sqrt(p.rte)
 	etaD := math.Sqrt(p.rte)
+	// One level stores step kWh: charging it draws step/ηc AC,
+	// discharging it delivers step·ηd AC — so ×ηc up but ÷ηd down.
 	upLevels := int(math.Ceil((p.maxChargeKwh * etaC) / step))
-	downLevels := int(math.Ceil((p.maxDischargeKwh * etaD) / step))
+	downLevels := int(math.Ceil(p.maxDischargeKwh / (etaD * step)))
 	if upLevels < 1 {
 		upLevels = 1
 	}

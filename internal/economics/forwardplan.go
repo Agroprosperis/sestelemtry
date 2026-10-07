@@ -136,8 +136,11 @@ func BuildForwardPlan(hours []ForwardHour, p ForwardParams) ([]ForwardStep, erro
 	}
 	f[start] = 0
 
+	// One level stores step kWh: climbing it draws step/ηc from the AC
+	// side, dropping it delivers step·ηd. The AC power limit therefore
+	// admits limit·ηc/step levels up but limit/(ηd·step) down.
 	upLevels := int(math.Ceil((p.PowerKw * etaC) / step))
-	downLevels := int(math.Ceil((p.PowerKw * etaD) / step))
+	downLevels := int(math.Ceil(p.PowerKw / (etaD * step)))
 
 	type action struct {
 		prev           int
