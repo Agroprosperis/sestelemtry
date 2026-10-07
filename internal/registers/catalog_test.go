@@ -67,6 +67,13 @@ func TestHuaweiCatalogResolvesAllKeys(t *testing.T) {
 		"power_consumption_day_kwh",
 		"electricity_sold_day_kwh",
 		"electricity_purchased_day_kwh",
+		"pv_active_power_adjustment_kw",
+		"ess_active_power_adjustment_kw",
+		"meter_active_power_kw",
+		"sl_alarm_7",
+		"sl_alarm_8",
+		"pcs_working_mode",
+		"grid_line_voltage_ab_v",
 	}
 	keys := make(map[string]ResolvedEntry, len(resolved))
 	for _, e := range resolved {
@@ -106,6 +113,25 @@ func TestSubsetFiltersAndPreservesOrder(t *testing.T) {
 	}
 	if len(got) != 2 || got[0].MetricKey != "a" || got[1].MetricKey != "c" {
 		t.Fatalf("unexpected subset result: %+v", got)
+	}
+}
+
+func TestSubsetEmptyKeysDropsEdgeScope(t *testing.T) {
+	all := []ResolvedEntry{
+		{Entry: Entry{MetricKey: "a"}},
+		{Entry: Entry{MetricKey: "meter_x", Scope: ScopeEdge}},
+		{Entry: Entry{MetricKey: "b"}},
+	}
+	got, err := Subset(all, nil)
+	if err != nil {
+		t.Fatalf("Subset error: %v", err)
+	}
+	if len(got) != 2 || got[0].MetricKey != "a" || got[1].MetricKey != "b" {
+		t.Fatalf("empty whitelist must drop scope=edge, got %+v", got)
+	}
+	named, err := Subset(all, []string{"meter_x"})
+	if err != nil || len(named) != 1 || named[0].MetricKey != "meter_x" {
+		t.Fatalf("explicit key must still resolve edge-scoped entries: %+v %v", named, err)
 	}
 }
 

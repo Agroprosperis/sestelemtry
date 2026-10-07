@@ -349,3 +349,134 @@ registers:
     swap_type: ABCD_BE
     gain: 1
     offset: 0
+
+  # --- Edge-only cutover reads (ems_sl_write_cutover.md §12.2) ---
+  # scope: edge — never polled by a full-catalog collector org: support
+  # varies by firmware (50006/50007, 44364) and the meter sits behind
+  # its own unit id, so an exception here must not fail a whole poll.
+
+  # The setpoint registers read back: before MVP-3 this is the command
+  # Encombi wrote last, after cutover the edge's own readback.
+  - metric_key: pv_active_power_adjustment_kw
+    name: PV active power adjustment in fixed value (40378), kW
+    address: 40378
+    data_type: UINT32
+    swap_type: ABCD_BE
+    gain: 0.1
+    offset: 0
+    scope: edge
+
+  - metric_key: ess_active_power_adjustment_kw
+    name: ESS active power adjustment in fixed value (40381), kW
+    address: 40381
+    data_type: INT32
+    swap_type: ABCD_BE
+    gain: 0.1
+    offset: 0
+    scope: edge
+
+  - metric_key: reactive_pv_power_kvar
+    name: PV actual reactive power, kvar
+    address: 40390
+    data_type: INT32
+    swap_type: ABCD_BE
+    gain: 0.001
+    offset: 0
+    scope: edge
+
+  # Line voltages on the inverter (PV logger) / PCS (ESS logger) side.
+  - metric_key: grid_line_voltage_ab_v
+    name: A-B line voltage of grid, V
+    address: 40575
+    data_type: UINT16
+    swap_type: ABCD_BE
+    gain: 0.1
+    offset: 0
+    scope: edge
+
+  - metric_key: grid_line_voltage_bc_v
+    name: B-C line voltage of grid, V
+    address: 40576
+    data_type: UINT16
+    swap_type: ABCD_BE
+    gain: 0.1
+    offset: 0
+    scope: edge
+
+  - metric_key: grid_line_voltage_ca_v
+    name: C-A line voltage of grid, V
+    address: 40577
+    data_type: UINT16
+    swap_type: ABCD_BE
+    gain: 0.1
+    offset: 0
+    scope: edge
+
+  - metric_key: pcs_working_mode
+    name: PCS working mode
+    address: 44364
+    data_type: UINT16
+    swap_type: ABCD_BE
+    gain: 1
+    offset: 0
+    scope: edge
+
+  # Alarm words 7..8 (Issue 52). Encombi reads only 50000…50005; on a
+  # firmware that refuses them the edge falls back to six words.
+  - metric_key: sl_alarm_7
+    name: SmartLogger alarm word 7
+    address: 50006
+    data_type: UINT16
+    swap_type: ABCD_BE
+    gain: 1
+    offset: 0
+    scope: edge
+
+  - metric_key: sl_alarm_8
+    name: SmartLogger alarm word 8
+    address: 50007
+    data_type: UINT16
+    swap_type: ABCD_BE
+    gain: 1
+    offset: 0
+    scope: edge
+
+  # DTSU666-HW grid meter read through the SmartLogger: unit id = the
+  # meter's RS485 address (ze: 11 on the PV logger). Issue 45 §2.4.
+  - metric_key: meter_phase_a_voltage_v
+    name: Grid meter phase A voltage, V
+    address: 32260
+    data_type: UINT32
+    swap_type: ABCD_BE
+    gain: 0.01
+    offset: 0
+    scope: edge
+
+  - metric_key: meter_phase_b_voltage_v
+    name: Grid meter phase B voltage, V
+    address: 32262
+    data_type: UINT32
+    swap_type: ABCD_BE
+    gain: 0.01
+    offset: 0
+    scope: edge
+
+  - metric_key: meter_phase_c_voltage_v
+    name: Grid meter phase C voltage, V
+    address: 32264
+    data_type: UINT32
+    swap_type: ABCD_BE
+    gain: 0.01
+    offset: 0
+    scope: edge
+
+  # Meter sign convention: + = export to grid, − = import (the opposite
+  # of 40505 in the EMS) — this pair is how the 40505 sign is verified.
+  - metric_key: meter_active_power_kw
+    name: Grid meter active power, kW (+ export)
+    address: 32278
+    data_type: INT32
+    swap_type: ABCD_BE
+    gain: 0.001
+    offset: 0
+    scope: edge

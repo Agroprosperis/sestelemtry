@@ -34,6 +34,14 @@ type Decision struct {
 	PBessVirtualKw    float64 // + discharge / − charge, kW
 	PPVLimitVirtualKw float64 // PV active power limit, kW
 
+	// Journal (ems_sl_write_cutover.md): write_enabled is device-local
+	// and off in this build — there is no Modbus write path. Readback
+	// is Encombi's current setpoint until cutover.
+	WriteEnabled  bool
+	Readback40381 *float64
+	Readback40378 *float64
+	MeterPowerKw  *float64
+
 	ReasonCode string
 	Rationale  string
 	// Clamps lists every safety clamp applied to the desired power, in
@@ -59,11 +67,23 @@ func (d Decision) Record(siteID string) map[string]any {
 	putF(inputs, "grid_power_kw", d.GridPowerKw)
 	putF(inputs, "load_power_kw", d.LoadPowerKw)
 	putF(inputs, "p_bess_plan_kw", d.PBessPlanKw)
+	putF(inputs, "meter_active_power_kw", d.MeterPowerKw)
 
 	clamps := d.Clamps
 	if clamps == nil {
 		clamps = []string{}
 	}
+	outputs := map[string]any{
+		"p_bess_virtual_kw":     round1(d.PBessVirtualKw),
+		"p_pv_limit_virtual_kw": round1(d.PPVLimitVirtualKw),
+		"would_write_40381":     round1(d.PBessVirtualKw),
+		"would_write_40378":     round1(d.PPVLimitVirtualKw),
+		"written_40381":         nil,
+		"written_40378":         nil,
+		"clamps":                clamps,
+	}
+	putF(outputs, "readback_40381", d.Readback40381)
+	putF(outputs, "readback_40378", d.Readback40378)
 	return map[string]any{
 		"site_id":       siteID,
 		"ts":            d.TS.UTC().Format(time.RFC3339),
@@ -71,16 +91,11 @@ func (d Decision) Record(siteID string) map[string]any {
 		"preset":        d.Preset,
 		"state_machine": d.StateMachine,
 		"plan_source":   d.PlanSource,
+		"write_enabled": d.WriteEnabled,
 		"inputs":        inputs,
-		"outputs": map[string]any{
-			"p_bess_virtual_kw":     round1(d.PBessVirtualKw),
-			"p_pv_limit_virtual_kw": round1(d.PPVLimitVirtualKw),
-			"would_write_40381":     round1(d.PBessVirtualKw),
-			"would_write_40378":     round1(d.PPVLimitVirtualKw),
-			"clamps":                clamps,
-		},
-		"reason_code": d.ReasonCode,
-		"rationale":   d.Rationale,
+		"outputs":       outputs,
+		"reason_code":   d.ReasonCode,
+		"rationale":     d.Rationale,
 	}
 }
 
@@ -173,6 +188,16 @@ func Decide(t Tick, m *Manifest, cfg *Config) (Decision, []Event) {
 		ESSPowerKw:   t.ESSPowerKw,
 		GridPowerKw:  t.GridPowerKw,
 		LoadPowerKw:  t.LoadPowerKw,
+		WriteEnabled: false,
+	}
+	if v, ok := t.Values["ess_active_power_adjustment_kw"]; ok {
+		d.Readback40381 = f64ptr(v)
+	}
+	if v, ok := t.Values["pv_active_power_adjustment_kw"]; ok {
+		d.Readback40378 = f64ptr(v)
+	}
+	if v, ok := t.Values["meter_active_power_kw"]; ok {
+		d.MeterPowerKw = f64ptr(v)
 	}
 	var events []Event
 
@@ -188,14 +213,14 @@ func Decide(t Tick, m *Manifest, cfg *Config) (Decision, []Event) {
 		words, _ := t.SLAlarmWords()
 		hex := slAlarmHex(words)
 		d.ReasonCode = "sl_alarm"
-		d.Rationale = "аларм SmartLogger [" + strings.Join(hex[:], " ") + "] — команда УЗЕ заблокована"
+		d.Rationale = "аларм SmartLogger [" + strings.Join(hex, " ") + "] — команда УЗЕ заблокована"
 		d.Degraded = true
 		// The message carries the word set, so the service dedup
 		// (code+message, 5 min) re-fires when the set changes.
 		events = append(events, Event{
 			TS: t.TS, Severity: SevAlarm, Code: EvSLAlarm,
-			Message: "SmartLogger alarm words: " + strings.Join(hex[:], " "),
-			Context: map[string]any{"words": hex[:]},
+			Message: "SmartLogger alarm words: " + strings.Join(hex, " "),
+			Context: map[string]any{"words": hex},
 		})
 	case t.PCSShutdown != nil && *t.PCSShutdown:
 		d.ReasonCode = "pcs_shutdown"

@@ -45,13 +45,16 @@ func TestLocalUIStatusShape(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{"site_id", "edge_id", "mode", "uptime_s", "blackbox", "uplink"} {
+	for _, key := range []string{"site_id", "edge_id", "mode", "uptime_s", "blackbox", "uplink", "write_enabled"} {
 		if _, ok := body[key]; !ok {
 			t.Errorf("status is missing %q", key)
 		}
 	}
 	if body["site_id"] != "ab" {
 		t.Errorf("site_id = %v", body["site_id"])
+	}
+	if body["write_enabled"] != false {
+		t.Errorf("write_enabled = %v, want false", body["write_enabled"])
 	}
 }
 

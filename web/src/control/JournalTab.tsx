@@ -28,7 +28,9 @@ const EVENT_CODE_LABELS: Record<string, string> = {
   MANIFEST_REJECTED: 'manifest відхилено',
   OVERRIDE_SET: 'локальний override увімкнено',
   OVERRIDE_CLEARED: 'локальний override знято',
-  SL_ALARM: 'аварія SmartLogger (50000…50005)',
+  SL_ALARM: 'аварія SmartLogger (50000…50007)',
+  SL_ALARM_WORDS_FALLBACK: 'логер відмовив 50006/50007 — читаємо 6 слів',
+  METER_READ_DISABLED: 'лічильник не віддає регістри — опитування вимкнено',
   INVERTER_FAULT: 'аварія / втрата інвертора',
   INVERTER_RECOVERED: 'інвертор відновився',
 }
