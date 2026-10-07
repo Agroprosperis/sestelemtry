@@ -1092,6 +1092,98 @@
   color: var(--text);
 }
 
+/* --- day report: УЗЕ fact / optimum / reserve, expected plan effect --- */
+
+.eco-uze-report {
+  margin-top: 16px;
+}
+
+.eco-uze-report p {
+  margin: 0;
+}
+
+.eco-uze-compare {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px;
+}
+
+.eco-uze-compare > div {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  text-align: center;
+}
+
+.eco-uze-compare span {
+  display: block;
+  font-size: 11px;
+  color: var(--text-subtle);
+  margin-bottom: 4px;
+}
+
+.eco-uze-compare strong {
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.eco-uze-compare strong.opt {
+  color: var(--violet-deep);
+}
+
+.eco-uze-compare strong.bad {
+  color: var(--err-text);
+}
+
+.eco-waterfall {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.eco-wf-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 6px;
+}
+
+.eco-wf-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 5px 0;
+  font-size: 12px;
+  border-bottom: 1px solid var(--bg-muted);
+  color: var(--text-muted);
+}
+
+.eco-wf-row strong {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.eco-wf-row.pos strong {
+  color: var(--ok-text);
+}
+
+.eco-wf-row.neg strong {
+  color: var(--err-text);
+}
+
+.eco-wf-row.total {
+  border-bottom: none;
+  padding-top: 8px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.eco-wf-row.total strong {
+  color: var(--violet-deep);
+  font-size: 15px;
+}
+
 /* The legend wraps under the donut once the panel can't hold both. */
 .eco-donut-wrap {
   display: flex;

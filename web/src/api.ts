@@ -698,6 +698,57 @@ export async function fetchUzeDayPlan(
   return res.json()
 }
 
+// DispatchDayEffect is the expected effect of the applied desk plan on
+// one civil day, over the LP's known hours (from..until).
+export type DispatchDayEffect = {
+  date: string
+  from: string
+  until: string
+  hours: number
+  ess_to_load_uah: number
+  ess_to_grid_uah: number
+  pv_charge_cost_uah: number
+  grid_charge_cost_uah: number
+  degradation_uah: number
+  flows_uah: number
+  soc_open_pct: number
+  soc_close_pct: number
+  soc_carry_uah: number
+  shadow_price_uah: number
+  net_effect_uah: number
+  baseline_cost_uah: number
+  plan_cost_uah: number
+  ess_to_load_kwh: number
+  ess_to_grid_kwh: number
+  charge_pv_kwh: number
+  charge_grid_kwh: number
+}
+
+export type DispatchEffectResponse = {
+  site_id: string
+  date: string
+  version: number
+  available: boolean
+  reason?: string
+  effect?: DispatchDayEffect
+}
+
+// fetchDispatchEffect reads the expected effect of the applied desk plan
+// for today or tomorrow (GET /api/v1/dispatch/effect).
+export async function fetchDispatchEffect(
+  input: { organizationID: string; date: string },
+  signal?: AbortSignal,
+): Promise<DispatchEffectResponse> {
+  const url = buildURL('/api/v1/dispatch/effect', { organization_id: input.organizationID, date: input.date })
+  const res = await apiFetch(url, { signal })
+  if (!res.ok) {
+    const body = await res.text().catch(() => '')
+    const suffix = body ? ` — ${body.trim()}` : ''
+    throw new Error(`dispatch/effect request failed: ${res.status}${suffix}`)
+  }
+  return res.json()
+}
+
 // EconomicsAnomalyHour is one excluded УЗЕ hour with classified reasons.
 export type EconomicsAnomalyHour = {
   at: string

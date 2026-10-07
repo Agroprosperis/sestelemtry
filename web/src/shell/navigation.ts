@@ -10,6 +10,15 @@ export function navigateView(view: AppView, tab?: string) {
   window.dispatchEvent(new PopStateEvent('popstate'))
 }
 
+// navigateEconomicsDay opens the economics day report on date (YYYY-MM-DD).
+export function navigateEconomicsDay(date: string) {
+  const url = viewURL('economics')
+  url.searchParams.set('anchor', date)
+  for (const key of ['range', 'from', 'to']) url.searchParams.delete(key)
+  window.history.pushState({}, '', url)
+  window.dispatchEvent(new PopStateEvent('popstate'))
+}
+
 // replaceView points the URL at a view the user may open, without
 // adding a history entry for the one they may not.
 export function replaceView(view: AppView) {

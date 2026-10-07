@@ -59,7 +59,9 @@ import {
 } from './model'
 import { commandError, constraintsError } from './validate'
 
-type Props = { site: string }
+// onOpenReport opens the economics day report for a date; absent when
+// the user cannot read economics on the site.
+type Props = { site: string; onOpenReport?: (date: string) => void }
 
 type CfgForm = {
   reserve: string
@@ -115,7 +117,7 @@ function writeDraft(site: string, d: SavedDraft | null) {
   }
 }
 
-export function DispatchDesk({ site }: Props) {
+export function DispatchDesk({ site, onOpenReport }: Props) {
   const [state, setState] = useState<DeskState | null>(null)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
@@ -533,6 +535,7 @@ export function DispatchDesk({ site }: Props) {
           timezone={state.timezone}
           onDate={setPastDay}
           onClose={() => setPastDay(null)}
+          onOpenReport={onOpenReport}
         />
       </div>
     )
@@ -697,6 +700,11 @@ export function DispatchDesk({ site }: Props) {
           <button type="button" onClick={() => setPastDay(addDays(today, -1))}>
             Минулі дні
           </button>
+          {onOpenReport && (
+            <button type="button" onClick={() => onOpenReport(today)}>
+              Звіт за день
+            </button>
+          )}
           <button type="button" onClick={() => setSel({ start: 0, end: 1, anchor: 0, inspect: 0 })}>
             Зараз на 1 год
           </button>
