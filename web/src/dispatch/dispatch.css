@@ -465,6 +465,37 @@
   color: var(--d-muted);
 }
 
+/* --- past day (read only) --- */
+
+.d-workspace.d-day {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.d-day-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+  margin: 2px 0 6px;
+  font-size: 12px;
+  color: var(--d-muted);
+}
+
+.d-day-summary strong {
+  color: var(--d-ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.d-date {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dispatch-desk .d-date input {
+  width: auto;
+  padding: 6px 8px;
+}
+
 .d-soc-readout strong {
   color: var(--d-soc);
   font-size: 14px;

@@ -3,7 +3,7 @@
 // action bands, command descriptions, review groups. Index 0 = the
 // current hour (start_hour); history hours are negative.
 
-import type { Command, CommandType, Constraints, DeskHour, HourResult, SimResult, WireModel } from './dispatchClient'
+import type { Command, CommandType, Constraints, DeskHour, HourResult, PlanHour, SimResult, WireModel } from './dispatchClient'
 
 export const FUTURE_HOURS = 24
 export const HISTORY_HOURS = 8
@@ -86,6 +86,13 @@ export function makeClock(startHourISO: string, timeZone: string): Clock {
   )
   return { nowHour: hour, midnight: 24 - hour }
 }
+
+// localDate is the civil date (YYYY-MM-DD) of an instant in timeZone.
+export const localDate = (iso: string, timeZone: string): string =>
+  new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(iso))
+
+export const addDays = (date: string, days: number): string =>
+  new Date(Date.parse(date + 'T12:00:00Z') + days * 86_400_000).toISOString().slice(0, 10)
 
 export const clockAt = (c: Clock, i: number): string => String((((c.nowHour + i) % 24) + 24) % 24).padStart(2, '0') + ':00'
 export const timeLabel = (c: Clock, i: number): string => (c.nowHour + i >= 24 ? 'завтра ' : '') + clockAt(c, i)
@@ -304,6 +311,16 @@ export function cfgSummary(cfg: Constraints): string {
     ' · заряд із мережі ' +
     (cfg.grid_charge ? 'дозволено' : 'вимкнено')
   )
+}
+
+// PlanOverlay is what the edge was asked to follow in a past hour
+// («план / факт»): dashed over the measured series. command describes
+// the operator intent behind it (inspector only).
+export type PlanOverlay = { ess: number | null; soc: number | null; grid: number | null; command?: string }
+
+export function planOverlay(p: PlanHour | undefined): PlanOverlay | null {
+  if (!p) return null
+  return { ess: p.ess_kw, soc: p.soc_pct, grid: p.import_kw - p.export_kw, command: p.command ? commandDesc(p.command) : 'AUTO' }
 }
 
 // unknownForecastText explains why the forecast stops: the first hour

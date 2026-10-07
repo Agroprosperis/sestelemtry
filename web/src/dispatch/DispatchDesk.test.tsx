@@ -6,6 +6,7 @@ const api = vi.hoisted(() => ({
   fetchDeskState: vi.fn(),
   previewDraft: vi.fn(),
   confirmDraft: vi.fn(),
+  fetchDeskDay: vi.fn(),
 }))
 vi.mock('./dispatchClient', () => api)
 
@@ -67,6 +68,13 @@ function deskState(version = 0): DeskState {
         sell_uah_per_kwh: 5.7,
         pv_kw: 0,
         fact: offset < 0 ? { pv_kw: 10, load_kw: 300, grid_kw: 5, ess_kw: 285, soc_pct: 60 - k } : undefined,
+        plan:
+          offset === -1
+            ? {
+                ts: '', load_kw: 300, pv_kw: 10, ess_kw: 290, soc_pct: 52, import_kw: 0, export_kw: 0, curtailed_kw: 0,
+                command: { type: 'cover' as const, value: 300, id: 'block-0-3-cover' },
+              }
+            : undefined,
       }
     }),
     defaults: cfg,
@@ -138,5 +146,29 @@ describe('DispatchDesk', () => {
     await waitFor(() => expect(confirm).toBeEnabled())
     fireEvent.click(confirm)
     expect(await screen.findByText('План змінив інший користувач.')).toBeInTheDocument()
+  })
+
+  it('draws the plan in force over the history hours', async () => {
+    const { container } = render(<DispatchDesk site="ze" />)
+    await screen.findByText('Ручне керування УЗЕ')
+    expect(container.querySelector('[data-mark="plan-ess"]')).not.toBeNull()
+    expect(container.querySelector('[data-mark="plan-soc"]')).not.toBeNull()
+  })
+
+  it('opens a past day read-only and returns to the draft', async () => {
+    api.fetchDeskDay.mockResolvedValue({ site_id: 'ze', timezone: 'Europe/Kyiv', date: '2026-10-06', site: deskState().site, hours: [] })
+    render(<DispatchDesk site="ze" />)
+    await screen.findByText('Ручне керування УЗЕ')
+    fireEvent.change(screen.getByLabelText('Споживання для вибраних годин'), { target: { value: '200' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Задати' }))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Минулі дні' }))
+    expect(await screen.findByText('За цей день немає даних.')).toBeInTheDocument()
+    expect(api.fetchDeskDay.mock.calls[0][1]).toBe('2026-10-06')
+    expect(screen.queryByRole('button', { name: 'У чернетку' })).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: '← До пульта' }))
+    expect(await screen.findByText('Ручне керування УЗЕ')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Переглянути чернетку →' })).toBeEnabled()
   })
 })

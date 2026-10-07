@@ -371,6 +371,8 @@ type dispatchHour struct {
 	PvKw    float64          `json:"pv_kw"` // forecast (future)
 	Weather *edgeHourWeather `json:"weather,omitempty"`
 	Fact    *dispatchFact    `json:"fact,omitempty"`
+	// Plan is what the edge was following in a history hour.
+	Plan *dispatchRunHour `json:"plan,omitempty"`
 }
 
 type dispatchModelDTO struct {
@@ -443,10 +445,20 @@ func (h *Handlers) dispatchState(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	facts, err := h.dispatchFacts(r.Context(), env, env.start.Add(-dispatchHistoryHours*time.Hour), env.start)
+	histFrom := env.start.Add(-dispatchHistoryHours * time.Hour)
+	facts, err := h.dispatchFacts(r.Context(), env, histFrom, env.start)
 	if err != nil {
 		h.edge.Log.Warn("dispatch_state_facts", "site_id", siteID, "err", err)
 	}
+	var histHours []time.Time
+	for ts := histFrom; ts.Before(env.start); ts = ts.Add(time.Hour) {
+		histHours = append(histHours, ts)
+	}
+	runs, err := storage.DispatchRunsBetween(r.Context(), h.edge.Pool, siteID, histFrom, env.start)
+	if err != nil {
+		h.edge.Log.Warn("dispatch_state_runs", "site_id", siteID, "err", err)
+	}
+	plans := plansInForce(runs, histHours)
 
 	resp := dispatchStateResponse{
 		SiteID: siteID, Timezone: env.tz, Now: env.now, StartHour: env.start,
@@ -479,8 +491,12 @@ func (h *Handlers) dispatchState(w http.ResponseWriter, r *http.Request) {
 				w := wx
 				hr.Weather = &w
 			}
-		} else if f, ok := facts[ts]; ok {
-			hr.Fact = f
+		} else {
+			hr.Fact = facts[ts]
+			if p, ok := plans[ts]; ok {
+				pl := p
+				hr.Plan = &pl
+			}
 		}
 		resp.Hours = append(resp.Hours, hr)
 	}
