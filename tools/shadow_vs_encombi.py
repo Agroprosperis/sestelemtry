@@ -33,6 +33,10 @@ import argparse
 import csv
 import statistics
 
+# The edge sign was fixed at 2026-10-07 18:46:27Z (21:46 Kyiv). Records
+# before that hour carry the inverted fact; the mixed hour is dropped.
+SIGN_FIXED_KYIV_HOUR = "2026-10-07 21"
+
 
 def load_rows(hourly_path, dam_path, start, end, fixed):
     prices = {}
@@ -55,8 +59,11 @@ def load_rows(hourly_path, dam_path, start, end, fixed):
         # garbage 40505/40503 samples (hundreds of MW); drop those.
         if abs(load - (float(grid or 0) + float(pv or 0))) > 2:
             continue
+        if dh == SIGN_FIXED_KYIV_HOUR:
+            continue
         if fixed:
-            fact = -fact
+            if dh < SIGN_FIXED_KYIV_HOUR:
+                fact = -fact
             load = load + fact
         rows.append(dict(
             d=d, h=int(hh), shadow=float(shadow or 0), fact=fact, load=load,
