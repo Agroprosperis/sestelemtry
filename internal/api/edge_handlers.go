@@ -34,18 +34,12 @@ type EdgeIngest struct {
 	OrgSuffix string
 	Log       *slog.Logger
 
-	// Forward-planner settings (manifest publisher). Zone is the DAM
-	// price zone (default 2 = unified UA grid), Timezone the market
-	// civil time (default Europe/Kyiv).
+	// Desk/publisher settings. Zone is the DAM price zone (default 2 =
+	// unified UA grid), Timezone the market civil time (default
+	// Europe/Kyiv).
 	PlannerZone     int
 	PlannerTimezone string
 
-	// loadProfiles caches the heuristic load profile per site. The
-	// 14-day median over 1 s telemetry takes minutes to compute on a
-	// large site, far beyond the HTTP write timeout — the planner loop
-	// recomputes it in the background and every publish/preview call
-	// reuses the warm copy.
-	loadProfiles edgeLoadProfileCache
 	// pvPlans caches the n8n generation forecast per site-day.
 	pvPlans edgePvPlanCache
 }

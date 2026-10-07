@@ -8,21 +8,17 @@ import (
 	"fmt"
 	"math"
 	"net/http"
-	"sort"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/nesh/sestelemetry/internal/economics"
 	"github.com/nesh/sestelemetry/internal/pvplan"
-	"github.com/nesh/sestelemetry/internal/storage"
 )
 
-// Edge manifest publisher: turns DAM prices + the PV forecast + a
-// heuristic load profile into a manifest-lite document with
-// plan.intervals[] (the level-A plan the shadow engine follows) and
-// stores it in edge_manifests, where GET /api/v1/edge/manifest serves
-// it to the device.
+// Edge manifest plumbing behind the desk publisher (dispatch_handlers.go):
+// the manifest-lite document, the site envelope (passport, inventory,
+// console settings), RDN prices, the PV forecast and the republish loop.
+// GET /api/v1/edge/manifest serves the stored document to the device.
 
 // pvPerformanceRatio derates the irradiance→AC conversion (soiling,
 // temperature, inverter losses) for the PV forecast.
@@ -40,14 +36,12 @@ type edgeManifestDoc struct {
 	Mode         string `json:"mode"`
 	WriteEnabled bool   `json:"write_enabled"`
 	Preset       string `json:"preset"`
-	// ExportAllowed mirrors the planner's DP setting so the edge shadow
-	// engine does not clamp the exporting plan back to the deficit.
+	// ExportAllowed keeps the edge shadow engine from clamping an
+	// exporting plan back to the local deficit.
 	ExportAllowed bool `json:"export_allowed,omitempty"`
 
-	// Source distinguishes planner output ("" / "auto") from operator
-	// publications ("manual"). The edge ignores unknown fields; the
-	// cloud uses it to keep the rolling planner from overwriting a
-	// still-valid manual manifest.
+	// Source is "dispatch" for desk plans; older rows carry "auto" or
+	// "manual". The edge ignores it.
 	Source string `json:"source,omitempty"`
 	Note   string `json:"note,omitempty"`
 
@@ -90,431 +84,58 @@ type EdgePublishResult struct {
 	Intervals  int    `json:"intervals"`
 	LoadSource string `json:"load_source"`
 	ValidUntil string `json:"valid_until"`
-	// Skipped explains why nothing was published (e.g. an operator's
-	// manual manifest is still valid and blocks the rolling planner).
-	Skipped string `json:"skipped,omitempty"`
-	Source  string `json:"source,omitempty"`
+	Source     string `json:"source,omitempty"`
 }
 
 // edgeManifestPublish handles POST /api/v1/edge/manifest/publish?site_id=.
-// Operator-facing (no edge token): recomputes the forward plan and
-// publishes a new manifest version if it changed.
+// Operator-facing (no edge token): republishes the applied desk plan
+// now rather than on the next loop tick (e.g. after «Обмеження» changed).
 func (h *Handlers) edgeManifestPublish(w http.ResponseWriter, r *http.Request) {
-	e := h.edge
-	if e == nil {
-		http.Error(w, "edge ingest not configured", http.StatusServiceUnavailable)
-		return
-	}
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	siteID := strings.TrimSpace(r.URL.Query().Get("site_id"))
-	if siteID == "" {
-		http.Error(w, "site_id is required", http.StatusBadRequest)
-		return
-	}
-	if _, ok := e.Tokens[siteID]; !ok {
-		http.Error(w, "unknown edge site", http.StatusNotFound)
-		return
-	}
-	res, err := h.PublishEdgeManifest(r.Context(), siteID)
-	if err != nil {
-		e.Log.Error("edge_manifest_publish", "site_id", siteID, "err", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	writeJSON(w, http.StatusOK, res)
-}
-
-// --- manual manifest (console «Ручний режим») ---
-
-// edgeManualInterval is one operator-entered dispatch hour.
-type edgeManualInterval struct {
-	TS           time.Time `json:"ts"`
-	EssKw        float64   `json:"ess_kw"` // + discharge / − charge
-	SocTargetPct float64   `json:"soc_target_pct,omitempty"`
-}
-
-// edgeManualPublishRequest is the POST /api/v1/edge/manifest/publish-manual
-// body. Intervals may be empty — a preset-only manual manifest (e.g.
-// «потримай self_consumption_safe 4 години») is legitimate. Cancel=true
-// discards the manual manifest by republishing the rolling plan.
-type edgeManualPublishRequest struct {
-	TTLHours  float64              `json:"ttl_hours"`
-	Preset    string               `json:"preset"`
-	Note      string               `json:"note"`
-	Cancel    bool                 `json:"cancel"`
-	Intervals []edgeManualInterval `json:"intervals"`
-}
-
-const (
-	edgeManualTTLDefault = 4 * time.Hour
-	edgeManualTTLMax     = 48 * time.Hour
-	// edgeManualEssMaxKw is a sanity bound, not a site limit — the real
-	// per-site caps still apply on the edge via manifest limits.
-	edgeManualEssMaxKw = 20000.0
-)
-
-func (r *edgeManualPublishRequest) validate() error {
-	if r.Cancel {
-		return nil
-	}
-	if r.TTLHours != 0 && (r.TTLHours < 0.5 || r.TTLHours > edgeManualTTLMax.Hours()) {
-		return fmt.Errorf("ttl_hours має бути в межах 0.5..%v", edgeManualTTLMax.Hours())
-	}
-	switch r.Preset {
-	case "", "economic_arbitrage", "self_consumption", "self_consumption_safe":
-	default:
-		return fmt.Errorf("невідомий preset %q", r.Preset)
-	}
-	seen := map[time.Time]bool{}
-	for i, iv := range r.Intervals {
-		if iv.TS.IsZero() {
-			return fmt.Errorf("intervals[%d]: ts обов'язковий", i)
-		}
-		if math.IsNaN(iv.EssKw) || math.IsInf(iv.EssKw, 0) || math.Abs(iv.EssKw) > edgeManualEssMaxKw {
-			return fmt.Errorf("intervals[%d]: ess_kw поза межами", i)
-		}
-		if iv.SocTargetPct < 0 || iv.SocTargetPct > 100 {
-			return fmt.Errorf("intervals[%d]: soc_target_pct має бути 0..100", i)
-		}
-		key := iv.TS.UTC().Truncate(time.Hour)
-		if seen[key] {
-			return fmt.Errorf("intervals[%d]: дубльована година %s", i, key.Format(time.RFC3339))
-		}
-		seen[key] = true
-	}
-	return nil
-}
-
-func (r *edgeManualPublishRequest) ttl() time.Duration {
-	if r.TTLHours <= 0 {
-		return edgeManualTTLDefault
-	}
-	return time.Duration(r.TTLHours * float64(time.Hour))
-}
-
-// edgeManifestPublishManual handles
-// POST /api/v1/edge/manifest/publish-manual?site_id=.
-func (h *Handlers) edgeManifestPublishManual(w http.ResponseWriter, r *http.Request) {
 	siteID, ok := h.requireEdge(w, r, http.MethodPost)
 	if !ok {
 		return
 	}
-	var req edgeManualPublishRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-	if err := req.validate(); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	if req.Cancel {
-		// Back to the rolling planner: force one auto publication past
-		// the manual guard so the edge picks a fresh plan immediately.
-		res, err := h.publishEdgeManifest(r.Context(), siteID, true)
-		if err != nil {
-			h.edge.Log.Error("edge_manifest_manual_cancel", "site_id", siteID, "err", err)
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		writeJSON(w, http.StatusOK, res)
-		return
-	}
-
-	res, err := h.publishManualEdgeManifest(r.Context(), siteID, req)
+	res, err := h.publishDispatch(r.Context(), siteID)
 	if err != nil {
-		h.edge.Log.Error("edge_manifest_manual", "site_id", siteID, "err", err)
+		h.edge.Log.Error("edge_manifest_publish", "site_id", siteID, "err", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, http.StatusOK, res)
 }
 
-// publishManualEdgeManifest stores an operator manifest: the requested
-// intervals with the site's limits/SOC policy, valid for the TTL. While
-// it is valid the rolling planner leaves it alone.
-func (h *Handlers) publishManualEdgeManifest(ctx context.Context, siteID string, req edgeManualPublishRequest) (EdgePublishResult, error) {
-	e := h.edge
-	now := time.Now().UTC()
-
-	in := edgePlanInputs{Now: now}
-	if err := h.applyEdgeSiteParams(ctx, siteID, &in); err != nil {
-		return EdgePublishResult{SiteID: siteID}, err
-	}
-
-	preset := req.Preset
-	if preset == "" {
-		preset = "economic_arbitrage"
-	}
-
-	doc := edgeManifestDoc{
-		SchemaVersion: "lite-1",
-		SiteID:        siteID,
-		IssuedAt:      now,
-		ValidFrom:     now,
-		ValidUntil:    now.Add(req.ttl()),
-		Mode:          "shadow",
-		WriteEnabled:  false,
-		Preset:        preset,
-		ExportAllowed: in.ExportAllowed,
-		Source:        "manual",
-		Note:          strings.TrimSpace(req.Note),
-	}
-	doc.Limits.EssChargeMaxKw = in.ChargeMaxKw
-	doc.Limits.EssDischargeMaxKw = in.DischargeMaxKw
-	doc.GridLimits.ImportLimitKw = in.GridImportKw
-	doc.GridLimits.TargetImportKw = in.GridTargetKw
-	doc.GridLimits.PvRatedKw = in.PvRatedKw
-	doc.SocPolicy.MinEconomicPct = in.SocMin
-	doc.SocPolicy.MaxEconomicPct = in.SocMax
-
-	if len(req.Intervals) > 0 {
-		ivs := make([]edgePlanInterval, 0, len(req.Intervals))
-		for _, iv := range req.Intervals {
-			ivs = append(ivs, edgePlanInterval{
-				TS:           iv.TS.UTC().Truncate(time.Hour),
-				EssKw:        round1(iv.EssKw),
-				SocTargetPct: round1(iv.SocTargetPct),
-				Action:       "manual",
-			})
-		}
-		sort.Slice(ivs, func(i, j int) bool { return ivs[i].TS.Before(ivs[j].TS) })
-		doc.Plan = &edgePlanDoc{Granularity: "1h", LoadSource: "manual", Intervals: ivs}
-	}
-	doc.ManifestID = edgeManualManifestID(siteID, doc)
-
-	res := EdgePublishResult{
-		SiteID:     siteID,
-		ManifestID: doc.ManifestID,
-		Intervals:  len(req.Intervals),
-		LoadSource: "manual",
-		ValidUntil: doc.ValidUntil.Format(time.RFC3339),
-		Source:     "manual",
-	}
-
-	_, latestID, hasLatest, err := storage.LatestEdgeManifest(ctx, e.Pool, siteID)
-	if err != nil {
-		return res, err
-	}
-	if hasLatest && latestID == doc.ManifestID {
-		return res, nil
-	}
-
-	payload, err := json.Marshal(doc)
-	if err != nil {
-		return res, err
-	}
-	if err := storage.UpsertEdgeManifest(ctx, e.Pool, siteID, doc.ManifestID, payload, doc.ValidFrom, doc.ValidUntil); err != nil {
-		return res, err
-	}
-	res.Published = true
-	e.Log.Info("edge_manifest_manual_published",
-		"site_id", siteID, "manifest_id", doc.ManifestID,
-		"intervals", len(req.Intervals), "valid_until", res.ValidUntil)
-	return res, nil
-}
-
-// manualManifestActive reports whether payload is an operator manifest
-// that is still within its validity window.
-func manualManifestActive(payload []byte, now time.Time) bool {
-	var m struct {
-		Source     string    `json:"source"`
-		ValidUntil time.Time `json:"valid_until"`
-	}
-	if json.Unmarshal(payload, &m) != nil {
-		return false
-	}
-	return m.Source == "manual" && m.ValidUntil.After(now)
-}
-
-// edgeManualManifestID hashes the manual content *including* the
-// validity end: re-publishing the same hours with a longer TTL must
-// yield a new version (the auto id deliberately ignores valid_until).
-func edgeManualManifestID(siteID string, doc edgeManifestDoc) string {
-	hashable := struct {
-		SiteID     string       `json:"site_id"`
-		Preset     string       `json:"preset"`
-		Note       string       `json:"note"`
-		ValidUntil time.Time    `json:"valid_until"`
-		Plan       *edgePlanDoc `json:"plan"`
-		Limits     any          `json:"limits"`
-		SocPolicy  any          `json:"soc_policy"`
-	}{siteID, doc.Preset, doc.Note, doc.ValidUntil, doc.Plan, doc.Limits, doc.SocPolicy}
-	raw, _ := json.Marshal(hashable)
-	sum := sha256.Sum256(raw)
-	return fmt.Sprintf("%s-manual-%s-%s", siteID, doc.ValidUntil.Format("20060102T1504"), hex.EncodeToString(sum[:])[:8])
-}
-
-// edgePlanInputs bundles everything the forward DP needs for one site:
-// horizon, ratings, tariffs and the merged hourly forecast series.
-type edgePlanInputs struct {
-	Loc        *time.Location
-	Timezone   string
-	Now        time.Time
-	Start, End time.Time
+// edgeSiteParams is a site's planning envelope: tariffs, ratings,
+// per-direction power limits, grid limits and the SOC window.
+type edgeSiteParams struct {
+	Now time.Time
 
 	Tariffs     economics.Tariffs
 	CapacityKwh float64
-	PowerKw     float64 // DP charge/discharge cap (min of the two limits)
 	PvRatedKw   float64
 	SocMin      float64
 	SocMax      float64
-	StartSoc    float64
-	// ExportAllowed lets the arbitrage DP discharge past the local
-	// deficit and sell at the export price (parity with the
-	// retrospective uze-plan optimum the dashboard compares against).
-	ExportAllowed bool
 
-	// Manifest-facing limits (may differ per direction when the
-	// console settings say so; default both to PowerKw).
 	ChargeMaxKw    float64
 	DischargeMaxKw float64
 	GridImportKw   float64
 	GridTargetKw   float64
-
-	Hours      []economics.ForwardHour
-	LoadSource string
-	// PvSource names the PV forecast origin: "generation_forecast"
-	// (the n8n per-orientation product the dashboard uses) or
-	// "gti_estimate" (irradiance × rated × PR fallback).
-	PvSource string
-	// OperatorHour marks hours (UTC hour start) whose load came from
-	// the operator plan (or the preview draft) rather than the
-	// heuristic profile.
-	OperatorHour map[time.Time]bool
-	// Weather carries the display forecast (temp/clouds) for the UI.
-	Weather map[time.Time]edgeHourWeather
-}
-
-// gatherEdgePlanInputs assembles the DP inputs for a site. draftLoad
-// (UTC hour start → kW) lets the planner UI preview unsaved edits: a
-// draft hour overrides both the stored operator plan and the heuristic
-// profile.
-func (h *Handlers) gatherEdgePlanInputs(ctx context.Context, siteID string, draftLoad map[time.Time]float64) (edgePlanInputs, error) {
-	e := h.edge
-	if e == nil {
-		return edgePlanInputs{}, fmt.Errorf("edge ingest not configured")
-	}
-	tzName := e.PlannerTimezone
-	if tzName == "" {
-		tzName = "Europe/Kyiv"
-	}
-	loc, err := time.LoadLocation(tzName)
-	if err != nil {
-		return edgePlanInputs{}, err
-	}
-	zone := e.PlannerZone
-	if zone == 0 {
-		zone = 2
-	}
-	now := time.Now().In(loc)
-
-	in := edgePlanInputs{Loc: loc, Timezone: tzName, Now: now}
-	if err := h.applyEdgeSiteParams(ctx, siteID, &in); err != nil {
-		return edgePlanInputs{}, err
-	}
-
-	// Horizon: the current hour → the end of tomorrow (local).
-	in.Start = now.Truncate(time.Hour)
-	in.End = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc).AddDate(0, 0, 2)
-
-	prices, err := h.edgeDAMPrices(ctx, zone, now, loc)
-	if err != nil {
-		return edgePlanInputs{}, fmt.Errorf("dam prices: %w", err)
-	}
-	pv, weather, err := h.edgePvForecast(ctx, siteID, in.Start, in.End, in.PvRatedKw)
-	if err != nil {
-		return edgePlanInputs{}, fmt.Errorf("pv forecast: %w", err)
-	}
-	in.Weather = weather
-	in.PvSource = "gti_estimate"
-	// Prefer the real generation forecast (same n8n product the
-	// dashboard's day chart shows); the GTI estimate stays as the
-	// per-hour fallback for hours the product does not cover.
-	if plan, ok := h.edgePvPlanForecast(ctx, siteID, loc, in.Start, in.End); ok {
-		in.PvSource = "generation_forecast"
-		for key, kw := range plan {
-			pv[key] = kw
-		}
-	}
-	heuristic, heuristicSource, err := h.edgeLoadProfile(ctx, siteID, tzName)
-	if err != nil {
-		return edgePlanInputs{}, fmt.Errorf("load profile: %w", err)
-	}
-	operator, err := storage.GetEdgeLoadPlan(ctx, e.Pool, siteID, in.Start, in.End)
-	if err != nil {
-		return edgePlanInputs{}, fmt.Errorf("operator load plan: %w", err)
-	}
-
-	in.StartSoc = h.edgeLatestSoc(ctx, siteID)
-	if in.StartSoc == 0 {
-		in.StartSoc = (in.SocMin + in.SocMax) / 2
-	}
-
-	in.OperatorHour = map[time.Time]bool{}
-	totalHours, operatorHours := 0, 0
-	for ts := in.Start; ts.Before(in.End); ts = ts.Add(time.Hour) {
-		key := ts.UTC()
-		fh := economics.ForwardHour{TS: ts, PvKw: pv[key]}
-		switch {
-		case draftLoad != nil && hasHour(draftLoad, key):
-			fh.LoadKw = draftLoad[key]
-			in.OperatorHour[key] = true
-			operatorHours++
-		case hasHour(operator, key):
-			fh.LoadKw = operator[key]
-			in.OperatorHour[key] = true
-			operatorHours++
-		default:
-			fh.LoadKw = heuristic[ts.In(loc).Hour()]
-		}
-		if price, ok := prices[key]; ok {
-			p := price
-			fh.RdnUahPerKwh = &p
-		}
-		in.Hours = append(in.Hours, fh)
-		totalHours++
-	}
-
-	switch {
-	case operatorHours == totalHours && totalHours > 0:
-		in.LoadSource = "operator"
-	case operatorHours > 0:
-		in.LoadSource = "operator_partial"
-	default:
-		in.LoadSource = heuristicSource
-	}
-	return in, nil
-}
-
-func hasHour(m map[time.Time]float64, ts time.Time) bool {
-	_, ok := m[ts]
-	return ok
 }
 
 // applyEdgeSiteParams fills tariffs, ratings, per-direction limits and
 // the SOC policy into in — passport/inventory numbers first, saved
 // console settings on top (mockup panel-settings). in.Now must be set.
-func (h *Handlers) applyEdgeSiteParams(ctx context.Context, siteID string, in *edgePlanInputs) error {
-	var err error
+func (h *Handlers) applyEdgeSiteParams(ctx context.Context, siteID string, in *edgeSiteParams) error {
 	in.Tariffs = h.resolveEdgeTariffs(ctx, siteID, in.Now)
-	in.CapacityKwh, in.PowerKw, in.PvRatedKw, err = h.resolveEdgeRatings(ctx, siteID, in.Tariffs)
+	capacityKwh, powerKw, pvRatedKw, err := h.resolveEdgeRatings(ctx, siteID, in.Tariffs)
 	if err != nil {
 		return err
 	}
+	in.CapacityKwh, in.PvRatedKw = capacityKwh, pvRatedKw
 	// Trusted SL PV rating (40396) caps every later override (§4.1);
 	// resolveEdgeRatings returns exactly it (0 = not polled yet).
 	slPvKw := in.PvRatedKw
-	in.ChargeMaxKw, in.DischargeMaxKw = in.PowerKw, in.PowerKw
+	in.ChargeMaxKw, in.DischargeMaxKw = powerKw, powerKw
 	in.SocMin, in.SocMax = 20.0, 90.0
-	// The pilot sites sell PV surplus at the export tariff, so BESS
-	// arbitrage may export too — same rules as the retrospective
-	// optimum. Becomes a per-site setting if a no-export site appears.
-	in.ExportAllowed = true
 
 	if s, saved := h.loadEdgeSiteSettings(ctx, siteID); saved && s != nil {
 		if s.PvRatedKw > 0 {
@@ -529,11 +150,6 @@ func (h *Handlers) applyEdgeSiteParams(ctx context.Context, siteID string, in *e
 		if s.AutoDischargeMaxKw > 0 {
 			in.DischargeMaxKw = s.AutoDischargeMaxKw
 		}
-		if s.AutoChargeMaxKw > 0 || s.AutoDischargeMaxKw > 0 {
-			// The DP has a single symmetric cap — take the stricter of
-			// the two so it never plans past either manifest limit.
-			in.PowerKw = math.Min(in.ChargeMaxKw, in.DischargeMaxKw)
-		}
 		if s.SocReservePct > 0 {
 			in.SocMin = s.SocReservePct
 		}
@@ -544,121 +160,6 @@ func (h *Handlers) applyEdgeSiteParams(ctx context.Context, siteID string, in *e
 		in.GridTargetKw = s.GridTargetKw
 	}
 	return nil
-}
-
-// PublishEdgeManifest builds the forward plan for one site and stores
-// it as a manifest-lite version. The manifest_id is a content hash, so
-// republishing an unchanged plan is a no-op (the edge keeps its cached
-// copy via ETag). A still-valid manual manifest blocks this auto path —
-// cancel it via publish-manual {"cancel":true}.
-func (h *Handlers) PublishEdgeManifest(ctx context.Context, siteID string) (EdgePublishResult, error) {
-	return h.publishEdgeManifest(ctx, siteID, false)
-}
-
-func (h *Handlers) publishEdgeManifest(ctx context.Context, siteID string, overrideManual bool) (EdgePublishResult, error) {
-	e := h.edge
-	if e == nil {
-		return EdgePublishResult{}, fmt.Errorf("edge ingest not configured")
-	}
-
-	latestPayload, latestID, hasLatest, err := storage.LatestEdgeManifest(ctx, e.Pool, siteID)
-	if err != nil {
-		return EdgePublishResult{SiteID: siteID}, err
-	}
-	if hasLatest && !overrideManual && manualManifestActive(latestPayload, time.Now().UTC()) {
-		return EdgePublishResult{
-			SiteID: siteID, ManifestID: latestID, Source: "manual",
-			Skipped: "manual manifest active",
-		}, nil
-	}
-
-	in, err := h.gatherEdgePlanInputs(ctx, siteID, nil)
-	if err != nil {
-		return EdgePublishResult{}, err
-	}
-	now, end, loadSource := in.Now, in.End, in.LoadSource
-
-	steps, err := economics.BuildForwardPlan(in.Hours, economics.ForwardParams{
-		Tariffs:       in.Tariffs,
-		CapacityKwh:   in.CapacityKwh,
-		PowerKw:       in.PowerKw,
-		SocMinPct:     in.SocMin,
-		SocMaxPct:     in.SocMax,
-		StartSocPct:   in.StartSoc,
-		ExportAllowed: in.ExportAllowed,
-	})
-	if err != nil {
-		return EdgePublishResult{}, err
-	}
-
-	intervals := make([]edgePlanInterval, 0, len(steps))
-	for _, s := range steps {
-		if !s.Tradable {
-			continue // no DAM price — the edge preset rules own the hour
-		}
-		intervals = append(intervals, edgePlanInterval{
-			TS:           s.TS.UTC(),
-			EssKw:        round1(s.EssKw),
-			SocTargetPct: round1(s.SocEndPct),
-			Action:       s.Action,
-			PriceUah:     round3(s.RdnUahPerKwh),
-		})
-	}
-
-	doc := edgeManifestDoc{
-		SchemaVersion: "lite-1",
-		SiteID:        siteID,
-		IssuedAt:      now.UTC(),
-		ValidFrom:     now.UTC(),
-		ValidUntil:    end.UTC(),
-		Mode:          "shadow",
-		WriteEnabled:  false,
-		Preset:        "economic_arbitrage",
-		ExportAllowed: in.ExportAllowed,
-		Source:        "auto",
-	}
-	doc.Limits.EssChargeMaxKw = in.ChargeMaxKw
-	doc.Limits.EssDischargeMaxKw = in.DischargeMaxKw
-	doc.GridLimits.ImportLimitKw = in.GridImportKw
-	doc.GridLimits.TargetImportKw = in.GridTargetKw
-	doc.GridLimits.PvRatedKw = in.PvRatedKw
-	doc.SocPolicy.MinEconomicPct = in.SocMin
-	doc.SocPolicy.MaxEconomicPct = in.SocMax
-	if len(intervals) > 0 {
-		doc.Plan = &edgePlanDoc{
-			Granularity: "1h",
-			LoadSource:  loadSource,
-			Intervals:   intervals,
-		}
-	}
-	doc.ManifestID = edgeManifestID(siteID, end, doc)
-
-	res := EdgePublishResult{
-		SiteID:     siteID,
-		ManifestID: doc.ManifestID,
-		Intervals:  len(intervals),
-		LoadSource: loadSource,
-		ValidUntil: doc.ValidUntil.Format(time.RFC3339),
-		Source:     doc.Source,
-	}
-
-	// Unchanged content → same id → nothing to publish.
-	if hasLatest && latestID == doc.ManifestID {
-		return res, nil
-	}
-
-	payload, err := json.Marshal(doc)
-	if err != nil {
-		return res, err
-	}
-	if err := storage.UpsertEdgeManifest(ctx, e.Pool, siteID, doc.ManifestID, payload, doc.ValidFrom, doc.ValidUntil); err != nil {
-		return res, err
-	}
-	res.Published = true
-	e.Log.Info("edge_manifest_published",
-		"site_id", siteID, "manifest_id", doc.ManifestID,
-		"intervals", len(intervals), "valid_until", res.ValidUntil)
-	return res, nil
 }
 
 // edgeManifestID derives a deterministic content id: same plan → same
@@ -745,14 +246,6 @@ func (h *Handlers) resolveEdgeRatings(ctx context.Context, orgID string, t econo
 		return 0, 0, 0, fmt.Errorf("no ESS ratings for %s: need tariffs passport (ess_capacity_kwh / ess_power_limit_kw) or trusted plant inventory", orgID)
 	}
 	return capacityKwh, powerKw, pvRatedKw, nil
-}
-
-// edgeDAMPrices loads today's and tomorrow's hourly RDN prices
-// (UAH/kWh) keyed by UTC hour start.
-func (h *Handlers) edgeDAMPrices(ctx context.Context, zone int, now time.Time, loc *time.Location) (map[time.Time]float64, error) {
-	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
-	dates := []string{today.Format("2006-01-02"), today.AddDate(0, 0, 1).Format("2006-01-02")}
-	return h.damPricesForDates(ctx, zone, dates, loc)
 }
 
 // damPricesForDates loads hourly RDN prices (UAH/kWh) for local
@@ -902,215 +395,6 @@ func (h *Handlers) edgePvForecast(ctx context.Context, orgID string, from, to ti
 	return out, weather, rows.Err()
 }
 
-// edgeLoadProfileCache holds the per-site heuristic profile. Zero value
-// ready to use; guarded by its own mutex because the planner loop and
-// HTTP handlers (publish, preview) share one EdgeIngest.
-type edgeLoadProfileCache struct {
-	mu         sync.Mutex
-	m          map[string]cachedLoadProfile
-	inflight   map[string]chan struct{} // cold-start: collapse concurrent scans
-	refreshing map[string]bool          // stale: one background refresh at a time
-}
-
-type cachedLoadProfile struct {
-	byHour map[int]float64
-	source string
-	at     time.Time
-}
-
-// loadProfileTTL is how long a computed heuristic profile counts as
-// fresh. The profile moves slowly (a 14-day median), so staleness is
-// invisible — while recomputing it on a large site scans tens of
-// millions of 1 s samples and takes minutes.
-const loadProfileTTL = time.Hour
-
-// edgeLoadProfile builds the heuristic load forecast: the median load
-// per local hour over the trailing 14 days (spec: until the operator
-// plan enters via the UI, shadow calibration uses this
-// marked-as-heuristic profile).
-//
-// Caching policy keeps interactive callers fast:
-//   - fresh entry → return it;
-//   - stale entry → return it immediately (stale-while-revalidate) and
-//     kick one background refresh;
-//   - no entry (first call after boot) → compute synchronously, but
-//     concurrent callers share a single scan instead of stacking up.
-func (h *Handlers) edgeLoadProfile(ctx context.Context, orgID, tzName string) (map[int]float64, string, error) {
-	cache := &h.edge.loadProfiles
-
-	cache.mu.Lock()
-	ent, has := cache.m[orgID]
-	if has && time.Since(ent.at) < loadProfileTTL {
-		cache.mu.Unlock()
-		return ent.byHour, ent.source, nil
-	}
-	if has {
-		if cache.refreshing == nil {
-			cache.refreshing = map[string]bool{}
-		}
-		if !cache.refreshing[orgID] {
-			cache.refreshing[orgID] = true
-			go h.refreshEdgeLoadProfile(orgID, tzName)
-		}
-		cache.mu.Unlock()
-		return ent.byHour, ent.source, nil
-	}
-	ch, joined := cache.inflight[orgID]
-	if !joined {
-		if cache.inflight == nil {
-			cache.inflight = map[string]chan struct{}{}
-		}
-		ch = make(chan struct{})
-		cache.inflight[orgID] = ch
-	}
-	cache.mu.Unlock()
-
-	if joined {
-		select {
-		case <-ch:
-			cache.mu.Lock()
-			ent, has := cache.m[orgID]
-			cache.mu.Unlock()
-			if has {
-				return ent.byHour, ent.source, nil
-			}
-			return nil, "", fmt.Errorf("load profile: initial computation failed")
-		case <-ctx.Done():
-			return nil, "", ctx.Err()
-		}
-	}
-
-	byHour, source, err := h.queryEdgeLoadProfile(ctx, orgID, tzName)
-	cache.mu.Lock()
-	if err == nil {
-		if cache.m == nil {
-			cache.m = map[string]cachedLoadProfile{}
-		}
-		cache.m[orgID] = cachedLoadProfile{byHour: byHour, source: source, at: time.Now()}
-	}
-	delete(cache.inflight, orgID)
-	close(ch)
-	cache.mu.Unlock()
-	if err != nil {
-		return nil, "", err
-	}
-	return byHour, source, nil
-}
-
-// refreshEdgeLoadProfile recomputes one site's profile detached from
-// any request context (the caller already got the stale copy).
-func (h *Handlers) refreshEdgeLoadProfile(orgID, tzName string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer cancel()
-	byHour, source, err := h.queryEdgeLoadProfile(ctx, orgID, tzName)
-
-	cache := &h.edge.loadProfiles
-	cache.mu.Lock()
-	defer cache.mu.Unlock()
-	delete(cache.refreshing, orgID)
-	if err != nil {
-		h.edge.Log.Warn("edge_load_profile_refresh", "site_id", orgID, "err", err)
-		return
-	}
-	cache.m[orgID] = cachedLoadProfile{byHour: byHour, source: source, at: time.Now()}
-}
-
-// loadProfileMinDays is how many local days of economics rows the
-// profile needs before it replaces the load_power_kw fallback.
-const loadProfileMinDays = 7
-
-// queryEdgeLoadProfile prefers the plant consumption the economics
-// recompute persists (energy-flow load: PV + import + ESS discharge −
-// export − ESS charge). load_power_kw is only the fallback: on a
-// dual-logger site it is 40503 of the PV logger (= grid + PV), blind to
-// the BESS on the other logger — ze's evening load reads ~3 kW while the
-// battery covers ~270 kW, and midday charging reads as load.
-func (h *Handlers) queryEdgeLoadProfile(ctx context.Context, orgID, tzName string) (map[int]float64, string, error) {
-	loc, err := time.LoadLocation(tzName)
-	if err != nil {
-		return nil, "", err
-	}
-	now := time.Now()
-	econ, err := storage.GetEconomicsHourly(ctx, h.edge.Pool, orgID, now.AddDate(0, 0, -14), now)
-	if err != nil {
-		if h.edge.Log != nil {
-			h.edge.Log.Warn("edge_load_profile_economics", "site_id", orgID, "err", err)
-		}
-	} else if profile := loadProfileFromEconomics(econ, loc); profile != nil {
-		return profile, "heuristic_energyflow_14d", nil
-	}
-
-	rows, err := h.edge.Pool.Query(ctx, `
-		SELECT extract(hour FROM bucket AT TIME ZONE $2)::int AS h,
-		       percentile_cont(0.5) WITHIN GROUP (ORDER BY v) AS load_kw
-		FROM (
-			SELECT time_bucket('1 hour', time) AS bucket, avg(value) AS v
-			FROM telemetry_samples
-			WHERE organization_id = $1
-			  AND metric_key = 'load_power_kw'
-			  AND time >= now() - interval '14 days'
-			GROUP BY 1
-		) s
-		GROUP BY 1`,
-		orgID, tzName)
-	if err != nil {
-		return nil, "", err
-	}
-	defer rows.Close()
-	out := map[int]float64{}
-	for rows.Next() {
-		var hour int
-		var kw float64
-		if err := rows.Scan(&hour, &kw); err != nil {
-			return nil, "", err
-		}
-		out[hour] = kw
-	}
-	if err := rows.Err(); err != nil {
-		return nil, "", err
-	}
-	if len(out) == 0 {
-		return out, "none", nil
-	}
-	return out, "heuristic_median_14d", nil
-}
-
-// loadProfileFromEconomics is the median load_total_kwh per local hour
-// (kWh in an hour = mean kW). Hours with no load are gaps in the
-// counters, not an idle plant, and are skipped. nil when the window has
-// fewer than loadProfileMinDays days or any hour without samples, so
-// the caller falls back rather than planning on a hole.
-func loadProfileFromEconomics(rows []storage.EconomicsHourlyRow, loc *time.Location) map[int]float64 {
-	byHour := map[int][]float64{}
-	days := map[string]bool{}
-	for _, r := range rows {
-		if r.LoadTotal <= 0 {
-			continue
-		}
-		t := r.HourStart.In(loc)
-		byHour[t.Hour()] = append(byHour[t.Hour()], r.LoadTotal)
-		days[t.Format("2006-01-02")] = true
-	}
-	if len(days) < loadProfileMinDays {
-		return nil
-	}
-	out := make(map[int]float64, 24)
-	for hour := 0; hour < 24; hour++ {
-		v := byHour[hour]
-		if len(v) == 0 {
-			return nil
-		}
-		sort.Float64s(v)
-		mid := len(v) / 2
-		if len(v)%2 == 1 {
-			out[hour] = v[mid]
-		} else {
-			out[hour] = (v[mid-1] + v[mid]) / 2
-		}
-	}
-	return out
-}
-
 // edgeLatestSoc returns the freshest soc_percent within 2 hours, or 0.
 func (h *Handlers) edgeLatestSoc(ctx context.Context, orgID string) float64 {
 	var soc float64
@@ -1125,9 +409,11 @@ func (h *Handlers) edgeLatestSoc(ctx context.Context, orgID string) float64 {
 	return soc
 }
 
-// RunEdgePlannerLoop republishes manifests for every configured site on
-// `interval` (content-hash ids make unchanged plans no-ops). Runs until
-// ctx is done; call from main in a goroutine.
+// RunEdgePlannerLoop re-runs the LP of each site's applied desk version
+// from the current SOC on `interval` and republishes the plan
+// (content-hash ids make unchanged plans no-ops). Without a version or
+// entered load the plan is empty and the edge runs self-consumption.
+// Runs until ctx is done; call from main in a goroutine.
 func (h *Handlers) RunEdgePlannerLoop(ctx context.Context, sites []string, interval time.Duration) {
 	if h.edge == nil || len(sites) == 0 {
 		return
@@ -1139,16 +425,13 @@ func (h *Handlers) RunEdgePlannerLoop(ctx context.Context, sites []string, inter
 	defer t.Stop()
 	for {
 		for _, site := range sites {
-			res, err := h.PublishEdgeManifest(ctx, site)
+			res, err := h.publishDispatch(ctx, site)
 			if err != nil {
 				h.edge.Log.Warn("edge_planner", "site_id", site, "err", err)
 				continue
 			}
 			if res.Published {
-				h.edge.Log.Info("edge_planner_published", "site_id", site, "manifest_id", res.ManifestID)
-			}
-			if res.Skipped != "" {
-				h.edge.Log.Info("edge_planner_skipped", "site_id", site, "reason", res.Skipped)
+				h.edge.Log.Info("edge_planner_published", "site_id", site, "manifest_id", res.ManifestID, "intervals", res.Intervals)
 			}
 		}
 		select {

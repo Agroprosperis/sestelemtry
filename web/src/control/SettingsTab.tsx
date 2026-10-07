@@ -1,7 +1,7 @@
 // SettingsTab — the «Обмеження» tab: per-site SOC policy, power and
 // grid limits (GET/PUT /api/v1/edge/settings). Saved values feed the
-// planner and every next manifest; «Опублікувати» pushes them to the
-// edge immediately instead of waiting for the 15-minute rolling cycle.
+// desk LP and every next manifest; «Опублікувати» pushes them to the
+// edge immediately instead of waiting for the 15-minute cycle.
 
 import { useEffect, useState } from 'react'
 import {
@@ -108,7 +108,7 @@ export function SettingsTab({ site, canEdit = true, onChanged }: Props) {
     try {
       await saveEdgeSettings(site, settings)
       setSaved(true)
-      setNotice('Збережено. Значення підуть у наступний manifest (rolling кожні 15 хв).')
+      setNotice('Збережено. Значення підуть у наступний manifest (перерахунок кожні 15 хв).')
       onChanged()
     } catch (e) {
       setError(String(e))
@@ -127,9 +127,7 @@ export function SettingsTab({ site, canEdit = true, onChanged }: Props) {
       await saveEdgeSettings(site, settings)
       setSaved(true)
       const res = await publishAutoManifest(site)
-      if (res.skipped) {
-        setNotice(`Збережено, але публікацію пропущено: ${res.skipped}. Скасуйте ручний режим у «Режимах».`)
-      } else if (res.published) {
+      if (res.published) {
         setNotice(`Збережено й опубліковано ${res.manifest_id} — edge підхопить протягом хвилини.`)
       } else {
         setNotice('Збережено; план не змінився, чинна версія лишається.')
