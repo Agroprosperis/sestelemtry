@@ -1009,7 +1009,31 @@ func (h *Handlers) refreshEdgeLoadProfile(orgID, tzName string) {
 	cache.m[orgID] = cachedLoadProfile{byHour: byHour, source: source, at: time.Now()}
 }
 
+// loadProfileMinDays is how many local days of economics rows the
+// profile needs before it replaces the load_power_kw fallback.
+const loadProfileMinDays = 7
+
+// queryEdgeLoadProfile prefers the plant consumption the economics
+// recompute persists (energy-flow load: PV + import + ESS discharge −
+// export − ESS charge). load_power_kw is only the fallback: on a
+// dual-logger site it is 40503 of the PV logger (= grid + PV), blind to
+// the BESS on the other logger — ze's evening load reads ~3 kW while the
+// battery covers ~270 kW, and midday charging reads as load.
 func (h *Handlers) queryEdgeLoadProfile(ctx context.Context, orgID, tzName string) (map[int]float64, string, error) {
+	loc, err := time.LoadLocation(tzName)
+	if err != nil {
+		return nil, "", err
+	}
+	now := time.Now()
+	econ, err := storage.GetEconomicsHourly(ctx, h.edge.Pool, orgID, now.AddDate(0, 0, -14), now)
+	if err != nil {
+		if h.edge.Log != nil {
+			h.edge.Log.Warn("edge_load_profile_economics", "site_id", orgID, "err", err)
+		}
+	} else if profile := loadProfileFromEconomics(econ, loc); profile != nil {
+		return profile, "heuristic_energyflow_14d", nil
+	}
+
 	rows, err := h.edge.Pool.Query(ctx, `
 		SELECT extract(hour FROM bucket AT TIME ZONE $2)::int AS h,
 		       percentile_cont(0.5) WITHIN GROUP (ORDER BY v) AS load_kw
@@ -1043,6 +1067,42 @@ func (h *Handlers) queryEdgeLoadProfile(ctx context.Context, orgID, tzName strin
 		return out, "none", nil
 	}
 	return out, "heuristic_median_14d", nil
+}
+
+// loadProfileFromEconomics is the median load_total_kwh per local hour
+// (kWh in an hour = mean kW). Hours with no load are gaps in the
+// counters, not an idle plant, and are skipped. nil when the window has
+// fewer than loadProfileMinDays days or any hour without samples, so
+// the caller falls back rather than planning on a hole.
+func loadProfileFromEconomics(rows []storage.EconomicsHourlyRow, loc *time.Location) map[int]float64 {
+	byHour := map[int][]float64{}
+	days := map[string]bool{}
+	for _, r := range rows {
+		if r.LoadTotal <= 0 {
+			continue
+		}
+		t := r.HourStart.In(loc)
+		byHour[t.Hour()] = append(byHour[t.Hour()], r.LoadTotal)
+		days[t.Format("2006-01-02")] = true
+	}
+	if len(days) < loadProfileMinDays {
+		return nil
+	}
+	out := make(map[int]float64, 24)
+	for hour := 0; hour < 24; hour++ {
+		v := byHour[hour]
+		if len(v) == 0 {
+			return nil
+		}
+		sort.Float64s(v)
+		mid := len(v) / 2
+		if len(v)%2 == 1 {
+			out[hour] = v[mid]
+		} else {
+			out[hour] = (v[mid-1] + v[mid]) / 2
+		}
+	}
+	return out
 }
 
 // edgeLatestSoc returns the freshest soc_percent within 2 hours, or 0.
