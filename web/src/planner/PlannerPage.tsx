@@ -44,7 +44,8 @@ function draftToEntries(draft: Map<string, number>): LoadPlanEntry[] {
 const LOAD_SOURCE_LABEL: Record<string, string> = {
   operator: 'операторський план',
   operator_partial: 'операторський (частково)',
-  heuristic_median_14d: 'heuristic: медіана 14 діб',
+  heuristic_energyflow_14d: 'heuristic: медіана 14 діб (energyflow)',
+  heuristic_median_14d: 'heuristic: медіана 14 діб (40503)',
   none: 'немає даних load',
 }
 
