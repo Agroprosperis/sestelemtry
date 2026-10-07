@@ -68,15 +68,16 @@ func (s *Service) uiStatus(w http.ResponseWriter, r *http.Request) {
 	// figure.
 	params := resolveParams(now, s.manifest.Load(), s.cfg)
 	out := map[string]any{
-		"site_id":  s.cfg.SiteID,
-		"edge_id":  s.cfg.Edge.EdgeID,
-		"version":  s.version,
-		"mode":     string(s.cfg.Control.Mode),
-		"preset":   s.cfg.Control.Preset,
-		"topology": string(s.cfg.SmartLogger.Topology),
-		"now":      now,
-		"uptime_s": int64(time.Since(s.startedAt).Seconds()),
-		"timezone": s.cfg.Timezone,
+		"site_id":       s.cfg.SiteID,
+		"edge_id":       s.cfg.Edge.EdgeID,
+		"version":       s.version,
+		"mode":          string(s.cfg.Control.Mode),
+		"preset":        s.cfg.Control.Preset,
+		"topology":      string(s.cfg.SmartLogger.Topology),
+		"now":           now,
+		"uptime_s":      int64(time.Since(s.startedAt).Seconds()),
+		"timezone":      s.cfg.Timezone,
+		"write_enabled": false,
 		"limits": map[string]any{
 			"source":                params.planSource,
 			"grid_import_kw":        s.effectiveImportLimitKw(now),

@@ -87,3 +87,34 @@ func TestEssSignFlip(t *testing.T) {
 		t.Fatalf("raw value must stay 75, got %v", tick.Values["active_ess_power_kw"])
 	}
 }
+
+func TestSLAlarmWordsSixOrEight(t *testing.T) {
+	six := testTick(map[string]float64{
+		"sl_alarm_1": 0, "sl_alarm_2": 16, "sl_alarm_3": 0,
+		"sl_alarm_4": 0, "sl_alarm_5": 0, "sl_alarm_6": 0,
+	}, QualityOK)
+	words, ok := six.SLAlarmWords()
+	if !ok || len(words) != 6 || words[1] != 16 {
+		t.Fatalf("six = %v ok=%v", words, ok)
+	}
+	if !six.SLAlarmActive() {
+		t.Fatal("word 2 = 16 must be active")
+	}
+
+	eight := testTick(map[string]float64{
+		"sl_alarm_1": 0, "sl_alarm_2": 0, "sl_alarm_3": 0,
+		"sl_alarm_4": 0, "sl_alarm_5": 0, "sl_alarm_6": 0,
+		"sl_alarm_7": 0, "sl_alarm_8": 1,
+	}, QualityOK)
+	words, ok = eight.SLAlarmWords()
+	if !ok || len(words) != 8 || words[7] != 1 {
+		t.Fatalf("eight = %v ok=%v", words, ok)
+	}
+	if !eight.SLAlarmActive() {
+		t.Fatal("word 8 must be active")
+	}
+	hex := slAlarmHex(words)
+	if len(hex) != 8 || hex[7] != "0x0001" {
+		t.Fatalf("hex = %v", hex)
+	}
+}

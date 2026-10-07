@@ -399,7 +399,7 @@ function HealthChecksCard({ checks, alarms }: { checks: HealthCheck[]; alarms?: 
       </table>
       {alarms && (
         <p className="ctl-card-sub" style={{ marginTop: 10 }}>
-          Слова алармів SL (50000…50005): <code>{alarms.join(' ')}</code>
+          Слова алармів SL (50000…): <code>{alarms.join(' ')}</code>
         </p>
       )}
     </section>

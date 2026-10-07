@@ -184,27 +184,38 @@ func f64ptr(v float64) *float64 { return &v }
 
 func round3(v float64) float64 { return math.Round(v*1000) / 1000 }
 
-// slAlarmWordKeys are the metric keys of the six SmartLogger alarm
-// words (registers 50000…50005, Issue 52 Alarm 1…6), in order.
-var slAlarmWordKeys = [6]string{
+// slAlarmWordKeys are the metric keys of the SmartLogger alarm words
+// (registers 50000…50007, Issue 52 Alarm 1…8), in order. Words 7–8
+// are optional: a firmware that refuses them is recorded and the
+// poll falls back to six.
+var slAlarmWordKeys = []string{
 	"sl_alarm_1", "sl_alarm_2", "sl_alarm_3",
 	"sl_alarm_4", "sl_alarm_5", "sl_alarm_6",
+	"sl_alarm_7", "sl_alarm_8",
 }
 
-// SLAlarmWords extracts the six raw alarm words from the tick. The
-// second return is false when none of the words were polled at all
-// (old catalog, replay CSV without the columns) — absence must not be
-// confused with "all clear", but it must not fake an alarm either.
-func (t Tick) SLAlarmWords() ([6]uint16, bool) {
-	var words [6]uint16
-	any := false
+// SLAlarmWords extracts the polled alarm words from the tick. The
+// slice is as long as the highest word that was actually read (6 or
+// 8). The second return is false when none of the words were polled
+// at all (old catalog, replay CSV without the columns) — absence must
+// not be confused with "all clear", but it must not fake an alarm either.
+func (t Tick) SLAlarmWords() ([]uint16, bool) {
+	n := 0
 	for i, k := range slAlarmWordKeys {
-		if v, ok := t.Values[k]; ok {
-			words[i] = uint16(v)
-			any = true
+		if _, ok := t.Values[k]; ok && i+1 > n {
+			n = i + 1
 		}
 	}
-	return words, any
+	if n == 0 {
+		return nil, false
+	}
+	words := make([]uint16, n)
+	for i := 0; i < n; i++ {
+		if v, ok := t.Values[slAlarmWordKeys[i]]; ok {
+			words[i] = uint16(v)
+		}
+	}
+	return words, true
 }
 
 // SLAlarmActive reports whether any polled alarm word is non-zero.
@@ -224,8 +235,8 @@ func (t Tick) SLAlarmActive() bool {
 // slAlarmHex renders the words for events and the health snapshot:
 // "0x0" for zero, "0x0010"-style for non-zero (mirrors the spec's UI
 // example `A2=0x0010`).
-func slAlarmHex(words [6]uint16) [6]string {
-	var out [6]string
+func slAlarmHex(words []uint16) []string {
+	out := make([]string, len(words))
 	for i, w := range words {
 		if w == 0 {
 			out[i] = "0x0"

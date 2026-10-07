@@ -3,6 +3,7 @@ package modbusclient
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -14,6 +15,7 @@ import (
 type Session struct {
 	handler *modbus.TCPClientHandler
 	client  modbus.Client
+	unitID  byte
 	mock    bool
 }
 
@@ -41,7 +43,7 @@ func Dial(ctx context.Context, target DialTarget) (*Session, error) {
 	if err := h.Connect(dctx); err != nil {
 		return nil, err
 	}
-	return &Session{handler: h, client: modbus.NewClient(h)}, nil
+	return &Session{handler: h, client: modbus.NewClient(h), unitID: byte(target.UnitID)}, nil
 }
 
 func (s *Session) Close() error {
@@ -57,6 +59,30 @@ func (s *Session) ReadHolding(ctx context.Context, start, quantity uint16) ([]by
 		return mockPayload(start, quantity), nil
 	}
 	return s.client.ReadHoldingRegisters(ctx, start, quantity)
+}
+
+// ReadHoldingUnit is ReadHolding addressed to another unit id behind
+// the same TCP endpoint (a meter on the SmartLogger's RS485 bus). The
+// session's own unit id is restored afterwards; not safe for
+// concurrent use, like the rest of the session.
+func (s *Session) ReadHoldingUnit(ctx context.Context, unitID byte, start, quantity uint16) ([]byte, error) {
+	if s != nil && s.mock {
+		return mockPayload(start, quantity), nil
+	}
+	s.handler.SetSlave(unitID)
+	defer s.handler.SetSlave(s.unitID)
+	return s.client.ReadHoldingRegisters(ctx, start, quantity)
+}
+
+// ExceptionCode returns the Modbus exception code when err is an
+// exception response: the device answered and refused the request, so
+// the TCP stream is intact (unlike a timeout or I/O error).
+func ExceptionCode(err error) (byte, bool) {
+	var me *modbus.Error
+	if errors.As(err, &me) {
+		return me.ExceptionCode, true
+	}
+	return 0, false
 }
 
 // ReadInput performs FC4 read.

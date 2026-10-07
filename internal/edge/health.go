@@ -2,6 +2,7 @@ package edge
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"time"
 )
@@ -66,7 +67,7 @@ type BessHealth struct {
 }
 
 type HealthAlarms struct {
-	Words []string `json:"words"` // six hex words, 50000…50005
+	Words []string `json:"words"` // hex words, 50000… (6 or 8)
 }
 
 // HealthSnapshot is the §8.3 root document. `inverters` is absent when
@@ -170,14 +171,28 @@ func (s *Service) buildHealth(now time.Time) *HealthSnapshot {
 	if tick != nil {
 		if words, polled := tick.SLAlarmWords(); polled {
 			hex := slAlarmHex(words)
-			h.Alarms = &HealthAlarms{Words: hex[:]}
+			h.Alarms = &HealthAlarms{Words: hex}
 			if tick.SLAlarmActive() {
-				add(HealthCheck{ID: "sl_alarms", OK: false, Severity: CheckAlarm, Label: "Аварії SmartLogger", Expected: "усі слова 0", Actual: strings.Join(hex[:], " "), Detail: "dispatch заблоковано (sl_alarm)"})
+				add(HealthCheck{ID: "sl_alarms", OK: false, Severity: CheckAlarm, Label: "Аварії SmartLogger", Expected: "усі слова 0", Actual: strings.Join(hex, " "), Detail: "dispatch заблоковано (sl_alarm)"})
 			} else {
 				add(HealthCheck{ID: "sl_alarms", OK: true, Severity: CheckOK, Label: "Аварії SmartLogger", Expected: "усі слова 0", Actual: "усі 0"})
 			}
 		} else {
-			add(HealthCheck{ID: "sl_alarms", OK: false, Severity: CheckWarning, Label: "Аварії SmartLogger", Expected: "усі слова 0", Actual: "не опитуються", Detail: "50000…50005 немає у whitelist"})
+			add(HealthCheck{ID: "sl_alarms", OK: false, Severity: CheckWarning, Label: "Аварії SmartLogger", Expected: "усі слова 0", Actual: "не опитуються", Detail: "50000… немає у whitelist"})
+		}
+	}
+
+	// pcc_sign: 40505 is EMS +import/−export; meter 32278 is Huawei
+	// +export/−import. Opposite signs confirm the 40505 convention.
+	if tick != nil {
+		if c := pccSignCheck(tick); c != nil {
+			add(*c)
+		}
+		if c := voltageCheck(tick); c != nil {
+			add(*c)
+		}
+		if c := controlModeCheck(tick); c != nil {
+			add(*c)
 		}
 	}
 
@@ -470,6 +485,107 @@ func (s *Service) hostFresh(now time.Time, host string) (bool, bool) {
 	}
 	last := time.Unix(v.(int64), 0).UTC()
 	return now.Sub(last) < 3*s.cfg.SmartLogger.PollInterval+2*time.Second, true
+}
+
+// pccSignDeadbandKw: below this both readings are noise, not a sign.
+const pccSignDeadbandKw = 5.0
+
+func pccSignCheck(tick *Tick) *HealthCheck {
+	meter, okM := tick.Values["meter_active_power_kw"]
+	grid, okG := tick.Values["grid_connected_active_power_kw"]
+	if !okM || !okG {
+		return nil
+	}
+	actual := fmt.Sprintf("40505=%+.1f · 32278=%+.1f кВт", grid, meter)
+	if math.Abs(grid) < pccSignDeadbandKw || math.Abs(meter) < pccSignDeadbandKw {
+		return &HealthCheck{ID: "pcc_sign", OK: true, Severity: CheckInfo, Label: "Знак PCC 40505", Expected: "протилежний 32278", Actual: actual, Detail: "обидва біля нуля — знак ще не звірений"}
+	}
+	if grid*meter > 0 {
+		return &HealthCheck{ID: "pcc_sign", OK: false, Severity: CheckWarning, Label: "Знак PCC 40505", Expected: "протилежний 32278", Actual: actual, Detail: "однаковий знак — конвенція 40505 під питанням"}
+	}
+	return &HealthCheck{ID: "pcc_sign", OK: true, Severity: CheckOK, Label: "Знак PCC 40505", Expected: "протилежний 32278", Actual: actual}
+}
+
+func voltageCheck(tick *Tick) *HealthCheck {
+	type group struct {
+		label string
+		keys  [3]string
+		min   float64
+		// Line voltages come from the inverters/PCS behind a logger:
+		// all three read exactly 0 when those are not measuring (ze PV
+		// inverters in night standby). That is no measurement, not an
+		// undervoltage — the meter phases still see the grid.
+		zeroIsIdle bool
+	}
+	lineKeys := func(prefix string) [3]string {
+		return [3]string{prefix + "grid_line_voltage_ab_v", prefix + "grid_line_voltage_bc_v", prefix + "grid_line_voltage_ca_v"}
+	}
+	groups := []group{
+		{"фази", [3]string{"meter_phase_a_voltage_v", "meter_phase_b_voltage_v", "meter_phase_c_voltage_v"}, 200, false},
+		{"лінія", lineKeys(""), 350, true},
+		{"СЕС", lineKeys("pv_"), 350, true},
+		{"УЗЕ", lineKeys("ess_"), 350, true},
+	}
+	var seen, idle, low []string
+	for _, g := range groups {
+		var vals []string
+		zero := true
+		var below []string
+		for _, k := range g.keys {
+			v, ok := tick.Values[k]
+			if !ok {
+				continue
+			}
+			vals = append(vals, fmt.Sprintf("%.0f", v))
+			if v != 0 {
+				zero = false
+			}
+			if v < g.min {
+				below = append(below, fmt.Sprintf("%s %.1f < %.0f", g.label, v, g.min))
+			}
+		}
+		if len(vals) == 0 {
+			continue
+		}
+		if g.zeroIsIdle && zero {
+			idle = append(idle, g.label+" 0 В (немає виміру)")
+			continue
+		}
+		seen = append(seen, g.label+" "+strings.Join(vals, "/")+" В")
+		low = append(low, below...)
+	}
+	if len(seen) == 0 && len(idle) == 0 {
+		return nil
+	}
+	const expected = "фаза ≥200 В, лінія ≥350 В"
+	if len(low) > 0 {
+		return &HealthCheck{ID: "grid_voltage", OK: false, Severity: CheckAlarm, Label: "Напруга мережі", Expected: expected, Actual: strings.Join(low, "; ")}
+	}
+	actual := strings.Join(append(seen, idle...), " · ")
+	if len(seen) == 0 {
+		return &HealthCheck{ID: "grid_voltage", OK: true, Severity: CheckInfo, Label: "Напруга мережі", Expected: expected, Actual: actual}
+	}
+	return &HealthCheck{ID: "grid_voltage", OK: true, Severity: CheckOK, Label: "Напруга мережі", Expected: expected, Actual: actual}
+}
+
+func controlModeCheck(tick *Tick) *HealthCheck {
+	type pair struct{ key, label string }
+	for _, p := range []pair{
+		{"active_power_control_mode", "40737"},
+		{"pv_active_power_control_mode", "СЕС 40737"},
+		{"ess_active_power_control_mode", "УЗЕ 40737"},
+	} {
+		v, ok := tick.Values[p.key]
+		if !ok {
+			continue
+		}
+		actual := fmt.Sprintf("%s=%g", p.label, v)
+		if v != 4 {
+			return &HealthCheck{ID: "control_mode", OK: false, Severity: CheckWarning, Label: "Режим керування 40737", Expected: "4 (remote)", Actual: actual, Detail: "для сторонньої EMS має бути 4"}
+		}
+		return &HealthCheck{ID: "control_mode", OK: true, Severity: CheckOK, Label: "Режим керування 40737", Expected: "4 (remote)", Actual: actual}
+	}
+	return nil
 }
 
 func tickF(t *Tick, key string) *float64 {

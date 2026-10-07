@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -345,5 +346,83 @@ func TestHeartbeatCarriesHealth(t *testing.T) {
 	}
 	if back.Health == nil || len(back.Health.Checks) == 0 {
 		t.Fatalf("heartbeat JSON lost the health snapshot: %s", out)
+	}
+}
+
+func TestHealthPCCSignOppositeOK(t *testing.T) {
+	tick := testTick(map[string]float64{
+		"active_pv_power_kw": 100, "load_power_kw": 100, "soc_percent": 60,
+		"grid_connected_active_power_kw": 80,  // EMS +import
+		"meter_active_power_kw":          -78, // Huawei +export
+	}, QualityOK)
+	s := healthTestService(testCfg(), &tick, nil)
+	c := findCheck(t, s.buildHealth(testTS), "pcc_sign")
+	if c == nil || !c.OK {
+		t.Fatalf("pcc_sign = %+v, want ok (opposite signs)", c)
+	}
+}
+
+func TestHealthPCCSignSameWarns(t *testing.T) {
+	tick := testTick(map[string]float64{
+		"active_pv_power_kw": 100, "load_power_kw": 100, "soc_percent": 60,
+		"grid_connected_active_power_kw": 80,
+		"meter_active_power_kw":          70,
+	}, QualityOK)
+	s := healthTestService(testCfg(), &tick, nil)
+	c := findCheck(t, s.buildHealth(testTS), "pcc_sign")
+	if c == nil || c.OK || c.Severity != CheckWarning {
+		t.Fatalf("pcc_sign = %+v, want warning", c)
+	}
+}
+
+func TestHealthVoltageLowAlarms(t *testing.T) {
+	tick := testTick(map[string]float64{
+		"active_pv_power_kw": 100, "load_power_kw": 100, "soc_percent": 60,
+		"meter_phase_a_voltage_v": 190,
+		"meter_phase_b_voltage_v": 230,
+		"meter_phase_c_voltage_v": 231,
+	}, QualityOK)
+	s := healthTestService(testCfg(), &tick, nil)
+	c := findCheck(t, s.buildHealth(testTS), "grid_voltage")
+	if c == nil || c.OK || c.Severity != CheckAlarm {
+		t.Fatalf("grid_voltage = %+v, want alarm", c)
+	}
+}
+
+func TestHealthVoltageIdleLoggerIsNotAlarm(t *testing.T) {
+	// ze at night: PV inverters in standby report 0 V line voltage on
+	// the PV logger while the meter and the PCS side see the grid.
+	tick := testTick(map[string]float64{
+		"active_pv_power_kw": 0, "load_power_kw": 10, "soc_percent": 60,
+		"meter_phase_a_voltage_v": 231, "meter_phase_b_voltage_v": 233, "meter_phase_c_voltage_v": 232,
+		"pv_grid_line_voltage_ab_v": 0, "pv_grid_line_voltage_bc_v": 0, "pv_grid_line_voltage_ca_v": 0,
+		"ess_grid_line_voltage_ab_v": 403, "ess_grid_line_voltage_bc_v": 405, "ess_grid_line_voltage_ca_v": 400,
+	}, QualityOK)
+	s := healthTestService(testCfg(), &tick, nil)
+	c := findCheck(t, s.buildHealth(testTS), "grid_voltage")
+	if c == nil || !c.OK || c.Severity != CheckOK {
+		t.Fatalf("grid_voltage = %+v, want ok with the PV logger marked idle", c)
+	}
+	if !strings.Contains(c.Actual, "СЕС 0 В (немає виміру)") {
+		t.Fatalf("actual = %q, want the idle PV logger named", c.Actual)
+	}
+
+	// One phase at 0 on a live logger is a real loss, not idle.
+	tick.Values["ess_grid_line_voltage_bc_v"] = 0
+	s = healthTestService(testCfg(), &tick, nil)
+	if c := findCheck(t, s.buildHealth(testTS), "grid_voltage"); c == nil || c.OK {
+		t.Fatalf("grid_voltage = %+v, want alarm on a single dead phase", c)
+	}
+}
+
+func TestHealthControlModeNotFour(t *testing.T) {
+	tick := testTick(map[string]float64{
+		"active_pv_power_kw": 100, "load_power_kw": 100, "soc_percent": 60,
+		"active_power_control_mode": 1,
+	}, QualityOK)
+	s := healthTestService(testCfg(), &tick, nil)
+	c := findCheck(t, s.buildHealth(testTS), "control_mode")
+	if c == nil || c.OK {
+		t.Fatalf("control_mode = %+v, want warning (not 4)", c)
 	}
 }

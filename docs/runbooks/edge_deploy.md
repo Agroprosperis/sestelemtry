@@ -135,9 +135,13 @@ sudo sqlite3 /var/lib/ems-edge/blackbox.db \
 make edge-package
 scp dist/ems-edge_*_linux_arm64.tar.gz iot2050:/tmp/
 ssh iot2050
-tar -C /tmp -xzf /tmp/ems-edge_*_linux_arm64.tar.gz ./ems-edge
+tar -C /tmp -xzf /tmp/ems-edge_*_linux_arm64.tar.gz ./ems-edge ./huawei_smartlogger.yaml
 sudo cp /opt/ems-edge/ems-edge /opt/ems-edge/ems-edge.prev   # для відкату
 sudo install -m 755 /tmp/ems-edge /opt/ems-edge/ems-edge
+# Catalog grows with the binary (new FC3 keys). Copy it when the
+# release adds registers; leftover YAML is safe only if the new keys
+# are unused.
+sudo install -m 644 /tmp/huawei_smartlogger.yaml /etc/ems-edge/huawei_smartlogger.yaml
 sudo systemctl restart ems-edge
 /opt/ems-edge/ems-edge -version && journalctl -u ems-edge -n 20
 ```

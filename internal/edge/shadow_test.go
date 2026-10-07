@@ -491,8 +491,35 @@ func TestDecisionRecordShape(t *testing.T) {
 	if rec["state_machine"] != "ADVISOR" || rec["site_id"] != "ab" {
 		t.Fatalf("record header wrong: %v", rec)
 	}
+	if rec["write_enabled"] != false {
+		t.Fatalf("write_enabled = %v, want false (no write path)", rec["write_enabled"])
+	}
+	if out["written_40381"] != nil || out["written_40378"] != nil {
+		t.Fatalf("written_* must be null while write_enabled is off: %v", out)
+	}
 	in, ok := rec["inputs"].(map[string]any)
 	if !ok || math.Abs(in["soc_percent"].(float64)-67.3) > 0.01 {
 		t.Fatalf("inputs wrong: %v", rec["inputs"])
+	}
+}
+
+func TestDecisionRecordReadbackAndMeter(t *testing.T) {
+	tick := testTick(map[string]float64{
+		"active_pv_power_kw":             50,
+		"load_power_kw":                  250,
+		"soc_percent":                    50,
+		"ess_active_power_adjustment_kw": -80,
+		"pv_active_power_adjustment_kw":  600,
+		"meter_active_power_kw":          12.5,
+	}, QualityOK)
+	d, _ := Decide(tick, nil, testCfg())
+	rec := d.Record("ab")
+	out := rec["outputs"].(map[string]any)
+	if out["readback_40381"] != -80.0 || out["readback_40378"] != 600.0 {
+		t.Fatalf("readback = %v", out)
+	}
+	in := rec["inputs"].(map[string]any)
+	if in["meter_active_power_kw"] != 12.5 {
+		t.Fatalf("meter input = %v", in)
 	}
 }

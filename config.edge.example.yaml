@@ -29,6 +29,9 @@ smartlogger:
 #     - role: pv
 #       host: ${EDGE_SL_PV_HOST}    # 10.28.40.101
 #       unit_id: 0
+#       meter:                      # DTSU666-HW on the PV logger RS485 bus
+#         unit_id: 11               # meter's RS485 address (ze = 11)
+#         interval: 2s
 #     - role: ess
 #       host: ${EDGE_SL_ESS_HOST}   # 10.28.40.102
 #       unit_id: 0

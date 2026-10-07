@@ -75,7 +75,7 @@ func (o *overrideState) activeAt(now time.Time) bool {
 
 // Run starts the edge service and blocks until ctx is cancelled.
 func Run(ctx context.Context, cfg *Config, log *slog.Logger, version string) error {
-	entriesByDevice, err := resolveDeviceEntries(cfg)
+	readsByDevice, err := resolveDeviceEntries(cfg)
 	if err != nil {
 		return err
 	}
@@ -118,7 +118,7 @@ func Run(ctx context.Context, cfg *Config, log *slog.Logger, version string) err
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			runDevicePoller(ctx, log, dev, cfg.SmartLogger.PollInterval, entriesByDevice[dev.Role], readings, events)
+			runDevicePoller(ctx, log, dev, cfg.SmartLogger.PollInterval, readsByDevice[dev.Role], readings, events)
 		}()
 	}
 	if s.client != nil {
@@ -167,8 +167,8 @@ func Run(ctx context.Context, cfg *Config, log *slog.Logger, version string) err
 }
 
 // resolveDeviceEntries loads the register catalog and computes each
-// device's whitelist (explicit metric_keys or the role default).
-func resolveDeviceEntries(cfg *Config) (map[DeviceRole][]registers.ResolvedEntry, error) {
+// device's required whitelist plus the optional/slow/meter sets.
+func resolveDeviceEntries(cfg *Config) (map[DeviceRole]deviceReads, error) {
 	cat, err := registers.Load(cfg.RegisterCatalog)
 	if err != nil {
 		return nil, fmt.Errorf("edge: register catalog: %w", err)
@@ -177,19 +177,53 @@ func resolveDeviceEntries(cfg *Config) (map[DeviceRole][]registers.ResolvedEntry
 	if err != nil {
 		return nil, err
 	}
-	out := map[DeviceRole][]registers.ResolvedEntry{}
+	out := map[DeviceRole]deviceReads{}
 	for _, dev := range cfg.SmartLogger.Devices {
 		keys := dev.MetricKeys
 		if len(keys) == 0 {
 			keys = DefaultMetricKeys(dev.Role)
 		}
-		entries, err := registers.Subset(resolved, keys)
+		required, err := registers.Subset(resolved, keys)
 		if err != nil {
 			return nil, fmt.Errorf("edge: device %s (%s): %w", dev.Host, dev.Role, err)
 		}
-		out[dev.Role] = entries
+		optional, err := registers.Subset(resolved, DefaultOptionalMetricKeys(dev.Role))
+		if err != nil {
+			return nil, fmt.Errorf("edge: device %s (%s) optional: %w", dev.Host, dev.Role, err)
+		}
+		slow, err := registers.Subset(resolved, DefaultSlowMetricKeys(dev.Role))
+		if err != nil {
+			return nil, fmt.Errorf("edge: device %s (%s) slow: %w", dev.Host, dev.Role, err)
+		}
+		var meter []registers.ResolvedEntry
+		if dev.Meter != nil {
+			meter, err = registers.Subset(resolved, MeterMetricKeys)
+			if err != nil {
+				return nil, fmt.Errorf("edge: device %s (%s) meter: %w", dev.Host, dev.Role, err)
+			}
+		}
+		out[dev.Role] = deviceReads{
+			required: required,
+			optional: subtractEntries(optional, required),
+			slow:     subtractEntries(slow, required),
+			meter:    meter,
+		}
 	}
 	return out, nil
+}
+
+func subtractEntries(entries, already []registers.ResolvedEntry) []registers.ResolvedEntry {
+	seen := make(map[string]bool, len(already))
+	for _, e := range already {
+		seen[e.MetricKey] = true
+	}
+	out := make([]registers.ResolvedEntry, 0, len(entries))
+	for _, e := range entries {
+		if !seen[e.MetricKey] {
+			out = append(out, e)
+		}
+	}
+	return out
 }
 
 // onTick is the 1 s heart of the edge: normalize → black box → shadow.

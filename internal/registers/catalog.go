@@ -24,6 +24,12 @@ const (
 	DTUint64 DataType = "UINT64"
 )
 
+// ScopeEdge marks entries only the on-site edge controller reads, and
+// only when a device whitelists them by name. Some firmwares answer
+// these with a Modbus exception (or they sit behind another unit id),
+// which would fail a full-catalog collector's whole poll.
+const ScopeEdge = "edge"
+
 // Entry is one logical metric in the catalog.
 type Entry struct {
 	MetricKey string   `yaml:"metric_key"`
@@ -33,6 +39,7 @@ type Entry struct {
 	SwapType  SwapType `yaml:"swap_type"`
 	Gain      float64  `yaml:"gain"`
 	Offset    float64  `yaml:"offset"`
+	Scope     string   `yaml:"scope"` // "" = everywhere, ScopeEdge = explicit edge whitelist only
 }
 
 // Catalog is the full register map plus addressing defaults.
@@ -47,9 +54,9 @@ type Catalog struct {
 // ResolvedEntry has computed PDU start and register width.
 type ResolvedEntry struct {
 	Entry
-	PDUStart    uint16
-	WordCount   uint16
-	PDUEnd      uint16 // inclusive last register index
+	PDUStart  uint16
+	WordCount uint16
+	PDUEnd    uint16 // inclusive last register index
 }
 
 func (e Entry) WordCountForType() (uint16, error) {
@@ -104,11 +111,17 @@ func (c *Catalog) Resolve(holdingBase int) ([]ResolvedEntry, error) {
 // Subset returns the entries in `all` whose MetricKey is listed in `keys`,
 // preserving the catalog ordering. It returns an error listing every key
 // that does not appear in the catalog so misconfigurations surface early.
-// An empty `keys` slice returns the input unchanged so callers can use
-// Subset(all, nil) to mean "no whitelist".
+// An empty `keys` slice means "no whitelist": every entry except the
+// ScopeEdge ones, which are only ever read when named explicitly.
 func Subset(all []ResolvedEntry, keys []string) ([]ResolvedEntry, error) {
 	if len(keys) == 0 {
-		return all, nil
+		out := make([]ResolvedEntry, 0, len(all))
+		for _, e := range all {
+			if e.Scope != ScopeEdge {
+				out = append(out, e)
+			}
+		}
+		return out, nil
 	}
 	wanted := make(map[string]struct{}, len(keys))
 	for _, k := range keys {

@@ -55,6 +55,17 @@ type Device struct {
 	RequestTimeout time.Duration `yaml:"request_timeout"`
 	// MetricKeys overrides the role's default register whitelist.
 	MetricKeys []string `yaml:"metric_keys"`
+	// Meter is the grid meter read through this SmartLogger under its
+	// own unit id (ze: DTSU666-HW, RS485 address 11, on the PV logger).
+	// Nil = no meter behind this box.
+	Meter *MeterConfig `yaml:"meter"`
+}
+
+// MeterConfig addresses a meter on the SmartLogger's RS485 bus. The
+// unit id is the meter's RS485 address, configured per site.
+type MeterConfig struct {
+	UnitID   int           `yaml:"unit_id"`
+	Interval time.Duration `yaml:"interval"`
 }
 
 // EffectiveUnitID resolves the pointer with the repo-wide default of 99
@@ -255,6 +266,65 @@ func DefaultMetricKeys(role DeviceRole) []string {
 	}
 }
 
+// Optional reads (ems_sl_write_cutover.md §12.2) go in their own
+// requests after the whitelist: a refusal or timeout drops only those
+// keys, never the poll. Fast ones repeat every optionalReadInterval,
+// the static/mode registers every slowReadInterval (40737: "старт і
+// раз на годину"; 44364 and 40396 do not change in operation).
+const (
+	optionalReadInterval = 2 * time.Second
+	slowReadInterval     = time.Hour
+	meterReadInterval    = 2 * time.Second
+)
+
+// DefaultOptionalMetricKeys returns the fast optional reads per role:
+// setpoint readback, line voltages, and alarm words 7…8.
+func DefaultOptionalMetricKeys(role DeviceRole) []string {
+	lineV := []string{"grid_line_voltage_ab_v", "grid_line_voltage_bc_v", "grid_line_voltage_ca_v"}
+	pv := append([]string{"pv_active_power_adjustment_kw", "reactive_pv_power_kvar", "pv_rated_kw"}, lineV...)
+	ess := append([]string{"ess_active_power_adjustment_kw", "pcs_working_mode", "sl_alarm_7", "sl_alarm_8"}, lineV...)
+	switch role {
+	case RolePV:
+		return pv
+	case RoleESS:
+		return ess
+	default:
+		return append([]string{"pv_active_power_adjustment_kw", "reactive_pv_power_kvar", "pv_rated_kw",
+			"ess_active_power_adjustment_kw", "pcs_working_mode", "sl_alarm_7", "sl_alarm_8"}, lineV...)
+	}
+}
+
+// DefaultSlowMetricKeys returns the hourly optional reads per role
+// (40737: start and once an hour).
+func DefaultSlowMetricKeys(role DeviceRole) []string {
+	return []string{"active_power_control_mode"}
+}
+
+// MeterMetricKeys are read from the meter unit id (Issue 45 §2.4).
+var MeterMetricKeys = []string{
+	"meter_phase_a_voltage_v", "meter_phase_b_voltage_v", "meter_phase_c_voltage_v",
+	"meter_active_power_kw",
+}
+
+// perDeviceMetricKeys exist on both SmartLoggers of a dual site; the
+// edge stores them as "<role>_<key>" so the PV and ESS readings do not
+// overwrite each other in the merged tick.
+var perDeviceMetricKeys = map[string]bool{
+	"grid_line_voltage_ab_v":    true,
+	"grid_line_voltage_bc_v":    true,
+	"grid_line_voltage_ca_v":    true,
+	"active_power_control_mode": true,
+}
+
+// DeviceMetricKey is the tick key under which `key` read from a device
+// of `role` is stored.
+func DeviceMetricKey(role DeviceRole, key string) string {
+	if role == RoleAll || !perDeviceMetricKeys[key] {
+		return key
+	}
+	return string(role) + "_" + key
+}
+
 // LoadConfig reads the edge YAML, expands ${ENV} in host/base_url
 // fields, applies defaults and validates.
 func LoadConfig(path string) (*Config, error) {
@@ -302,6 +372,9 @@ func (c *Config) applyDefaults() {
 		}
 		if d.RequestTimeout <= 0 {
 			d.RequestTimeout = 5 * time.Second
+		}
+		if d.Meter != nil && d.Meter.Interval <= 0 {
+			d.Meter.Interval = meterReadInterval
 		}
 	}
 
@@ -427,6 +500,9 @@ func (c *Config) validate() error {
 		uid := d.EffectiveUnitID()
 		if uid < 0 || uid > 255 {
 			return fmt.Errorf("edge config: smartlogger.devices[%d].unit_id out of range: %d", i, uid)
+		}
+		if d.Meter != nil && (d.Meter.UnitID < 1 || d.Meter.UnitID > 247) {
+			return fmt.Errorf("edge config: smartlogger.devices[%d].meter.unit_id: %d out of RS-485 range 1..247", i, d.Meter.UnitID)
 		}
 	}
 
