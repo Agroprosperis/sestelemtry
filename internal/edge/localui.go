@@ -63,6 +63,10 @@ func uiJSON(w http.ResponseWriter, v any) {
 // «Стан» panel shows in one document.
 func (s *Service) uiStatus(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC()
+	// The console shows the limits the engine actually applies (§4.1):
+	// the device YAML is only the pre-manifest fallback, never the live
+	// figure.
+	params := resolveParams(now, s.manifest.Load(), s.cfg)
 	out := map[string]any{
 		"site_id":  s.cfg.SiteID,
 		"edge_id":  s.cfg.Edge.EdgeID,
@@ -74,13 +78,14 @@ func (s *Service) uiStatus(w http.ResponseWriter, r *http.Request) {
 		"uptime_s": int64(time.Since(s.startedAt).Seconds()),
 		"timezone": s.cfg.Timezone,
 		"limits": map[string]any{
-			"grid_import_kw":    s.cfg.Limits.Grid.ImportLimitKw,
-			"grid_target_kw":    s.cfg.Limits.Grid.TargetImportKw,
-			"pv_rated_kw":       s.cfg.Limits.PV.RatedKw,
-			"bess_power_kw":     s.cfg.Limits.Bess.RatedPowerKw,
-			"bess_capacity_kwh": s.cfg.Limits.Bess.RatedCapacityKwh,
-			"soc_min_pct":       s.cfg.Limits.Bess.SocMinEconomicPct,
-			"soc_max_pct":       s.cfg.Limits.Bess.SocMaxEconomicPct,
+			"source":                params.planSource,
+			"grid_import_kw":        s.effectiveImportLimitKw(now),
+			"grid_target_kw":        params.targetImportKw,
+			"pv_rated_kw":           params.pvRatedKw,
+			"bess_charge_max_kw":    params.chargeMaxKw,
+			"bess_discharge_max_kw": params.dischargeMaxKw,
+			"soc_min_pct":           params.socMinPct,
+			"soc_max_pct":           params.socMaxPct,
 		},
 	}
 

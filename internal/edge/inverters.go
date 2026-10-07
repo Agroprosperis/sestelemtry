@@ -40,22 +40,22 @@ func inverterRegisterBase(addr int) int { return 51000 + inverterBlockQty*(addr-
 // contract). Numeric fields are nil when the block was unreachable;
 // the row itself always stays in the array.
 type InverterSnapshot struct {
-	DeviceAddress  int       `json:"device_address"`
-	RegisterBase   int       `json:"register_base"`
-	Label          string    `json:"label,omitempty"`
-	Class          string    `json:"class"`
-	StatusRaw      string    `json:"status_raw,omitempty"`
-	StatusLabel    string    `json:"status_label"`
-	PKw            *float64  `json:"p_kw"`
-	QKvar          *float64  `json:"q_kvar"`
-	PDcKw          *float64  `json:"p_dc_kw"`
-	IDcA           *float64  `json:"i_dc_a"`
-	Pf             *float64  `json:"pf"`
-	InsulationMohm *float64  `json:"insulation_mohm"`
-	TempC          *float64  `json:"temp_c"`
-	MajorFault     string    `json:"major_fault,omitempty"`
-	MinorFault     string    `json:"minor_fault,omitempty"`
-	Warning        string    `json:"warning,omitempty"`
+	DeviceAddress  int      `json:"device_address"`
+	RegisterBase   int      `json:"register_base"`
+	Label          string   `json:"label,omitempty"`
+	Class          string   `json:"class"`
+	StatusRaw      string   `json:"status_raw,omitempty"`
+	StatusLabel    string   `json:"status_label"`
+	PKw            *float64 `json:"p_kw"`
+	QKvar          *float64 `json:"q_kvar"`
+	PDcKw          *float64 `json:"p_dc_kw"`
+	IDcA           *float64 `json:"i_dc_a"`
+	Pf             *float64 `json:"pf"`
+	InsulationMohm *float64 `json:"insulation_mohm"`
+	TempC          *float64 `json:"temp_c"`
+	MajorFault     string   `json:"major_fault,omitempty"`
+	MinorFault     string   `json:"minor_fault,omitempty"`
+	Warning        string   `json:"warning,omitempty"`
 	// Розшифровки з канону ems-spec (inverterdecode). Hex вище завжди
 	// лишається — decode його доповнює, не замінює. Порожньо, коли
 	// слово 0; для невідомого статусу — фолбек на §6.2-лейбл.

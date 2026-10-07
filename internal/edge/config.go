@@ -145,9 +145,8 @@ type BessLimits struct {
 	// RatedPowerKw/RatedCapacityKwh are ILLUSTRATIVE FORM ONLY
 	// (diagnostics spec §4.1): the shadow engine takes power policy
 	// exclusively from manifest limits (паспорт/«Обмеження» ladder in
-	// the cloud) and the dynamic SL registers 40490/40492. Shown on the
-	// local console for reference; never used to clamp or to raise
-	// SHADOW_ANOMALY (the ze «324» incident).
+	// the cloud) and the dynamic SL registers 40490/40492. Neither the
+	// engine nor the local console reads them (the ze «324» incident).
 	RatedPowerKw      float64 `yaml:"rated_power_kw"`
 	RatedCapacityKwh  float64 `yaml:"rated_capacity_kwh"`
 	SocMinEconomicPct float64 `yaml:"soc_min_economic_pct"`
@@ -185,17 +184,17 @@ type DiagnosticsConfig struct {
 
 // Config is the root of the edge YAML (config.edge.yaml).
 type Config struct {
-	SiteID          string         `yaml:"site_id"`
-	Timezone        string         `yaml:"timezone"`
-	RegisterCatalog string         `yaml:"register_catalog"`
-	SmartLogger     SmartLogger    `yaml:"smartlogger"`
-	Edge            EdgeIdentity   `yaml:"edge"`
-	Blackbox        BlackboxConfig `yaml:"blackbox"`
-	Uplink          UplinkConfig   `yaml:"uplink"`
-	Manifest        ManifestConfig `yaml:"manifest"`
-	Control         ControlConfig  `yaml:"control"`
-	Limits          Limits         `yaml:"limits"`
-	LocalUI         LocalUIConfig  `yaml:"local_ui"`
+	SiteID          string            `yaml:"site_id"`
+	Timezone        string            `yaml:"timezone"`
+	RegisterCatalog string            `yaml:"register_catalog"`
+	SmartLogger     SmartLogger       `yaml:"smartlogger"`
+	Edge            EdgeIdentity      `yaml:"edge"`
+	Blackbox        BlackboxConfig    `yaml:"blackbox"`
+	Uplink          UplinkConfig      `yaml:"uplink"`
+	Manifest        ManifestConfig    `yaml:"manifest"`
+	Control         ControlConfig     `yaml:"control"`
+	Limits          Limits            `yaml:"limits"`
+	LocalUI         LocalUIConfig     `yaml:"local_ui"`
 	Diagnostics     DiagnosticsConfig `yaml:"diagnostics"`
 
 	// EssDischargeSign overrides the convention that raw
