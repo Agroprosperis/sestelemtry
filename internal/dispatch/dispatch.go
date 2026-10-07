@@ -228,6 +228,11 @@ func Optimize(in Inputs, m Model, count int) ([]HourPlan, error) {
 	eta := site.Eta()
 	floor := site.CapacityKwh * math.Max(site.SocMinPct, cfg.ReservePct) / 100
 	ceiling := site.CapacityKwh * site.SocMaxPct / 100
+	// A live SOC can sit outside the window (below a freshly raised
+	// reserve): keep the LP feasible by never asking it to jump inside —
+	// the battery just may not discharge below where it already is.
+	floor = math.Min(floor, in.StartKwh)
+	ceiling = math.Max(ceiling, in.StartKwh)
 	exportCap := cfg.EffectiveExportCap()
 
 	type hourVars struct{ charge, discharge, buy, sell, curtail int }

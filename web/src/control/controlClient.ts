@@ -200,6 +200,24 @@ export type EdgeSiteSettings = {
   grid_import_kw?: number
   grid_target_kw?: number
   pv_rated_kw?: number
+  // Passport paragraph of the export cap: self_production = 50 % of
+  // grid_import_kw, storage = 100 %; absent = not chosen (export off).
+  export_regime?: ExportRegime
+  export_pcc_kw?: number
+}
+
+export type ExportRegime = '' | 'self_production' | 'storage'
+
+// exportCeilingKw mirrors the backend: min(passport ceiling, PCC limit).
+export function exportCeilingKw(s: EdgeSiteSettings): number | null {
+  const contract = s.grid_import_kw ?? 0
+  if (contract <= 0) return null
+  let cap: number
+  if (s.export_regime === 'self_production') cap = Math.floor(0.5 * contract)
+  else if (s.export_regime === 'storage') cap = contract
+  else return null
+  const pcc = s.export_pcc_kw ?? 0
+  return pcc > 0 && pcc < cap ? pcc : cap
 }
 
 export type ManualInterval = {

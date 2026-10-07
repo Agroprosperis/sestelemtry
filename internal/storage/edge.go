@@ -125,6 +125,7 @@ func InitEdgeSchema(ctx context.Context, pool *pgxpool.Pool) error {
 			updated_at timestamptz NOT NULL DEFAULT now()
 		)`,
 	}
+	stmts = append(stmts, dispatchSchema...)
 	for _, s := range stmts {
 		if _, err := pool.Exec(ctx, s); err != nil {
 			return fmt.Errorf("storage: edge schema: %w", err)
