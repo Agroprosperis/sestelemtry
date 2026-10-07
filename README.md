@@ -408,15 +408,6 @@ lives in `device_alert_state` (`migrations/010_alerts.sql`, also created on
 startup), so restarting the container does not re-announce an outage operators
 already know about.
 
-### Safe production update path
-
-Re-running `bash scripts/install-prod.sh` on a host that already has
-`/etc/sestelemetry/config.yaml` is **non-destructive**: the script seeds those
-files only when missing (`if ! sudo test -f`). The container mounts them
-read-only. Watchtower only updates Docker images; host files are untouched.
-Your existing modbus configuration on the production host stays exactly as it
-is across this update — and `dam-collector` stays inert until you opt in.
-
 ## Run locally without Docker
 
 ```bash
@@ -430,79 +421,53 @@ Or start only backend services:
 bash scripts/run-local.sh backend
 ```
 
-## Run as Linux service (auto restart + image auto-updates)
+## Run as Linux service (production)
 
-One-command installer (recommended for new PC):
+Production builds the stack from a git clone: `deploy/docker-compose.yml`
+under the systemd unit `deploy/sestelemetry.service`, which runs
+`docker compose up -d --build` at boot. The unit names the clone
+`/home/itspec/sestelemtry`; change its paths for a clone elsewhere.
+
+What the host keeps outside git, so a pull never touches it:
+
+- `/etc/sestelemetry/config.yaml` and `/etc/sestelemetry/registers/`:
+  organizations and Modbus devices;
+- `/etc/sestelemetry/fusionsolar.yaml`: FusionSolar import defaults;
+- `/etc/sestelemetry/tls/`: the dashboard certificate (see «Run with Docker
+  Compose»);
+- `deploy/.env` (`chmod 600`): `EDGE_SITE_TOKENS`, `SMTP_PASSWORD`, and
+  optionally `AUTH_BOOTSTRAP_EMAIL` / `AUTH_BOOTSTRAP_PASSWORD`.
+
+First install:
 
 ```bash
-bash scripts/install-prod.sh
-```
-
-If `.env.service` still has placeholder values (`your-org`, `change-me`), edit it and restart:
-
-```bash
-sudo editor /opt/sestelemetry/deploy/.env.service
-sudo systemctl restart sestelemetry
-```
-
-```bash
-# on server
-sudo mkdir -p /opt/sestelemetry
-sudo rsync -a ./ /opt/sestelemetry/
-cd /opt/sestelemetry/deploy
-
-cp service.env.example .env.service
-# edit image names/tags in .env.service
-# set DB credentials and SESTELEMETRY_DATABASE_URL
-# set SESTELEMETRY_API_ALLOW_ORIGIN to your web URL (no "*")
-# set SESTELEMETRY_WEB_API_BASE_URL to your server URL, e.g. http://SERVER_IP:8080
-# optional: AUTH_BOOTSTRAP_EMAIL / AUTH_BOOTSTRAP_PASSWORD (otherwise admin/admin)
-# keep collector config outside repo:
-#   SESTELEMETRY_HOST_CONFIG_PATH=/etc/sestelemetry/config.yaml
-#   SESTELEMETRY_HOST_REGISTERS_PATH=/etc/sestelemetry/registers
-
-sudo cp sestelemetry.service /etc/systemd/system/sestelemetry.service
+git clone https://github.com/Agroprosperis/sestelemtry.git ~/sestelemtry
+sudo install -d /etc/sestelemetry/registers
+sudo cp ~/sestelemtry/config.docker.yaml /etc/sestelemetry/config.yaml
+sudo cp -r ~/sestelemtry/registers/. /etc/sestelemetry/registers/
+# Must exist as a file: Docker mounts a directory in place of a missing one.
+sudo cp ~/sestelemtry/fusionsolar.example.yaml /etc/sestelemetry/fusionsolar.yaml
+sudo cp ~/sestelemtry/deploy/sestelemetry.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable sestelemetry
-sudo systemctl start sestelemetry
+sudo systemctl enable --now sestelemetry
 ```
 
-Persist Modbus config outside git-managed repo:
+Update (roll back the same way with `git checkout <commit>`):
 
 ```bash
-sudo mkdir -p /etc/sestelemetry/registers
-sudo cp /opt/sestelemetry/config.docker.yaml /etc/sestelemetry/config.yaml
-sudo cp -r /opt/sestelemetry/registers/* /etc/sestelemetry/registers/
-sudo chown -R root:root /etc/sestelemetry
+cd ~/sestelemtry && git pull
+sudo systemctl reload sestelemetry   # rebuilds and recreates what changed
 ```
 
-Manage service:
+Check:
 
 ```bash
-sudo systemctl status sestelemetry
-sudo systemctl restart sestelemetry
-sudo systemctl stop sestelemetry
-```
-
-Health checks:
-
-```bash
+systemctl status sestelemetry
+docker compose -f ~/sestelemtry/deploy/docker-compose.yml ps
 curl -fsS http://localhost:8080/healthz
-curl -fsS http://localhost:8080/readyz
-docker compose -f /opt/sestelemetry/deploy/docker-compose.service.yml --env-file /opt/sestelemetry/deploy/.env.service ps
 ```
 
-Rollback basics:
-
-```bash
-# set previous working image tags in .env.service, then:
-sudo systemctl restart sestelemetry
-```
-
-Notes:
-
-- `restart: unless-stopped` keeps containers running after reboots/failures.
-- `watchtower` watches tagged containers and restarts them after pulling newer images.
-- keep `.env.service` out of git and restrict permissions (example: `chmod 600 /opt/sestelemetry/deploy/.env.service`).
-- TimescaleDB data is pinned to stable Docker volume `sestelemetry_timescaledb_data` to survive updates/recreates.
+Containers restart after a failure (`restart: unless-stopped`). TimescaleDB
+data lives in the Docker volume `sestelemetry_timescaledb_data` and survives
+rebuilds.
 

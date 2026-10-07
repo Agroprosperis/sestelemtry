@@ -1,5 +1,7 @@
+# Installed as /etc/systemd/system/sestelemetry.service. The paths name
+# the git clone on the production host; change them for a clone elsewhere.
 [Unit]
-Description=SESTelemetry Docker Compose Stack
+Description=SESTelemetry Docker Compose Stack (build from source)
 Requires=docker.service
 After=docker.service network-online.target
 Wants=network-online.target
@@ -7,12 +9,11 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-WorkingDirectory=/opt/sestelemetry/deploy
-EnvironmentFile=/opt/sestelemetry/deploy/.env.service
+WorkingDirectory=/home/itspec/sestelemtry/deploy
 Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-ExecStart=/usr/bin/env docker compose -f /opt/sestelemetry/deploy/docker-compose.service.yml up -d
-ExecStop=/usr/bin/env docker compose -f /opt/sestelemetry/deploy/docker-compose.service.yml down
-ExecReload=/usr/bin/env docker compose -f /opt/sestelemetry/deploy/docker-compose.service.yml up -d
+ExecStart=/usr/bin/env docker compose -f /home/itspec/sestelemtry/deploy/docker-compose.yml up -d --build
+ExecStop=/usr/bin/env docker compose -f /home/itspec/sestelemtry/deploy/docker-compose.yml down
+ExecReload=/usr/bin/env docker compose -f /home/itspec/sestelemtry/deploy/docker-compose.yml up -d --build
 TimeoutStartSec=0
 
 [Install]
