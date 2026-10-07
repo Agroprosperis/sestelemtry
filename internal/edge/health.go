@@ -182,10 +182,7 @@ func (s *Service) buildHealth(now time.Time) *HealthSnapshot {
 	}
 
 	// grid_limit
-	limitKw := s.cfg.Limits.Grid.ImportLimitKw
-	if m := s.manifest.Load(); m != nil && m.ActiveAt(now) && m.GridLimits.ImportLimitKw > 0 {
-		limitKw = m.GridLimits.ImportLimitKw
-	}
+	limitKw := s.effectiveImportLimitKw(now)
 	if limitKw > 0 && tick != nil && tick.GridPowerKw != nil {
 		imp := *tick.GridPowerKw
 		if imp > limitKw {
@@ -439,6 +436,16 @@ func passportSummary(b *BessHealth) string {
 		parts = append(parts, fmt.Sprintf("%d шаф", *b.PassportEssCount))
 	}
 	return strings.Join(parts, " / ")
+}
+
+// effectiveImportLimitKw is the grid import limit in force: the active
+// manifest's (паспорт / «Обмеження», diagnostics spec §4.1); the device
+// YAML only until the first manifest arrives.
+func (s *Service) effectiveImportLimitKw(now time.Time) float64 {
+	if m := s.manifest.Load(); m != nil && m.ActiveAt(now) && m.GridLimits.ImportLimitKw > 0 {
+		return m.GridLimits.ImportLimitKw
+	}
+	return s.cfg.Limits.Grid.ImportLimitKw
 }
 
 // roleFresh reports whether the device serving `role` produced a

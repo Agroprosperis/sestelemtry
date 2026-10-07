@@ -51,7 +51,7 @@ type Service struct {
 	devPollOK     sync.Map     // host → unix seconds of its last reading
 	override      atomic.Pointer[overrideState]
 	lastInverters atomic.Pointer[inverterFleet] // written by the 51xxx poller
-	events        chan Event // core-loop event channel (console sends too)
+	events        chan Event                    // core-loop event channel (console sends too)
 
 	// Core-loop state (no locks: touched only from the core loop).
 	lastManifestID   string

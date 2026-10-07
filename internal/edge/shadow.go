@@ -87,11 +87,11 @@ func (d Decision) Record(siteID string) map[string]any {
 // engineParams are the effective control parameters after merging the
 // site config with the active manifest (manifest wins where set).
 type engineParams struct {
-	preset         string
-	planSource     string
-	plan           *Plan
-	socMinPct float64
-	socMaxPct float64
+	preset     string
+	planSource string
+	plan       *Plan
+	socMinPct  float64
+	socMaxPct  float64
 	// Policy power limits (diagnostics spec §4.1): the manifest carries
 	// the passport / admin «Обмеження» ladder resolved by the cloud.
 	// 0 = no policy known (no manifest yet) — then only the dynamic SL

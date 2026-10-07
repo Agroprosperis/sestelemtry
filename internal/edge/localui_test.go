@@ -55,6 +55,62 @@ func TestLocalUIStatusShape(t *testing.T) {
 	}
 }
 
+// §4.1: the console limits are the engine's — active manifest over the
+// device YAML; YAML only before the first manifest; YAML BESS rated
+// power is never presented as a limit.
+func TestLocalUIStatusLimitsFollowManifest(t *testing.T) {
+	s := localUITestService(t)
+	s.cfg.Limits = Limits{
+		Grid: GridLimits{ImportLimitKw: 516, TargetImportKw: 480},
+		PV:   PVLimits{RatedKw: 660},
+		Bess: BessLimits{RatedPowerKw: 324, RatedCapacityKwh: 645, SocMinEconomicPct: 20, SocMaxEconomicPct: 90},
+	}
+	limits := func() map[string]any {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		s.uiStatus(rec, httptest.NewRequest("GET", "/api/status", nil))
+		var body struct {
+			Limits map[string]any `json:"limits"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		return body.Limits
+	}
+
+	l := limits()
+	if l["source"] != "config" || l["grid_import_kw"] != 516.0 || l["pv_rated_kw"] != 660.0 || l["bess_discharge_max_kw"] != 0.0 {
+		t.Fatalf("pre-manifest limits = %v, want YAML fallback and no power policy", l)
+	}
+
+	now := time.Now().UTC()
+	m := &Manifest{
+		SiteID: "ab", Mode: ModeShadow, Preset: PresetEconomicArbitrage,
+		ValidFrom: now.Add(-time.Hour), ValidUntil: now.Add(time.Hour),
+		Limits:     ManifestLimits{EssChargeMaxKw: 864, EssDischargeMaxKw: 864},
+		GridLimits: ManifestGridLimits{ImportLimitKw: 1700, TargetImportKw: 1600, PvRatedKw: 600},
+		SocPolicy:  SocPolicy{MinEconomicPct: 25, MaxEconomicPct: 85},
+	}
+	s.manifest.Store(m)
+
+	l = limits()
+	want := map[string]any{
+		"source": "manifest", "grid_import_kw": 1700.0, "grid_target_kw": 1600.0,
+		"pv_rated_kw": 600.0, "bess_charge_max_kw": 864.0, "bess_discharge_max_kw": 864.0,
+		"soc_min_pct": 25.0, "soc_max_pct": 85.0,
+	}
+	for k, v := range want {
+		if l[k] != v {
+			t.Errorf("limits[%s] = %v, want %v", k, l[k], v)
+		}
+	}
+	for _, k := range []string{"bess_power_kw", "bess_capacity_kwh"} {
+		if _, ok := l[k]; ok {
+			t.Errorf("YAML %s must not be exposed as a limit", k)
+		}
+	}
+}
+
 func TestLocalUIOverrideLifecycle(t *testing.T) {
 	s := localUITestService(t)
 
