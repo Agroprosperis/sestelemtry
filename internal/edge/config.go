@@ -198,10 +198,11 @@ type Config struct {
 	Diagnostics     DiagnosticsConfig `yaml:"diagnostics"`
 
 	// EssDischargeSign overrides the convention that raw
-	// active_ess_power_kw > 0 means "discharging". Set to -1 for
-	// firmwares that report charge as positive (ze). Allowed: 0
-	// (= default 1), 1, -1. The normalizer applies it so the tick's
-	// ess_power_kw is always + discharge / − charge per the spec.
+	// active_ess_power_kw > 0 means "discharging". Set to -1 only for
+	// a firmware proven to report charge as positive (check against the
+	// charge/discharge counters; ze is +1). Allowed: 0 (= default 1),
+	// 1, -1. The normalizer applies it so the tick's ess_power_kw is
+	// always + discharge / − charge per the spec.
 	EssDischargeSign int `yaml:"ess_discharge_sign"`
 }
 
