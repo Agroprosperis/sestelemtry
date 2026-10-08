@@ -263,33 +263,62 @@ func Decide(t Tick, m *Manifest, cfg *Config) (Decision, []Event) {
 	return d, events
 }
 
-// desiredPower picks the economic target (level A plan or
-// self-consumption rules) before clamping.
+// setpoint is one source's proposed command before the clamp chain.
+// After PR #5 a live manual command becomes the first source.
+type setpoint struct {
+	kw        float64
+	planKw    *float64
+	reason    string
+	rationale string
+}
+
+func applySetpoint(d *Decision, s setpoint) {
+	d.ReasonCode = s.reason
+	d.Rationale = s.rationale
+	if s.planKw != nil {
+		d.PBessPlanKw = s.planKw
+	}
+}
+
+// desiredPower picks the first applicable setpoint source, then
+// returns its kW. Sources stay ordered so a later one (manual) can
+// be prepended without changing the existing two.
 func desiredPower(t Tick, params engineParams, d *Decision) float64 {
 	if params.preset == PresetEconomicArbitrage {
-		if iv := params.plan.IntervalAt(t.TS); iv != nil {
-			v := iv.EssKw
-			d.PBessPlanKw = &v
-			switch {
-			case v > deadbandKw:
-				d.ReasonCode = "plan_discharge"
-				d.Rationale = planRationale("розряд за планом", iv)
-			case v < -deadbandKw:
-				d.ReasonCode = "plan_charge"
-				d.Rationale = planRationale("заряд за планом", iv)
-			default:
-				d.ReasonCode = "plan_hold"
-				d.Rationale = "план: утримання"
-			}
-			return v
+		if s, ok := planSetpoint(t, params); ok {
+			applySetpoint(d, s)
+			return s.kw
 		}
-		// Arbitrage without a plan interval degrades to self-consumption.
-		v := selfConsumptionPower(t, d)
-		d.ReasonCode = "no_plan_" + d.ReasonCode
-		d.Rationale = "план відсутній — " + d.Rationale
-		return v
+		s := selfConsumptionSetpoint(t)
+		s.reason = "no_plan_" + s.reason
+		s.rationale = "план відсутній — " + s.rationale
+		applySetpoint(d, s)
+		return s.kw
 	}
-	return selfConsumptionPower(t, d)
+	s := selfConsumptionSetpoint(t)
+	applySetpoint(d, s)
+	return s.kw
+}
+
+func planSetpoint(t Tick, params engineParams) (setpoint, bool) {
+	iv := params.plan.IntervalAt(t.TS)
+	if iv == nil {
+		return setpoint{}, false
+	}
+	v := iv.EssKw
+	s := setpoint{kw: v, planKw: &v}
+	switch {
+	case v > deadbandKw:
+		s.reason = "plan_discharge"
+		s.rationale = planRationale("розряд за планом", iv)
+	case v < -deadbandKw:
+		s.reason = "plan_charge"
+		s.rationale = planRationale("заряд за планом", iv)
+	default:
+		s.reason = "plan_hold"
+		s.rationale = "план: утримання"
+	}
+	return s, true
 }
 
 func planRationale(action string, iv *PlanInterval) string {
@@ -299,29 +328,33 @@ func planRationale(action string, iv *PlanInterval) string {
 	return fmt.Sprintf("%s (%.1f кВт)", action, iv.EssKw)
 }
 
-// selfConsumptionPower implements the self_consumption preset: charge
-// from PV surplus, discharge into the local deficit, never trade.
-func selfConsumptionPower(t Tick, d *Decision) float64 {
+// selfConsumptionSetpoint implements the self_consumption preset:
+// charge from PV surplus, discharge into the local deficit, never trade.
+func selfConsumptionSetpoint(t Tick) setpoint {
 	if t.PVPowerKw == nil || t.LoadPowerKw == nil {
-		d.ReasonCode = "insufficient_data"
-		d.Rationale = "немає pv/load — утримання 0"
-		return 0
+		return setpoint{reason: "insufficient_data", rationale: "немає pv/load — утримання 0"}
 	}
 	surplus := *t.PVPowerKw - *t.LoadPowerKw
 	switch {
 	case surplus > deadbandKw:
-		d.ReasonCode = "self_charge"
-		d.Rationale = fmt.Sprintf("заряд від надлишку СЕС (%.1f кВт)", surplus)
-		return -surplus
+		return setpoint{kw: -surplus, reason: "self_charge", rationale: fmt.Sprintf("заряд від надлишку СЕС (%.1f кВт)", surplus)}
 	case surplus < -deadbandKw:
-		d.ReasonCode = "self_discharge"
-		d.Rationale = fmt.Sprintf("розряд на покриття навантаження (%.1f кВт)", -surplus)
-		return -surplus
+		return setpoint{kw: -surplus, reason: "self_discharge", rationale: fmt.Sprintf("розряд на покриття навантаження (%.1f кВт)", -surplus)}
 	default:
-		d.ReasonCode = "hold"
-		d.Rationale = "баланс у межах deadband — утримання"
-		return 0
+		return setpoint{reason: "hold", rationale: "баланс у межах deadband — утримання"}
 	}
+}
+
+type clampStep func(t Tick, params engineParams, p float64, note func(string)) (float64, bool)
+
+// clampSteps is the safety chain in diagnostics spec §4.1 order.
+// Each step may note a clamp; a true stop (SOC) ends the chain.
+var clampSteps = []clampStep{
+	clampSOC,
+	clampPolicy,
+	clampDynamicSL,
+	clampNoExport,
+	clampChargeSource,
 }
 
 // clampBess applies, in order: SOC policy, SmartLogger dynamic limits
@@ -329,30 +362,41 @@ func selfConsumptionPower(t Tick, d *Decision) float64 {
 // no-grid-charge rule for self-consumption presets, and the grid
 // import target for plan-driven charging.
 func clampBess(t Tick, params engineParams, p float64, clamps *[]string) float64 {
-	note := func(s string) { *clamps = append(*clamps, s) }
-
 	if p == 0 {
 		return 0
 	}
+	note := func(s string) { *clamps = append(*clamps, s) }
+	for _, step := range clampSteps {
+		var stop bool
+		p, stop = step(t, params, p, note)
+		if stop {
+			return p
+		}
+	}
+	return p
+}
 
-	// SOC policy.
+func clampSOC(t Tick, params engineParams, p float64, note func(string)) (float64, bool) {
 	if t.SocPercent == nil {
 		note("SOC невідомий — команда 0")
-		return 0
+		return 0, true
 	}
 	soc := *t.SocPercent
 	if p > 0 && soc <= params.socMinPct {
 		note(fmt.Sprintf("SOC %.1f%% ≤ min %.0f%% — розряд заборонено", soc, params.socMinPct))
-		return 0
+		return 0, true
 	}
 	if p < 0 && soc >= params.socMaxPct {
 		note(fmt.Sprintf("SOC %.1f%% ≥ max %.0f%% — заряд заборонено", soc, params.socMaxPct))
-		return 0
+		return 0, true
 	}
+	return p, false
+}
 
-	// §4.1: команда = min(план, ліміт політики, 40490/40492). Policy
-	// (manifest: паспорт/«Обмеження») and the dynamic SL registers cap
-	// independently; the device YAML is never a power source.
+// §4.1: команда = min(план, ліміт політики, 40490/40492). Policy
+// (manifest: паспорт/«Обмеження») and the dynamic SL registers cap
+// independently; the device YAML is never a power source.
+func clampPolicy(_ Tick, params engineParams, p float64, note func(string)) (float64, bool) {
 	if p > 0 && params.dischargeMaxKw > 0 && p > params.dischargeMaxKw {
 		note(fmt.Sprintf("ліміт політики розряду %.0f кВт", params.dischargeMaxKw))
 		p = params.dischargeMaxKw
@@ -361,6 +405,10 @@ func clampBess(t Tick, params engineParams, p float64, clamps *[]string) float64
 		note(fmt.Sprintf("ліміт політики заряду %.0f кВт", params.chargeMaxKw))
 		p = -params.chargeMaxKw
 	}
+	return p, false
+}
+
+func clampDynamicSL(t Tick, _ engineParams, p float64, note func(string)) (float64, bool) {
 	if p > 0 && t.ESSDischargeMaxKw != nil && *t.ESSDischargeMaxKw > 0 && p > *t.ESSDischargeMaxKw {
 		note(fmt.Sprintf("ліміт розряду %.0f кВт (40492)", *t.ESSDischargeMaxKw))
 		p = *t.ESSDischargeMaxKw
@@ -369,50 +417,51 @@ func clampBess(t Tick, params engineParams, p float64, clamps *[]string) float64
 		note(fmt.Sprintf("ліміт заряду %.0f кВт (40490)", *t.ESSChargeMaxKw))
 		p = -*t.ESSChargeMaxKw
 	}
+	return p, false
+}
 
-	pvKnown := t.PVPowerKw != nil && t.LoadPowerKw != nil
+func clampNoExport(t Tick, params engineParams, p float64, note func(string)) (float64, bool) {
+	if p <= 0 || t.PVPowerKw == nil || t.LoadPowerKw == nil || params.exportAllowed {
+		return p, false
+	}
+	maxNoExport := *t.LoadPowerKw - *t.PVPowerKw
+	if maxNoExport < 0 {
+		maxNoExport = 0
+	}
+	if p > maxNoExport {
+		note("без експорту: розряд обрізано до дефіциту")
+		p = maxNoExport
+	}
+	return p, false
+}
 
-	// No export (unless the manifest allows it): discharge must not
-	// exceed the local deficit.
-	if p > 0 && pvKnown && !params.exportAllowed {
-		maxNoExport := *t.LoadPowerKw - *t.PVPowerKw
-		if maxNoExport < 0 {
-			maxNoExport = 0
+func clampChargeSource(t Tick, params engineParams, p float64, note func(string)) (float64, bool) {
+	if p >= 0 || t.PVPowerKw == nil || t.LoadPowerKw == nil {
+		return p, false
+	}
+	switch params.preset {
+	case PresetEconomicArbitrage:
+		if params.targetImportKw > 0 {
+			headroom := params.targetImportKw - (*t.LoadPowerKw - *t.PVPowerKw)
+			if headroom < 0 {
+				headroom = 0
+			}
+			if -p > headroom {
+				note(fmt.Sprintf("ліміт імпорту %.0f кВт", params.targetImportKw))
+				p = -headroom
+			}
 		}
-		if p > maxNoExport {
-			note("без експорту: розряд обрізано до дефіциту")
-			p = maxNoExport
+	default:
+		surplus := *t.PVPowerKw - *t.LoadPowerKw
+		if surplus < 0 {
+			surplus = 0
+		}
+		if -p > surplus {
+			note("заряд лише від надлишку СЕС")
+			p = -surplus
 		}
 	}
-
-	if p < 0 && pvKnown {
-		switch params.preset {
-		case PresetEconomicArbitrage:
-			// Grid charging is allowed (the plan gated it by price), but
-			// the import target still caps it.
-			if params.targetImportKw > 0 {
-				headroom := params.targetImportKw - (*t.LoadPowerKw - *t.PVPowerKw)
-				if headroom < 0 {
-					headroom = 0
-				}
-				if -p > headroom {
-					note(fmt.Sprintf("ліміт імпорту %.0f кВт", params.targetImportKw))
-					p = -headroom
-				}
-			}
-		default:
-			// Self-consumption presets charge from PV surplus only.
-			surplus := *t.PVPowerKw - *t.LoadPowerKw
-			if surplus < 0 {
-				surplus = 0
-			}
-			if -p > surplus {
-				note("заряд лише від надлишку СЕС")
-				p = -surplus
-			}
-		}
-	}
-	return p
+	return p, false
 }
 
 func round1(v float64) float64 { return math.Round(v*10) / 10 }
