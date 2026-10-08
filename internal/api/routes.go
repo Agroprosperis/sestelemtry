@@ -158,7 +158,8 @@ func (h *Handlers) routes() []route {
 		{"/api/v1/economics/portfolio", h.economicsPortfolio, need(onAnyOrg(auth.PermEconomicsRead))},
 		{"/api/v1/economics/recompute", h.economicsRecompute, need(econEdit)},
 		{"/api/v1/economics/data-range", h.economicsDataRange, need(econRead)},
-		{"/api/v1/uze-plan", h.uzePlan, need(day)},
+		// The economics day report shows the optimum too.
+		{"/api/v1/uze-plan", h.uzePlan, need(onOrg(auth.PermAnalyticsDay, auth.PermEconomicsRead))},
 		{"/api/v1/edge/batch", h.edgeBatch, edgeRoute},
 		{"/api/v1/edge/heartbeat", h.edgeHeartbeat, edgeRoute},
 		{"/api/v1/edge/manifest", h.edgeManifest, edgeRoute},
@@ -169,6 +170,7 @@ func (h *Handlers) routes() []route {
 		{"/api/v1/dispatch/preview", h.dispatchPreview, need(control)},
 		{"/api/v1/dispatch/confirm", h.dispatchConfirm, need(control)},
 		{"/api/v1/dispatch/day", h.dispatchDay, need(control)},
+		{"/api/v1/dispatch/effect", h.dispatchEffect, need(onOrg(auth.PermEconomicsRead, auth.PermControl))},
 		{"/api/v1/edge/settings", h.edgeSettings,
 			need(control).on(http.MethodPut, onSite(auth.PermTechnicalWrite))},
 		{"/api/v1/edge/status", h.edgeStatus, need(control)},

@@ -148,6 +148,19 @@ describe('DispatchDesk', () => {
     expect(await screen.findByText('План змінив інший користувач.')).toBeInTheDocument()
   })
 
+  it('links the day report only when economics is readable', async () => {
+    const open = vi.fn()
+    const { unmount } = render(<DispatchDesk site="ze" onOpenReport={open} />)
+    await screen.findByText('Ручне керування УЗЕ')
+    fireEvent.click(screen.getByRole('button', { name: 'Звіт за день' }))
+    expect(open).toHaveBeenCalledWith('2026-10-07')
+    unmount()
+
+    render(<DispatchDesk site="ze" />)
+    await screen.findByText('Ручне керування УЗЕ')
+    expect(screen.queryByRole('button', { name: 'Звіт за день' })).toBeNull()
+  })
+
   it('draws the plan in force over the history hours', async () => {
     const { container } = render(<DispatchDesk site="ze" />)
     await screen.findByText('Ручне керування УЗЕ')

@@ -15,6 +15,7 @@ type Props = {
   timezone: string
   onDate: (date: string) => void
   onClose: () => void
+  onOpenReport?: (date: string) => void
 }
 
 const SERIES: [keyof SeriesToggles, string, string][] = [
@@ -33,7 +34,7 @@ const dayTitle = (date: string) =>
 const energy = (xs: (number | null | undefined)[], sign: 1 | -1) =>
   xs.reduce<number>((n, v) => n + (hasValue(v) ? Math.max(0, sign * v) : 0), 0)
 
-export function DeskDay({ site, date, maxDate, timezone, onDate, onClose }: Props) {
+export function DeskDay({ site, date, maxDate, timezone, onDate, onClose, onOpenReport }: Props) {
   const [loaded, setLoaded] = useState<{ date: string; day: DayResponse } | null>(null)
   const [failed, setFailed] = useState<{ date: string; text: string } | null>(null)
   const [series, setSeries] = useState<SeriesToggles>({
@@ -86,6 +87,11 @@ export function DeskDay({ site, date, maxDate, timezone, onDate, onClose }: Prop
           День
           <input type="date" value={date} max={maxDate} onChange={(e) => e.target.value && onDate(e.target.value)} />
         </label>
+        {onOpenReport && (
+          <button type="button" onClick={() => onOpenReport(date)}>
+            Звіт за день
+          </button>
+        )}
         <button type="button" onClick={onClose}>
           ← До пульта
         </button>

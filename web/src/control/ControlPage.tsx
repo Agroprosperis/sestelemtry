@@ -12,7 +12,7 @@ import { useOrganizationParam } from '../dashboard/hooks/useOrganizationParam'
 import { fetchEdgeSites, fetchEdgeStatus, type EdgeSiteStatus } from './controlClient'
 import { JournalTab } from './JournalTab'
 import { ModeTopBar, type TopBarMenuItem } from '../shell/ModeTopBar'
-import { navigateView } from '../shell/navigation'
+import { navigateEconomicsDay, navigateView } from '../shell/navigation'
 import { ModesTab } from './ModesTab'
 import { SettingsTab } from './SettingsTab'
 import { StateTab } from './StateTab'
@@ -140,7 +140,11 @@ export function ControlPage() {
       ) : tab === 'state' ? (
         <StateTab site={site} status={status} />
       ) : tab === 'plan' ? (
-        <DispatchDesk key={site} site={site} />
+        <DispatchDesk
+          key={site}
+          site={site}
+          onOpenReport={access.can('economics.read', site) ? navigateEconomicsDay : undefined}
+        />
       ) : tab === 'modes' ? (
         <ModesTab status={status} onOpenDesk={() => switchTab('plan')} />
       ) : tab === 'limits' ? (
