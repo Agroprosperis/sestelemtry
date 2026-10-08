@@ -9,6 +9,7 @@ import {
   type ActionGroup,
   type ChartPoint,
   type Clock,
+  type PlanOverlay,
   clockAt,
   flowMeta,
   fmt,
@@ -29,10 +30,6 @@ export type SeriesToggles = {
 }
 
 export type ModeGroup = { key: string; label: string; short: string; start: number; end: number }
-
-// PlanOverlay is what the edge was asked to follow in a past hour
-// («план / факт»): dashed over the measured series.
-export type PlanOverlay = { ess: number | null; soc: number | null; grid: number | null }
 
 export type ChartInput = {
   width: number

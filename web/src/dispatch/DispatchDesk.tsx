@@ -5,9 +5,11 @@
 // the preview, stages a draft and confirms it; the server prices every
 // version with the same LP the rolling publisher uses.
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './dispatch.css'
-import { buildChartSvg, type ChartLayout, type ModeGroup, type PlanOverlay, type SeriesToggles } from './chartSvg'
+import { buildChartSvg, type ChartLayout, type ModeGroup, type SeriesToggles } from './chartSvg'
+import { DeskDay } from './DeskDay'
+import { Inspector } from './Inspector'
 import {
   confirmDraft,
   fetchDeskState,
@@ -23,6 +25,7 @@ import {
   FUTURE_HOURS,
   HISTORY_HOURS,
   actionGroups,
+  addDays,
   buildPreview,
   cfgSummary,
   clone,
@@ -35,22 +38,24 @@ import {
   hourPlanState,
   hoursBetween,
   intents,
+  localDate,
   makeClock,
   normalizeModel,
   optionTime,
   paramLabel,
+  planOverlay,
   pointFromResult,
   priceFmt,
   reviewGroups,
   same,
   scenarioOptions,
   shiftModel,
-  splitBessFlow,
   timeLabel,
   unknownForecastText,
   type ChartPoint,
   type Clock,
   type DeskModel,
+  type PlanOverlay,
 } from './model'
 import { commandError, constraintsError } from './validate'
 
@@ -467,6 +472,8 @@ export function DispatchDesk({ site }: Props) {
   const chartRef = useRef<HTMLDivElement>(null)
   const dragging = useRef(false)
   const [width, setWidth] = useState(900)
+  // A past day replaces the desk view; the draft stays in this component.
+  const [pastDay, setPastDay] = useState<string | null>(null)
   const hasState = !!state
   useEffect(() => {
     const el = chartRef.current
@@ -477,7 +484,7 @@ export function DispatchDesk({ site }: Props) {
     })
     ro.observe(el)
     return () => ro.disconnect()
-  }, [hasState])
+  }, [hasState, pastDay])
 
   // hitIndex maps a pointer x to a desk hour of the rendered layout
   // (read only from event handlers — the DOM rect is live there).
@@ -515,6 +522,21 @@ export function DispatchDesk({ site }: Props) {
   if (!state || !active || !working || !form || !cfg || !clock || !result || !siteInfo || !chartModel)
     return <div className="ctl-placeholder">Завантаження пульта…</div>
 
+  const today = localDate(state.now, state.timezone)
+  if (pastDay)
+    return (
+      <div className="dispatch-desk">
+        <DeskDay
+          site={site}
+          date={pastDay}
+          maxDate={today}
+          timezone={state.timezone}
+          onDate={setPastDay}
+          onClose={() => setPastDay(null)}
+        />
+      </div>
+    )
+
   const hours = state.hours
   const at = (i: number) => hours[i + HISTORY_HOURS]
   const past = historyPoints(hours)
@@ -525,10 +547,7 @@ export function DispatchDesk({ site }: Props) {
     i < 0 ? (past[i + HISTORY_HOURS] ?? EMPTY_POINT) : pointFromResult(res.hours[i])
   const previewAt = (i: number) => pointAt(result, i)
   const baselineAt = (i: number) => pointAt(state.result, i)
-  const planAt = (i: number): PlanOverlay | null => {
-    const p = i < 0 ? at(i)?.plan : undefined
-    return p ? { ess: p.ess_kw, soc: p.soc_pct, grid: p.import_kw - p.export_kw } : null
-  }
+  const planAt = (i: number): PlanOverlay | null => planOverlay(i < 0 ? at(i)?.plan : undefined)
   const reserve = invalid ? working.cfg.reserve_pct : cfg.reserve_pct
   const first = -HISTORY_HOURS
   const count = HISTORY_HOURS + FUTURE_HOURS
@@ -675,6 +694,9 @@ export function DispatchDesk({ site }: Props) {
         </div>
         <div className="d-row">
           <span className="d-small">32 години · 8 назад + 24 уперед</span>
+          <button type="button" onClick={() => setPastDay(addDays(today, -1))}>
+            Минулі дні
+          </button>
           <button type="button" onClick={() => setSel({ start: 0, end: 1, anchor: 0, inspect: 0 })}>
             Зараз на 1 год
           </button>
@@ -1220,99 +1242,6 @@ export function DispatchDesk({ site }: Props) {
           повного циклу: {fmt((state.tariffs.roundtrip_efficiency || 0.9) * 100)}%. Тарифи — з налаштувань економіки обʼєкта.
         </p>
       </details>
-    </div>
-  )
-}
-
-type InspectorProps = {
-  clock: Clock
-  i: number
-  point: ChartPoint
-  pv: number | null
-  load: number | null
-  price: number | null
-  buy: number | null
-  sell: number | null
-  plan: PlanOverlay | null
-  state: { label: string; detail: string }
-  series: SeriesToggles
-}
-
-// Inspector — exact values of the hovered / clicked hour (renderInspector).
-function Inspector({ clock, i, point: d, pv, load, price, buy, sell, plan, state, series }: InspectorProps): ReactElement {
-  const knownPower = hasValue(d.p)
-  const knownGrid = hasValue(d.import) && hasValue(d.export)
-  const knownSoc = hasValue(d.before) && hasValue(d.soc)
-  const flows = knownPower && hasValue(load) && hasValue(pv) ? splitBessFlow(d.p as number, pv, load) : []
-  const gridCharge = flows.find((f) => f.key === 'grid')
-  const gridChargeKw = gridCharge ? Math.abs(gridCharge.power) : 0
-  return (
-    <div className="d-inspect" aria-label="Точні значення вибраної години">
-      <strong className="d-inspect-time">
-        {timeLabel(clock, i)}–{timeLabel(clock, i + 1)} · {state.label}
-      </strong>
-      {i >= 0 && <span className="d-flow-detail">{state.detail}</span>}
-      {series.pv && (
-        <span>
-          {i < 0 ? 'СЕС' : 'СЕС (прогноз)'} <strong>{fmt(pv)} кВт</strong>
-        </span>
-      )}
-      {series.load && (
-        <span>
-          Споживання <strong>{hasValue(load) ? fmt(load) + ' кВт' : 'Не задано'}</strong>
-        </span>
-      )}
-      {series.price && (
-        <span>
-          РДН <strong>{hasValue(price) ? fmt(price) + ' грн/кВт·год' : 'не опублікована'}</strong>
-        </span>
-      )}
-      {series.bess && (
-        <span>
-          УЗЕ{knownPower ? ' · ' + ((d.p as number) < 0 ? 'заряд' : (d.p as number) > 0 ? 'розряд' : 'утримання') : ''}{' '}
-          <strong>{knownPower ? fmt(Math.abs(d.p as number)) + ' кВт' : 'Немає прогнозу'}</strong>
-        </span>
-      )}
-      <span>
-        {knownGrid ? ((d.export as number) > 0 ? 'Експорт PCC' : 'Імпорт PCC') : 'Мережа PCC'}{' '}
-        <strong>{knownGrid ? fmt((d.import as number) || (d.export as number)) + ' кВт' : 'Немає прогнозу'}</strong>
-      </span>
-      {series.soc && (
-        <span>
-          SOC <strong>{knownSoc ? fmt(d.before) + ' → ' + fmt(d.soc) + '%' : hasValue(d.soc) ? fmt(d.soc) + '%' : 'Немає прогнозу'}</strong>
-        </span>
-      )}
-      {series.bess && knownPower && hasValue(load) && (
-        <span className="d-flow-detail">
-          {flows.length
-            ? ((d.p as number) < 0 ? 'Заряд УЗЕ' : 'Розряд УЗЕ') +
-              ' · ' +
-              flows.map((part) => flowMeta[part.key].detail + ' ' + fmt(Math.abs(part.power)) + ' кВт').join(' · ')
-            : 'УЗЕ · утримання, 0 кВт'}
-        </span>
-      )}
-      {knownGrid && (d.import as number) > 0.05 && (
-        <span className="d-flow-detail">
-          Імпорт із мережі · на споживання <strong>{fmt(Math.max(0, (d.import as number) - gridChargeKw))} кВт</strong> · на заряд УЗЕ{' '}
-          <strong>{fmt(gridChargeKw)} кВт</strong>
-        </span>
-      )}
-      {hasValue(d.curtailed) && d.curtailed > 0.05 && (
-        <span className="d-flow-detail">
-          Обмеження СЕС <strong>{fmt(d.curtailed)} кВт</strong> · надлишок не приймають батарея або мережа
-        </span>
-      )}
-      {plan && (
-        <span className="d-flow-detail">
-          План на цю годину · УЗЕ <strong>{fmt(plan.ess)} кВт</strong> · SOC <strong>{fmt(plan.soc)}%</strong> · мережа{' '}
-          <strong>{fmt(plan.grid)} кВт</strong>
-        </span>
-      )}
-      {series.price && i >= 0 && hasValue(buy) && hasValue(sell) && (
-        <span className="d-flow-detail">
-          Тарифи AUTO · купівля <strong>{priceFmt(buy)}</strong> · продаж <strong>{priceFmt(sell)}</strong> грн/кВт·год
-        </span>
-      )}
     </div>
   )
 }
