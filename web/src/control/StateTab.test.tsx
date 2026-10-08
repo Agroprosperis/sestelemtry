@@ -1,7 +1,8 @@
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import type { EdgeHealth, EdgeSiteStatus } from './controlClient'
-import { REASON_LABELS, StateTab } from './StateTab'
+import { REASON_LABELS } from './decisionLabels'
+import { StateTab } from './StateTab'
 
 // The tab embeds the dashboard's live cards and chart — stub them, the
 // subject here is the diagnostics layer (план·shadow·факт, УЗЕ, checks,

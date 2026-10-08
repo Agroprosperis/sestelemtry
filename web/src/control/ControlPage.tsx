@@ -41,7 +41,9 @@ export function ControlPage() {
   const [sites, setSites] = useState<string[]>([])
   const [sitesLoaded, setSitesLoaded] = useState(false)
   const [tab, setTab] = useState<Tab>(readTab)
-  const [status, setStatus] = useState<EdgeSiteStatus | null>(null)
+  // Keyed by site so a switch shows no status until the new site
+  // answers, and a late reply for the old site is ignored.
+  const [statusEntry, setStatusEntry] = useState<{ site: string; status: EdgeSiteStatus } | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -68,17 +70,18 @@ export function ControlPage() {
   const refreshStatus = useCallback(() => {
     if (!site) return
     fetchEdgeStatus(site, 100)
-      .then(setStatus)
+      .then((next) => setStatusEntry({ site, status: next }))
       .catch(() => {})
   }, [site])
 
   useEffect(() => {
-    setStatus(null)
     if (!site) return
     refreshStatus()
     const id = window.setInterval(refreshStatus, STATUS_POLL_MS)
     return () => window.clearInterval(id)
   }, [site, refreshStatus])
+
+  const status = statusEntry && statusEntry.site === site ? statusEntry.status : null
 
   useEffect(() => {
     const handler = () => setTab(readTab())
@@ -149,6 +152,7 @@ export function ControlPage() {
         <ModesTab status={status} onOpenDesk={() => switchTab('plan')} />
       ) : tab === 'limits' ? (
         <SettingsTab
+          key={site}
           site={site}
           canEdit={access.can('technical.write', site)}
           onChanged={refreshStatus}
