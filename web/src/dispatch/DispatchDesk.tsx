@@ -9,115 +9,53 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './dispatch.css'
 import { buildChartSvg, type ChartLayout, type ModeGroup, type SeriesToggles } from './chartSvg'
 import { PeriodPicker } from '../dashboard/components/PeriodPicker'
+import { ChartNotes, ChartToolbar, type ChartLayoutMode } from './ChartParts'
+import { CommandFields, CommandHelp, CommandPreview, IntervalHead, LoadEditor } from './CommandEditor'
+import { ConstraintsPanel } from './ConstraintsPanel'
 import { DeskDay } from './DeskDay'
+import { DeskFootnotes } from './DeskFootnotes'
+import { HISTORY_LIMIT, cfgToForm, formToCfg, readDraft, writeDraft, type CfgForm, type Selection } from './deskDraft'
 import { Inspector } from './Inspector'
-import {
-  confirmDraft,
-  fetchDeskState,
-  previewDraft,
-  type CommandType,
-  type Constraints,
-  type DeskState,
-  type Issue,
-  type SimResult,
-} from './dispatchClient'
+import { ReviewPanel } from './ReviewPanel'
+import { confirmDraft, fetchDeskState, previewDraft, type CommandType, type DeskState, type SimResult } from './dispatchClient'
 import {
   EMPTY_POINT,
   FUTURE_HOURS,
   HISTORY_HOURS,
   actionGroups,
   buildPreview,
-  cfgSummary,
   clone,
-  commandDesc,
   defaultParams,
-  flowMeta,
   fmt,
   hasValue,
   historyPoints,
   hourPlanState,
   hoursBetween,
-  intents,
   isoFromDate,
   dateFromISO,
   localDate,
   makeClock,
   normalizeModel,
-  optionTime,
-  paramLabel,
   planOverlay,
   pointFromResult,
   reviewGroups,
   same,
-  scenarioOptions,
   shiftModel,
-  tariffSummary,
   timeLabel,
-  unknownForecastText,
   type ChartPoint,
   type Clock,
   type DeskModel,
   type PlanOverlay,
 } from './model'
+import { commandOutcome } from './outcome'
 import { commandError, constraintsError } from './validate'
 
 // onOpenReport opens the economics day report for a date; absent when
 // the user cannot read economics on the site.
 type Props = { site: string; onOpenReport?: (date: string) => void }
 
-type CfgForm = {
-  reserve: string
-  grid: boolean
-  essSale: boolean
-  blockExport: boolean
-  importCap: string
-  exportCap: string
-}
-
-const cfgToForm = (c: Constraints): CfgForm => ({
-  reserve: String(c.reserve_pct),
-  grid: c.grid_charge,
-  essSale: c.ess_sale,
-  blockExport: c.block_export,
-  importCap: String(c.import_cap_kw),
-  exportCap: c.export_cap_kw === null ? '' : String(c.export_cap_kw),
-})
-
-const formToCfg = (f: CfgForm): Constraints => ({
-  reserve_pct: Number(f.reserve),
-  grid_charge: f.grid,
-  ess_sale: f.essSale,
-  block_export: f.blockExport,
-  import_cap_kw: Number(f.importCap),
-  export_cap_kw: f.exportCap.trim() === '' ? null : Number(f.exportCap),
-})
-
-type Selection = { start: number; end: number; anchor: number; inspect: number }
-
-type SavedDraft = { start_hour: string; base_version: number; working: DeskModel; history: DeskModel[] }
-
-const draftKey = (site: string) => 'dispatch-desk:' + site
 const STATE_REFRESH_MS = 5 * 60_000
 const PREVIEW_DEBOUNCE_MS = 250
-const HISTORY_LIMIT = 30
-
-function readDraft(site: string): SavedDraft | null {
-  try {
-    const raw = window.localStorage.getItem(draftKey(site))
-    return raw ? (JSON.parse(raw) as SavedDraft) : null
-  } catch {
-    return null
-  }
-}
-
-function writeDraft(site: string, d: SavedDraft | null) {
-  try {
-    if (d) window.localStorage.setItem(draftKey(site), JSON.stringify(d))
-    else window.localStorage.removeItem(draftKey(site))
-  } catch {
-    /* storage full or blocked — the draft lives in memory only */
-  }
-}
 
 export function DispatchDesk({ site, onOpenReport }: Props) {
   const [state, setState] = useState<DeskState | null>(null)
@@ -144,7 +82,7 @@ export function DispatchDesk({ site, onOpenReport }: Props) {
     before: false,
     plan: true,
   })
-  const [layout, setLayout] = useState<'split' | 'combined'>('split')
+  const [layout, setLayout] = useState<ChartLayoutMode>('split')
   const [reviewOpen, setReviewOpen] = useState(false)
   // An action's message stays until the operator touches the fields or
   // the selection again (the mockup overwrites it on the next render).
@@ -589,90 +527,20 @@ export function DispatchDesk({ site, onOpenReport }: Props) {
 
   const span = timeLabel(clock, sel.start) + '–' + timeLabel(clock, sel.end)
   const selected = result.hours.slice(sel.start, sel.end)
-  const complete = selected.every((h) => !h.unknown)
   const knownLoads = chartModel.loads.slice(sel.start, sel.end).every(hasValue)
   const mean = (xs: (number | null)[]) => xs.slice(sel.start, sel.end).reduce<number>((v, x) => v + (x ?? 0), 0) / (sel.end - sel.start)
   const futurePv = Array.from({ length: FUTURE_HOURS }, (_, i) => at(i)?.pv_kw ?? 0)
   const prices = Array.from({ length: FUTURE_HOURS }, (_, i) => at(i)?.rdn_uah_per_kwh).slice(sel.start, sel.end).filter(hasValue)
-  const charged = selected.reduce((n, x) => n + Math.max(0, -(x.p_kw ?? 0)), 0)
-  const discharged = selected.reduce((n, x) => n + Math.max(0, x.p_kw ?? 0), 0)
-  const exported = selected.reduce((n, x) => n + (x.export_kw ?? 0), 0)
   const issues = result.issues.filter((x) => x.blocking)
-  const commandIssues = issues.filter((x) => x.hour >= sel.start && x.hour < sel.end)
-  const laterIssues = issues.filter((x) => x.hour >= sel.end)
-  const earlierIssues = issues.filter((x) => x.hour < sel.start)
   const startSoc = result.hours[sel.start]?.soc_before_pct ?? null
   const endSoc = result.hours[sel.end - 1]?.soc_pct ?? null
   const selectedSoc = selected.map((h) => h.soc_pct)
   const completeSoc = hasValue(startSoc) && selectedSoc.every(hasValue)
-  const exportCeiling = siteInfo.export_ceiling_kw
-
-  let flowLabel: string
-  let flowValue: string
-  let flowDetail: string
-  let comparison = ''
-  if (!complete) {
-    flowLabel = 'Результат команди'
-    flowValue = 'Немає прогнозу'
-    flowDetail = unknownForecastText(clock, result, chartModel, hours)
-    if (scenario === 'export' || scenario === 'fixed') comparison = 'Запитано ' + fmt(Number(paramRaw) * (sel.end - sel.start)) + ' кВт·год'
-  } else if (scenario === 'cap') {
-    const peak = Math.max(...selected.map((x) => x.import_kw ?? 0))
-    const limit = Number(paramRaw)
-    flowLabel = 'AUTO · пік імпорту'
-    flowValue = fmt(peak) + ' кВт'
-    flowDetail =
-      'Заданий ліміт ' + fmt(limit) + ' кВт' + (peak > limit + 0.05 ? ' · перевищення ' + fmt(peak - limit) + ' кВт' : ' · дотримано') +
-      '. AUTO: заряд ' + fmt(charged) + ' · розряд ' + fmt(discharged) + ' кВт·год'
-  } else if (scenario === 'target') {
-    flowLabel = 'SOC наприкінці команди'
-    flowValue = fmt(endSoc) + '%'
-    flowDetail = 'Ціль ' + fmt(Number(paramRaw)) + '% · заряд ' + fmt(charged) + ' кВт·год'
-  } else {
-    flowLabel =
-      scenario === 'export' ? 'Експорт PCC за інтервал' : discharged > 0 ? 'Розряд УЗЕ за інтервал' : charged > 0 ? 'Заряд УЗЕ за інтервал' : 'УЗЕ за інтервал'
-    flowValue = fmt(scenario === 'export' ? exported : discharged > 0 ? discharged : charged) + ' кВт·год'
-    flowDetail =
-      scenario === 'export'
-        ? 'УЗЕ: заряд ' + fmt(charged) + ' · розряд ' + fmt(discharged) + ' кВт·год'
-        : charged > 0 && discharged > 0
-          ? 'Заряд УЗЕ за інтервал: ' + fmt(charged) + ' кВт·год'
-          : discharged > 0
-            ? 'Енергія, віддана УЗЕ'
-            : charged > 0
-              ? 'Енергія, отримана УЗЕ'
-              : 'Заряд і розряд відсутні'
-    if (scenario === 'export' || scenario === 'fixed') {
-      const requested = Number(paramRaw) * (sel.end - sel.start)
-      const actual = scenario === 'export' ? exported : direction === 'charge' ? charged : discharged
-      const shortfall = Math.max(0, requested - actual)
-      comparison = 'Запитано ' + fmt(requested) + ' кВт·год' + (shortfall > 0.05 ? ' · бракує ' + fmt(shortfall) + ' кВт·год' : ' · виконується повністю')
-    }
-  }
+  const outcome = commandOutcome(clock, result, chartModel, hours, scenario, paramRaw, direction, sel.start, sel.end)
   const statusLine =
     statusState.key === fieldsKey || invalid || same(working, previewModel)
       ? status
       : 'Попередній перегляд · ці зміни ще не додано у чернетку.'
-
-  const issueRows = (items: Issue[]) =>
-    items.map((x) => (
-      <li key={x.hour + x.text}>
-        {timeLabel(clock, x.hour)}–{timeLabel(clock, x.hour + 1)} · {commandDesc(chartModel.commands[x.hour])}: {x.text}
-      </li>
-    ))
-  const issueGroup = (label: string, items: Issue[]) =>
-    items.length ? (
-      <>
-        <div className="d-warning-group">{label}</div>
-        <ul>{issueRows(items.slice(0, 2))}</ul>
-        {items.length > 2 && (
-          <details>
-            <summary>Ще {items.length - 2} інтервалів</summary>
-            <ul>{issueRows(items.slice(2))}</ul>
-          </details>
-        )}
-      </>
-    ) : null
 
   const review = reviewGroups(active, working)
   const reviewResult = reviewOpen ? result : null
@@ -683,7 +551,6 @@ export function DispatchDesk({ site, onOpenReport }: Props) {
       : ''
   const canConfirm = reviewOpen && !stale && !same(active, working) && reviewBlockers.length === 0 && !reviewReserveError && !confirmBusy
 
-  const fromOptions = Array.from({ length: FUTURE_HOURS }, (_, i) => i)
   const startSummary =
     'SOC ' + fmt(state.start_soc_pct) + '%' + (state.start_soc_known ? '' : ' (немає свіжої телеметрії — середина вікна)') + ' · ' +
     fmt(siteInfo.capacity_kwh) + ' кВт·год · до ' + fmt(Math.max(siteInfo.charge_kw, siteInfo.discharge_kw)) + ' кВт'
@@ -720,42 +587,13 @@ export function DispatchDesk({ site, onOpenReport }: Props) {
 
       <section className={'d-workspace' + (reviewOpen ? ' d-reviewing' : '')} aria-label="Контекст і швидке керування">
         <div className="d-context">
-          <div className="d-chart-head">
-            <h3>Прогноз і керування{stale ? ' · розрахунок…' : ''}</h3>
-            <div className="d-chart-modes" role="group" aria-label="Компонування графіка">
-              {(['split', 'combined'] as const).map((l) => (
-                <button key={l} type="button" aria-pressed={layout === l} onClick={() => setLayout(l)}>
-                  {l === 'split' ? 'Розділено' : 'Разом'}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="d-series-controls" role="group" aria-label="Показники на графіку">
-            {(
-              [
-                ['price', 'd-price', 'РДН'],
-                ['pv', 'd-pv', 'СЕС'],
-                ['load', 'd-load', 'Споживання'],
-                ['grid', 'd-grid', 'Мережа PCC'],
-                ['bess', 'd-bess', 'УЗЕ'],
-                ['soc', 'd-soc', 'SOC'],
-                ['before', 'd-old', 'До зміни'],
-                ['plan', 'd-plan', 'План (історія)'],
-              ] as const
-            ).map(([key, cls, label]) => (
-              <button
-                key={key}
-                type="button"
-                className="d-key"
-                aria-pressed={series[key]}
-                aria-label={key === 'bess' ? 'УЗЕ: заряд від СЕС жовтим, із мережі сірим; споживання зеленим, експорт помаранчевим' : undefined}
-                onClick={() => setSeries((s) => ({ ...s, [key]: !s[key] }))}
-              >
-                <b className={cls} />
-                {label}
-              </button>
-            ))}
-          </div>
+          <ChartToolbar
+            stale={stale}
+            layout={layout}
+            onLayout={setLayout}
+            series={series}
+            onToggle={(key) => setSeries((s) => ({ ...s, [key]: !s[key] }))}
+          />
           <div
             ref={chartRef}
             className="d-chart"
@@ -784,61 +622,17 @@ export function DispatchDesk({ site, onOpenReport }: Props) {
             }}
             dangerouslySetInnerHTML={{ __html: chart.svg }}
           />
-          {series.grid && (
-            <div className="d-grid-legend">
-              <span>
-                <b />
-                Мережа PCC · весь об’єкт, кВт
-              </span>
-              <span>вище нуля — імпорт із мережі</span>
-              <span>нижче нуля — експорт у мережу</span>
-            </div>
-          )}
-          {chart.overflow.length > 0 && (
-            <div className="d-action-overflow" aria-label="Команди коротких інтервалів">
-              {chart.overflow.map((g, k) => (
-                <span key={k} className={g.status === 'preview' ? 'is-preview' : ''}>
-                  {k + 1}. {timeLabel(clock, g.start)}–{timeLabel(clock, g.end)} · {g.mark.detail}
-                  {g.status === 'preview' ? ' · перегляд' : ''}
-                </span>
-              ))}
-            </div>
-          )}
-          <div className="d-chart-note">
-            {series.bess && (
-              <span className="d-flow-legend" aria-label="Джерела заряду та призначення розряду УЗЕ">
-                {Object.entries(flowMeta).map(([key, meta]) => (
-                  <span className="d-key" key={key}>
-                    <b style={{ background: meta.color }} />
-                    {meta.name}
-                  </span>
-                ))}
-              </span>
-            )}
-            {series.soc && (
-              <span className="d-soc-readout" aria-live="polite">
-                <span>SOC · {span}</span>
-                {completeSoc ? (
-                  <>
-                    <strong>
-                      {fmt(startSoc)}% → {fmt(endSoc)}%
-                    </strong>
-                    <span>
-                      мін. {fmt(Math.min(startSoc as number, ...(selectedSoc as number[])))}% · резерв {fmt(reserve)}%
-                    </span>
-                  </>
-                ) : (
-                  <>
-                    <strong>Немає прогнозу</strong>
-                    <span>
-                      {hasValue(startSoc) ? 'на початку ' + fmt(startSoc) + '% · ' : ''}резерв {fmt(reserve)}%
-                    </span>
-                  </>
-                )}
-              </span>
-            )}
-            <span>Клік — деталі · протягніть — інтервал</span>
-          </div>
+          <ChartNotes
+            series={series}
+            overflow={chart.overflow}
+            clock={clock}
+            span={span}
+            startSoc={startSoc}
+            endSoc={endSoc}
+            selectedSoc={selectedSoc}
+            completeSoc={completeSoc}
+            reserve={reserve}
+          />
           <Inspector
             clock={clock}
             i={sel.inspect}
@@ -856,277 +650,65 @@ export function DispatchDesk({ site, onOpenReport }: Props) {
 
         <aside className="d-command" aria-label="Параметри ручної команди">
           <div className="d-edit">
-            <div className="d-edit-head">
-              <strong aria-live="polite">
-                Інтервал · {span} · {sel.end - sel.start} год
-              </strong>
-              <div className="d-range">
-                <label>
-                  Від
-                  <select
-                    aria-label="Початок ручного інтервалу"
-                    value={sel.start}
-                    onChange={(e) => {
-                      const start = Number(e.target.value)
-                      setSel((s) => ({ start, end: Math.max(s.end, start + 1), anchor: start, inspect: start }))
-                    }}
-                  >
-                    {fromOptions.map((i) => (
-                      <option key={i} value={i}>
-                        {optionTime(clock, i)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  До
-                  <select
-                    aria-label="Кінець ручного інтервалу"
-                    value={sel.end}
-                    onChange={(e) => {
-                      const end = Number(e.target.value)
-                      setSel((s) => {
-                        const start = Math.min(s.start, end - 1)
-                        return { start, end, anchor: start, inspect: start }
-                      })
-                    }}
-                  >
-                    {fromOptions.map((i) => (
-                      <option key={i + 1} value={i + 1}>
-                        {optionTime(clock, i + 1)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-            </div>
+            <IntervalHead
+              clock={clock}
+              span={span}
+              start={sel.start}
+              end={sel.end}
+              onStart={(start) => setSel((s) => ({ start, end: Math.max(s.end, start + 1), anchor: start, inspect: start }))}
+              onEnd={(end) =>
+                setSel((s) => {
+                  const start = Math.min(s.start, end - 1)
+                  return { start, end, anchor: start, inspect: start }
+                })
+              }
+            />
 
-            <section className="d-load-editor" aria-label="Споживання у вибрані години">
-              <label className="d-field">
-                Очікуване споживання
-                <span className="d-input-unit">
-                  <input
-                    type="number"
-                    min={0}
-                    step={10}
-                    placeholder={uniformLoad ? 'Не задано' : 'Різні значення'}
-                    value={loadInput}
-                    onChange={(e) => setLoadInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault()
-                        stageLoad(false)
-                      }
-                    }}
-                    aria-label="Споживання для вибраних годин"
-                  />
-                  <span>кВт</span>
-                </span>
-              </label>
-              <div className="d-load-actions">
-                <button type="button" aria-label="Задати споживання для вибраного інтервалу" onClick={() => stageLoad(false)}>
-                  Задати
-                </button>
-                <button type="button" className="d-quiet" disabled={selectionLoads.every((v) => v === null)} onClick={() => stageLoad(true)}>
-                  Очистити
-                </button>
-              </div>
-              <p className="d-small" aria-live="polite">
-                {selectionLoads.some((v, k) => v !== active.loads[sel.start + k]) ? 'У чернетці. ' : ''}
-                Порожньо = невідомо; 0 = споживання немає.
-              </p>
-              {loadError && (
-                <p className="d-small d-error" role="alert">
-                  {loadError}
-                </p>
-              )}
-            </section>
+            <LoadEditor
+              value={loadInput}
+              uniform={uniformLoad}
+              inDraft={selectionLoads.some((v, k) => v !== active.loads[sel.start + k])}
+              canClear={!selectionLoads.every((v) => v === null)}
+              error={loadError}
+              onChange={setLoadInput}
+              onSet={() => stageLoad(false)}
+              onClear={() => stageLoad(true)}
+            />
 
-            <div className="d-fields">
-              <label className="d-field">
-                Що потрібно зробити
-                <select value={scenario} onChange={(e) => setScenario(e.target.value as CommandType)}>
-                  {scenarioOptions.map((o) => (
-                    <option key={o.value} value={o.value}>
-                      {o.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              {scenario !== 'hold' && scenario !== 'auto' && (
-                <label className="d-field">
-                  <span>{paramLabel(scenario)}</span>
-                  <span className="d-input-unit">
-                    <input
-                      type="number"
-                      min={0}
-                      step={scenario === 'target' ? 5 : 10}
-                      max={
-                        scenario === 'target'
-                          ? siteInfo.soc_max_pct
-                          : scenario === 'cap'
-                            ? siteInfo.import_kw
-                            : scenario === 'export'
-                              ? (cfg.export_cap_kw ?? undefined)
-                              : Math.max(siteInfo.charge_kw, siteInfo.discharge_kw)
-                      }
-                      value={paramRaw}
-                      onChange={(e) => setParams((p) => ({ ...p, [scenario]: e.target.value }))}
-                    />
-                    <span>{scenario === 'target' ? '%' : 'кВт'}</span>
-                  </span>
-                </label>
-              )}
-              <label className="d-field">
-                Резерв SOC для чернетки
-                <span className="d-input-unit">
-                  <input
-                    type="number"
-                    min={siteInfo.soc_min_pct}
-                    max={siteInfo.soc_max_pct}
-                    step={5}
-                    value={form.reserve}
-                    onChange={(e) => setForm({ ...form, reserve: e.target.value })}
-                    aria-label="Операційний резерв SOC"
-                  />
-                  <span>%</span>
-                </span>
-              </label>
-              {scenario === 'fixed' && (
-                <label className="d-field">
-                  Напрямок потужності
-                  <select value={direction} onChange={(e) => setDirection(e.target.value as 'charge' | 'discharge')}>
-                    <option value="discharge">Розряд</option>
-                    <option value="charge">Заряд</option>
-                  </select>
-                </label>
-              )}
-            </div>
+            <CommandFields
+              site={siteInfo}
+              exportCapKw={cfg.export_cap_kw}
+              scenario={scenario}
+              onScenario={setScenario}
+              param={paramRaw}
+              onParam={(value) => setParams((p) => ({ ...p, [scenario]: value }))}
+              reserve={form.reserve}
+              onReserve={(value) => setForm({ ...form, reserve: value })}
+              direction={direction}
+              onDirection={setDirection}
+            />
 
-            <details className="d-help">
-              <summary>Пояснення дії та прогноз інтервалу</summary>
-              <p className="d-intent">{intents[scenario]}</p>
-              <p className="d-small">
-                Після завершення ручної команди AUTO перерахує план від фактичного стану. Інші ручні інтервали залишаються заданими. Раніші ручні
-                команди мають пріоритет: пізніша команда не зменшує їх виконання.
-              </p>
-              <div className="d-small">
-                У вибрані години: СЕС у середньому {fmt(mean(futurePv))} кВт · споживання{' '}
-                {knownLoads ? fmt(mean(chartModel.loads)) + ' кВт' : 'задано не для всіх годин'} · РДН{' '}
-                {prices.length ? fmt(Math.min(...prices)) + '–' + fmt(Math.max(...prices)) : '—'} грн/кВт·год
-              </div>
-            </details>
+            <CommandHelp scenario={scenario} pvKw={mean(futurePv)} loadKw={knownLoads ? mean(chartModel.loads) : null} prices={prices} />
 
-            <details>
-              <summary>Обмеження на весь горизонт</summary>
-              <div className="d-constraints">
-                <label className="d-field">
-                  Резерв SOC
-                  <span className="d-input-unit">
-                    <input
-                      type="number"
-                      min={siteInfo.soc_min_pct}
-                      max={siteInfo.soc_max_pct}
-                      step={5}
-                      value={form.reserve}
-                      onChange={(e) => setForm({ ...form, reserve: e.target.value })}
-                      aria-label="Резерв SOC на весь горизонт"
-                    />
-                    <span>%</span>
-                  </span>
-                </label>
-                <div className="d-rule-note">Спільний резерв для всієї чернетки; синхронізований із полем біля команди.</div>
-                <label className="d-check">
-                  <input type="checkbox" checked={form.grid} onChange={(e) => setForm({ ...form, grid: e.target.checked })} />
-                  Дозволити заряд із мережі
-                </label>
-                <label className="d-check">
-                  <input type="checkbox" checked={form.blockExport} onChange={(e) => setForm({ ...form, blockExport: e.target.checked })} />
-                  Повністю заборонити експорт · СЕС та УЗЕ
-                </label>
-                <label className="d-check">
-                  <input
-                    type="checkbox"
-                    checked={form.essSale}
-                    disabled={form.blockExport || exportCeiling === null}
-                    onChange={(e) => setForm({ ...form, essSale: e.target.checked })}
-                  />
-                  Продаж енергії УЗЕ
-                </label>
-                <label className="d-field">
-                  Ліміт імпорту, кВт
-                  <input
-                    type="number"
-                    min={0}
-                    max={siteInfo.import_kw}
-                    step={10}
-                    value={form.importCap}
-                    onChange={(e) => setForm({ ...form, importCap: e.target.value })}
-                  />
-                </label>
-                <label className="d-field">
-                  Ліміт експорту PCC, кВт
-                  <input
-                    type="number"
-                    min={0}
-                    max={exportCeiling ?? undefined}
-                    step={10}
-                    placeholder="Не заданий"
-                    disabled={form.blockExport || exportCeiling === null}
-                    value={form.exportCap}
-                    onChange={(e) => setForm({ ...form, exportCap: e.target.value })}
-                  />
-                </label>
-                <div className="d-rule-note">
-                  Паспорт: імпорт до {siteInfo.import_set ? fmt(siteInfo.import_kw) + ' кВт' : 'не задано'}; заряд / розряд УЗЕ до {fmt(siteInfo.charge_kw)} /{' '}
-                  {fmt(siteInfo.discharge_kw)} кВт; ємність {fmt(siteInfo.capacity_kwh)} кВт·год; СЕС до {fmt(siteInfo.pv_rated_kw)} кВт AC. Вікно SOC{' '}
-                  {fmt(siteInfo.soc_min_pct)}–{fmt(siteInfo.soc_max_pct)}% за паспортом. Резерв за замовчуванням {fmt(state.defaults.reserve_pct)}% —
-                  налаштування «Обмежень», а не паспортна межа.
-                </div>
-                <div className="d-rule-note">
-                  <button type="button" disabled={!!cfgError || same(cfg, working.cfg)} onClick={stageConstraints}>
-                    У чернетку лише обмеження
-                  </button>
-                </div>
-                <div className="d-rule-note">
-                  {form.blockExport
-                    ? 'Експорт у точці приєднання = 0 кВт для СЕС і УЗЕ. Надлишок СЕС заряджає батарею, коли це можливо; решта обмежується. Після зняття заборони повернеться заданий ліміт.'
-                    : exportCeiling === null
-                      ? 'Режим відпуску в мережу для обʼєкта не обрано («Обмеження»), тому ліміту експорту немає й експорт вимкнений; надлишок СЕС обмежується.'
-                      : cfg.export_cap_kw === null
-                        ? 'Ліміт експорту не заданий. До його введення експорт вимкнений; надлишок СЕС обмежується.'
-                        : 'Експорт PCC до ' + fmt(cfg.export_cap_kw) + ' кВт; стеля за паспортом — ' + fmt(exportCeiling) +
-                          ' кВт. Продаж енергії УЗЕ дозволяється окремо.'}
-                </div>
-              </div>
-            </details>
+            <ConstraintsPanel
+              site={siteInfo}
+              form={form}
+              onForm={setForm}
+              cfg={cfg}
+              defaultReserve={state.defaults.reserve_pct}
+              stageDisabled={!!cfgError || same(cfg, working.cfg)}
+              onStage={stageConstraints}
+            />
 
-            {!invalid && (
-              <div className="d-preview" aria-live="polite">
-                <div className="d-metric">
-                  <span>{flowLabel}</span>
-                  <strong>{flowValue}</strong>
-                  {comparison && <span className="d-compare">{comparison}</span>}
-                  <span>{flowDetail}</span>
-                </div>
-              </div>
-            )}
-
-            {(invalid || issues.length > 0) && (
-              <div className="d-warning" role="alert">
-                {invalid ? (
-                  invalid
-                ) : (
-                  <>
-                    <strong>{commandIssues.length ? 'Команда не виконується повністю.' : 'Є невиконані умови в інших годинах.'}</strong>
-                    {issueGroup('У вибраному інтервалі', commandIssues)}
-                    {issueGroup('Інші інтервали після ' + timeLabel(clock, sel.end), laterIssues)}
-                    {issueGroup('Інші інтервали до ' + timeLabel(clock, sel.start), earlierIssues)}
-                    <p>Можна додати у чернетку й продовжити редагування. Перед застосуванням потрібно виправити позначені інтервали.</p>
-                  </>
-                )}
-              </div>
-            )}
+            <CommandPreview
+              invalid={invalid}
+              outcome={outcome}
+              issues={issues}
+              clock={clock}
+              commands={chartModel.commands}
+              start={sel.start}
+              end={sel.end}
+            />
 
             <div className="d-actions">
               <button type="button" className="d-quiet" disabled={!history.length} onClick={undo} aria-label="Скасувати останню зміну чернетки">
@@ -1147,127 +729,32 @@ export function DispatchDesk({ site, onOpenReport }: Props) {
           </div>
 
           {reviewOpen && (
-            <section className="d-review" aria-label="Підтвердження чернетки">
-              <div className="d-row" style={{ justifyContent: 'space-between' }}>
-                <h3>Перевірте чернетку</h3>
-                <button type="button" className="d-quiet" onClick={closeReview} aria-label="Закрити чернетку">
-                  ✕
-                </button>
-              </div>
-              <div className="d-review-reserve">
-                <label className="d-field">
-                  Резерв SOC для всієї чернетки
-                  <span className="d-input-unit">
-                    <input
-                      type="number"
-                      min={siteInfo.soc_min_pct}
-                      max={siteInfo.soc_max_pct}
-                      step={5}
-                      value={form.reserve}
-                      onChange={(e) => reviewReserve(e.target.value)}
-                      aria-label="Резерв SOC у чернетці"
-                    />
-                    <span>%</span>
-                  </span>
-                </label>
-                <p className="d-small">Зміна перераховує чернетку перед застосуванням.</p>
-                {reviewReserveError && (
-                  <p className="d-small d-error" role="alert">
-                    {reviewReserveError}
-                  </p>
-                )}
-              </div>
-              <label className="d-check">
-                <input type="checkbox" checked={working.cfg.block_export} onChange={(e) => reviewBlockExport(e.target.checked)} />
-                Повністю заборонити експорт · СЕС та УЗЕ
-              </label>
-              <div className="d-review-list">
-                {review.loads.map((g) => (
-                  <div className="d-review-item" key={'l' + g.start}>
-                    <strong>
-                      {timeLabel(clock, g.start)}–{timeLabel(clock, g.end)}
-                    </strong>
-                    <span>{g.text}</span>
-                  </div>
-                ))}
-                {review.commands.map((g) => (
-                  <div className="d-review-item" key={'c' + g.start}>
-                    <strong>
-                      {timeLabel(clock, g.start)}–{timeLabel(clock, g.end)}
-                    </strong>
-                    <span>{g.text}</span>
-                  </div>
-                ))}
-                {review.cfgChanged && (
-                  <div className="d-review-item">
-                    <strong>Для всієї чернетки</strong>
-                    <span>{cfgSummary(working.cfg)}</span>
-                  </div>
-                )}
-              </div>
-              <div className="d-review-checks">
-                {reviewResult && reviewResult.known_hours < FUTURE_HOURS && (
-                  <p className="d-small">
-                    {unknownForecastText(clock, reviewResult, working, hours)} Команди можна зберегти; досяжність у цих годинах ще не оцінена.
-                  </p>
-                )}
-                {reviewBlockers.length > 0 && (
-                  <div className="d-warning">
-                    <strong>Перед застосуванням виправте позначені інтервали.</strong>
-                    {reviewBlockers.map((x) => (
-                      <div className="d-issue-edit" key={x.hour + x.text}>
-                        <span>
-                          {timeLabel(clock, x.hour)}–{timeLabel(clock, x.hour + 1)}: {x.text}
-                        </span>
-                        <button type="button" onClick={() => editIssue(x.hour)}>
-                          Редагувати {timeLabel(clock, x.hour)}–{timeLabel(clock, x.hour + 1)}
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                {confirmIssues && (
-                  <div className="d-warning" style={{ whiteSpace: 'pre-line' }}>
-                    {confirmIssues}
-                  </div>
-                )}
-              </div>
-              <div className="d-review-foot">
-                <span className="d-small">Shadow: план піде на edge погодинно, запису в SmartLogger немає.</span>
-                <button type="button" className="d-primary" disabled={!canConfirm} onClick={() => void confirm()}>
-                  {confirmBusy ? 'Підтвердження…' : stale ? 'Розрахунок…' : 'Підтвердити'}
-                </button>
-              </div>
-            </section>
+            <ReviewPanel
+              clock={clock}
+              socMinPct={siteInfo.soc_min_pct}
+              socMaxPct={siteInfo.soc_max_pct}
+              reserve={form.reserve}
+              reserveError={reviewReserveError}
+              onReserve={reviewReserve}
+              working={working}
+              onBlockExport={reviewBlockExport}
+              review={review}
+              result={reviewResult}
+              hours={hours}
+              blockers={reviewBlockers}
+              confirmIssues={confirmIssues}
+              canConfirm={canConfirm}
+              confirmBusy={confirmBusy}
+              stale={stale}
+              onClose={closeReview}
+              onEditIssue={editIssue}
+              onConfirm={() => void confirm()}
+            />
           )}
         </aside>
       </section>
 
-      <details className="d-bottom">
-        <summary>Як рахується план</summary>
-        <p>
-          Погодинний розрахунок, сталі значення всередині години. Потужність УЗЕ показано без знаків: стовпчики розряду над нулем, заряду — під
-          нулем. PCC — точка приєднання. Надлишок СЕС, який не можна зарядити або експортувати, обмежується. Частини стовпчика УЗЕ розраховані з
-          балансу: СЕС спочатку покриває споживання; це не окремі вимірювання потоків.
-        </p>
-        <p>
-          Майбутнє споживання задає оператор для відомих інтервалів; порожнє значення означає «невідомо», а явний 0 — відсутність споживання.
-          Збережені значення є очікуванням оператора, не фактом. Прогноз потужності УЗЕ, мережі та SOC розраховується від поточного SOC лише до
-          першої години без споживання або без опублікованої ціни РДН; після прогалини запас енергії невідомий. Решту доби заповнювати для
-          збереження чернетки не потрібно.
-        </p>
-        <p>
-          Досяжність ручних команд визначається за часом виконання, від раніших до пізніших, після перевірки фізичних меж; економіка AUTO не може
-          перенести нестачу пізнішої ручної команди в ранішу. Купівля рахується з тарифами, продаж — зі знижкою, заряд від СЕС — з урахуванням
-          втраченого експорту, знос — на кожну кВт·год розряду. Залишок енергії понад резерв оцінюється за мінімальною повною ціною імпорту на
-          відомому горизонті. Підтверджений план перераховується кожні 15 хвилин від свіжого SOC; без заданого споживання edge працює на
-          самоспоживання. Фактична доступність УЗЕ може бути нижчою за паспортну потужність.
-        </p>
-      </details>
-      <details className="d-bottom">
-        <summary>Тарифи AUTO</summary>
-        <p>{tariffSummary(state.tariffs)} Тарифи — з налаштувань економіки обʼєкта.</p>
-      </details>
+      <DeskFootnotes tariffs={state.tariffs} />
     </div>
   )
 }
