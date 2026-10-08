@@ -53,10 +53,10 @@ export function SettingsTab({ site, canEdit = true, onChanged }: Props) {
   const [notice, setNotice] = useState('')
   const [error, setError] = useState('')
 
+  // The parent keys the tab by site, so a site switch remounts it with
+  // loading on and no error.
   useEffect(() => {
     let cancelled = false
-    setLoading(true)
-    setError('')
     fetchEdgeSettings(site)
       .then((res) => {
         if (cancelled) return
