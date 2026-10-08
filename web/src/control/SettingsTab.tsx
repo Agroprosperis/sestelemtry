@@ -33,7 +33,7 @@ const EXPORT_REGIMES: { value: ExportRegime; label: string }[] = [
 
 const FIELDS: { key: FieldKey; label: string; hint: string }[] = [
   { key: 'soc_target_pct', label: 'Цільовий SOC, %', hint: 'верхня межа економічного циклу (SocMax)' },
-  { key: 'soc_reserve_pct', label: 'Резерв SOC, %', hint: 'нижня межа — недоторканний запас (SocMin)' },
+  { key: 'soc_reserve_pct', label: 'Резерв SOC за замовчуванням, %', hint: 'стартове значення для чернетки пульта; діючий резерв задає пульт' },
   { key: 'auto_charge_max_kw', label: 'Заряд макс., кВт', hint: 'ліміт заряду в AUTO' },
   { key: 'auto_discharge_max_kw', label: 'Розряд макс., кВт', hint: 'ліміт розряду в AUTO' },
   { key: 'grid_import_kw', label: 'Ліміт імпорту, кВт', hint: 'договірна межа з мережі' },
