@@ -1,13 +1,10 @@
 // JournalTab — the «Журнал» tab: published manifest versions with
-// delivery status (reuses the planner's ManifestJournal) plus the edge
-// event feed (manifest applied/rejected, poll failures, overrides…) —
-// the shadow-phase command audit.
+// delivery status plus the edge event feed (manifest applied/rejected,
+// poll failures, overrides…) — the shadow-phase command audit.
 
 import { useEffect, useState } from 'react'
-import { ManifestJournal } from '../planner/ManifestJournal'
-import { fetchManifestJournal, type ManifestJournal as Journal } from '../planner/plannerClient'
-import '../planner/planner.css'
-import type { EdgeSiteStatus } from './controlClient'
+import { fetchManifestJournal, type EdgeSiteStatus, type ManifestJournal as Journal } from './controlClient'
+import { ManifestJournal } from './ManifestJournal'
 
 type Props = {
   site: string
@@ -46,14 +43,14 @@ function fmtTime(iso: string): string {
 }
 
 export function JournalTab({ site, status }: Props) {
-  const [journal, setJournal] = useState<Journal | null>(null)
+  const [journal, setJournal] = useState<{ data: Journal; at: number } | null>(null)
   const [error, setError] = useState('')
 
   useEffect(() => {
     let cancelled = false
     const load = () =>
       fetchManifestJournal(site)
-        .then((j) => !cancelled && setJournal(j))
+        .then((j) => !cancelled && setJournal({ data: j, at: Date.now() }))
         .catch((e) => !cancelled && setError(String(e)))
     void load()
     const id = window.setInterval(load, 30_000)
@@ -68,7 +65,7 @@ export function JournalTab({ site, status }: Props) {
   return (
     <div style={{ display: 'grid', gap: 20 }}>
       {error && <div className="ctl-notice err">{error}</div>}
-      {journal && <ManifestJournal journal={journal} />}
+      {journal && <ManifestJournal journal={journal.data} fetchedAt={journal.at} />}
 
       <section className="ctl-card">
         <h2>Події edge-пристрою</h2>

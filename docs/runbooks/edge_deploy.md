@@ -229,17 +229,21 @@ sudo systemctl start ems-edge     # схема створиться заново
   ліміт імпорту, heartbeat, черга на пристрої) і Energy Trend
   «план і факт»: інтервали чинного manifest накладаються на фактичні
   серії, вертикальний маркер — момент MANIFEST_APPLIED;
-- **План УЗЕ** — вбудований 3-кроковий планувальник (той самий код);
-- **Режими** — пресети (`economic_arbitrage` / `self_consumption` /
-  `self_consumption_safe`) і ручний погодинний план. Публікація йде
-  через `POST /api/v1/edge/manifest/publish-manual` з TTL (default 4
-  год): поки ручний manifest чинний, rolling-цикл його **не
-  перезаписує** (guard за `source: "manual"`); «Повернутись до AUTO» =
-  `{"cancel": true}` — примусова публікація rolling-плану;
+- **План УЗЕ** — пульт ручного керування (ems-spec
+  `docs/specs/ems_manual_control_mvp.md`): споживання, команди й
+  обмеження на 24 год → `POST /api/v1/dispatch/confirm` зберігає версію
+  (`dispatch_versions`) і одразу публікує manifest. Кожні 15 хв
+  `RunEdgePlannerLoop` перераховує LP застосованої версії від
+  поточного SOC; інтервали — лише на години з введеним споживанням і
+  ціною РДН, без них план порожній і edge працює на самоспоживання;
+- **Режими** — опис пресетів edge (`economic_arbitrage` /
+  `self_consumption` / `self_consumption_safe`) і який із них чинний;
+  ручного погодинного плану й `publish-manual` більше немає;
 - **Обмеження** — `GET/PUT /api/v1/edge/settings` (SOC target/reserve,
-  ліміти заряду/розряду, ліміт і ціль імпорту, номінал СЕС). Значення
-  перекривають паспортні в планувальнику і потрапляють у
-  `limits`/`soc_policy` кожного наступного manifest;
+  ліміти заряду/розряду, ліміт і ціль імпорту, номінал СЕС, режим
+  відпуску й технічний ліміт експорту PCC). Значення перекривають
+  паспортні й потрапляють у `limits`/`soc_policy` кожного наступного
+  manifest; «Опублікувати» = `POST /api/v1/edge/manifest/publish`;
 - **Журнал** — версії manifest зі статусом доставки + стрічка
   `edge_events`.
 

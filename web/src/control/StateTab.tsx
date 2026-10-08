@@ -177,7 +177,7 @@ export function StateTab({ site, status }: Props) {
               <span className="k">Активний режим</span>
               <span className="v">
                 {(payload?.mode ?? decision?.mode ?? '—').toUpperCase()}
-                {payload?.source === 'manual' ? ' · РУЧНИЙ' : ''}
+                {payload?.note ? ' · ' + payload.note : ''}
               </span>
             </div>
             <div className="ctl-row">

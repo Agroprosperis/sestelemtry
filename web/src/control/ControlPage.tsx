@@ -1,7 +1,7 @@
 // ControlPage — the «Керування» mode: the same object as the analytics
 // dashboard, but through the manifest lens. Tabs follow the approved
 // design: Стан (live + план і факт) · План УЗЕ (manual-control desk) ·
-// Режими (presets) · Обмеження (settings) · Журнал.
+// Режими (which edge preset runs) · Обмеження (settings) · Журнал.
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import '../dashboard/dashboard.css'
@@ -9,8 +9,7 @@ import './control.css'
 import { DispatchDesk } from '../dispatch/DispatchDesk'
 import { useAccess } from '../auth/authContext'
 import { useOrganizationParam } from '../dashboard/hooks/useOrganizationParam'
-import { fetchEdgeSites } from '../planner/plannerClient'
-import { fetchEdgeStatus, type EdgeSiteStatus } from './controlClient'
+import { fetchEdgeSites, fetchEdgeStatus, type EdgeSiteStatus } from './controlClient'
 import { JournalTab } from './JournalTab'
 import { ModeTopBar, type TopBarMenuItem } from '../shell/ModeTopBar'
 import { navigateView } from '../shell/navigation'
@@ -97,8 +96,8 @@ export function ControlPage() {
 
   const siteOptions = useMemo(() => (sites.length > 0 ? sites : [organizationID]), [sites, organizationID])
 
-  // Cross-page navigation only; the planner and the journal live in
-  // the tabs, so no menu entries for them.
+  // Cross-page navigation only; the desk and the journal live in the
+  // tabs, so no menu entries for them.
   const serviceMenu: TopBarMenuItem[] = access.can('service', organizationID)
     ? [
         { id: 'station', label: 'Паспорт станції', onSelect: () => navigateView('station') },
@@ -143,7 +142,7 @@ export function ControlPage() {
       ) : tab === 'plan' ? (
         <DispatchDesk key={site} site={site} />
       ) : tab === 'modes' ? (
-        <ModesTab site={site} status={status} onChanged={refreshStatus} />
+        <ModesTab status={status} onOpenDesk={() => switchTab('plan')} />
       ) : tab === 'limits' ? (
         <SettingsTab
           site={site}

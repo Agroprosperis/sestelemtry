@@ -389,65 +389,7 @@ func LatestEdgeManifest(ctx context.Context, db DBTX, siteID string) (payload []
 	return payload, manifestID, true, nil
 }
 
-// EdgeLoadPlanEntry is one operator-planned hour (hour start, UTC).
-type EdgeLoadPlanEntry struct {
-	Hour   time.Time
-	LoadKw float64
-}
-
-// UpsertEdgeLoadPlan stores operator load-plan hours (last writer wins
-// per hour).
-func UpsertEdgeLoadPlan(ctx context.Context, pool *pgxpool.Pool, siteID string, entries []EdgeLoadPlanEntry) error {
-	for _, e := range entries {
-		if _, err := pool.Exec(ctx, `
-			INSERT INTO edge_load_plans (site_id, hour, load_kw)
-			VALUES ($1, $2, $3)
-			ON CONFLICT (site_id, hour) DO UPDATE SET
-				load_kw = EXCLUDED.load_kw,
-				updated_at = now()`,
-			siteID, e.Hour.UTC().Truncate(time.Hour), e.LoadKw); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// DeleteEdgeLoadPlan clears operator hours in [from, to).
-func DeleteEdgeLoadPlan(ctx context.Context, pool *pgxpool.Pool, siteID string, from, to time.Time) (int64, error) {
-	tag, err := pool.Exec(ctx, `
-		DELETE FROM edge_load_plans
-		WHERE site_id = $1 AND hour >= $2 AND hour < $3`,
-		siteID, from.UTC(), to.UTC())
-	if err != nil {
-		return 0, err
-	}
-	return tag.RowsAffected(), nil
-}
-
-// GetEdgeLoadPlan returns the operator hours in [from, to) keyed by the
-// UTC hour start.
-func GetEdgeLoadPlan(ctx context.Context, pool *pgxpool.Pool, siteID string, from, to time.Time) (map[time.Time]float64, error) {
-	rows, err := pool.Query(ctx, `
-		SELECT hour, load_kw FROM edge_load_plans
-		WHERE site_id = $1 AND hour >= $2 AND hour < $3`,
-		siteID, from.UTC(), to.UTC())
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := map[time.Time]float64{}
-	for rows.Next() {
-		var h time.Time
-		var kw float64
-		if err := rows.Scan(&h, &kw); err != nil {
-			return nil, err
-		}
-		out[h.UTC()] = kw
-	}
-	return out, rows.Err()
-}
-
-// EdgeManifestInfo is one journal row for the planner UI: a published
+// EdgeManifestInfo is one journal row for the control UI: a published
 // manifest version plus its delivery outcome derived from edge events.
 type EdgeManifestInfo struct {
 	ManifestID string

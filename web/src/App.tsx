@@ -31,9 +31,10 @@ function readView(): View {
   if (view === 'alerts') return 'alerts'
   if (view === 'control') return 'control'
   if (view === 'users') return 'users'
-  // The standalone planner moved into the control mode's «План УЗЕ»
-  // tab; old ?view=planner links (bookmarks, dashboard header) land
-  // there. The URL is normalised so back/forward stays coherent.
+  // The standalone planner was replaced by the desk in the control
+  // mode's «План УЗЕ» tab; old ?view=planner links (bookmarks,
+  // dashboard header) land there. The URL is normalised so
+  // back/forward stays coherent.
   if (view === 'planner') {
     const url = new URL(window.location.href)
     url.searchParams.set('view', 'control')

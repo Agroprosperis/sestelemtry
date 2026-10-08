@@ -105,9 +105,10 @@ func TestAuthRouteMatrix(t *testing.T) {
 		{"control", http.MethodGet, "/api/v1/edge/settings?site_id=ze", ok},
 		{"control", http.MethodPut, "/api/v1/edge/settings?site_id=ze", ok},
 		{"control", http.MethodPut, "/api/v1/edge/settings?site_id=pe", denied},
-		{"control", http.MethodPut, "/api/v1/edge/load-plan?site_id=ze", ok},
 		{"control", http.MethodPost, "/api/v1/edge/manifest/publish?site_id=ze", ok},
-		{"control", http.MethodPost, "/api/v1/edge/manifest/publish-manual?site_id=ze", ok},
+		{"control", http.MethodGet, "/api/v1/dispatch/state?site_id=ze", ok},
+		{"control", http.MethodPost, "/api/v1/dispatch/confirm?site_id=ze", ok},
+		{"control", http.MethodPost, "/api/v1/dispatch/confirm?site_id=pe", denied},
 		{"control", http.MethodPut, "/api/v1/organization-tariffs?organization_id=ze", denied},
 
 		{"economist", http.MethodGet, "/api/v1/economics/daily?organization_id=pe", ok},

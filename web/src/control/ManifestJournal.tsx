@@ -1,9 +1,15 @@
-import type { ManifestJournal as Journal } from './plannerClient'
+import type { ManifestJournal as Journal } from './controlClient'
 
 const STATUS_LABEL: Record<string, string> = {
   applied: 'застосовано',
   pending: 'очікує',
   rejected: 'відхилено',
+}
+
+const STATUS_CHIP: Record<string, string> = {
+  applied: 'ok',
+  pending: 'warn',
+  rejected: 'err',
 }
 
 function fmtTime(iso?: string | null): string {
@@ -19,34 +25,34 @@ function fmtTime(iso?: string | null): string {
 
 // ManifestJournal shows the published manifest versions and whether the
 // edge confirmed applying them (MANIFEST_APPLIED / _REJECTED events).
-export function ManifestJournal({ journal }: { journal: Journal }) {
+// fetchedAt (ms) is when the journal was loaded — heartbeat freshness is
+// judged against it.
+export function ManifestJournal({ journal, fetchedAt }: { journal: Journal; fetchedAt: number }) {
   const rows = journal.manifests ?? []
   const hbFresh =
-    journal.heartbeat_at != null &&
-    Date.now() - new Date(journal.heartbeat_at).getTime() < 5 * 60_000
+    journal.heartbeat_at != null && fetchedAt - new Date(journal.heartbeat_at).getTime() < 5 * 60_000
   return (
-    <div className="planner-card">
+    <section className="ctl-card">
       <h2>Журнал публікацій manifest</h2>
-      <p className="planner-card-sub">
+      <p className="ctl-card-sub">
         Edge-пристрій:{' '}
         {journal.heartbeat_at ? (
           <>
             heartbeat {fmtTime(journal.heartbeat_at)}{' '}
-            <span className={'planner-chip ' + (hbFresh ? 'applied' : 'pending')}>
-              {hbFresh ? 'на звʼязку' : 'звʼязку немає'}
-            </span>
+            <span className={'ctl-sev ' + (hbFresh ? 'ok' : 'warn')}>{hbFresh ? 'на звʼязку' : 'звʼязку немає'}</span>
           </>
         ) : (
-          <span className="planner-chip pending">ще не підключався</span>
-        )}
-        {' '}— «очікує» означає, що пристрій ще не підняв нову версію (poll раз на хвилину).
+          <span className="ctl-sev warn">ще не підключався</span>
+        )}{' '}
+        — «очікує» означає, що пристрій ще не підняв нову версію (poll раз на хвилину).
       </p>
       {rows.length === 0 ? (
-        <div className="planner-empty">
-          Публікацій ще не було. Натисніть «Опублікувати на edge» — версія зʼявиться тут.
+        <div className="ctl-placeholder">
+          Публікацій ще не було. Версія зʼявиться після «Підтвердити» в пульті або чергового 15-хвилинного
+          перерахунку.
         </div>
       ) : (
-        <table className="planner-journal-table">
+        <table className="ctl-events-table">
           <thead>
             <tr>
               <th>Manifest</th>
@@ -67,7 +73,9 @@ export function ManifestJournal({ journal }: { journal: Journal }) {
                 <td>{m.intervals}</td>
                 <td>{m.load_source || '—'}</td>
                 <td>
-                  <span className={'planner-chip ' + m.status}>{STATUS_LABEL[m.status] ?? m.status}</span>
+                  <span className={'ctl-sev ' + (STATUS_CHIP[m.status] ?? 'plain')}>
+                    {STATUS_LABEL[m.status] ?? m.status}
+                  </span>
                 </td>
                 <td>{fmtTime(m.applied_at ?? m.rejected_at)}</td>
               </tr>
@@ -75,6 +83,6 @@ export function ManifestJournal({ journal }: { journal: Journal }) {
           </tbody>
         </table>
       )}
-    </div>
+    </section>
   )
 }

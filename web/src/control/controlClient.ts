@@ -1,6 +1,8 @@
 // Feature-local API client for the «Керування» mode (mirrors
-// internal/api/edge_fleet_handlers.go and the settings / manual-publish
-// endpoints in internal/api/edge_plan_handlers.go + edge_planner.go).
+// internal/api/edge_fleet_handlers.go, the sites / settings / journal
+// endpoints in internal/api/edge_plan_handlers.go and the republish
+// endpoint in edge_planner.go). The desk has its own client in
+// ../dispatch/dispatchClient.ts.
 
 import { apiFetch, buildURL, withBase } from '../api'
 
@@ -220,20 +222,6 @@ export function exportCeilingKw(s: EdgeSiteSettings): number | null {
   return pcc > 0 && pcc < cap ? pcc : cap
 }
 
-export type ManualInterval = {
-  ts: string // UTC hour start, RFC3339
-  ess_kw: number // + розряд / − заряд
-  soc_target_pct?: number
-}
-
-export type ManualPublishRequest = {
-  ttl_hours?: number
-  preset?: string
-  note?: string
-  cancel?: boolean
-  intervals?: ManualInterval[]
-}
-
 export type PublishResult = {
   site_id: string
   manifest_id: string
@@ -241,8 +229,27 @@ export type PublishResult = {
   intervals: number
   load_source: string
   valid_until: string
-  skipped?: string
   source?: string
+}
+
+export type ManifestJournalRow = {
+  manifest_id: string
+  issued_at: string
+  valid_from?: string
+  valid_until?: string
+  preset: string
+  load_source?: string
+  intervals: number
+  status: 'applied' | 'rejected' | 'pending'
+  applied_at?: string
+  rejected_at?: string
+}
+
+export type ManifestJournal = {
+  site_id: string
+  manifests: ManifestJournalRow[] | null
+  heartbeat_at?: string | null
+  heartbeat?: string
 }
 
 async function ensureOK(res: Response, what: string): Promise<Response> {
@@ -297,21 +304,22 @@ export async function saveEdgeSettings(
   )
 }
 
-export async function publishManualManifest(
-  siteID: string,
-  req: ManualPublishRequest,
-): Promise<PublishResult> {
-  const res = await ensureOK(
-    await apiFetch(buildURL('/api/v1/edge/manifest/publish-manual', { site_id: siteID }), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(req),
-    }),
-    'publish manual manifest',
-  )
-  return (await res.json()) as PublishResult
+export async function fetchEdgeSites(signal?: AbortSignal): Promise<string[]> {
+  const res = await ensureOK(await apiFetch(withBase('/api/v1/edge/sites'), { signal }), 'edge sites')
+  const body = (await res.json()) as { sites: string[] | null }
+  return body.sites ?? []
 }
 
+export async function fetchManifestJournal(siteID: string, signal?: AbortSignal): Promise<ManifestJournal> {
+  const res = await ensureOK(
+    await apiFetch(buildURL('/api/v1/edge/manifests', { site_id: siteID, limit: '20' }), { signal }),
+    'manifest journal',
+  )
+  return (await res.json()) as ManifestJournal
+}
+
+// publishAutoManifest republishes the applied desk plan right away
+// (POST /api/v1/edge/manifest/publish), e.g. after «Обмеження» changed.
 export async function publishAutoManifest(siteID: string): Promise<PublishResult> {
   const res = await ensureOK(
     await apiFetch(buildURL('/api/v1/edge/manifest/publish', { site_id: siteID }), {

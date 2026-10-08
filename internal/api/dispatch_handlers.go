@@ -39,7 +39,7 @@ type dispatchEnv struct {
 	tz            string
 	now           time.Time
 	start         time.Time // current hour, UTC
-	params        edgePlanInputs
+	params        edgeSiteParams
 	site          dispatch.Site
 	importSet     bool
 	exportRegime  string
@@ -68,7 +68,7 @@ func (h *Handlers) loadDispatchEnv(ctx context.Context, siteID string) (*dispatc
 	}
 	now := time.Now().In(loc)
 	env := &dispatchEnv{siteID: siteID, loc: loc, tz: tz, now: now.UTC(), start: now.Truncate(time.Hour).UTC()}
-	env.params = edgePlanInputs{Now: now, Loc: loc, Timezone: tz}
+	env.params = edgeSiteParams{Now: now}
 	if err := h.applyEdgeSiteParams(ctx, siteID, &env.params); err != nil {
 		return nil, err
 	}
