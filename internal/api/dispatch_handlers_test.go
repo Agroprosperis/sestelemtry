@@ -208,6 +208,36 @@ func TestBuildDispatchManifestGridLimits(t *testing.T) {
 	}
 }
 
+func TestDispatchManifestOutlivesHorizonRollover(t *testing.T) {
+	env := dispatchTestEnv(t)
+	m := dispatch.Model{Loads: make([]*float64, 24), Commands: make([]*dispatch.Command, 24), Cfg: env.defaults}
+	res, err := dispatch.Simulate(env.inputs, m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// An unchanged plan gets a new id only when the horizon date rolls
+	// over; the next loop run (≤ 15 min) plus the edge poll (1 min)
+	// must still find the live manifest valid.
+	const worstRunDelay = 16 * time.Minute
+	first := time.Date(2026, 10, 8, 5, 0, 0, 0, time.UTC)
+	var live edgeManifestDoc
+	published := 0
+	for h := 0; h < 72; h++ {
+		env.start = first.Add(time.Duration(h) * time.Hour)
+		env.now = env.start.Add(worstRunDelay)
+		if published > 0 && !live.ValidUntil.After(env.now) {
+			t.Fatalf("manifest %s expired at %v before the %v run republished it", live.ManifestID, live.ValidUntil, env.now)
+		}
+		if doc, _ := buildDispatchManifest(env, m, res, 1); doc.ManifestID != live.ManifestID {
+			live = doc
+			published++
+		}
+	}
+	if published < 3 {
+		t.Fatalf("published %d manifests over 72 h, want the initial one plus daily rollovers", published)
+	}
+}
+
 func TestDispatchAction(t *testing.T) {
 	cases := []struct {
 		p, export, load, pv float64

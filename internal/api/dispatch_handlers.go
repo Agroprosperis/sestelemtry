@@ -27,6 +27,10 @@ import (
 const (
 	dispatchHistoryHours = 8
 	dispatchFutureHours  = 24
+	// An unchanged plan is republished only when its horizon date rolls
+	// over, the same instant a manifest without grace would expire; the
+	// grace must outlast one planner-loop interval plus the edge poll.
+	dispatchManifestGraceHours = 1
 	// dispatchUncappedImportKw stands in for a site without a saved
 	// import limit: the LP needs a number, the UI shows it as not set.
 	dispatchUncappedImportKw = 10000
@@ -698,7 +702,7 @@ func buildDispatchManifest(env *dispatchEnv, m dispatch.Model, res dispatch.Resu
 		SiteID:        env.siteID,
 		IssuedAt:      env.now,
 		ValidFrom:     env.now,
-		ValidUntil:    env.start.Add(dispatchFutureHours * time.Hour),
+		ValidUntil:    env.start.Add((dispatchFutureHours + dispatchManifestGraceHours) * time.Hour),
 		Mode:          "shadow",
 		WriteEnabled:  false,
 		Preset:        "economic_arbitrage",
