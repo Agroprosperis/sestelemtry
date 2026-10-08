@@ -105,16 +105,9 @@ func InitEdgeSchema(ctx context.Context, pool *pgxpool.Pool) error {
 		`CREATE INDEX IF NOT EXISTS edge_manifests_site_issued
 			ON edge_manifests (site_id, issued_at DESC)`,
 
-		// Operator-entered hourly load plan (cloud planner UI). One row
-		// per planned hour; the forward planner prefers these hours over
-		// the heuristic median profile (mirrored by 013_edge_load_plans.sql).
-		`CREATE TABLE IF NOT EXISTS edge_load_plans (
-			site_id text NOT NULL,
-			hour timestamptz NOT NULL,
-			load_kw double precision NOT NULL,
-			updated_at timestamptz NOT NULL DEFAULT now(),
-			PRIMARY KEY (site_id, hour)
-		)`,
+		// Desk loads live in dispatch_versions (mirrored by
+		// 019_drop_edge_load_plans.sql).
+		`DROP TABLE IF EXISTS edge_load_plans`,
 
 		// Per-site planner/control settings edited in the console
 		// (SOC policy, power limits, grid limits). One JSONB blob per

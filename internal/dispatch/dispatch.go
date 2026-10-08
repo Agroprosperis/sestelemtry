@@ -345,7 +345,7 @@ func Optimize(in Inputs, m Model, count int) ([]HourPlan, error) {
 			return nil, err
 		}
 	}
-	// Terminal value (SHADOW_SOC, as the forward planner): energy left
+	// Terminal value (SHADOW_SOC): energy left
 	// above the floor is worth the cheapest all-in import of the horizon.
 	shadowPrice := math.Inf(1)
 	for i := 0; i < count; i++ {

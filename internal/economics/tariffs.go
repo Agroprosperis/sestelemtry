@@ -108,6 +108,22 @@ func (t Tariffs) SupplierMarginFor(rdn float64) float64 {
 	return t.SupplierMarginUahPerKwh
 }
 
+// ImportExportPrices computes the all-in hourly prices from the RDN
+// price — the same composition HourEconomicsFor uses.
+func ImportExportPrices(t Tariffs, rdnUahPerKwh float64) (importPrice, exportPrice float64) {
+	vat := 1.0
+	if t.IncludeVat {
+		vat = 1 + t.VatRate
+	}
+	importPrice = (rdnUahPerKwh +
+		t.DistributionUahPerKwh +
+		t.TransmissionUahPerKwh +
+		t.SupplierMarginFor(rdnUahPerKwh) +
+		t.OtherFeesUahPerKwh) * vat
+	exportPrice = rdnUahPerKwh * (1 - t.ExportDiscount) * vat
+	return importPrice, exportPrice
+}
+
 // ScheduleEntry is one effective-dated tariff version. EffectiveFrom is
 // the calendar day (midnight) from which Tariffs applies.
 type ScheduleEntry struct {
