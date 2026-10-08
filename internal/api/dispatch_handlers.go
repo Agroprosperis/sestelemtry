@@ -708,10 +708,19 @@ func buildDispatchManifest(env *dispatchEnv, m dispatch.Model, res dispatch.Resu
 	}
 	doc.Limits.EssChargeMaxKw = env.site.ChargeKw
 	doc.Limits.EssDischargeMaxKw = env.site.DischargeKw
+	// import_limit_kw is the contract the edge health check uses;
+	// target_import_kw is the charge clamp: the tighter of the
+	// «Обмеження» target and the desk horizon cap.
 	if env.importSet {
-		doc.GridLimits.ImportLimitKw = cfg.ImportCapKw
+		doc.GridLimits.ImportLimitKw = env.site.ImportKw
+		target := cfg.ImportCapKw
+		if t := env.params.GridTargetKw; t > 0 && t < target {
+			target = t
+		}
+		doc.GridLimits.TargetImportKw = target
+	} else {
+		doc.GridLimits.TargetImportKw = env.params.GridTargetKw
 	}
-	doc.GridLimits.TargetImportKw = env.params.GridTargetKw
 	doc.GridLimits.PvRatedKw = env.params.PvRatedKw
 	doc.SocPolicy.MinEconomicPct = cfg.ReservePct
 	doc.SocPolicy.MaxEconomicPct = env.site.SocMaxPct

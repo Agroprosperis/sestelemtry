@@ -164,6 +164,50 @@ func TestBuildDispatchManifest(t *testing.T) {
 	}
 }
 
+func TestBuildDispatchManifestGridLimits(t *testing.T) {
+	env := dispatchTestEnv(t)
+	env.params.GridTargetKw = 480
+	m := dispatch.Model{Loads: make([]*float64, 24), Commands: make([]*dispatch.Command, 24), Cfg: env.defaults}
+	res, err := dispatch.Simulate(env.inputs, m)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	doc, _ := buildDispatchManifest(env, m, res, 0)
+	if doc.GridLimits.ImportLimitKw != 1700 {
+		t.Fatalf("default import_limit_kw = %v, want contract 1700", doc.GridLimits.ImportLimitKw)
+	}
+	if doc.GridLimits.TargetImportKw != 480 {
+		t.Fatalf("default target_import_kw = %v, want «Обмеження» 480", doc.GridLimits.TargetImportKw)
+	}
+
+	m.Cfg.ImportCapKw = 900
+	doc, _ = buildDispatchManifest(env, m, res, 0)
+	if doc.GridLimits.ImportLimitKw != 1700 || doc.GridLimits.TargetImportKw != 480 {
+		t.Fatalf("desk 900 vs target 480: limit=%v target=%v, want 1700 / 480",
+			doc.GridLimits.ImportLimitKw, doc.GridLimits.TargetImportKw)
+	}
+
+	env.params.GridTargetKw = 1600
+	doc, _ = buildDispatchManifest(env, m, res, 0)
+	if doc.GridLimits.ImportLimitKw != 1700 || doc.GridLimits.TargetImportKw != 900 {
+		t.Fatalf("desk 900 vs target 1600: limit=%v target=%v, want 1700 / 900",
+			doc.GridLimits.ImportLimitKw, doc.GridLimits.TargetImportKw)
+	}
+
+	env.importSet = false
+	env.site.ImportKw = dispatchUncappedImportKw
+	m.Cfg.ImportCapKw = dispatchUncappedImportKw
+	env.params.GridTargetKw = 480
+	doc, _ = buildDispatchManifest(env, m, res, 0)
+	if doc.GridLimits.ImportLimitKw != 0 {
+		t.Fatalf("import unset: import_limit_kw = %v, want omitted (0)", doc.GridLimits.ImportLimitKw)
+	}
+	if doc.GridLimits.TargetImportKw != 480 {
+		t.Fatalf("import unset: target_import_kw = %v, want 480", doc.GridLimits.TargetImportKw)
+	}
+}
+
 func TestDispatchAction(t *testing.T) {
 	cases := []struct {
 		p, export, load, pv float64
