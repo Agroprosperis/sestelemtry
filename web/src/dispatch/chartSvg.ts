@@ -185,7 +185,8 @@ export function buildChartSvg(c: ChartInput): ChartLayout {
 
   let svg =
     '<svg viewBox="0 0 ' + w + ' ' + total + '" xmlns="http://www.w3.org/2000/svg">' +
-    '<title>Керування УЗЕ: потужність у кВт без знаків. Розряд над нулем, заряд під нулем. SOC за правою шкалою 0–100%.</title>'
+    '<title>Керування УЗЕ: потужність у кВт без знаків. Розряд над нулем, заряд під нулем. SOC за правою шкалою 0–100%.' +
+    (c.editable ? ' Вибір інтервалу також доступний у полях Від і До.' : '') + '</title>'
   const line = (x1: number, y1: number, x2: number, y2b: number, extra = '') =>
     '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2b + '" ' + extra + '/>'
   const text = (v: string | number, xx: number, yy: number, extra = '') =>
@@ -359,9 +360,9 @@ export function buildChartSvg(c: ChartInput): ChartLayout {
     const fact = path(c.pvAt, py, (i) => i < 0)
     const forecast = path(c.pvAt, py, (i) => i >= 0)
     if (forecast)
-      svg += '<path d="' + forecast + ' L' + x(first + count - 1) + ',' + py(0) + ' L' + x(Math.max(0, first)) + ',' + py(0) + ' Z" fill="var(--d-pv)" opacity=".06"/>'
+      svg += '<path d="' + forecast + ' L' + x(first + count - 1) + ',' + py(0) + ' L' + x(Math.max(0, first)) + ',' + py(0) + ' Z" fill="var(--d-pv-forecast)" opacity=".06"/>'
     if (fact) svg += '<path data-mark="pv-fact" d="' + fact + '" stroke="var(--d-pv)" fill="none" stroke-width="2.5"/>'
-    if (forecast) svg += '<path data-mark="pv" d="' + forecast + '" stroke="var(--d-pv)" fill="none" stroke-width="2.5" stroke-dasharray="5 4"/>'
+    if (forecast) svg += '<path data-mark="pv" d="' + forecast + '" stroke="var(--d-pv-forecast)" fill="none" stroke-width="2.5" stroke-dasharray="5 4"/>'
   }
   if (s.load) {
     const loadPath = path(c.loadAt, py)
@@ -403,16 +404,17 @@ export function buildChartSvg(c: ChartInput): ChartLayout {
     if (s.before && beforeSoc) svg += '<path data-mark="before" d="' + beforeSoc + '" fill="none" stroke="var(--d-old)" stroke-width="2"/>'
     if (s.plan && c.planAt) {
       const planSoc = path((i) => c.planAt?.(i)?.soc ?? null, sy)
-      if (planSoc) svg += '<path data-mark="plan-soc" d="' + planSoc + '" fill="none" stroke="var(--d-soc)" stroke-width="2" stroke-dasharray="4 3" opacity=".8"/>'
+      if (planSoc) svg += '<path data-mark="plan-soc" d="' + planSoc + '" fill="none" stroke="var(--d-soc-plan)" stroke-width="2" stroke-dasharray="4 3"/>'
     }
     if (previewSoc)
       svg += '<path d="' + previewSoc + '" fill="none" stroke="var(--d-chart-bg)" stroke-width="5.5"/><path data-mark="soc" d="' + previewSoc + '" fill="none" stroke="var(--d-soc)" stroke-width="3.5"/>'
     if (c.editable) {
-      const startPoint = c.previewAt(Math.max(first, c.start))
-      const endPoint = c.previewAt(Math.min(first + count, c.end) - 1)
+      // SOC now and at the end of the selection (the mockup's checkpoints).
+      const now = Math.max(first, 0)
+      const end = Math.min(first + count, c.end)
       const checkpoints = [
-        { i: Math.max(first, c.start), v: startPoint.before },
-        { i: Math.min(first + count, c.end), v: endPoint.soc },
+        { i: now, v: c.previewAt(now).before },
+        { i: end, v: c.previewAt(end - 1).soc },
       ].filter((p): p is { i: number; v: number } => hasValue(p.v))
       checkpoints.forEach((p, k) => {
         if (p.i < first || p.i > first + count || (k && Math.abs(bx(p.i) - bx(checkpoints[0].i)) < 68)) return
@@ -448,10 +450,12 @@ export function buildChartSvg(c: ChartInput): ChartLayout {
       const value = full ? mark.value : mark.compact
       const fits = Math.max(label.length, value.length) * 6.6 + 8 <= ww
       const preview = g.status === 'preview'
+      const statusName = preview ? 'Попередній перегляд' : g.status === 'draft' ? 'Чернетка' : g.status === 'manual' ? 'Ручне' : 'AUTO'
+      const span = timeLabel(c.clock, g.start) + '–' + timeLabel(c.clock, g.end)
       svg +=
         '<rect data-command-status="' + g.status + '" x="' + xx + '" y="' + actionY + '" width="' + Math.max(0, ww) +
-        '" height="34" rx="3" fill="' + (preview ? 'var(--d-select-bg)' : 'var(--d-band-bg)') + '"><title>' +
-        esc(timeLabel(c.clock, g.start) + '–' + timeLabel(c.clock, g.end) + ': ' + mark.detail) + '</title></rect>'
+        '" height="34" rx="3" fill="' + (preview ? 'var(--d-select-bg)' : 'var(--d-band-bg)') + '" aria-label="' +
+        esc(span + ': ' + mark.detail + '; ' + statusName) + '"><title>' + esc(span + ': ' + mark.detail) + '</title></rect>'
       const ink = preview ? 'var(--d-select-ink)' : 'var(--d-band-ink)'
       if (fits) {
         svg += text(label, xx + ww / 2, actionY + (value ? 13 : 22), 'text-anchor="middle" style="fill:' + ink + ';font-size:11px;font-weight:500"')
@@ -466,7 +470,9 @@ export function buildChartSvg(c: ChartInput): ChartLayout {
       const ww = (g.end - g.start) * step - 2
       const col = modeColors[g.key] ?? modeColors.auto
       const label = ww >= g.label.length * 7 + 12 ? g.label : ww >= 13 ? g.short : ''
-      svg += '<rect data-plan-status="' + g.key + '" x="' + xx + '" y="' + modeY + '" width="' + Math.max(0, ww) + '" height="19" rx="3" fill="' + col.fill + '"/>'
+      svg +=
+        '<rect data-plan-status="' + g.key + '" x="' + xx + '" y="' + modeY + '" width="' + Math.max(0, ww) + '" height="19" rx="3" fill="' + col.fill +
+        '" aria-label="' + esc(timeLabel(c.clock, g.start) + '–' + timeLabel(c.clock, g.end) + ' · ' + g.label) + '"/>'
       if (label) svg += text(label, xx + ww / 2, modeY + 13, 'text-anchor="middle" style="fill:' + col.ink + ';font-size:11px;font-weight:500"')
     })
   }

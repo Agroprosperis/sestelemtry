@@ -3,10 +3,11 @@
 // hour, dispatch_runs). No editing bands; hovering shows the hour.
 
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { PeriodPicker } from '../dashboard/components/PeriodPicker'
 import { buildChartSvg, type ChartLayout, type SeriesToggles } from './chartSvg'
 import { fetchDeskDay, type DayResponse, type DeskHour } from './dispatchClient'
 import { Inspector } from './Inspector'
-import { EMPTY_POINT, flowMeta, fmt, hasValue, historyPoints, makeClock, planOverlay } from './model'
+import { EMPTY_POINT, dateFromISO, flowMeta, fmt, hasValue, historyPoints, isoFromDate, makeClock, planOverlay } from './model'
 
 type Props = {
   site: string
@@ -83,10 +84,15 @@ export function DeskDay({ site, date, maxDate, timezone, onDate, onClose, onOpen
         <p className="d-small">Лише перегляд: факт із телеметрії, план — остання публікація до початку кожної години.</p>
       </div>
       <div className="d-row">
-        <label className="d-small d-date">
-          День
-          <input type="date" value={date} max={maxDate} onChange={(e) => e.target.value && onDate(e.target.value)} />
-        </label>
+        <PeriodPicker
+          preset="day"
+          anchor={dateFromISO(date)}
+          onChange={(d) => {
+            const iso = isoFromDate(d)
+            if (iso >= maxDate) onClose()
+            else onDate(iso)
+          }}
+        />
         {onOpenReport && (
           <button type="button" onClick={() => onOpenReport(date)}>
             Звіт за день

@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './dispatch.css'
 import { buildChartSvg, type ChartLayout, type ModeGroup, type SeriesToggles } from './chartSvg'
+import { PeriodPicker } from '../dashboard/components/PeriodPicker'
 import { DeskDay } from './DeskDay'
 import { Inspector } from './Inspector'
 import {
@@ -25,7 +26,6 @@ import {
   FUTURE_HOURS,
   HISTORY_HOURS,
   actionGroups,
-  addDays,
   buildPreview,
   cfgSummary,
   clone,
@@ -38,6 +38,8 @@ import {
   hourPlanState,
   hoursBetween,
   intents,
+  isoFromDate,
+  dateFromISO,
   localDate,
   makeClock,
   normalizeModel,
@@ -45,11 +47,11 @@ import {
   paramLabel,
   planOverlay,
   pointFromResult,
-  priceFmt,
   reviewGroups,
   same,
   scenarioOptions,
   shiftModel,
+  tariffSummary,
   timeLabel,
   unknownForecastText,
   type ChartPoint,
@@ -697,9 +699,14 @@ export function DispatchDesk({ site, onOpenReport }: Props) {
         </div>
         <div className="d-row">
           <span className="d-small">32 години · 8 назад + 24 уперед</span>
-          <button type="button" onClick={() => setPastDay(addDays(today, -1))}>
-            Минулі дні
-          </button>
+          <PeriodPicker
+            preset="day"
+            anchor={dateFromISO(today)}
+            onChange={(d) => {
+              const iso = isoFromDate(d)
+              if (iso < today) setPastDay(iso)
+            }}
+          />
           {onOpenReport && (
             <button type="button" onClick={() => onOpenReport(today)}>
               Звіт за день
@@ -741,6 +748,7 @@ export function DispatchDesk({ site, onOpenReport }: Props) {
                 type="button"
                 className="d-key"
                 aria-pressed={series[key]}
+                aria-label={key === 'bess' ? 'УЗЕ: заряд від СЕС жовтим, із мережі сірим; споживання зеленим, експорт помаранчевим' : undefined}
                 onClick={() => setSeries((s) => ({ ...s, [key]: !s[key] }))}
               >
                 <b className={cls} />
@@ -756,7 +764,8 @@ export function DispatchDesk({ site, onOpenReport }: Props) {
               'Керування УЗЕ. ' +
               (completeSoc
                 ? 'SOC: ' + fmt(startSoc) + '% на початку вибраного інтервалу, ' + fmt(endSoc) + '% наприкінці.'
-                : 'Прогноз SOC для вибраного інтервалу відсутній.')
+                : 'Прогноз SOC для вибраного інтервалу відсутній: споживання або ціна РДН задані не для всіх попередніх годин.') +
+              ' Горизонт ' + timeLabel(clock, first) + '–' + timeLabel(clock, first + count) + '. Минуле не редагується.'
             }
             onPointerDown={(e) => {
               if (!(e.target as Element).closest('[data-brush]') || e.button !== 0) return
@@ -855,6 +864,7 @@ export function DispatchDesk({ site, onOpenReport }: Props) {
                 <label>
                   Від
                   <select
+                    aria-label="Початок ручного інтервалу"
                     value={sel.start}
                     onChange={(e) => {
                       const start = Number(e.target.value)
@@ -871,6 +881,7 @@ export function DispatchDesk({ site, onOpenReport }: Props) {
                 <label>
                   До
                   <select
+                    aria-label="Кінець ручного інтервалу"
                     value={sel.end}
                     onChange={(e) => {
                       const end = Number(e.target.value)
@@ -913,7 +924,7 @@ export function DispatchDesk({ site, onOpenReport }: Props) {
                 </span>
               </label>
               <div className="d-load-actions">
-                <button type="button" onClick={() => stageLoad(false)}>
+                <button type="button" aria-label="Задати споживання для вибраного інтервалу" onClick={() => stageLoad(false)}>
                   Задати
                 </button>
                 <button type="button" className="d-quiet" disabled={selectionLoads.every((v) => v === null)} onClick={() => stageLoad(true)}>
@@ -1069,7 +1080,8 @@ export function DispatchDesk({ site, onOpenReport }: Props) {
                 <div className="d-rule-note">
                   Паспорт: імпорт до {siteInfo.import_set ? fmt(siteInfo.import_kw) + ' кВт' : 'не задано'}; заряд / розряд УЗЕ до {fmt(siteInfo.charge_kw)} /{' '}
                   {fmt(siteInfo.discharge_kw)} кВт; ємність {fmt(siteInfo.capacity_kwh)} кВт·год; СЕС до {fmt(siteInfo.pv_rated_kw)} кВт AC. Вікно SOC{' '}
-                  {fmt(siteInfo.soc_min_pct)}–{fmt(siteInfo.soc_max_pct)}% («Обмеження»).
+                  {fmt(siteInfo.soc_min_pct)}–{fmt(siteInfo.soc_max_pct)}% за паспортом. Резерв за замовчуванням {fmt(state.defaults.reserve_pct)}% —
+                  налаштування «Обмежень», а не паспортна межа.
                 </div>
                 <div className="d-rule-note">
                   <button type="button" disabled={!!cfgError || same(cfg, working.cfg)} onClick={stageConstraints}>
@@ -1081,7 +1093,10 @@ export function DispatchDesk({ site, onOpenReport }: Props) {
                     ? 'Експорт у точці приєднання = 0 кВт для СЕС і УЗЕ. Надлишок СЕС заряджає батарею, коли це можливо; решта обмежується. Після зняття заборони повернеться заданий ліміт.'
                     : exportCeiling === null
                       ? 'Режим відпуску в мережу для обʼєкта не обрано («Обмеження»), тому ліміту експорту немає й експорт вимкнений; надлишок СЕС обмежується.'
-                      : 'Стеля відпуску PCC за паспортом — ' + fmt(exportCeiling) + ' кВт. Продаж енергії УЗЕ дозволяється окремо.'}
+                      : cfg.export_cap_kw === null
+                        ? 'Ліміт експорту не заданий. До його введення експорт вимкнений; надлишок СЕС обмежується.'
+                        : 'Експорт PCC до ' + fmt(cfg.export_cap_kw) + ' кВт; стеля за паспортом — ' + fmt(exportCeiling) +
+                          ' кВт. Продаж енергії УЗЕ дозволяється окремо.'}
                 </div>
               </div>
             </details>
@@ -1231,24 +1246,27 @@ export function DispatchDesk({ site, onOpenReport }: Props) {
       <details className="d-bottom">
         <summary>Як рахується план</summary>
         <p>
-          Погодинний розрахунок, сталі значення всередині години. Прогноз УЗЕ, мережі та SOC будується від поточного SOC лише до першої години без
-          заданого споживання або без опублікованої ціни РДН; після прогалини запас енергії невідомий. Ручні команди мають пріоритет у порядку часу
-          виконання, далі AUTO обирає економічно найкращий план. Залишок енергії понад резерв оцінюється за мінімальною повною ціною імпорту на
-          відомому горизонті. Частини стовпчика УЗЕ розраховані з балансу: СЕС спочатку покриває споживання. Підтверджений план перераховується
-          кожні 15 хвилин від свіжого SOC; без заданого споживання edge працює на самоспоживання.
+          Погодинний розрахунок, сталі значення всередині години. Потужність УЗЕ показано без знаків: стовпчики розряду над нулем, заряду — під
+          нулем. PCC — точка приєднання. Надлишок СЕС, який не можна зарядити або експортувати, обмежується. Частини стовпчика УЗЕ розраховані з
+          балансу: СЕС спочатку покриває споживання; це не окремі вимірювання потоків.
+        </p>
+        <p>
+          Майбутнє споживання задає оператор для відомих інтервалів; порожнє значення означає «невідомо», а явний 0 — відсутність споживання.
+          Збережені значення є очікуванням оператора, не фактом. Прогноз потужності УЗЕ, мережі та SOC розраховується від поточного SOC лише до
+          першої години без споживання або без опублікованої ціни РДН; після прогалини запас енергії невідомий. Решту доби заповнювати для
+          збереження чернетки не потрібно.
+        </p>
+        <p>
+          Досяжність ручних команд визначається за часом виконання, від раніших до пізніших, після перевірки фізичних меж; економіка AUTO не може
+          перенести нестачу пізнішої ручної команди в ранішу. Купівля рахується з тарифами, продаж — зі знижкою, заряд від СЕС — з урахуванням
+          втраченого експорту, знос — на кожну кВт·год розряду. Залишок енергії понад резерв оцінюється за мінімальною повною ціною імпорту на
+          відомому горизонті. Підтверджений план перераховується кожні 15 хвилин від свіжого SOC; без заданого споживання edge працює на
+          самоспоживання. Фактична доступність УЗЕ може бути нижчою за паспортну потужність.
         </p>
       </details>
       <details className="d-bottom">
         <summary>Тарифи AUTO</summary>
-        <p>
-          Купівля: РДН + {priceFmt(state.tariffs.distribution_uah_per_kwh)} розподіл + {priceFmt(state.tariffs.transmission_uah_per_kwh)} передача
-          {state.tariffs.supplier_margin_mode === 'pct'
-            ? ' + ' + fmt(state.tariffs.supplier_margin_pct) + '% націнки постачальника'
-            : ' + ' + priceFmt(state.tariffs.supplier_margin_uah_per_kwh) + ' націнка постачальника'}{' '}
-          + {priceFmt(state.tariffs.other_fees_uah_per_kwh)} інші платежі. Продаж: РДН − {fmt(state.tariffs.export_discount * 100)}%. Знос:{' '}
-          {priceFmt(state.tariffs.degradation_uah_per_kwh)} грн на кВт·год розряду. {state.tariffs.include_vat ? 'З ПДВ.' : 'Без ПДВ.'} ККД
-          повного циклу: {fmt((state.tariffs.roundtrip_efficiency || 0.9) * 100)}%. Тарифи — з налаштувань економіки обʼєкта.
-        </p>
+        <p>{tariffSummary(state.tariffs)} Тарифи — з налаштувань економіки обʼєкта.</p>
       </details>
     </div>
   )

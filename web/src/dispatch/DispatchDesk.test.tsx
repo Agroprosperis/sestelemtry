@@ -103,7 +103,7 @@ describe('DispatchDesk', () => {
     expect(await screen.findByText('Ручне керування УЗЕ')).toBeInTheDocument()
 
     fireEvent.change(screen.getByLabelText('Споживання для вибраних годин'), { target: { value: '200' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Задати' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Задати споживання для вибраного інтервалу' }))
     expect(screen.getByText(/Споживання 19:00–20:00 додано у чернетку/)).toBeInTheDocument()
 
     await waitFor(() => expect(api.previewDraft).toHaveBeenCalled())
@@ -138,7 +138,7 @@ describe('DispatchDesk', () => {
     render(<DispatchDesk site="ze" />)
     await screen.findByText('Ручне керування УЗЕ')
     fireEvent.change(screen.getByLabelText('Споживання для вибраних годин'), { target: { value: '200' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Задати' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Задати споживання для вибраного інтервалу' }))
     await waitFor(() => expect(api.previewDraft).toHaveBeenCalled())
     fireEvent.click(screen.getByRole('button', { name: 'Переглянути чернетку →' }))
     api.confirmDraft.mockResolvedValue({ status: 409, body: { version: 0, conflict: true, message: 'План змінив інший користувач.' } })
@@ -173,9 +173,10 @@ describe('DispatchDesk', () => {
     render(<DispatchDesk site="ze" />)
     await screen.findByText('Ручне керування УЗЕ')
     fireEvent.change(screen.getByLabelText('Споживання для вибраних годин'), { target: { value: '200' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Задати' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Задати споживання для вибраного інтервалу' }))
 
-    fireEvent.click(screen.getByRole('button', { name: 'Минулі дні' }))
+    // The dashboard date picker: «‹» from today opens yesterday read-only.
+    fireEvent.click(screen.getByRole('button', { name: 'Previous period' }))
     expect(await screen.findByText('За цей день немає даних.')).toBeInTheDocument()
     expect(api.fetchDeskDay.mock.calls[0][1]).toBe('2026-10-06')
     expect(screen.queryByRole('button', { name: 'У чернетку' })).toBeNull()
