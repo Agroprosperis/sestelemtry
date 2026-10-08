@@ -752,6 +752,12 @@ func (h *Handlers) resolveEdgeRatings(ctx context.Context, orgID string, t econo
 func (h *Handlers) edgeDAMPrices(ctx context.Context, zone int, now time.Time, loc *time.Location) (map[time.Time]float64, error) {
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
 	dates := []string{today.Format("2006-01-02"), today.AddDate(0, 0, 1).Format("2006-01-02")}
+	return h.damPricesForDates(ctx, zone, dates, loc)
+}
+
+// damPricesForDates loads hourly RDN prices (UAH/kWh) for local
+// delivery dates, keyed by UTC hour start.
+func (h *Handlers) damPricesForDates(ctx context.Context, zone int, dates []string, loc *time.Location) (map[time.Time]float64, error) {
 	rows, err := h.edge.Pool.Query(ctx, `
 		SELECT delivery_date, hour, price_uah_per_mwh
 		FROM market_dam_prices

@@ -152,9 +152,50 @@ type EdgeSiteSettings struct {
 	GridImportKw         float64 `json:"grid_import_kw,omitempty"`
 	GridTargetKw         float64 `json:"grid_target_kw,omitempty"`
 	PvRatedKw            float64 `json:"pv_rated_kw,omitempty"`
+	// ExportRegime is the passport paragraph of the export cap
+	// (active_consumer_export_power_cap.md): self_production = 50 % of
+	// the contracted power (GridImportKw), storage = 100 %. Empty = not
+	// chosen yet: no export limit can be agreed, export stays off.
+	ExportRegime string `json:"export_regime,omitempty"`
+	// ExportPccKw is the site's technical PCC export limit; 0 = none.
+	ExportPccKw float64 `json:"export_pcc_kw,omitempty"`
+}
+
+const (
+	exportRegimeSelfProduction = "self_production"
+	exportRegimeStorage        = "storage"
+)
+
+// exportCeilingKw is min(passport ceiling, technical PCC limit); nil
+// until the regime is chosen and the contracted power is known.
+func (s *EdgeSiteSettings) exportCeilingKw() *float64 {
+	if s == nil || s.GridImportKw <= 0 {
+		return nil
+	}
+	var c float64
+	switch s.ExportRegime {
+	case exportRegimeSelfProduction:
+		c = math.Floor(0.5 * s.GridImportKw)
+	case exportRegimeStorage:
+		c = s.GridImportKw
+	default:
+		return nil
+	}
+	if s.ExportPccKw > 0 && s.ExportPccKw < c {
+		c = s.ExportPccKw
+	}
+	return &c
 }
 
 func (s *EdgeSiteSettings) validate() error {
+	switch s.ExportRegime {
+	case "", exportRegimeSelfProduction, exportRegimeStorage:
+	default:
+		return fmt.Errorf("невідомий режим відпуску %q", s.ExportRegime)
+	}
+	if s.ExportPccKw < 0 || math.IsNaN(s.ExportPccKw) || math.IsInf(s.ExportPccKw, 0) {
+		return fmt.Errorf("технічний ліміт експорту має бути невід'ємним числом")
+	}
 	if s.SocTargetPct < 0 || s.SocTargetPct > 100 || s.SocReservePct < 0 || s.SocReservePct > 100 {
 		return fmt.Errorf("SOC відсотки мають бути в межах 0..100")
 	}

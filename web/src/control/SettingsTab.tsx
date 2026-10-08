@@ -5,10 +5,12 @@
 
 import { useEffect, useState } from 'react'
 import {
+  exportCeilingKw,
   fetchEdgeSettings,
   publishAutoManifest,
   saveEdgeSettings,
   type EdgeSiteSettings,
+  type ExportRegime,
 } from './controlClient'
 
 type Props = {
@@ -19,7 +21,15 @@ type Props = {
   onChanged: () => void
 }
 
-type FieldKey = keyof EdgeSiteSettings
+type FieldKey = Exclude<keyof EdgeSiteSettings, 'export_regime'>
+
+// active_consumer_export_power_cap.md: which paragraph applies is a
+// per-site legal choice; until it is made no export limit exists.
+const EXPORT_REGIMES: { value: ExportRegime; label: string }[] = [
+  { value: '', label: 'Не задано — експорт вимкнено' },
+  { value: 'self_production', label: 'Самовиробництво — 50 % договірної потужності' },
+  { value: 'storage', label: 'УЗЕ не за самовиробництвом — 100 % договірної потужності' },
+]
 
 const FIELDS: { key: FieldKey; label: string; hint: string }[] = [
   { key: 'soc_target_pct', label: 'Цільовий SOC, %', hint: 'верхня межа економічного циклу (SocMax)' },
@@ -31,10 +41,12 @@ const FIELDS: { key: FieldKey; label: string; hint: string }[] = [
   { key: 'pv_rated_kw', label: 'СЕС номінал, кВт', hint: 'для прогнозу генерації (fallback)' },
   { key: 'island_charge_max_kw', label: 'Заряд (острів), кВт', hint: 'резерв на автономний режим' },
   { key: 'island_discharge_max_kw', label: 'Розряд (острів), кВт', hint: 'резерв на автономний режим' },
+  { key: 'export_pcc_kw', label: 'Технічний ліміт експорту PCC, кВт', hint: 'межа точки приєднання; порожньо — немає' },
 ]
 
 export function SettingsTab({ site, canEdit = true, onChanged }: Props) {
   const [form, setForm] = useState<Record<string, string>>({})
+  const [regime, setRegime] = useState<ExportRegime>('')
   const [saved, setSaved] = useState(false)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
@@ -54,6 +66,7 @@ export function SettingsTab({ site, canEdit = true, onChanged }: Props) {
           next[f.key] = v != null && v !== 0 ? String(v) : ''
         }
         setForm(next)
+        setRegime(res.settings.export_regime ?? '')
         setSaved(res.saved)
       })
       .catch((e) => !cancelled && setError(String(e)))
@@ -75,8 +88,16 @@ export function SettingsTab({ site, canEdit = true, onChanged }: Props) {
       }
       out[f.key] = v
     }
+    if (regime) out.export_regime = regime
     return out
   }
+
+  const preview: EdgeSiteSettings = { export_regime: regime }
+  for (const key of ['grid_import_kw', 'export_pcc_kw'] as const) {
+    const v = Number((form[key] ?? '').replace(',', '.'))
+    if (Number.isFinite(v) && v > 0) preview[key] = v
+  }
+  const ceiling = exportCeilingKw(preview)
 
   const save = async () => {
     const settings = parse()
@@ -149,6 +170,27 @@ export function SettingsTab({ site, canEdit = true, onChanged }: Props) {
               <small>{f.hint}</small>
             </label>
           ))}
+          <label className="ctl-field">
+            <span>Режим відпуску в мережу</span>
+            <select
+              value={regime}
+              disabled={loading || busy || !canEdit}
+              onChange={(e) => setRegime(e.target.value as ExportRegime)}
+            >
+              {EXPORT_REGIMES.map((r) => (
+                <option key={r.value} value={r.value}>
+                  {r.label}
+                </option>
+              ))}
+            </select>
+            <small>
+              {ceiling !== null
+                ? `Стеля відпуску PCC: ${ceiling.toLocaleString('uk-UA')} кВт`
+                : regime
+                  ? 'Задайте ліміт імпорту (договірну потужність) — від нього рахується стеля'
+                  : 'Поки режим не обрано, пульт не дозволяє експорт'}
+            </small>
+          </label>
         </div>
         {canEdit ? (
           <div className="ctl-form-actions">
