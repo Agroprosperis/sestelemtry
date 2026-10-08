@@ -94,6 +94,11 @@ func TestSanitizeConstraintsFollowsEnvelope(t *testing.T) {
 	if cfg.ReservePct != 20 || cfg.ImportCapKw != 1700 || *cfg.ExportCapKw != 850 {
 		t.Fatalf("sanitized = %+v, want reserve 20, import 1700, export 850", cfg)
 	}
+	// A cap the operator cleared stays cleared: export off, not the ceiling.
+	cfg = sanitizeConstraints(env, dispatch.Constraints{ReservePct: 30, ImportCapKw: 900, EssSale: true})
+	if cfg.ExportCapKw != nil || cfg.EssSale {
+		t.Fatalf("cleared cap: %+v, want no cap and ESS sale off", cfg)
+	}
 	env.exportCeiling = nil
 	cfg = sanitizeConstraints(env, dispatch.Constraints{ReservePct: 30, ImportCapKw: 900, EssSale: true, ExportCapKw: kwp(400)})
 	if cfg.ExportCapKw != nil || cfg.EssSale {

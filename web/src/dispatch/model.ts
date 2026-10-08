@@ -3,7 +3,7 @@
 // action bands, command descriptions, review groups. Index 0 = the
 // current hour (start_hour); history hours are negative.
 
-import type { Command, CommandType, Constraints, DeskHour, HourResult, PlanHour, SimResult, WireModel } from './dispatchClient'
+import type { Command, CommandType, Constraints, DeskHour, HourResult, PlanHour, SimResult, Tariffs, WireModel } from './dispatchClient'
 
 export const FUTURE_HOURS = 24
 export const HISTORY_HOURS = 8
@@ -18,6 +18,27 @@ const nf2 = new Intl.NumberFormat('uk-UA', { minimumFractionDigits: 2, maximumFr
 
 export const fmt = (x: number | null | undefined): string => (x === null || x === undefined ? '—' : nf1.format(x))
 export const priceFmt = (v: number): string => nf2.format(v)
+
+const nf5 = new Intl.NumberFormat('uk-UA', { maximumFractionDigits: 5 })
+
+// tariffSummary spells the AUTO price stack with the tariffs as stored
+// (the mockup shows 2,75218, not a rounded 2,75).
+export function tariffSummary(t: Tariffs): string {
+  const marginPct = t.supplier_margin_mode === 'pct'
+  const noExtras = (marginPct ? t.supplier_margin_pct : t.supplier_margin_uah_per_kwh) === 0 && t.other_fees_uah_per_kwh === 0
+  const extras = noExtras
+    ? '; націнка постачальника та інші платежі — 0 грн/кВт·год'
+    : (marginPct
+        ? ' + ' + nf5.format(t.supplier_margin_pct) + '% РДН націнки постачальника'
+        : ' + ' + nf5.format(t.supplier_margin_uah_per_kwh) + ' націнка постачальника') +
+      ' + ' + nf5.format(t.other_fees_uah_per_kwh) + ' інші платежі'
+  return (
+    'Купівля: РДН + ' + nf5.format(t.distribution_uah_per_kwh) + ' розподіл + ' + nf5.format(t.transmission_uah_per_kwh) + ' передача' +
+    extras + '. Продаж: РДН − ' + fmt(t.export_discount * 100) + '%. Знос: ' + nf5.format(t.degradation_uah_per_kwh) +
+    ' грн на кВт·год розряду. ' + (t.include_vat ? 'З ПДВ ' + fmt(t.vat_rate * 100) + '%.' : 'Без ПДВ.') +
+    ' ККД повного циклу: ' + fmt((t.roundtrip_efficiency || 0.9) * 100) + '%.'
+  )
+}
 
 export const hasValue = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
 
@@ -91,8 +112,14 @@ export function makeClock(startHourISO: string, timeZone: string): Clock {
 export const localDate = (iso: string, timeZone: string): string =>
   new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(iso))
 
-export const addDays = (date: string, days: number): string =>
-  new Date(Date.parse(date + 'T12:00:00Z') + days * 86_400_000).toISOString().slice(0, 10)
+// The dashboard PeriodPicker works on local Date objects.
+export const dateFromISO = (iso: string): Date => {
+  const [y, m, d] = iso.split('-').map(Number)
+  return new Date(y, m - 1, d)
+}
+
+export const isoFromDate = (d: Date): string =>
+  d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0')
 
 export const clockAt = (c: Clock, i: number): string => String((((c.nowHour + i) % 24) + 24) % 24).padStart(2, '0') + ':00'
 export const timeLabel = (c: Clock, i: number): string => (c.nowHour + i >= 24 ? 'завтра ' : '') + clockAt(c, i)

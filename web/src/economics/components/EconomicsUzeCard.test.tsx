@@ -62,19 +62,31 @@ describe('EconomicsUzeCard', () => {
     expect(api.fetchDispatchEffect).not.toHaveBeenCalled()
   })
 
-  it('shows the expected effect of the applied plan for today', async () => {
+  it('shows today so far and the expected effect of the applied plan', async () => {
+    api.fetchUzeDayPlan.mockResolvedValue({ ...plan(), date: '2026-10-07' })
     api.fetchDispatchEffect.mockResolvedValue(effect())
     render(<EconomicsUzeCard organizationID="ze" date="2026-10-07" today="2026-10-07" />)
     expect(await screen.findByText('Очікуваний ефект плану УЗЕ')).toBeInTheDocument()
+    expect(screen.getByText('УЗЕ: факт / оптимум / резерв')).toBeInTheDocument()
+    expect(screen.getByText(/за години, що минули/)).toBeInTheDocument()
     expect(screen.getByText('план пульта · версія 3')).toBeInTheDocument()
     expect(screen.getByText(/21:00–24:00 · 3 год плану/)).toBeInTheDocument()
     expect(screen.getByText(/Запас SOC \(70% → 25%/)).toBeInTheDocument()
+  })
+
+  it('skips an empty optimum early today', async () => {
+    api.fetchUzeDayPlan.mockResolvedValue({ ...plan(), available: false })
+    api.fetchDispatchEffect.mockResolvedValue(effect())
+    render(<EconomicsUzeCard organizationID="ze" date="2026-10-07" today="2026-10-07" />)
+    expect(await screen.findByText('Очікуваний ефект плану УЗЕ')).toBeInTheDocument()
+    expect(screen.queryByText('УЗЕ: факт / оптимум / резерв')).toBeNull()
   })
 
   it('explains a missing plan', async () => {
     api.fetchDispatchEffect.mockResolvedValue({ site_id: 'ze', date: '2026-10-08', version: 0, available: false, reason: 'План пульта не покриває цю дату.' })
     render(<EconomicsUzeCard organizationID="ze" date="2026-10-08" today="2026-10-07" />)
     expect(await screen.findByText('План пульта не покриває цю дату.')).toBeInTheDocument()
+    expect(api.fetchUzeDayPlan).not.toHaveBeenCalled()
   })
 
   it('stays hidden for a site without an edge device', async () => {

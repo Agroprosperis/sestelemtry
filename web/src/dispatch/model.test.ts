@@ -9,6 +9,7 @@ import {
   reviewGroups,
   shiftModel,
   splitBessFlow,
+  tariffSummary,
   timeLabel,
 } from './model'
 
@@ -95,5 +96,17 @@ describe('desk model', () => {
     expect(timeLabel(c, 0)).toBe('19:00')
     expect(timeLabel(c, 6)).toBe('завтра 01:00')
     expect(timeLabel(c, -3)).toBe('16:00')
+  })
+
+  it('spells the tariffs as stored, like the mockup', () => {
+    const text = tariffSummary({
+      distribution_uah_per_kwh: 2.75218, transmission_uah_per_kwh: 0.74291, supplier_margin_uah_per_kwh: 0,
+      supplier_margin_mode: 'abs', supplier_margin_pct: 0, other_fees_uah_per_kwh: 0, export_discount: 0.05,
+      degradation_uah_per_kwh: 0.6, include_vat: false, vat_rate: 0.2, roundtrip_efficiency: 0.913,
+    })
+    expect(text).toBe(
+      'Купівля: РДН + 2,75218 розподіл + 0,74291 передача; націнка постачальника та інші платежі — 0 грн/кВт·год. ' +
+        'Продаж: РДН − 5%. Знос: 0,6 грн на кВт·год розряду. Без ПДВ. ККД повного циклу: 91,3%.',
+    )
   })
 })

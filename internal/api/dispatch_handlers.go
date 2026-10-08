@@ -30,6 +30,11 @@ const (
 	// dispatchUncappedImportKw stands in for a site without a saved
 	// import limit: the LP needs a number, the UI shows it as not set.
 	dispatchUncappedImportKw = 10000
+	// The passport capacity is the usable 10–90 % SOC window
+	// (resolveEdgeRatings), so it bounds the desk reserve; the
+	// «Обмеження» reserve is only the default for a new draft.
+	passportSocMinPct = 10
+	passportSocMaxPct = 90
 )
 
 // dispatchEnv is everything a run needs besides the operator's model.
@@ -83,8 +88,8 @@ func (h *Handlers) loadDispatchEnv(ctx context.Context, siteID string) (*dispatc
 		ChargeKw:    env.params.ChargeMaxKw,
 		DischargeKw: env.params.DischargeMaxKw,
 		ImportKw:    importKw,
-		SocMinPct:   env.params.SocMin,
-		SocMaxPct:   env.params.SocMax,
+		SocMinPct:   passportSocMinPct,
+		SocMaxPct:   math.Max(passportSocMinPct, math.Min(passportSocMaxPct, env.params.SocMax)),
 		Tariffs:     env.params.Tariffs,
 	}
 	if settings != nil {
@@ -92,7 +97,7 @@ func (h *Handlers) loadDispatchEnv(ctx context.Context, siteID string) (*dispatc
 		env.exportCeiling = settings.exportCeilingKw()
 	}
 	env.defaults = dispatch.Constraints{
-		ReservePct:  env.site.SocMinPct,
+		ReservePct:  math.Min(math.Max(env.params.SocMin, env.site.SocMinPct), env.site.SocMaxPct),
 		GridCharge:  true,
 		EssSale:     env.exportCeiling != nil,
 		ImportCapKw: importKw,
@@ -237,10 +242,12 @@ func sanitizeConstraints(env *dispatchEnv, cfg dispatch.Constraints) dispatch.Co
 	if cfg.ImportCapKw <= 0 || cfg.ImportCapKw > site.ImportKw {
 		cfg.ImportCapKw = site.ImportKw
 	}
+	// A cleared cap is the operator's «експорт вимкнено», not «take the
+	// ceiling»; only a value above the ceiling is cut down.
 	switch {
 	case env.exportCeiling == nil:
 		cfg.ExportCapKw = nil
-	case cfg.ExportCapKw == nil || *cfg.ExportCapKw > *env.exportCeiling:
+	case cfg.ExportCapKw != nil && *cfg.ExportCapKw > *env.exportCeiling:
 		cfg.ExportCapKw = copyKw(env.exportCeiling)
 	}
 	if cfg.ExportCapKw == nil {

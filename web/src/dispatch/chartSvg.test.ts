@@ -59,6 +59,24 @@ describe('desk chart', () => {
     expect(readOnly.svg).not.toContain('d-select-bg')
   })
 
+  it('labels SOC now and at the end of the selection', () => {
+    const { svg } = buildChartSvg(
+      input({
+        start: 4,
+        end: 6,
+        previewAt: (i) => (i === 0 ? { ...EMPTY_POINT, before: 90 } : i < 0 ? { p: 0, before: 60, soc: 60, import: 0, export: 0, curtailed: null } : EMPTY_POINT),
+      }),
+    )
+    // No forecast in the selection: only the «now» point is labelled.
+    expect(svg.match(/class="d-soc-label"/g)?.length).toBe(1)
+    expect(svg).toMatch(/class="d-soc-label"[^>]*>90%</)
+  })
+
+  it('draws the PV forecast in the dashboard forecast colour', () => {
+    const { svg } = buildChartSvg(input({ pvAt: (i) => (i < 0 ? 40 : 120) }))
+    expect(svg).toMatch(/data-mark="pv" [^>]*stroke="var\(--d-pv-forecast\)"/)
+  })
+
   it('reports the geometry used for pointer hits', () => {
     const l = buildChartSvg(input())
     expect(l.first).toBe(-8)

@@ -15,10 +15,12 @@
   --d-err: var(--err-text);
 
   --d-pv: #22c55e;
+  --d-pv-forecast: #16a34a;
   --d-load: #f59e0b;
   --d-grid: #9ca3af;
   --d-grid-ink: #6b7280;
-  --d-soc: #9333ea;
+  --d-soc: var(--chart-soc, #a855f7);
+  --d-soc-plan: var(--chart-soc-plan, #9333ea);
   --d-price: #0ea5e9;
   --d-price-opacity: 0.2;
   --d-plan: #db2777;
@@ -483,17 +485,6 @@
 .d-day-summary strong {
   color: var(--d-ink);
   font-variant-numeric: tabular-nums;
-}
-
-.d-date {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.dispatch-desk .d-date input {
-  width: auto;
-  padding: 6px 8px;
 }
 
 .d-soc-readout strong {
