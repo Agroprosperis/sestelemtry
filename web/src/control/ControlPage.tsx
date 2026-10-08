@@ -1,12 +1,12 @@
 // ControlPage — the «Керування» mode: the same object as the analytics
 // dashboard, but through the manifest lens. Tabs follow the approved
-// design: Стан (live + план і факт) · План УЗЕ (planner wizard) ·
-// Режими (presets + ручний план) · Обмеження (settings) · Журнал.
+// design: Стан (live + план і факт) · План УЗЕ (manual-control desk) ·
+// Режими (presets) · Обмеження (settings) · Журнал.
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import '../dashboard/dashboard.css'
 import './control.css'
-import { PlannerPage } from '../planner/PlannerPage'
+import { DispatchDesk } from '../dispatch/DispatchDesk'
 import { useAccess } from '../auth/authContext'
 import { useOrganizationParam } from '../dashboard/hooks/useOrganizationParam'
 import { fetchEdgeSites } from '../planner/plannerClient'
@@ -141,7 +141,7 @@ export function ControlPage() {
       ) : tab === 'state' ? (
         <StateTab site={site} status={status} />
       ) : tab === 'plan' ? (
-        <PlannerPage embedded siteOverride={site} />
+        <DispatchDesk key={site} site={site} />
       ) : tab === 'modes' ? (
         <ModesTab site={site} status={status} onChanged={refreshStatus} />
       ) : tab === 'limits' ? (
