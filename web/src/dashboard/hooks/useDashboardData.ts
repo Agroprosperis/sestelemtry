@@ -177,15 +177,15 @@ export type DashboardData = {
   // `cardsLoading` flag so they don't go blank between live ticks.
   loading: boolean
   cardsLoading: boolean
-  // flowsRefreshing flips while the user-triggered `refreshFlows`
-  // call is in flight. The period-flow card uses it to disable
-  // its "Оновити" button and spin the icon — distinct from the
-  // initial `loading` so explicit refresh actions don't blank
-  // the surrounding charts.
+  // flowsRefreshing is true while the period flows load for a new
+  // scope or a refresh (button or background tick) is in flight.
+  // The period-flow card uses it to disable its "Оновити" button
+  // and spin the icon — distinct from the initial `loading` so
+  // refresh actions don't blank the surrounding charts.
   flowsRefreshing: boolean
   // flowsLoaded becomes true after the first successful
-  // /energy-summary fetch and stays true for the lifetime of the
-  // hook instance. Cards that read from `energyFlows` use it to
+  // /energy-summary fetch for the scope on screen and stays true
+  // until the scope changes. Cards that read from `energyFlows` use it to
   // distinguish "still loading for the first time" (show placeholders)
   // from "background refresh in flight" (keep the previous values on
   // screen — stale-while-revalidate). A failed refresh does not flip
@@ -236,21 +236,22 @@ export function useDashboardData(input: {
   const [energySummary, setEnergySummary] = useState<EnergySummary>(() =>
     energySummaryFromTotals({}),
   )
-  const [energyFlows, setEnergyFlows] = useState<EnergyFlows>(EMPTY_FLOWS)
+  const [flowsEntry, setFlowsEntry] = useState<{ scope: string; flows: EnergyFlows; gap: FlowsGap | null } | null>(
+    null,
+  )
   const [damSeries, setDamSeries] = useState<DAMChartRow[]>([])
   const [socSeries, setSocSeries] = useState<SOCChartRow[]>([])
   const [powerSeries, setPowerSeries] = useState<PowerChartRow[]>([])
   const [loading, setLoading] = useState(true)
   const [cardsLoading, setCardsLoading] = useState(true)
-  const [flowsRefreshing, setFlowsRefreshing] = useState(false)
-  const [flowsLoaded, setFlowsLoaded] = useState(false)
-  const [flowsGap, setFlowsGap] = useState<FlowsGap | null>(null)
+  const [flowsSpinning, setFlowsSpinning] = useState(false)
+  const [flowsSettledScope, setFlowsSettledScope] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   // flowsRefreshController keeps the AbortController for the
-  // in-flight user-triggered refresh so a rapid second click (or
-  // a preset/anchor change mid-flight) cancels the stale request
-  // before its result clobbers fresh state.
+  // in-flight flows fetch so a rapid second click (or a
+  // preset/anchor change mid-flight) cancels the stale request.
   const flowsRefreshController = useRef<AbortController | null>(null)
+  const flowsSpinOwner = useRef<AbortController | null>(null)
 
   // liveAllocation is the per-poll fan-out of /current into the seven
   // directional kW edges that drive `EnergyFlowLive`. Recomputed on
@@ -628,49 +629,81 @@ export function useDashboardData(input: {
   // take minutes, so the cache is what makes those presets possible at
   // all; the trade is that today's contribution to a month total lags
   // by up to one economics refresh interval.
-  const refreshFlows = useCallback(async () => {
-    if (flowsRefreshController.current) {
-      flowsRefreshController.current.abort()
-    }
-    const controller = new AbortController()
-    flowsRefreshController.current = controller
-    setFlowsRefreshing(true)
-    try {
-      const anchorDate = new Date(anchorTime)
-      const now = new Date()
-      const rawRange = rangeParams(preset, anchorDate, now)
-      const baseRange = {
-        ...rawRange,
-        from: clampEnergyFromIso(rawRange.from, rawRange.to, energyFloorMs),
-      }
+  //
+  // The answer is stored with the scope it was fetched for, like the
+  // period plan below: after a scope change the stored scope no longer
+  // matches, so the card shows dashes instead of the previous scope's
+  // numbers under the new header (e.g. yesterday's flows under today's
+  // date) without an effect blanking anything. Refreshes within one
+  // scope keep the previous values on screen (stale-while-revalidate),
+  // and a failed refresh keeps the last good numbers.
+  const flowsScope = `${organizationID}|${preset}|${anchorTime}|${metricsAtTime}|${energyFloorMs}`
+  const currentFlows = flowsEntry?.scope === flowsScope ? flowsEntry : null
+  const energyFlows = currentFlows?.flows ?? EMPTY_FLOWS
+  const flowsGap = currentFlows?.gap ?? null
+  const flowsLoaded = currentFlows !== null
+  // The spinner also covers the first load of a scope, until it settles.
+  const flowsRefreshing = flowsSpinning || flowsSettledScope !== flowsScope
 
-      const summaryResp = await fetchEnergySummary(
-        {
-          organizationID,
-          from: baseRange.from,
-          to: baseRange.to,
-          metricKeys: FLOW_SUMMARY_METRIC_KEYS,
-        },
-        controller.signal,
-      )
-      if (controller.signal.aborted) return
-      setEnergyFlows(flowsFromTotals(summaryResp.totals, summaryResp.flows ?? null))
-      setFlowsGap(flowsGapFrom(summaryResp.flows_meta))
-      setFlowsLoaded(true)
-      setError(null)
-    } catch (e) {
-      if (controller.signal.aborted || isAbortError(e)) return
-      setError(e instanceof Error ? e.message : 'Failed to refresh period flows')
+  // loadFlows runs one fetch for the scope on screen; each run aborts
+  // the one before it.
+  const loadFlows = useCallback(
+    (controller: AbortController) => {
+      flowsRefreshController.current?.abort()
+      flowsRefreshController.current = controller
+      return Promise.resolve()
+        .then(() => {
+          const rawRange = rangeParams(preset, new Date(anchorTime), new Date())
+          return fetchEnergySummary(
+            {
+              organizationID,
+              from: clampEnergyFromIso(rawRange.from, rawRange.to, energyFloorMs),
+              to: rawRange.to,
+              metricKeys: FLOW_SUMMARY_METRIC_KEYS,
+            },
+            controller.signal,
+          )
+        })
+        .then((summaryResp) => {
+          if (controller.signal.aborted) return
+          setFlowsEntry({
+            scope: flowsScope,
+            flows: flowsFromTotals(summaryResp.totals, summaryResp.flows ?? null),
+            gap: flowsGapFrom(summaryResp.flows_meta),
+          })
+          setError(null)
+        })
+        .catch((e: unknown) => {
+          if (controller.signal.aborted || isAbortError(e)) return
+          setError(e instanceof Error ? e.message : 'Failed to refresh period flows')
+        })
+        .finally(() => {
+          if (flowsRefreshController.current === controller) {
+            flowsRefreshController.current = null
+          }
+          if (!controller.signal.aborted) setFlowsSettledScope(flowsScope)
+        })
+    },
+    [organizationID, preset, anchorTime, energyFloorMs, flowsScope],
+  )
+
+  // refreshFlows is a run that also spins the card's refresh button.
+  // Only the run that turned the spinner on may clear it: a superseded
+  // run would otherwise report "done" while its replacement is still
+  // fetching.
+  const refreshFlows = useCallback(async () => {
+    const controller = new AbortController()
+    flowsSpinOwner.current = controller
+    setFlowsSpinning(true)
+    try {
+      await loadFlows(controller)
     } finally {
-      // Only the run that still owns the slot may clear the spinner.
-      // A superseded run reaching here would otherwise report "done"
-      // while its replacement is still fetching.
-      if (flowsRefreshController.current === controller) {
-        flowsRefreshController.current = null
-        setFlowsRefreshing(false)
+      if (flowsSpinOwner.current === controller) {
+        flowsSpinOwner.current = null
+        setFlowsSpinning(false)
       }
     }
-  }, [organizationID, preset, anchorTime, energyFloorMs])
+  }, [loadFlows])
 
   // Fetch the period flows for whatever scope is on screen so the
   // BatteryDayNarrative / DailySummaryNarrative cards (which read
@@ -680,23 +713,12 @@ export function useDashboardData(input: {
   // numbers track the period forward instead of freezing at whatever
   // accumulator snapshot the first fetch captured. The refresh
   // button on the period-flow card stays useful as a force-now
-  // override (it shares `refreshFlows`, so it also cancels the
-  // in-flight background request via the AbortController).
+  // override (it shares the abort slot, so it also cancels the
+  // in-flight background request).
   //
-  // Reset `flowsLoaded` + `energyFlows` to placeholder state on
-  // scope change so the period-flow card briefly shows dashes
-  // instead of the previous scope's numbers labeled with the new
-  // header (e.g. yesterday's flows under today's date). Background
-  // re-fires inside the interval keep the previous values on
-  // screen (stale-while-revalidate) — only scope changes blank
-  // them out.
-  //
-  // Aborting on the way out matters for the same reason: the day
-  // allocator takes 5–15 s on a busy day, so switching period
-  // mid-flight used to let the day's answer land after the switch
-  // and repopulate the card the operator had just changed away
-  // from. `refreshFlows` writes nothing once its controller is
-  // aborted.
+  // Aborting on the way out matters: the day allocator takes 5–15 s
+  // on a busy day, and there is no reason to keep it running for a
+  // period the operator has left.
   //
   // Historical snapshots (`metricsAt != null`) fire once and skip
   // the interval: the period is immutable so there is no fresher
@@ -705,10 +727,7 @@ export function useDashboardData(input: {
     const abortInflight = () => {
       flowsRefreshController.current?.abort()
     }
-    setFlowsLoaded(false)
-    setEnergyFlows(EMPTY_FLOWS)
-    setFlowsGap(null)
-    void refreshFlows()
+    void loadFlows(new AbortController())
     if (metricsAtTime !== null) return abortInflight
     const timer = window.setInterval(() => {
       if (document.visibilityState === 'hidden') return
@@ -723,7 +742,7 @@ export function useDashboardData(input: {
       window.clearInterval(timer)
       document.removeEventListener('visibilitychange', onVisibilityChange)
     }
-  }, [organizationID, anchorTime, preset, metricsAtTime, refreshFlows])
+  }, [metricsAtTime, loadFlows, refreshFlows])
 
   // Period plan for the month/year presets, on its own pipeline for the
   // same reason the flows are: filling a cold period's per-day plan
