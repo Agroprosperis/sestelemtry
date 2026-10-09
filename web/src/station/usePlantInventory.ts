@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { fetchPlantInventory } from '../api'
 import type { PlantInventory } from '../types'
 
@@ -13,33 +13,27 @@ function isAbortError(e: unknown): boolean {
 }
 
 export function usePlantInventory(organizationID: string): UsePlantInventoryResult {
-  const [data, setData] = useState<PlantInventory | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  // The last answer and the organization it is for; until the current
+  // one answers it is loading and the previous inventory stays shown.
+  const [answer, setAnswer] = useState<{ org: string; data: PlantInventory | null; error: string | null } | null>(null)
 
   useEffect(() => {
-    if (!organizationID) {
-      setData(null)
-      setLoading(false)
-      setError(null)
-      return
-    }
+    if (!organizationID) return
     const ac = new AbortController()
-    setLoading(true)
-    setError(null)
     fetchPlantInventory(organizationID, ac.signal)
       .then((inv) => {
-        setData(inv)
-        setLoading(false)
+        setAnswer({ org: organizationID, data: inv, error: null })
       })
       .catch((e: unknown) => {
         if (isAbortError(e)) return
-        setData(null)
-        setLoading(false)
-        setError(e instanceof Error ? e.message : 'Failed to load plant inventory')
+        setAnswer({ org: organizationID, data: null, error: e instanceof Error ? e.message : 'Failed to load plant inventory' })
       })
     return () => ac.abort()
   }, [organizationID])
 
-  return { data, loading, error }
+  return useMemo(() => {
+    if (!organizationID) return { data: null, loading: false, error: null }
+    const loading = answer?.org !== organizationID
+    return { data: answer?.data ?? null, loading, error: loading ? null : (answer?.error ?? null) }
+  }, [organizationID, answer])
 }

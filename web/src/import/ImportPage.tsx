@@ -9,7 +9,8 @@ import {
 import { useOrganizationParam } from '../dashboard/hooks/useOrganizationParam'
 import { ModeTopBar } from '../shell/ModeTopBar'
 import './import.css'
-import { ImportProgressBar, isAbortError, type RunState } from './shared'
+import { isAbortError, type RunState } from './importUtils'
+import { ImportProgressBar } from './shared'
 
 // dayToIso converts a YYYY-MM-DD local day into an RFC3339 UTC instant
 // at the given day offset's midnight UTC. We send the importer a

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { fetchEconomicsDaily, type EconomicsHourApi } from '../api'
 import type { HourEconomicsRow } from './compute'
 import type { Tariffs } from './tariffs'
@@ -46,32 +46,26 @@ type Input = {
 // the single /economics/daily endpoint. All computation now lives in
 // the Go service (internal/economics); this hook only maps the wire
 // shape into the existing HourEconomicsRow[] the charts/table consume.
+type DayValues = Omit<EconomicsData, 'loading' | 'error'>
+
+const EMPTY_DAY: DayValues = {
+  rows: Array.from({ length: 24 }, () => null),
+  hoursMissingPrice: 0,
+  skipDiagnostics: null,
+  reconciled: false,
+  qualityFlags: [],
+}
+
 export function useEconomicsData(input: Input): EconomicsData {
-  const [data, setData] = useState<EconomicsData>(() => ({
-    rows: Array.from({ length: 24 }, () => null),
-    loading: true,
-    error: null,
-    hoursMissingPrice: 0,
-    skipDiagnostics: null,
-    reconciled: false,
-    qualityFlags: [],
-  }))
+  const active = Boolean(input.organizationID && input.date)
+  const key = JSON.stringify([input.organizationID, input.date, input.refreshKey ?? 0])
+  // The last answer and the request it settled; while the current key
+  // has no answer it is loading and the previous day stays on screen.
+  const [answer, setAnswer] = useState<{ key: string; day: DayValues; error: string | null } | null>(null)
 
   useEffect(() => {
-    if (!input.organizationID || !input.date) {
-      setData({
-        rows: Array.from({ length: 24 }, () => null),
-        loading: false,
-        error: null,
-        hoursMissingPrice: 0,
-        skipDiagnostics: null,
-        reconciled: false,
-        qualityFlags: [],
-      })
-      return
-    }
+    if (!active) return
     const controller = new AbortController()
-    setData((prev) => ({ ...prev, loading: true, error: null }))
 
     // The live today recompute can exceed the API write timeout; fail
     // the spinner instead of hanging until the browser gives up.
@@ -83,15 +77,16 @@ export function useEconomicsData(input: Input): EconomicsData {
       signal,
     )
       .then((resp) => {
-        const rows = resp.hours.map((h) => (h ? mapHourRow(h) : null))
-        setData({
-          rows,
-          loading: false,
+        setAnswer({
+          key,
+          day: {
+            rows: resp.hours.map((h) => (h ? mapHourRow(h) : null)),
+            hoursMissingPrice: resp.hours_missing_price,
+            skipDiagnostics: null,
+            reconciled: resp.reconciled ?? false,
+            qualityFlags: resp.quality_flags ?? [],
+          },
           error: null,
-          hoursMissingPrice: resp.hours_missing_price,
-          skipDiagnostics: null,
-          reconciled: resp.reconciled ?? false,
-          qualityFlags: resp.quality_flags ?? [],
         })
       })
       .catch((err: unknown) => {
@@ -105,13 +100,17 @@ export function useEconomicsData(input: Input): EconomicsData {
               : typeof err === 'string'
                 ? err
                 : 'failed to load economics data'
-        setData((prev) => ({ ...prev, loading: false, error: message }))
+        setAnswer((prev) => ({ key, day: prev?.day ?? EMPTY_DAY, error: message }))
       })
 
     return () => controller.abort()
-  }, [input.organizationID, input.date, input.refreshKey])
+  }, [active, key, input.organizationID, input.date])
 
-  return data
+  return useMemo(() => {
+    if (!active) return { ...EMPTY_DAY, loading: false, error: null }
+    const loading = answer?.key !== key
+    return { ...(answer?.day ?? EMPTY_DAY), loading, error: loading ? null : (answer?.error ?? null) }
+  }, [active, answer, key])
 }
 
 // mapHourRow converts the flat snake_case wire shape into the nested

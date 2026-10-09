@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   BatteryCharging,
   BatteryFull,
@@ -8,8 +8,7 @@ import {
   SunDim,
 } from '@phosphor-icons/react'
 import type { RegisterMeta } from '../../types'
-import { cssVar } from '../../theme/cssVar'
-import { useTheme } from '../../theme/theme'
+import { useCssVar } from '../../theme/useChartChrome'
 import { formatChartNumber } from '../format'
 import type {
   LiveAllocation,
@@ -239,8 +238,7 @@ export function EnergyFlowLive({
     return () => window.clearInterval(id)
   }, [])
 
-  const { resolved } = useTheme()
-  const idle = useMemo(() => cssVar('--border-strong', '#cbd5e1'), [resolved])
+  const idle = useCssVar('--border-strong', '#cbd5e1')
   // Hub chrome was COLORS.hub (#0f172a); .energy-flow-live-hub already uses var(--text).
 
   const ageSeconds =
