@@ -71,22 +71,23 @@ type Status = 'idle' | 'loading' | 'saving' | 'error'
 // (run it from the import page) or the next read of a non-final day.
 export function TariffScheduleEditor({ organizationID, tariffs, defaultEffectiveFrom, onLoadVersion }: Props) {
   const [versions, setVersions] = useState<TariffScheduleVersion[]>([])
-  const [effectiveFrom, setEffectiveFrom] = useState<string>(defaultEffectiveFrom)
+  // A typed or loaded date applies until the viewed day changes.
+  const [dateDraft, setDateDraft] = useState<{ base: string; value: string } | null>(null)
+  const effectiveFrom =
+    dateDraft && dateDraft.base === defaultEffectiveFrom ? dateDraft.value : defaultEffectiveFrom
+  const setEffectiveFrom = useCallback(
+    (value: string) => setDateDraft({ base: defaultEffectiveFrom, value }),
+    [defaultEffectiveFrom],
+  )
   const [status, setStatus] = useState<Status>('loading')
   const [error, setError] = useState<string | null>(null)
   // Tracks which saved version is currently loaded into the form above
   // (for the edit-and-resave flow), so the row can show it's being edited.
   const [editingFrom, setEditingFrom] = useState<string | null>(null)
 
-  useEffect(() => {
-    setEffectiveFrom(defaultEffectiveFrom)
-  }, [defaultEffectiveFrom])
-
-  const reload = useCallback(
-    (signal?: AbortSignal) => {
-      setStatus('loading')
-      setError(null)
-      return fetchTariffSchedule(organizationID, signal)
+  const load = useCallback(
+    (signal?: AbortSignal) =>
+      fetchTariffSchedule(organizationID, signal)
         .then((v) => {
           setVersions(v)
           setStatus('idle')
@@ -95,17 +96,24 @@ export function TariffScheduleEditor({ organizationID, tariffs, defaultEffective
           if ((err as DOMException)?.name === 'AbortError') return
           setError(err instanceof Error ? err.message : String(err))
           setStatus('error')
-        })
-    },
+        }),
     [organizationID],
   )
 
+  const reload = useCallback(() => {
+    setStatus('loading')
+    setError(null)
+    return load()
+  }, [load])
+
+  // The parent keys the editor by organization, so the first load
+  // starts from the initial 'loading' status.
   useEffect(() => {
     if (!organizationID) return
     const controller = new AbortController()
-    void reload(controller.signal)
+    void load(controller.signal)
     return () => controller.abort()
-  }, [organizationID, reload])
+  }, [organizationID, load])
 
   const onSaveVersion = useCallback(async () => {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(effectiveFrom)) {
@@ -132,7 +140,7 @@ export function TariffScheduleEditor({ organizationID, tariffs, defaultEffective
       setEditingFrom(v.effectiveFrom)
       setError(null)
     },
-    [onLoadVersion],
+    [onLoadVersion, setEffectiveFrom],
   )
 
   const onDelete = useCallback(

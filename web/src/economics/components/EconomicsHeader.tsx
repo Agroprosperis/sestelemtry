@@ -409,6 +409,7 @@ export function EconomicsHeader({
           </button>
         </div>
         <TariffScheduleEditor
+          key={organizationID}
           organizationID={organizationID}
           tariffs={tariffs}
           defaultEffectiveFrom={date}

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useEffectEvent, useRef, useState } from 'react'
 import {
   refreshDAMPricesRange,
   type DAMRefreshRangeResult,
@@ -36,22 +36,23 @@ export function EconomicsDamPricesModal({ onClose, onDone }: Props) {
   const [progress, setProgress] = useState<ImportProgress | null>(null)
   const [result, setResult] = useState<DAMRefreshRangeResult | null>(null)
   const abortRef = useRef<AbortController | null>(null)
-  const stateRef = useRef(state)
-  stateRef.current = state
 
   // Close on Escape, unless a fetch is in flight (so an accidental
   // key press doesn't abandon the in-progress import). Abort the
   // request on unmount as a safety net.
+  const onEscape = useEffectEvent(() => {
+    if (state !== 'loading') onClose()
+  })
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && stateRef.current !== 'loading') onClose()
+      if (e.key === 'Escape') onEscape()
     }
     window.addEventListener('keydown', onKey)
     return () => {
       window.removeEventListener('keydown', onKey)
       abortRef.current?.abort()
     }
-  }, [onClose])
+  }, [])
 
   const onCancel = useCallback(() => {
     abortRef.current?.abort()
