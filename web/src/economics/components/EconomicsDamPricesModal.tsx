@@ -5,7 +5,8 @@ import {
   type ImportProgress,
 } from '../../api'
 import '../../import/import.css'
-import { ImportProgressBar, isAbortError, kyivDate, type RunState } from '../../import/shared'
+import { isAbortError, kyivDate, type RunState } from '../../import/importUtils'
+import { ImportProgressBar } from '../../import/shared'
 
 type Props = {
   onClose: () => void
