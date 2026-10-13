@@ -1,7 +1,5 @@
-import { useMemo } from 'react'
 import type { RegisterMeta } from '../../types'
-import { cssVar } from '../../theme/cssVar'
-import { useTheme } from '../../theme/theme'
+import { useCssVar } from '../../theme/useChartChrome'
 import { formatPeriodLabel } from '../format'
 import type { RangePreset } from '../range'
 import type { EnergyFlows } from '../transforms/flows'
@@ -121,9 +119,8 @@ function ForecastRing({
   forecastKwh: number | null
   hasData: boolean
 }) {
-  const { resolved } = useTheme()
-  const grid = useMemo(() => cssVar('--chart-grid', '#e2e8f0'), [resolved])
-  const text = useMemo(() => cssVar('--text', '#0f172a'), [resolved])
+  const grid = useCssVar('--chart-grid', '#e2e8f0')
+  const text = useCssVar('--text', '#0f172a')
   // The visible arc is clamped to a single full revolution so a
   // big overshoot (e.g. forecast underestimated by 2x) doesn't
   // produce a multi-loop dasharray; the printed percentage stays

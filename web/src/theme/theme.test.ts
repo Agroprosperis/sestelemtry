@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { chartChrome } from './cssVar'
-import { applyResolvedTheme, resolveTheme } from './theme'
+import { applyResolvedTheme, resolveTheme } from './themeContext'
 
 describe('theme', () => {
   it('resolves light and dark preferences directly', () => {

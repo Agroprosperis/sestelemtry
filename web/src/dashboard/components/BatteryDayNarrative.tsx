@@ -6,10 +6,8 @@ import {
   BatteryMedium,
 } from '@phosphor-icons/react'
 import type { ReactElement } from 'react'
-import { useMemo } from 'react'
 import type { CurrentResponse } from '../../types'
-import { cssVar } from '../../theme/cssVar'
-import { useTheme } from '../../theme/theme'
+import { useCssVar } from '../../theme/useChartChrome'
 import { formatPeriodLabel } from '../format'
 import type { RangePreset } from '../range'
 import type { EnergyFlows } from '../transforms/flows'
@@ -133,8 +131,7 @@ function renderRingBatteryIcon(soc: number | null): ReactElement {
 // the ring on screen even while a background refresh is in flight,
 // because the operator should never lose sight of the battery state.
 function SocRing({ socPercent }: { socPercent: number | null }) {
-  const { resolved } = useTheme()
-  const grid = useMemo(() => cssVar('--chart-grid', '#e2e8f0'), [resolved])
+  const grid = useCssVar('--chart-grid', '#e2e8f0')
   const visible = socPercent
   const ratio = visible === null ? 0 : Math.max(0, Math.min(1, visible / 100))
   const dashOffset = RING_CIRCUMFERENCE * (1 - ratio)

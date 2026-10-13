@@ -1,36 +1,16 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useEffectEvent, useRef, useState } from 'react'
 import {
   fetchEconomicsDataRange,
   recomputeEconomics,
+  type EconomicsDataRange,
   type EconomicsRecomputeResult,
   type ImportProgress,
 } from '../../api'
 import { OrganizationSelect } from '../../dashboard/components/OrganizationSelect'
 import '../../import/import.css'
+import { isAbortError, kyivDate, type RunState } from '../../import/importUtils'
 
 const ECON_LOCAL_TZ = 'Europe/Kyiv'
-
-type RunState = 'idle' | 'loading' | 'done' | 'error'
-
-// isAbortError detects a fetch cancelled by the operator's "cancel"
-// button so the UI shows a neutral note rather than a red error.
-function isAbortError(err: unknown): boolean {
-  return err instanceof DOMException && err.name === 'AbortError'
-}
-
-// kyivDate returns YYYY-MM-DD at the given day offset in Europe/Kyiv,
-// matching the economics page's local-time day grid.
-function kyivDate(offsetDays: number): string {
-  const fmt = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Europe/Kyiv',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  })
-  const d = new Date()
-  d.setUTCDate(d.getUTCDate() + offsetDays)
-  return fmt.format(d)
-}
 
 type Props = {
   onClose: () => void
@@ -65,58 +45,59 @@ export function EconomicsRecomputeModal({
   const [detected, setDetected] = useState<{ from: string; to: string; hasData: boolean } | null>(
     null,
   )
-  const [rangeLoading, setRangeLoading] = useState(false)
-  const [rangeError, setRangeError] = useState<string | null>(null)
+  // The range lookup answers per organization; until the selected one
+  // answers it is loading, and an older organization's error is hidden.
+  const [rangeStatus, setRangeStatus] = useState<{ org: string; error: string | null } | null>(null)
+  const rangeLoading = rangeStatus?.org !== organizationID
+  const rangeError = rangeStatus?.org === organizationID ? rangeStatus.error : null
   const [state, setState] = useState<RunState>('idle')
   const [error, setError] = useState<string | null>(null)
   const [cancelled, setCancelled] = useState(false)
   const [progress, setProgress] = useState<ImportProgress | null>(null)
   const [result, setResult] = useState<EconomicsRecomputeResult | null>(null)
   const abortRef = useRef<AbortController | null>(null)
-  const stateRef = useRef(state)
-  stateRef.current = state
-  // fullPeriodRef lets the async range fetch decide whether to apply the
-  // detected span without re-subscribing the effect on every toggle.
-  const fullPeriodRef = useRef(fullPeriod)
-  fullPeriodRef.current = fullPeriod
 
   // Close on Escape, unless a recompute is in flight (mirrors the
   // disabled overlay/close button during loading). Abort any in-flight
   // request if the dialog unmounts.
+  const onEscape = useEffectEvent(() => {
+    if (state !== 'loading') onClose()
+  })
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && stateRef.current !== 'loading') onClose()
+      if (e.key === 'Escape') onEscape()
     }
     window.addEventListener('keydown', onKey)
     return () => {
       window.removeEventListener('keydown', onKey)
       abortRef.current?.abort()
     }
-  }, [onClose])
+  }, [])
+
+  // When "весь період" is on, a detected range fills the date inputs;
+  // toggling it does not refetch.
+  const applyDetected = useEffectEvent((range: EconomicsDataRange) => {
+    setDetected({ from: range.from, to: range.to, hasData: range.has_data })
+    if (fullPeriod && range.has_data) {
+      setFromDate(range.from)
+      setToDate(range.to)
+    }
+  })
 
   // Auto-detect the station's full telemetry span on open and whenever the
-  // operator switches organizations. When "весь період" is on, the detected
-  // range fills the date inputs. An AbortController guards against a fast
-  // org switch applying a stale range.
+  // operator switches organizations. An AbortController guards against a
+  // fast org switch applying a stale range.
   useEffect(() => {
     const controller = new AbortController()
-    setRangeLoading(true)
-    setRangeError(null)
     fetchEconomicsDataRange({ organizationID, tz: ECON_LOCAL_TZ }, controller.signal)
       .then((range) => {
-        setDetected({ from: range.from, to: range.to, hasData: range.has_data })
-        if (fullPeriodRef.current && range.has_data) {
-          setFromDate(range.from)
-          setToDate(range.to)
-        }
+        applyDetected(range)
+        setRangeStatus({ org: organizationID, error: null })
       })
       .catch((err) => {
         if (isAbortError(err)) return
         setDetected(null)
-        setRangeError(err instanceof Error ? err.message : String(err))
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setRangeLoading(false)
+        setRangeStatus({ org: organizationID, error: err instanceof Error ? err.message : String(err) })
       })
     return () => controller.abort()
   }, [organizationID])

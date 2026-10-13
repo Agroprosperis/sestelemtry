@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { fetchEconomicsMonthly, type EconomicsMonthlyResponse } from '../api'
 
 // LOCAL_TZ is the canonical timezone for the economics page: the month
@@ -26,26 +26,24 @@ type Input = {
 // and recomputes the open tail (today) on read, so the dashboard always
 // reflects a consistent month.
 export function useEconomicsMonthlyData(input: Input): EconomicsMonthlyData {
-  const [data, setData] = useState<EconomicsMonthlyData>(() => ({
-    month: null,
-    loading: true,
-    error: null,
-  }))
+  const active = Boolean(input.organizationID && input.month)
+  const key = JSON.stringify([input.organizationID, input.month, input.refreshKey ?? 0])
+  // The last answer and the request it settled; while the current key
+  // has no answer it is loading and the previous month stays on screen.
+  const [answer, setAnswer] = useState<{ key: string; month: EconomicsMonthlyResponse | null; error: string | null } | null>(
+    null,
+  )
 
   useEffect(() => {
-    if (!input.organizationID || !input.month) {
-      setData({ month: null, loading: false, error: null })
-      return
-    }
+    if (!active) return
     const controller = new AbortController()
-    setData((prev) => ({ ...prev, loading: true, error: null }))
 
     fetchEconomicsMonthly(
       { organizationID: input.organizationID, month: input.month, tz: LOCAL_TZ },
       controller.signal,
     )
       .then((resp) => {
-        setData({ month: resp, loading: false, error: null })
+        setAnswer({ key, month: resp, error: null })
       })
       .catch((err: unknown) => {
         if ((err as DOMException)?.name === 'AbortError') return
@@ -55,11 +53,15 @@ export function useEconomicsMonthlyData(input: Input): EconomicsMonthlyData {
             : typeof err === 'string'
               ? err
               : 'failed to load monthly economics data'
-        setData((prev) => ({ ...prev, loading: false, error: message }))
+        setAnswer((prev) => ({ key, month: prev?.month ?? null, error: message }))
       })
 
     return () => controller.abort()
-  }, [input.organizationID, input.month, input.refreshKey])
+  }, [active, key, input.organizationID, input.month])
 
-  return data
+  return useMemo(() => {
+    if (!active) return { month: null, loading: false, error: null }
+    const loading = answer?.key !== key
+    return { month: answer?.month ?? null, loading, error: loading ? null : (answer?.error ?? null) }
+  }, [active, answer, key])
 }

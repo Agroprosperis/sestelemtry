@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useState } from 'react'
+import { useId, useMemo, useState } from 'react'
 import './PeriodPicker.css'
 import { isCurrentPeriod, shiftPeriod, startOfPeriod, type RangePreset } from '../range'
 
@@ -75,19 +75,17 @@ function DateSegmentInput({
   max: string
   onCommit: (next: string) => void
 }) {
-  const [draft, setDraft] = useState<string | null>(null)
-  useEffect(() => {
-    setDraft(null)
-  }, [committed])
+  // A draft only applies over the committed value it was typed on.
+  const [draft, setDraft] = useState<{ base: string; value: string } | null>(null)
   return (
     <input
       id={id}
       type={type}
-      value={draft ?? committed}
+      value={draft && draft.base === committed ? draft.value : committed}
       max={max}
       onChange={(e) => {
         const next = e.target.value
-        setDraft(next)
+        setDraft({ base: committed, value: next })
         onCommit(next)
       }}
       onBlur={() => setDraft(null)}

@@ -211,6 +211,48 @@ describe('useDashboardData period flows', () => {
     expect(result.current.energyFlows.pvToEssKwh).toBe(8000)
     expect(result.current.energyFlows.pvProducedKwh).toBe(60000)
   })
+
+  // The card's refresh button spins through a scope's first load and
+  // every explicit refresh, keeping the last numbers on screen meanwhile.
+  it('spins the refresh button until the flows settle', async () => {
+    const first = deferred<api.EnergySummaryResponse>()
+    const summary = vi.spyOn(api, 'fetchEnergySummary').mockImplementation(() => first.promise)
+    const { result } = renderHook(() =>
+      useDashboardData({ organizationID: 'ab', preset: 'day', anchor: ANCHOR }),
+    )
+    await waitFor(() => expect(summary).toHaveBeenCalled())
+    expect(result.current.flowsRefreshing).toBe(true)
+    expect(result.current.flowsLoaded).toBe(false)
+
+    await act(async () => {
+      first.resolve(summaryResponse(DAY_TOTALS, DAY_FLOWS, { source: 'allocator' }))
+    })
+    await waitFor(() => expect(result.current.flowsLoaded).toBe(true))
+    expect(result.current.flowsRefreshing).toBe(false)
+
+    const second = deferred<api.EnergySummaryResponse>()
+    summary.mockImplementation(() => second.promise)
+    let done: Promise<void> = Promise.resolve()
+    act(() => {
+      done = result.current.refreshFlows()
+    })
+    expect(result.current.flowsRefreshing).toBe(true)
+    expect(result.current.energyFlows.pvToEssKwh).toBe(282)
+    await act(async () => {
+      second.resolve(summaryResponse(DAY_TOTALS, DAY_FLOWS, { source: 'allocator' }))
+      await done
+    })
+    expect(result.current.flowsRefreshing).toBe(false)
+  })
+
+  it('stops the spinner when the first load fails', async () => {
+    vi.spyOn(api, 'fetchEnergySummary').mockRejectedValue(new Error('allocator down'))
+    const { result } = renderHook(() =>
+      useDashboardData({ organizationID: 'ab', preset: 'day', anchor: ANCHOR }),
+    )
+    await waitFor(() => expect(result.current.flowsRefreshing).toBe(false))
+    expect(result.current.flowsLoaded).toBe(false)
+  })
 })
 
 function planResponse(

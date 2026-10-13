@@ -1,5 +1,5 @@
 import { Desktop, Moon, Sun } from '@phosphor-icons/react'
-import { useTheme, type ThemePreference } from './theme'
+import { useTheme, type ThemePreference } from './themeContext'
 import './theme-toggle.css'
 
 const OPTIONS: { id: ThemePreference; label: string; Icon: typeof Sun }[] = [
