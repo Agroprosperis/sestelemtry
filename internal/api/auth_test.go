@@ -49,6 +49,8 @@ func TestAuthRouteMatrix(t *testing.T) {
 		"mixed":      {{Role: auth.RoleEconomist, OrganizationID: "ze"}, {Role: auth.RoleEngineer, OrganizationID: "pe"}},
 		"admin":      {{Role: auth.RoleAdmin, OrganizationID: "ze"}},
 		"global":     {{Role: auth.RoleAdmin}},
+		"ceo":        {{Role: auth.RoleCEO, OrganizationID: "ze"}},
+		"investor":   {{Role: auth.RoleInvestor}},
 	}
 	cookies := map[string]*http.Cookie{}
 	for who, g := range grants {
@@ -132,6 +134,33 @@ func TestAuthRouteMatrix(t *testing.T) {
 		{"mixed", http.MethodGet, "/api/v1/economics/daily?organization_id=pe", denied},
 		{"mixed", http.MethodGet, "/api/v1/current?organization_id=pe", ok},
 		{"mixed", http.MethodGet, "/api/v1/current?organization_id=ze", denied},
+
+		{"ceo", http.MethodGet, series + "ze" + year, ok},
+		{"ceo", http.MethodGet, "/api/v1/energy-summary?organization_id=ze" + year, ok},
+		{"ceo", http.MethodGet, "/api/v1/economics/annual?organization_id=ze", ok},
+		{"ceo", http.MethodGet, "/api/v1/dispatch/effect?organization_id=ze&date=2026-10-07", ok},
+		{"ceo", http.MethodGet, "/api/v1/edge/sites", ok},
+		{"ceo", http.MethodGet, "/api/v1/edge/status?site_id=ze", ok},
+		{"ceo", http.MethodGet, "/api/v1/edge/status?site_id=pe", denied},
+		{"ceo", http.MethodGet, "/api/v1/edge/settings?site_id=ze", ok},
+		{"ceo", http.MethodGet, "/api/v1/dispatch/state?site_id=ze", ok},
+		{"ceo", http.MethodPost, "/api/v1/dispatch/preview?site_id=ze", ok},
+		{"ceo", http.MethodPost, "/api/v1/dispatch/confirm?site_id=ze", denied},
+		{"ceo", http.MethodPost, "/api/v1/edge/manifest/publish?site_id=ze", denied},
+		{"ceo", http.MethodPut, "/api/v1/edge/settings?site_id=ze", denied},
+		{"ceo", http.MethodPut, "/api/v1/organization-tariffs?organization_id=ze", denied},
+		{"ceo", http.MethodPost, "/api/v1/economics/recompute?organization_id=ze", denied},
+		{"ceo", http.MethodGet, "/api/v1/plant-inventory?organization_id=ze", denied},
+		{"ceo", http.MethodGet, "/api/v1/samples?organization_id=ze", denied},
+		{"ceo", http.MethodGet, "/api/v1/users", denied},
+
+		{"investor", http.MethodGet, "/api/v1/current", ok},
+		{"investor", http.MethodGet, "/api/v1/economics/portfolio", ok},
+		{"investor", http.MethodGet, "/api/v1/dispatch/state?site_id=pe", ok},
+		{"investor", http.MethodPost, "/api/v1/dispatch/confirm?site_id=pe", denied},
+		{"investor", http.MethodPost, "/api/v1/dam-prices/refresh", denied},
+		{"investor", http.MethodGet, "/api/v1/alert-settings", denied},
+		{"investor", http.MethodGet, "/api/v1/users", denied},
 
 		{"admin", http.MethodGet, "/api/v1/energy-summary?organization_id=ze" + year, ok},
 		{"admin", http.MethodGet, "/api/v1/samples?organization_id=ze", ok},

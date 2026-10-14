@@ -467,9 +467,10 @@
   color: var(--d-muted);
 }
 
-/* --- past day (read only) --- */
+/* --- past day, and the desk without control.write (read only) --- */
 
-.d-workspace.d-day {
+.d-workspace.d-day,
+.d-workspace.d-readonly {
   grid-template-columns: minmax(0, 1fr);
 }
 

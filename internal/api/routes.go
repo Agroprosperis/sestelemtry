@@ -111,7 +111,10 @@ func (h *Handlers) routes() []route {
 		econEdit = onOrg(auth.PermEconomicsWrite)
 		service  = onOrg(auth.PermService)
 		control  = onSite(auth.PermControl)
-		anyAdmin = need(onAnyOrg(auth.PermService))
+		// Only these two write anything in the control mode; the
+		// preview just simulates a draft.
+		controlAct = onSite(auth.PermControlWrite)
+		anyAdmin   = need(onAnyOrg(auth.PermService))
 	)
 	return []route{
 		{"/healthz", h.healthz, publicRoute},
@@ -163,12 +166,12 @@ func (h *Handlers) routes() []route {
 		{"/api/v1/edge/batch", h.edgeBatch, edgeRoute},
 		{"/api/v1/edge/heartbeat", h.edgeHeartbeat, edgeRoute},
 		{"/api/v1/edge/manifest", h.edgeManifest, edgeRoute},
-		{"/api/v1/edge/manifest/publish", h.edgeManifestPublish, need(control)},
+		{"/api/v1/edge/manifest/publish", h.edgeManifestPublish, need(controlAct)},
 		{"/api/v1/edge/sites", h.edgeSites, need(onAnyOrg(auth.PermControl))},
 		{"/api/v1/edge/manifests", h.edgeManifestJournal, need(control)},
 		{"/api/v1/dispatch/state", h.dispatchState, need(control)},
 		{"/api/v1/dispatch/preview", h.dispatchPreview, need(control)},
-		{"/api/v1/dispatch/confirm", h.dispatchConfirm, need(control)},
+		{"/api/v1/dispatch/confirm", h.dispatchConfirm, need(controlAct)},
 		{"/api/v1/dispatch/day", h.dispatchDay, need(control)},
 		{"/api/v1/dispatch/effect", h.dispatchEffect, need(onOrg(auth.PermEconomicsRead, auth.PermControl))},
 		{"/api/v1/edge/settings", h.edgeSettings,

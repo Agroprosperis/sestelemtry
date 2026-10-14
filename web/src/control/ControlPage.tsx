@@ -147,6 +147,7 @@ export function ControlPage() {
           key={site}
           site={site}
           onOpenReport={access.can('economics.read', site) ? navigateEconomicsDay : undefined}
+          readOnly={!access.can('control.write', site)}
         />
       ) : tab === 'modes' ? (
         <ModesTab status={status} onOpenDesk={() => switchTab('plan')} />

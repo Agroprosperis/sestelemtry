@@ -15,13 +15,20 @@ func TestRolePermissions(t *testing.T) {
 		deny []Permission
 	}{
 		{RoleEngineer, []Permission{PermAnalyticsDay},
-			[]Permission{PermAnalyticsFull, PermEconomicsRead, PermControl, PermTechnicalWrite, PermService}},
-		{RoleControlEngineer, []Permission{PermAnalyticsDay, PermControl, PermTechnicalWrite},
+			[]Permission{PermAnalyticsFull, PermEconomicsRead, PermControl, PermControlWrite, PermTechnicalWrite, PermService}},
+		{RoleControlEngineer, []Permission{PermAnalyticsDay, PermControl, PermControlWrite, PermTechnicalWrite},
 			[]Permission{PermAnalyticsFull, PermEconomicsRead, PermEconomicsWrite, PermService}},
 		{RoleEconomist, []Permission{PermEconomicsRead, PermEconomicsWrite},
-			[]Permission{PermAnalyticsDay, PermControl, PermTechnicalWrite, PermService}},
+			[]Permission{PermAnalyticsDay, PermControl, PermControlWrite, PermTechnicalWrite, PermService}},
+		{RoleCEO, []Permission{PermAnalyticsDay, PermAnalyticsFull, PermEconomicsRead, PermControl},
+			[]Permission{PermEconomicsWrite, PermControlWrite, PermTechnicalWrite, PermService}},
+		{RoleInvestor, []Permission{PermAnalyticsDay, PermAnalyticsFull, PermEconomicsRead, PermControl},
+			[]Permission{PermEconomicsWrite, PermControlWrite, PermTechnicalWrite, PermService}},
 		{RoleAdmin, []Permission{PermAnalyticsDay, PermAnalyticsFull, PermEconomicsRead, PermEconomicsWrite,
-			PermControl, PermTechnicalWrite, PermService}, nil},
+			PermControl, PermControlWrite, PermTechnicalWrite, PermService}, nil},
+	}
+	if len(Roles) != len(cases) {
+		t.Fatalf("Roles lists %d roles, the test covers %d", len(Roles), len(cases))
 	}
 	for _, c := range cases {
 		for _, p := range c.want {

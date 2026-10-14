@@ -1,4 +1,4 @@
-// Package auth is the dashboard's access model: the four roles, the
+// Package auth is the dashboard's access model: the roles, the
 // permissions each one carries, and the principal a signed-in request
 // acts as. It knows nothing about HTTP or the database — internal/api
 // maps routes onto these permissions and internal/storage persists the
@@ -16,11 +16,15 @@ const (
 	RoleEconomist       Role = "economist"
 	RoleEngineer        Role = "engineer"
 	RoleControlEngineer Role = "control_engineer"
+	// RoleCEO and RoleInvestor see everything an organization's
+	// dashboard shows except the admin tools, and change nothing.
+	RoleCEO      Role = "ceo"
+	RoleInvestor Role = "investor"
 )
 
 // Roles lists every assignable role in the order the user-management
 // page shows them.
-var Roles = []Role{RoleAdmin, RoleEconomist, RoleEngineer, RoleControlEngineer}
+var Roles = []Role{RoleAdmin, RoleEconomist, RoleEngineer, RoleControlEngineer, RoleCEO, RoleInvestor}
 
 // Permission is the unit routes are checked against. Roles are fixed
 // bundles of permissions; users only ever receive roles.
@@ -35,9 +39,12 @@ const (
 	PermAnalyticsFull  Permission = "analytics.full"
 	PermEconomicsRead  Permission = "economics.read"
 	PermEconomicsWrite Permission = "economics.write"
-	// PermControl is the «Керування» mode: edge status, the УЗЕ planner,
-	// modes and manifest publication.
+	// PermControl opens the «Керування» mode: edge status, the УЗЕ desk
+	// with its preview, modes, the manifest journal and the limits.
 	PermControl Permission = "control"
+	// PermControlWrite acts in it: confirms the УЗЕ plan and publishes
+	// manifests to the edge device.
+	PermControlWrite Permission = "control.write"
 	// PermTechnicalWrite changes the per-site limits the planner and
 	// every manifest obey (SOC policy, kW limits, PV rating).
 	PermTechnicalWrite Permission = "technical.write"
@@ -46,14 +53,18 @@ const (
 	PermService Permission = "service"
 )
 
+var viewerPermissions = []Permission{PermAnalyticsDay, PermAnalyticsFull, PermEconomicsRead, PermControl}
+
 var rolePermissions = map[Role][]Permission{
 	RoleEngineer:        {PermAnalyticsDay},
-	RoleControlEngineer: {PermAnalyticsDay, PermControl, PermTechnicalWrite},
+	RoleControlEngineer: {PermAnalyticsDay, PermControl, PermControlWrite, PermTechnicalWrite},
 	RoleEconomist:       {PermEconomicsRead, PermEconomicsWrite},
+	RoleCEO:             viewerPermissions,
+	RoleInvestor:        viewerPermissions,
 	RoleAdmin: {
 		PermAnalyticsDay, PermAnalyticsFull,
 		PermEconomicsRead, PermEconomicsWrite,
-		PermControl, PermTechnicalWrite,
+		PermControl, PermControlWrite, PermTechnicalWrite,
 		PermService,
 	},
 }

@@ -11,6 +11,7 @@ const api = vi.hoisted(() => ({
 vi.mock('./dispatchClient', () => api)
 
 import { DispatchDesk } from './DispatchDesk'
+import { readDraft, writeDraft } from './deskDraft'
 
 const cfg = { reserve_pct: 20, grid_charge: true, ess_sale: true, block_export: false, import_cap_kw: 1700, export_cap_kw: 850 }
 
@@ -184,5 +185,24 @@ describe('DispatchDesk', () => {
     fireEvent.click(screen.getByRole('button', { name: '← До пульта' }))
     expect(await screen.findByText('Ручне керування УЗЕ')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Переглянути чернетку →' })).toBeEnabled()
+  })
+
+  it('shows the plan in force without the command panel when read-only', async () => {
+    const draft = {
+      start_hour: '2026-10-07T16:00:00Z',
+      base_version: 0,
+      working: { loads: [200, ...Array(23).fill(null)], commands: Array(24).fill(null), cfg },
+      history: [],
+    }
+    writeDraft('ze', draft)
+    const { container } = render(<DispatchDesk site="ze" readOnly />)
+    expect(await screen.findByText('Ручне керування УЗЕ')).toBeInTheDocument()
+    expect(screen.getByText(/^Лише перегляд/)).toBeInTheDocument()
+    expect(container.querySelector('[data-mark="plan-ess"]')).not.toBeNull()
+    for (const name of ['У чернетку', 'Переглянути чернетку →', 'Зараз на 1 год']) {
+      expect(screen.queryByRole('button', { name })).toBeNull()
+    }
+    // Someone else's draft in this browser stays as it was.
+    expect(readDraft('ze')).toEqual(draft)
   })
 })

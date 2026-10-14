@@ -9,10 +9,11 @@ export type Permission =
   | 'economics.read'
   | 'economics.write'
   | 'control'
+  | 'control.write'
   | 'technical.write'
   | 'service'
 
-export type Role = 'admin' | 'economist' | 'engineer' | 'control_engineer'
+export type Role = 'admin' | 'economist' | 'engineer' | 'control_engineer' | 'ceo' | 'investor'
 
 export const ROLES: { id: Role; label: string; hint: string }[] = [
   { id: 'admin', label: 'Адміністратор', hint: 'усі розділи й налаштування' },
@@ -23,6 +24,8 @@ export const ROLES: { id: Role; label: string; hint: string }[] = [
     label: 'Інженер-керування',
     hint: 'денний графік, керування, технічні ліміти',
   },
+  { id: 'ceo', label: 'Генеральний директор', hint: 'перегляд аналітики, економіки й керування без змін' },
+  { id: 'investor', label: 'Інвестор', hint: 'перегляд аналітики, економіки й керування без змін' },
 ]
 
 // MIN_PASSWORD_LEN is the API's minimum password length, in characters.

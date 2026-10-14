@@ -1123,7 +1123,7 @@ components:
       properties:
         role:
           type: string
-          enum: [admin, economist, engineer, control_engineer]
+          enum: [admin, economist, engineer, control_engineer, ceo, investor]
         organization_id:
           type: string
           nullable: true

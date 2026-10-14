@@ -52,12 +52,18 @@ import { commandError, constraintsError } from './validate'
 
 // onOpenReport opens the economics day report for a date; absent when
 // the user cannot read economics on the site.
-type Props = { site: string; onOpenReport?: (date: string) => void }
+type Props = {
+  site: string
+  onOpenReport?: (date: string) => void
+  // readOnly shows the plan in force without the command panel, for
+  // roles that may look at the desk but not confirm (no control.write).
+  readOnly?: boolean
+}
 
 const STATE_REFRESH_MS = 5 * 60_000
 const PREVIEW_DEBOUNCE_MS = 250
 
-export function DispatchDesk({ site, onOpenReport }: Props) {
+export function DispatchDesk({ site, onOpenReport, readOnly = false }: Props) {
   const [state, setState] = useState<DeskState | null>(null)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
@@ -118,7 +124,7 @@ export function DispatchDesk({ site, onOpenReport }: Props) {
       setActive(applied)
       setResults({ map: {}, last: '' })
       if (initial || !prev) {
-        const saved = readDraft(site)
+        const saved = readOnly ? null : readDraft(site)
         if (saved && saved.base_version === next.applied.version) {
           const shift = hoursBetween(saved.start_hour, next.start_hour)
           const restored = shiftModel(normalizeModel(saved.working), shift)
@@ -165,7 +171,7 @@ export function DispatchDesk({ site, onOpenReport }: Props) {
           return { start, end: Math.max(start + 1, s.end - shift), anchor: start, inspect: start }
         })
     },
-    [site],
+    [site, readOnly],
   )
 
   // The parent keys the desk by site, so a site switch remounts it.
@@ -189,15 +195,17 @@ export function DispatchDesk({ site, onOpenReport }: Props) {
     }
   }, [site, applyState])
 
+  // A viewer leaves the browser's draft alone: it may belong to someone
+  // else who signs in here.
   useEffect(() => {
-    if (!state || !working || !active) return
+    if (readOnly || !state || !working || !active) return
     writeDraft(
       site,
       same(working, active) && history.length === 0
         ? null
         : { start_hour: state.start_hour, base_version: baseVersion, working, history: history.slice(-HISTORY_LIMIT) },
     )
-  }, [site, state, working, active, history, baseVersion])
+  }, [readOnly, site, state, working, active, history, baseVersion])
 
   // --- derived model -----------------------------------------------------
 
@@ -559,6 +567,9 @@ export function DispatchDesk({ site, onOpenReport }: Props) {
     <div className="dispatch-desk">
       {notice && <div className="ctl-notice">{notice}</div>}
       {error && <div className="ctl-notice err">{error}</div>}
+      {readOnly && (
+        <div className="ctl-notice">Лише перегляд: план УЗЕ змінюють інженер-керування та адміністратор.</div>
+      )}
       <div className="d-heading">
         <div>
           <h2>Ручне керування УЗЕ</h2>
@@ -579,13 +590,18 @@ export function DispatchDesk({ site, onOpenReport }: Props) {
               Звіт за день
             </button>
           )}
-          <button type="button" onClick={() => setSel({ start: 0, end: 1, anchor: 0, inspect: 0 })}>
-            Зараз на 1 год
-          </button>
+          {!readOnly && (
+            <button type="button" onClick={() => setSel({ start: 0, end: 1, anchor: 0, inspect: 0 })}>
+              Зараз на 1 год
+            </button>
+          )}
         </div>
       </div>
 
-      <section className={'d-workspace' + (reviewOpen ? ' d-reviewing' : '')} aria-label="Контекст і швидке керування">
+      <section
+        className={'d-workspace' + (reviewOpen ? ' d-reviewing' : '') + (readOnly ? ' d-readonly' : '')}
+        aria-label="Контекст і швидке керування"
+      >
         <div className="d-context">
           <ChartToolbar
             stale={stale}
@@ -648,110 +664,112 @@ export function DispatchDesk({ site, onOpenReport }: Props) {
           />
         </div>
 
-        <aside className="d-command" aria-label="Параметри ручної команди">
-          <div className="d-edit">
-            <IntervalHead
-              clock={clock}
-              span={span}
-              start={sel.start}
-              end={sel.end}
-              onStart={(start) => setSel((s) => ({ start, end: Math.max(s.end, start + 1), anchor: start, inspect: start }))}
-              onEnd={(end) =>
-                setSel((s) => {
-                  const start = Math.min(s.start, end - 1)
-                  return { start, end, anchor: start, inspect: start }
-                })
-              }
-            />
+        {!readOnly && (
+          <aside className="d-command" aria-label="Параметри ручної команди">
+            <div className="d-edit">
+              <IntervalHead
+                clock={clock}
+                span={span}
+                start={sel.start}
+                end={sel.end}
+                onStart={(start) => setSel((s) => ({ start, end: Math.max(s.end, start + 1), anchor: start, inspect: start }))}
+                onEnd={(end) =>
+                  setSel((s) => {
+                    const start = Math.min(s.start, end - 1)
+                    return { start, end, anchor: start, inspect: start }
+                  })
+                }
+              />
 
-            <LoadEditor
-              value={loadInput}
-              uniform={uniformLoad}
-              inDraft={selectionLoads.some((v, k) => v !== active.loads[sel.start + k])}
-              canClear={!selectionLoads.every((v) => v === null)}
-              error={loadError}
-              onChange={setLoadInput}
-              onSet={() => stageLoad(false)}
-              onClear={() => stageLoad(true)}
-            />
+              <LoadEditor
+                value={loadInput}
+                uniform={uniformLoad}
+                inDraft={selectionLoads.some((v, k) => v !== active.loads[sel.start + k])}
+                canClear={!selectionLoads.every((v) => v === null)}
+                error={loadError}
+                onChange={setLoadInput}
+                onSet={() => stageLoad(false)}
+                onClear={() => stageLoad(true)}
+              />
 
-            <CommandFields
-              site={siteInfo}
-              exportCapKw={cfg.export_cap_kw}
-              scenario={scenario}
-              onScenario={setScenario}
-              param={paramRaw}
-              onParam={(value) => setParams((p) => ({ ...p, [scenario]: value }))}
-              reserve={form.reserve}
-              onReserve={(value) => setForm({ ...form, reserve: value })}
-              direction={direction}
-              onDirection={setDirection}
-            />
+              <CommandFields
+                site={siteInfo}
+                exportCapKw={cfg.export_cap_kw}
+                scenario={scenario}
+                onScenario={setScenario}
+                param={paramRaw}
+                onParam={(value) => setParams((p) => ({ ...p, [scenario]: value }))}
+                reserve={form.reserve}
+                onReserve={(value) => setForm({ ...form, reserve: value })}
+                direction={direction}
+                onDirection={setDirection}
+              />
 
-            <CommandHelp scenario={scenario} pvKw={mean(futurePv)} loadKw={knownLoads ? mean(chartModel.loads) : null} prices={prices} />
+              <CommandHelp scenario={scenario} pvKw={mean(futurePv)} loadKw={knownLoads ? mean(chartModel.loads) : null} prices={prices} />
 
-            <ConstraintsPanel
-              site={siteInfo}
-              form={form}
-              onForm={setForm}
-              cfg={cfg}
-              defaultReserve={state.defaults.reserve_pct}
-              stageDisabled={!!cfgError || same(cfg, working.cfg)}
-              onStage={stageConstraints}
-            />
+              <ConstraintsPanel
+                site={siteInfo}
+                form={form}
+                onForm={setForm}
+                cfg={cfg}
+                defaultReserve={state.defaults.reserve_pct}
+                stageDisabled={!!cfgError || same(cfg, working.cfg)}
+                onStage={stageConstraints}
+              />
 
-            <CommandPreview
-              invalid={invalid}
-              outcome={outcome}
-              issues={issues}
-              clock={clock}
-              commands={chartModel.commands}
-              start={sel.start}
-              end={sel.end}
-            />
+              <CommandPreview
+                invalid={invalid}
+                outcome={outcome}
+                issues={issues}
+                clock={clock}
+                commands={chartModel.commands}
+                start={sel.start}
+                end={sel.end}
+              />
 
-            <div className="d-actions">
-              <button type="button" className="d-quiet" disabled={!history.length} onClick={undo} aria-label="Скасувати останню зміну чернетки">
-                ↶ Скасувати
-              </button>
-              <button type="button" className="d-primary" disabled={!!invalid} onClick={stage}>
-                У чернетку
+              <div className="d-actions">
+                <button type="button" className="d-quiet" disabled={!history.length} onClick={undo} aria-label="Скасувати останню зміну чернетки">
+                  ↶ Скасувати
+                </button>
+                <button type="button" className="d-primary" disabled={!!invalid} onClick={stage}>
+                  У чернетку
+                </button>
+              </div>
+            </div>
+            <div className="d-footer">
+              <span className="d-small d-status" aria-live="polite">
+                {statusLine}
+              </span>
+              <button type="button" disabled={same(active, working)} onClick={openReview}>
+                Переглянути чернетку →
               </button>
             </div>
-          </div>
-          <div className="d-footer">
-            <span className="d-small d-status" aria-live="polite">
-              {statusLine}
-            </span>
-            <button type="button" disabled={same(active, working)} onClick={openReview}>
-              Переглянути чернетку →
-            </button>
-          </div>
 
-          {reviewOpen && (
-            <ReviewPanel
-              clock={clock}
-              socMinPct={siteInfo.soc_min_pct}
-              socMaxPct={siteInfo.soc_max_pct}
-              reserve={form.reserve}
-              reserveError={reviewReserveError}
-              onReserve={reviewReserve}
-              working={working}
-              onBlockExport={reviewBlockExport}
-              review={review}
-              result={reviewResult}
-              hours={hours}
-              blockers={reviewBlockers}
-              confirmIssues={confirmIssues}
-              canConfirm={canConfirm}
-              confirmBusy={confirmBusy}
-              stale={stale}
-              onClose={closeReview}
-              onEditIssue={editIssue}
-              onConfirm={() => void confirm()}
-            />
-          )}
-        </aside>
+            {reviewOpen && (
+              <ReviewPanel
+                clock={clock}
+                socMinPct={siteInfo.soc_min_pct}
+                socMaxPct={siteInfo.soc_max_pct}
+                reserve={form.reserve}
+                reserveError={reviewReserveError}
+                onReserve={reviewReserve}
+                working={working}
+                onBlockExport={reviewBlockExport}
+                review={review}
+                result={reviewResult}
+                hours={hours}
+                blockers={reviewBlockers}
+                confirmIssues={confirmIssues}
+                canConfirm={canConfirm}
+                confirmBusy={confirmBusy}
+                stale={stale}
+                onClose={closeReview}
+                onEditIssue={editIssue}
+                onConfirm={() => void confirm()}
+              />
+            )}
+          </aside>
+        )}
       </section>
 
       <DeskFootnotes tariffs={state.tariffs} />

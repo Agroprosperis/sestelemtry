@@ -51,6 +51,30 @@ describe('accessFor', () => {
     expect(firstAllowedView(accessFor(me({})))).toBeNull()
   })
 
+  it('opens every mode but no admin tool to a view-only role', () => {
+    const viewer = accessFor(
+      me({
+        grants: [{ role: 'ceo', organization_id: 'ze' }],
+        organizations: [
+          {
+            id: 'ze',
+            name: 'ZE',
+            permissions: ['analytics.day', 'analytics.full', 'control', 'economics.read'],
+          },
+        ],
+      }),
+    )
+    for (const view of ['dashboard', 'economics', 'control'] as const) {
+      expect(viewer.canView(view)).toBe(true)
+    }
+    for (const view of ['station', 'import', 'alerts', 'users'] as const) {
+      expect(viewer.canView(view)).toBe(false)
+    }
+    expect(viewer.can('control.write', 'ze')).toBe(false)
+    expect(viewer.can('economics.write', 'ze')).toBe(false)
+    expect(viewer.can('technical.write', 'ze')).toBe(false)
+  })
+
   it('keeps user management for administrators of every organization', () => {
     const global = accessFor(me({ global_admin: true }))
     expect(global.canView('users')).toBe(true)
