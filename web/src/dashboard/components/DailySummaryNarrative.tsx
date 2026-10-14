@@ -1,3 +1,4 @@
+import { useId } from 'react'
 import type { RegisterMeta } from '../../types'
 import { useCssVar } from '../../theme/useChartChrome'
 import { formatPeriodLabel } from '../format'
@@ -261,6 +262,9 @@ export function DailySummaryNarrative({
   flowsLoaded = false,
   flowsGap = null,
 }: Props) {
+  // The Система page stacks a summary per period, so the heading id
+  // must be unique per instance.
+  const titleId = useId()
   const periodLabel = formatPeriodLabel(preset, anchor)
   const pvSegments = [
     {
@@ -315,11 +319,11 @@ export function DailySummaryNarrative({
   return (
     <section
       className="metrics-group summary-narrative"
-      aria-labelledby="daily-narrative-title"
+      aria-labelledby={titleId}
       aria-busy={showFirstLoadSpinner || undefined}
     >
       <header className="metrics-group-header">
-        <h2 id="daily-narrative-title" className="metrics-group-title">
+        <h2 id={titleId} className="metrics-group-title">
           {TITLES[preset]}
           <span className="metrics-group-subtitle"> · {periodLabel}</span>
         </h2>
