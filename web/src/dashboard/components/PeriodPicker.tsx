@@ -159,22 +159,33 @@ export function PeriodPicker({ preset, anchor, onChange }: Props) {
   }
 
   return (
-    <div className="period-picker" role="group" aria-label="Period">
-      <button type="button" className="period-nav" onClick={() => shift(-1)} aria-label="Previous period">
-        ‹
-      </button>
-      <label className="period-input" htmlFor={id}>
-        {body}
-      </label>
-      <button
-        type="button"
-        className="period-nav"
-        onClick={() => shift(1)}
-        aria-label="Next period"
-        disabled={isAtCurrent}
-      >
-        ›
-      </button>
+    <div className="period-picker-wrap">
+      <div className="period-picker" role="group" aria-label="Period">
+        <button type="button" className="period-nav" onClick={() => shift(-1)} aria-label="Previous period">
+          ‹
+        </button>
+        <label className="period-input" htmlFor={id}>
+          {body}
+        </label>
+        <button
+          type="button"
+          className="period-nav"
+          onClick={() => shift(1)}
+          aria-label="Next period"
+          disabled={isAtCurrent}
+        >
+          ›
+        </button>
+      </div>
+      {!isAtCurrent && (
+        <button
+          type="button"
+          className="period-today"
+          onClick={() => onChange(startOfPeriod(preset, new Date()))}
+        >
+          Сьогодні
+        </button>
+      )}
     </div>
   )
 }

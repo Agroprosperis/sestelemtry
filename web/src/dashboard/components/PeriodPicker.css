@@ -4,6 +4,29 @@
  * dashboard's full stylesheet. The economics page reuses the picker
  * to keep the day-selection control visually identical across views.
  */
+.period-picker-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.period-today {
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  border-radius: 10px;
+  padding: 7px 12px;
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.period-today:hover {
+  background: var(--bg-muted);
+  color: var(--text);
+}
+
 .period-picker {
   display: inline-flex;
   align-items: center;
