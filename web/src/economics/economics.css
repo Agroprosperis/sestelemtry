@@ -1092,98 +1092,6 @@
   color: var(--text);
 }
 
-/* --- day report: УЗЕ fact / optimum / reserve, expected plan effect --- */
-
-.eco-uze-report {
-  margin-top: 16px;
-}
-
-.eco-uze-report p {
-  margin: 0;
-}
-
-.eco-uze-compare {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  gap: 8px;
-}
-
-.eco-uze-compare > div {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 10px;
-  text-align: center;
-}
-
-.eco-uze-compare span {
-  display: block;
-  font-size: 11px;
-  color: var(--text-subtle);
-  margin-bottom: 4px;
-}
-
-.eco-uze-compare strong {
-  font-size: 16px;
-  font-variant-numeric: tabular-nums;
-  color: var(--text);
-}
-
-.eco-uze-compare strong.opt {
-  color: var(--violet-deep);
-}
-
-.eco-uze-compare strong.bad {
-  color: var(--err-text);
-}
-
-.eco-waterfall {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 10px 12px;
-}
-
-.eco-wf-title {
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--text);
-  margin-bottom: 6px;
-}
-
-.eco-wf-row {
-  display: flex;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 5px 0;
-  font-size: 12px;
-  border-bottom: 1px solid var(--bg-muted);
-  color: var(--text-muted);
-}
-
-.eco-wf-row strong {
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
-.eco-wf-row.pos strong {
-  color: var(--ok-text);
-}
-
-.eco-wf-row.neg strong {
-  color: var(--err-text);
-}
-
-.eco-wf-row.total {
-  border-bottom: none;
-  padding-top: 8px;
-  font-weight: 700;
-  color: var(--text);
-}
-
-.eco-wf-row.total strong {
-  color: var(--violet-deep);
-  font-size: 15px;
-}
-
 /* The legend wraps under the donut once the panel can't hold both. */
 .eco-donut-wrap {
   display: flex;
@@ -1965,56 +1873,7 @@
   opacity: 0.85;
 }
 
-/* Waterfall: a row of bottom-anchored bars. */
-.economics-waterfall {
-  display: grid;
-  grid-template-columns: repeat(6, 1fr);
-  gap: 14px;
-  height: 280px;
-  align-items: end;
-  padding: 8px 4px 0;
-  border-bottom: 1px solid var(--border);
-}
-
-.economics-wf-item {
-  height: 100%;
-  display: grid;
-  grid-template-rows: 1fr auto auto;
-  text-align: center;
-  min-width: 0;
-}
-
-.economics-wf-bar {
-  align-self: end;
-  min-height: 26px;
-  border-radius: 6px 6px 0 0;
-}
-
-.economics-wf-gray { background: var(--text-subtle); }
-.economics-wf-green { background: var(--ok-strong); }
-.economics-wf-blue { background: var(--info); }
-.economics-wf-violet { background: var(--violet); }
-.economics-wf-red { background: var(--err-strong); }
-
-.economics-wf-num {
-  margin-top: 8px;
-  font-size: 12px;
-  font-weight: 700;
-  white-space: nowrap;
-}
-
-.economics-wf-name {
-  margin-top: 4px;
-  color: var(--text-label);
-  font-size: 11px;
-  line-height: 1.2;
-}
-
-.economics-month-chart {
-  width: 100%;
-}
-
-/* Round-dot legend under the daily trend chart (matches the example). */
+/* Round-dot legend under the economics charts. */
 .economics-trend-legend {
   display: flex;
   flex-wrap: wrap;
@@ -2039,7 +1898,7 @@
   display: inline-block;
 }
 
-/* Compact hover tooltip for the daily trend chart. */
+/* Compact hover tooltip for the economics charts. */
 .economics-trend-tip {
   background: var(--bg-elevated);
   border: 1px solid var(--border-muted);
@@ -2075,58 +1934,6 @@
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   color: var(--text);
-}
-
-/* Summary metrics above the daily trend chart (PV fate + load
-   coverage), each with a thin two-segment ratio bar. */
-.economics-trend-summary {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 28px;
-  margin-bottom: 10px;
-}
-
-.economics-trend-metric strong {
-  font-size: 14px;
-  font-weight: 700;
-}
-
-.economics-trend-mwh {
-  margin-left: 5px;
-  font-size: 13px;
-  color: var(--text-label);
-  font-weight: 600;
-}
-
-.economics-ratio-line {
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  gap: 10px;
-  align-items: center;
-  margin-top: 8px;
-  color: var(--text-disabled);
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.economics-ratio-bar {
-  height: 8px;
-  display: flex;
-  overflow: hidden;
-  border-radius: 999px;
-  background: var(--bg-panel);
-}
-
-.economics-ratio-bar span {
-  display: block;
-  height: 100%;
-}
-
-@media (max-width: 600px) {
-  .economics-trend-summary {
-    grid-template-columns: 1fr;
-    gap: 14px;
-  }
 }
 
 /* Energy balance stacked bars. */
@@ -2427,12 +2234,12 @@
 }
 
 /* Two-column row for paired analytical cards (mirrors the mockup's
-   .grid-2). Wide elements (KPI strip, daily trend, daily table) stay
-   full-width; only the four analytical cards pair up. */
+   .grid-2). Wide elements (KPI strip, heatmap, daily table) stay
+   full-width; only the finance and balance cards pair up. */
 .economics-month-grid2 {
   display: grid;
   grid-template-columns: 1.05fr 0.95fr;
-  align-items: start;
+  align-items: stretch;
   gap: 18px;
 }
 
@@ -3453,9 +3260,6 @@ button.economics-optimum-row.open {
   }
   .economics-finance {
     grid-template-columns: 1fr;
-  }
-  .economics-waterfall {
-    height: 220px;
   }
 }
 

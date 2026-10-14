@@ -1,16 +1,5 @@
 import { useMemo, useState } from 'react'
 import type { MouseEvent as ReactMouseEvent, ReactNode } from 'react'
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  ReferenceLine,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts'
-import { makeTrendCap, TREND_NEG_ORDER, TREND_POS_ORDER } from '../trendBarCap'
 import type {
   EconomicsDataQuality,
   EconomicsMonthlyDay,
@@ -19,7 +8,6 @@ import type {
   EconomicsMonthlyTotals,
   EconomicsUzeCycle,
 } from '../../api'
-import { useChartChrome } from '../../theme/useChartChrome'
 import { UzeCyclesAccordion } from './UzeCycleChart'
 import { EconomicsTopSection, type EconomicsPvPlan } from '../components/EconomicsTopSection'
 import { EconomicsOverviewRow } from '../components/EconomicsOverviewRow'
@@ -52,7 +40,6 @@ import {
   PERIOD_WORDS,
   type PeriodScope,
   signClass,
-  signedUah,
   unitCostUahPerKwh,
 } from './rollup'
 import { exportFileName, monthDetailSheet } from '../exportSheets'
@@ -95,10 +82,6 @@ export function EconomicsMonthlyView({ data, organizationID, prior, pvPlan, cape
       <MonthlyAiAnalysis totals={t} cycles={data.uze_cycles} organizationID={organizationID} month={data.month} />
       <div className="economics-month-grid2">
         <MonthlyFinance totals={t} />
-        <MonthlyWaterfall totals={t} />
-      </div>
-      <div className="economics-month-grid2">
-        <MonthlyTrend days={data.days} totals={t} />
         <MonthlyBalance totals={t} />
       </div>
       <MonthlyHeatmap margins={data.hourly_margin} />
@@ -190,189 +173,6 @@ function MiniCard({ label, value, note, good }: { label: string; value: string; 
       <span className={good ? 'economics-month-mini-value good' : 'economics-month-mini-value'}>{value}</span>
       <span className="economics-month-mini-note">{note}</span>
     </div>
-  )
-}
-
-// --- Waterfall ---
-
-export function MonthlyWaterfall({ totals, scope = 'month' }: { totals: EconomicsMonthlyTotals; scope?: PeriodScope }) {
-  const w = PERIOD_WORDS[scope]
-  const base = totals.baseline_cost_uah
-  // `value` is each step's signed effect on cost (negative = reduces
-  // cost). `display` derives its sign from `value` so a negative ESS
-  // effect renders "+…" (a cost increase) instead of a double minus.
-  const items = [
-    { name: 'база без проєкту', value: base, color: 'gray', display: formatUah(base) },
-    { name: 'СЕС самоспоживання', value: -totals.revenue_pv_self_uah, color: 'green', display: signedUah(-totals.revenue_pv_self_uah) },
-    { name: 'експорт СЕС', value: -totals.revenue_pv_export_uah, color: 'blue', display: signedUah(-totals.revenue_pv_export_uah) },
-    { name: 'ефект УЗЕ', value: -totals.ess_net_uah, color: 'violet', display: signedUah(-totals.ess_net_uah) },
-    { name: 'заряд і знос', value: totals.expense_total_uah, color: 'red', display: signedUah(totals.expense_total_uah) },
-    { name: 'факт. вартість', value: totals.actual_cost_uah, color: 'gray', display: formatUah(totals.actual_cost_uah) },
-  ]
-  const maxMagnitude = Math.max(base, ...items.map((i) => Math.abs(i.value)), 1)
-
-  return (
-    <section className="economics-card economics-month-section" aria-label="Водоспад економіки">
-      <div className="economics-month-section-head">
-        <h3 className="economics-month-section-title">Водоспад економіки</h3>
-        <span className="economics-month-muted">грн {w.per}</span>
-      </div>
-      <div className="economics-waterfall">
-        {items.map((item) => (
-          <div className="economics-wf-item" key={item.name}>
-            <div
-              className={`economics-wf-bar economics-wf-${item.color}`}
-              style={{ height: `${Math.max((Math.abs(item.value) / maxMagnitude) * 100, 6)}%` }}
-            />
-            <div className="economics-wf-num">{item.display}</div>
-            <div className="economics-wf-name">{item.name}</div>
-          </div>
-        ))}
-      </div>
-    </section>
-  )
-}
-
-// --- Daily energy trend ---
-
-type TrendRow = {
-  label: string
-  gridImport: number
-  essDischarge: number
-  pv: number
-  gridExport: number
-  essCharge: number
-  load: number
-}
-
-const trendNumberFmt = new Intl.NumberFormat('uk-UA', { minimumFractionDigits: 1, maximumFractionDigits: 1 })
-
-// Trend palette: generation/sources are shades of green (above the axis),
-// sinks/exports are shades of orange (below). Order matches the legend.
-const TREND_SERIES = [
-  { key: 'gridImport', name: 'з мережі', color: '#12b76a' },
-  { key: 'essDischarge', name: 'розряд УЗЕ', color: '#5fc993' },
-  { key: 'pv', name: 'виробіток СЕС', color: '#91d9aa' },
-  { key: 'gridExport', name: 'експорт у мережу', color: '#f97316' },
-  { key: 'essCharge', name: 'заряд УЗЕ', color: '#fb923c' },
-  { key: 'load', name: 'споживання', color: '#fdba74' },
-] as const
-
-type TrendTooltipProps = {
-  active?: boolean
-  label?: string | number
-  payload?: { payload: TrendRow }[]
-}
-
-function TrendTooltip({ active, payload, label }: TrendTooltipProps) {
-  if (!active || !payload?.length) return null
-  const row = payload[0].payload
-  return (
-    <div className="economics-trend-tip">
-      <div className="economics-trend-tip-day">{label}</div>
-      {TREND_SERIES.map((s) => (
-        <div className="economics-trend-tip-row" key={s.key}>
-          <i style={{ background: s.color }} />
-          <span>{s.name}</span>
-          <b>{trendNumberFmt.format(Math.abs(row[s.key]))}</b>
-        </div>
-      ))}
-    </div>
-  )
-}
-
-function MonthlyTrend({ days, totals }: { days: EconomicsMonthlyDay[]; totals: EconomicsMonthlyTotals }) {
-  const chrome = useChartChrome()
-  const rows = useMemo<TrendRow[]>(
-    () =>
-      days.map((d) => ({
-        label: formatDayOfMonth(d.date),
-        gridImport: d.grid_import_kwh / 1000,
-        essDischarge: d.ess_discharged_kwh / 1000,
-        pv: d.pv_kwh / 1000,
-        gridExport: -d.grid_export_kwh / 1000,
-        essCharge: -d.ess_charged_kwh / 1000,
-        load: -d.load_kwh / 1000,
-      })),
-    [days],
-  )
-
-  // PV fate: directly self-consumed vs exported + stored.
-  const pvSelf = totals.pv_to_load_kwh
-  const pvOther = totals.pv_to_grid_kwh + totals.pv_to_ess_kwh
-  const pvSelfShare = totals.pv_kwh > 0 ? pvSelf / totals.pv_kwh : 0
-  // Load coverage: served by PV+ESS vs taken from the grid. Consumption
-  // is the sum of the three load-serving flows (matching the boundary
-  // balance widget), not the raw load meter, so both blocks agree.
-  const loadFromRenewable = totals.pv_to_load_kwh + totals.ess_to_load_kwh
-  const loadFromGrid = totals.grid_to_load_kwh
-  const consumption = loadFromRenewable + loadFromGrid
-  const loadRenewableShare = consumption > 0 ? loadFromRenewable / consumption : 0
-
-  return (
-    <section className="economics-card economics-month-section" aria-label="Енергетичний тренд по днях">
-      <div className="economics-month-section-head">
-        <h3 className="economics-month-section-title">Енергетичний тренд по днях</h3>
-        <span className="economics-month-muted">МВт·год/день</span>
-      </div>
-      <div className="economics-trend-summary">
-        <div className="economics-trend-metric">
-          <div>
-            <strong>Вироблено СЕС: {formatMwhNumber(totals.pv_kwh)}</strong>
-            <span className="economics-trend-mwh">МВт·год</span>
-          </div>
-          <div className="economics-ratio-line">
-            <span>{formatPercent(pvSelfShare)}</span>
-            <div className="economics-ratio-bar">
-              <span style={{ width: `${pvSelfShare * 100}%`, background: '#12b76a' }} />
-              <span style={{ width: `${(1 - pvSelfShare) * 100}%`, background: '#91d9aa' }} />
-            </div>
-            <span>{formatPercent(1 - pvSelfShare)}</span>
-          </div>
-          <div className="economics-month-muted">спожито {formatMwh(pvSelf)} / експорт + заряд УЗЕ {formatMwh(pvOther)}</div>
-        </div>
-        <div className="economics-trend-metric">
-          <div>
-            <strong>Споживання об'єкта: {formatMwhNumber(consumption)}</strong>
-            <span className="economics-trend-mwh">МВт·год</span>
-          </div>
-          <div className="economics-ratio-line">
-            <span>{formatPercent(loadRenewableShare)}</span>
-            <div className="economics-ratio-bar">
-              <span style={{ width: `${loadRenewableShare * 100}%`, background: '#f97316' }} />
-              <span style={{ width: `${(1 - loadRenewableShare) * 100}%`, background: '#fdba74' }} />
-            </div>
-            <span>{formatPercent(1 - loadRenewableShare)}</span>
-          </div>
-          <div className="economics-month-muted">від СЕС+УЗЕ {formatMwh(loadFromRenewable)} / з мережі {formatMwh(loadFromGrid)}</div>
-        </div>
-      </div>
-      <div className="economics-month-chart">
-        <ResponsiveContainer width="100%" height={300}>
-          <BarChart data={rows} margin={{ top: 8, right: 8, bottom: 0, left: 0 }} stackOffset="sign" barCategoryGap="12%">
-            <CartesianGrid strokeDasharray="2 5" stroke={chrome.grid} vertical={false} />
-            <XAxis dataKey="label" tick={{ fontSize: 10, fill: chrome.tick }} interval={0} tickLine={false} axisLine={false} />
-            <YAxis tick={{ fontSize: 11, fill: chrome.axis }} width={40} tickLine={false} axisLine={false} />
-            <Tooltip content={<TrendTooltip />} cursor={{ fill: chrome.cursor }} />
-            <ReferenceLine y={0} stroke={chrome.zero} />
-            <Bar dataKey="pv" name="виробіток СЕС" stackId="pos" fill="#91d9aa" maxBarSize={28} shape={makeTrendCap('top', 'pv', TREND_POS_ORDER)} />
-            <Bar dataKey="essDischarge" name="розряд УЗЕ" stackId="pos" fill="#5fc993" maxBarSize={28} shape={makeTrendCap('top', 'essDischarge', TREND_POS_ORDER)} />
-            <Bar dataKey="gridImport" name="з мережі" stackId="pos" fill="#12b76a" maxBarSize={28} shape={makeTrendCap('top', 'gridImport', TREND_POS_ORDER)} />
-            <Bar dataKey="load" name="споживання" stackId="neg" fill="#fdba74" maxBarSize={28} shape={makeTrendCap('bottom', 'load', TREND_NEG_ORDER)} />
-            <Bar dataKey="essCharge" name="заряд УЗЕ" stackId="neg" fill="#fb923c" maxBarSize={28} shape={makeTrendCap('bottom', 'essCharge', TREND_NEG_ORDER)} />
-            <Bar dataKey="gridExport" name="експорт у мережу" stackId="neg" fill="#f97316" maxBarSize={28} shape={makeTrendCap('bottom', 'gridExport', TREND_NEG_ORDER)} />
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
-      <div className="economics-trend-legend">
-        {TREND_SERIES.map((s) => (
-          <span key={s.key}>
-            <i style={{ background: s.color }} />
-            {s.name}
-          </span>
-        ))}
-      </div>
-    </section>
   )
 }
 

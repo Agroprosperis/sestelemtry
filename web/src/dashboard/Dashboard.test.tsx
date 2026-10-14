@@ -78,7 +78,7 @@ describe('Dashboard', () => {
         <Dashboard />
       </AuthContext.Provider>,
     )
-    expect(screen.queryByRole('button', { name: 'Month' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Місяць' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Debug' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Сервіс' })).toBeNull()
     expect(screen.queryByRole('tablist', { name: 'Режим інтерфейсу' })).toBeNull()
@@ -87,7 +87,7 @@ describe('Dashboard', () => {
 
   it('keeps the full toolset outside the signed-in app', () => {
     render(<Dashboard />)
-    expect(screen.getAllByRole('button', { name: 'Month' }).length).toBeGreaterThan(0)
+    expect(screen.getAllByRole('button', { name: 'Місяць' }).length).toBeGreaterThan(0)
     expect(screen.getAllByRole('button', { name: 'Debug' }).length).toBeGreaterThan(0)
   })
 })

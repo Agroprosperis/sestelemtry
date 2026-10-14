@@ -15,8 +15,8 @@ type Props = {
   onDebugToggle?: () => void
 }
 
-// DashboardControls is the strip of interactive widgets that sits
-// above the right-hand charts column: range / period drive the charts.
+// DashboardControls is the full-width strip under the mode top bar:
+// range / period drive the whole page.
 // The object (organization) picker lives once, in the mode top bar —
 // it switches the whole page, not just this pane.
 export function DashboardControls({

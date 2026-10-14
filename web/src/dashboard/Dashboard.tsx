@@ -14,14 +14,6 @@ import { useRangeParams } from './hooks/useRangeParams'
 import { useRegistersWhenDebug } from './hooks/useRegistersWhenDebug'
 import { useUzeDayPlan } from './hooks/useUzeDayPlan'
 
-// RevenueChart sits below the fold for most users and pulls a sizable
-// recharts subgraph (AreaChart + gradients) that the energy chart
-// already reuses. Lazy-loading it keeps the initial paint small without
-// affecting the energy chart, which renders synchronously.
-const RevenueChart = lazy(() =>
-  import('./components/RevenueChart').then((mod) => ({ default: mod.RevenueChart })),
-)
-
 // ExportDialog is also below-the-fold (it only renders when the user
 // clicks "Експорт даних"); lazy import keeps its form + custom-export
 // fetch helpers out of the initial bundle.
@@ -32,10 +24,9 @@ const ExportDialog = lazy(() =>
 export function Dashboard() {
   const { organizationID, options, change: onOrganizationChange } = useOrganizationParam('analytics.day')
   const access = useAccess()
-  // Engineers get the day chart only; money stays with the roles that
-  // may read economics, and the service tools with administrators.
+  // Engineers get the day chart only; the service tools stay with
+  // administrators.
   const fullRange = access.can('analytics.full', organizationID)
-  const showRevenue = access.can('economics.read', organizationID)
   const canService = access.can('service', organizationID)
   const { preset, anchor, setPreset, setAnchor } = useRangeParams({ dayOnly: !fullRange })
   const [metricsAt, setMetricsAt] = useState<Date | null>(null)
@@ -99,6 +90,16 @@ export function Dashboard() {
         menu={serviceMenu}
       />
 
+      <DashboardControls
+        preset={preset}
+        onPresetChange={setPreset}
+        presetLocked={!fullRange}
+        anchor={anchor}
+        onAnchorChange={setAnchor}
+        debug={debug}
+        onDebugToggle={canService ? toggleDebug : undefined}
+      />
+
       {error && (
         <section className="error-banner" role="alert" aria-live="polite">
           Failed to load data: {error}
@@ -127,15 +128,6 @@ export function Dashboard() {
         />
 
         <div className="dashboard-charts">
-          <DashboardControls
-            preset={preset}
-            onPresetChange={setPreset}
-            presetLocked={!fullRange}
-            anchor={anchor}
-            onAnchorChange={setAnchor}
-            debug={debug}
-            onDebugToggle={canService ? toggleDebug : undefined}
-          />
           <WeatherCard
             organizationID={organizationID}
             anchor={anchor}
@@ -153,24 +145,6 @@ export function Dashboard() {
             pvForecastSeries={pvForecastSeries}
             aiPlan={aiPlan}
           />
-          {showRevenue && (
-            <Suspense
-              fallback={
-                <div className="chart-card">
-                  <div className="chart-wrap">
-                    <p className="chart-placeholder">Loading…</p>
-                  </div>
-                </div>
-              }
-            >
-              <RevenueChart
-                energySeries={energySeries}
-                damSeries={damSeries}
-                preset={preset}
-                loading={loading}
-              />
-            </Suspense>
-          )}
         </div>
       </div>
 

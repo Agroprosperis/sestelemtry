@@ -9,7 +9,6 @@ import { EconomicsHeader, type EconomicsRange } from './components/EconomicsHead
 import { EconomicsDayTop } from './components/EconomicsDayTop'
 import { EconomicsRecomputeModal } from './components/EconomicsRecomputeModal'
 import { EconomicsTable } from './components/EconomicsTable'
-import { EconomicsUzeCard } from './components/EconomicsUzeCard'
 import { EconomicsMonthlyView } from './monthly/EconomicsMonthlyView'
 import { EconomicsAnnualView } from './annual/EconomicsAnnualView'
 import { EconomicsPaybackView } from './payback/EconomicsPaybackView'
@@ -549,7 +548,6 @@ export function EconomicsPage() {
           ) : (
             <>
               <EconomicsDayTop totals={totals} rows={data.rows} tariffs={tariffs} pvPlan={pvPlanDay} />
-              <EconomicsUzeCard organizationID={organizationID} date={date} today={today()} />
               <EconomicsTable rows={data.rows} organizationID={organizationID} date={date} />
             </>
           )}

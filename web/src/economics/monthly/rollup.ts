@@ -5,22 +5,14 @@
 import type { EconomicsMonthlyMarginHour, EconomicsMonthlyTotals } from '../../api'
 import { formatKwh, formatKwhNumber, formatMwh, formatPercent, formatPrice, formatUah } from './format'
 
-// signedUah prints an explicit +/− prefix based on the value's sign,
-// using the absolute amount so the sign is never doubled (e.g. a
-// negative delta renders "−123 грн", a positive one "+123 грн").
-export function signedUah(delta: number): string {
-  const sign = delta < 0 ? '−' : '+'
-  return `${sign}${formatUah(Math.abs(delta))}`
-}
-
 // signClass tints a currency cell green/red by sign so a loss-making
 // period (negative EBITDA / effect) is never shown in the "good" colour.
 export function signClass(v: number): string {
   return v >= 0 ? 'cell-positive' : 'cell-negative'
 }
 
-// PeriodScope lets the shared rollup blocks (KPIs / Finance / Waterfall /
-// Balance / narrative) read identically for the month and year views,
+// PeriodScope lets the shared rollup blocks (KPIs / Finance / Balance /
+// narrative) read identically for the month and year views,
 // swapping only the period wording.
 export type PeriodScope = 'month' | 'year' | 'period'
 

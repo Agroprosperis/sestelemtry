@@ -46,7 +46,7 @@ describe('access in the shell', () => {
       ),
     )
     const tabs = screen.getAllByRole('tab').map((t) => t.textContent)
-    expect(tabs).toEqual(['Аналітика', 'Економіка'])
+    expect(tabs).toEqual(['Система', 'Економіка'])
     expect(screen.getByRole('button', { name: /Олена/ })).toBeInTheDocument()
   })
 

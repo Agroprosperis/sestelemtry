@@ -1,9 +1,9 @@
 import type { RangePreset } from '../range'
 
 const PRESETS: { id: RangePreset; label: string }[] = [
-  { id: 'day', label: 'Day' },
-  { id: 'month', label: 'Month' },
-  { id: 'year', label: 'Year' },
+  { id: 'day', label: 'День' },
+  { id: 'month', label: 'Місяць' },
+  { id: 'year', label: 'Рік' },
 ]
 
 type Props = {
@@ -13,7 +13,7 @@ type Props = {
 
 export function RangeSwitch({ value, onChange }: Props) {
   return (
-    <div className="range-switch" role="group" aria-label="Range preset">
+    <div className="range-switch" role="group" aria-label="Період">
       {PRESETS.map((p) => {
         const active = value === p.id
         return (

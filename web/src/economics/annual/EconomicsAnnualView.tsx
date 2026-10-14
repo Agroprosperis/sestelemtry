@@ -1,14 +1,4 @@
 import { useMemo } from 'react'
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  ReferenceLine,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts'
 import type {
   EconomicsAnnualMonthMargin,
   EconomicsAnnualMonthRollup,
@@ -18,13 +8,11 @@ import type {
 } from '../../api'
 import { formatOrganizationLabel } from '../../dashboard/config'
 import { useChartChrome } from '../../theme/useChartChrome'
-import { makeTrendCap, TREND_NEG_ORDER, TREND_POS_ORDER } from '../trendBarCap'
 import {
   AiLead,
   EssDataQualityNote,
   MonthlyBalance,
   MonthlyFinance,
-  MonthlyWaterfall,
   OptimumInfo,
 } from '../monthly/EconomicsMonthlyView'
 import { EconomicsTopSection, type EconomicsPvPlan } from '../components/EconomicsTopSection'
@@ -50,8 +38,6 @@ import {
   formatMonthShort,
   formatMonthTitle,
   formatMwh,
-  formatMwhNumber,
-  formatPercent,
   formatPercentNumber,
   formatPeriodTitle,
   formatPrice,
@@ -112,7 +98,7 @@ export function EconomicsAnnualView({ data, organizationID, onSelectMonth, prior
       <QuarterCards quarters={data.quarters} />
       <div className="economics-month-grid2">
         <MonthlyFinance totals={t} scope={scope} />
-        <MonthlyWaterfall totals={t} scope={scope} />
+        <MonthlyBalance totals={t} scope={scope} />
       </div>
       <AnnualAiAnalysis
         totals={t}
@@ -121,10 +107,6 @@ export function EconomicsAnnualView({ data, organizationID, onSelectMonth, prior
         periodTitle={periodTitle}
         scope={scope}
       />
-      <div className="economics-month-grid2">
-        <AnnualTrend months={data.months} totals={t} onSelectMonth={onSelectMonth} />
-        <MonthlyBalance totals={t} scope={scope} />
-      </div>
       <MonthHourHeatmap margins={data.monthly_margin} />
       <AnnualMonthlyTable
         months={withData}
@@ -161,173 +143,6 @@ function QuarterCards({ quarters }: { quarters: EconomicsAnnualQuarter[] }) {
           </article>
         )
       })}
-    </section>
-  )
-}
-
-// --- Annual energy trend (12 month stacked bars, SPEC §3.6) ---
-
-type AnnualTrendRow = {
-  month: string
-  label: string
-  hasData: boolean
-  gridImport: number
-  essDischarge: number
-  pv: number
-  gridExport: number
-  essCharge: number
-  load: number
-}
-
-const trendNumberFmt = new Intl.NumberFormat('uk-UA', { minimumFractionDigits: 1, maximumFractionDigits: 1 })
-
-const TREND_SERIES = [
-  { key: 'gridImport', name: 'з мережі', color: '#12b76a' },
-  { key: 'essDischarge', name: 'розряд УЗЕ', color: '#5fc993' },
-  { key: 'pv', name: 'виробіток СЕС', color: '#91d9aa' },
-  { key: 'gridExport', name: 'експорт у мережу', color: '#f97316' },
-  { key: 'essCharge', name: 'заряд УЗЕ', color: '#fb923c' },
-  { key: 'load', name: 'споживання', color: '#fdba74' },
-] as const
-
-type TrendTooltipProps = {
-  active?: boolean
-  payload?: { payload: AnnualTrendRow }[]
-}
-
-function TrendTooltip({ active, payload }: TrendTooltipProps) {
-  if (!active || !payload?.length) return null
-  const row = payload[0].payload
-  return (
-    <div className="economics-trend-tip">
-      <div className="economics-trend-tip-day">{formatMonthTitle(row.month)}</div>
-      {TREND_SERIES.map((s) => (
-        <div className="economics-trend-tip-row" key={s.key}>
-          <i style={{ background: s.color }} />
-          <span>{s.name}</span>
-          <b>{trendNumberFmt.format(Math.abs(row[s.key]))}</b>
-        </div>
-      ))}
-      {row.hasData ? <div className="economics-month-muted">Натисніть, щоб відкрити місяць</div> : null}
-    </div>
-  )
-}
-
-// chartClickState is the loose shape recharts hands the click callback;
-// activePayload[0].payload is the row of the clicked category.
-type ChartClickState = { activePayload?: Array<{ payload?: AnnualTrendRow }> }
-
-function AnnualTrend({
-  months,
-  totals,
-  onSelectMonth,
-}: {
-  months: EconomicsAnnualMonthRollup[]
-  totals: EconomicsMonthlyTotals
-  onSelectMonth: (month: string) => void
-}) {
-  const chrome = useChartChrome()
-  const rows = useMemo<AnnualTrendRow[]>(
-    () =>
-      months.map((m) => ({
-        month: m.month,
-        label: formatMonthShort(m.month),
-        hasData: m.totals.hours_with_data > 0,
-        gridImport: m.totals.grid_import_kwh / 1000,
-        essDischarge: m.totals.ess_discharged_kwh / 1000,
-        pv: m.totals.pv_kwh / 1000,
-        gridExport: -m.totals.grid_export_kwh / 1000,
-        essCharge: -m.totals.ess_charged_kwh / 1000,
-        load: -m.totals.load_kwh / 1000,
-      })),
-    [months],
-  )
-
-  const pvSelf = totals.pv_to_load_kwh
-  const pvOther = totals.pv_to_grid_kwh + totals.pv_to_ess_kwh
-  const pvSelfShare = totals.pv_kwh > 0 ? pvSelf / totals.pv_kwh : 0
-  const loadFromRenewable = totals.pv_to_load_kwh + totals.ess_to_load_kwh
-  const loadFromGrid = totals.grid_to_load_kwh
-  const consumption = loadFromRenewable + loadFromGrid
-  const loadRenewableShare = consumption > 0 ? loadFromRenewable / consumption : 0
-
-  // recharts types the click arg as its internal MouseHandlerDataParam;
-  // we only need activePayload[0].payload, so read it through a cast.
-  const handleClick = (state: unknown) => {
-    const row = (state as ChartClickState | undefined)?.activePayload?.[0]?.payload
-    if (row?.hasData) onSelectMonth(row.month)
-  }
-
-  return (
-    <section className="economics-card economics-month-section" aria-label="Енергетичний тренд по місяцях">
-      <div className="economics-month-section-head">
-        <h3 className="economics-month-section-title">Енергетичний тренд по місяцях</h3>
-        <span className="economics-month-muted">МВт·год/місяць</span>
-      </div>
-      <div className="economics-trend-summary">
-        <div className="economics-trend-metric">
-          <div>
-            <strong>Вироблено СЕС: {formatMwhNumber(totals.pv_kwh)}</strong>
-            <span className="economics-trend-mwh">МВт·год</span>
-          </div>
-          <div className="economics-ratio-line">
-            <span>{formatPercent(pvSelfShare)}</span>
-            <div className="economics-ratio-bar">
-              <span style={{ width: `${pvSelfShare * 100}%`, background: '#12b76a' }} />
-              <span style={{ width: `${(1 - pvSelfShare) * 100}%`, background: '#91d9aa' }} />
-            </div>
-            <span>{formatPercent(1 - pvSelfShare)}</span>
-          </div>
-          <div className="economics-month-muted">спожито {formatMwh(pvSelf)} / експорт + заряд УЗЕ {formatMwh(pvOther)}</div>
-        </div>
-        <div className="economics-trend-metric">
-          <div>
-            <strong>Споживання об'єкта: {formatMwhNumber(consumption)}</strong>
-            <span className="economics-trend-mwh">МВт·год</span>
-          </div>
-          <div className="economics-ratio-line">
-            <span>{formatPercent(loadRenewableShare)}</span>
-            <div className="economics-ratio-bar">
-              <span style={{ width: `${loadRenewableShare * 100}%`, background: '#f97316' }} />
-              <span style={{ width: `${(1 - loadRenewableShare) * 100}%`, background: '#fdba74' }} />
-            </div>
-            <span>{formatPercent(1 - loadRenewableShare)}</span>
-          </div>
-          <div className="economics-month-muted">від СЕС+УЗЕ {formatMwh(loadFromRenewable)} / з мережі {formatMwh(loadFromGrid)}</div>
-        </div>
-      </div>
-      <div className="economics-month-chart">
-        <ResponsiveContainer width="100%" height={300}>
-          <BarChart
-            data={rows}
-            margin={{ top: 8, right: 8, bottom: 0, left: 0 }}
-            stackOffset="sign"
-            barCategoryGap="18%"
-            onClick={handleClick}
-            style={{ cursor: 'pointer' }}
-          >
-            <CartesianGrid strokeDasharray="2 5" stroke={chrome.grid} vertical={false} />
-            <XAxis dataKey="label" tick={{ fontSize: 10, fill: chrome.tick }} interval={0} tickLine={false} axisLine={false} />
-            <YAxis tick={{ fontSize: 11, fill: chrome.axis }} width={40} tickLine={false} axisLine={false} />
-            <Tooltip content={<TrendTooltip />} cursor={{ fill: chrome.cursor }} />
-            <ReferenceLine y={0} stroke={chrome.zero} />
-            <Bar dataKey="pv" name="виробіток СЕС" stackId="pos" fill="#91d9aa" maxBarSize={36} shape={makeTrendCap('top', 'pv', TREND_POS_ORDER)} />
-            <Bar dataKey="essDischarge" name="розряд УЗЕ" stackId="pos" fill="#5fc993" maxBarSize={36} shape={makeTrendCap('top', 'essDischarge', TREND_POS_ORDER)} />
-            <Bar dataKey="gridImport" name="з мережі" stackId="pos" fill="#12b76a" maxBarSize={36} shape={makeTrendCap('top', 'gridImport', TREND_POS_ORDER)} />
-            <Bar dataKey="load" name="споживання" stackId="neg" fill="#fdba74" maxBarSize={36} shape={makeTrendCap('bottom', 'load', TREND_NEG_ORDER)} />
-            <Bar dataKey="essCharge" name="заряд УЗЕ" stackId="neg" fill="#fb923c" maxBarSize={36} shape={makeTrendCap('bottom', 'essCharge', TREND_NEG_ORDER)} />
-            <Bar dataKey="gridExport" name="експорт у мережу" stackId="neg" fill="#f97316" maxBarSize={36} shape={makeTrendCap('bottom', 'gridExport', TREND_NEG_ORDER)} />
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
-      <div className="economics-trend-legend">
-        {TREND_SERIES.map((s) => (
-          <span key={s.key}>
-            <i style={{ background: s.color }} />
-            {s.name}
-          </span>
-        ))}
-      </div>
     </section>
   )
 }

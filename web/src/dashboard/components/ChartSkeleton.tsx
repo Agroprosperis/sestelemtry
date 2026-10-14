@@ -3,7 +3,7 @@ import type { RangePreset } from '../range'
 type Props = {
   preset: RangePreset
   // shape overrides the bar/line decision; useful when a chart is always
-  // line-shaped (e.g. RevenueChart) regardless of the active preset.
+  // line-shaped regardless of the active preset.
   shape?: 'bars' | 'line'
 }
 

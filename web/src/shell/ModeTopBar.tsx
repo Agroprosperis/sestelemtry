@@ -43,7 +43,7 @@ type Props = {
 const FLEET_POLL_MS = 60_000
 
 const MODES: { mode: Exclude<ConsoleMode, 'none'>; view: 'dashboard' | 'economics' | 'control'; label: string }[] = [
-  { mode: 'analytics', view: 'dashboard', label: 'Аналітика' },
+  { mode: 'analytics', view: 'dashboard', label: 'Система' },
   { mode: 'economics', view: 'economics', label: 'Економіка' },
   { mode: 'control', view: 'control', label: 'Керування' },
 ]
