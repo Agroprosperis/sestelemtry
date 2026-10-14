@@ -13,6 +13,9 @@ config.pe-single.yaml
 # Dependencies (npx also drops a bare node_modules/ at the repo root)
 node_modules/
 
+# Database dumps
+*.dump
+
 # Logs and temp files
 *.log
 tmp/
