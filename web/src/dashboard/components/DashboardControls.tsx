@@ -1,36 +1,36 @@
 import { Bug } from '@phosphor-icons/react'
 import type { RangePreset } from '../range'
 import { PeriodPicker } from './PeriodPicker'
+import { RangeSwitch } from './RangeSwitch'
 
 type Props = {
-  title: string
-  titleId?: string
   preset: RangePreset
+  onPresetChange: (next: RangePreset) => void
+  // presetLocked hides the Day/Month/Year switch for day-chart roles.
+  presetLocked?: boolean
   anchor: Date
   onAnchorChange: (next: Date) => void
-  debug?: boolean
+  debug: boolean
   // Without a handler the debug toggle is not offered.
   onDebugToggle?: () => void
 }
 
-// DashboardControls heads one period block of the Система page: the
-// block's name on the left, its period picker (and, on the day block,
-// the debug toggle) on the right. The object picker lives once, in the
-// mode top bar — it switches the whole page, not just one block.
+// DashboardControls is the full-width strip under the mode top bar:
+// range / period drive the whole page.
+// The object (organization) picker lives once, in the mode top bar —
+// it switches the whole page, not just this pane.
 export function DashboardControls({
-  title,
-  titleId,
   preset,
+  onPresetChange,
+  presetLocked = false,
   anchor,
   onAnchorChange,
-  debug = false,
+  debug,
   onDebugToggle,
 }: Props) {
   return (
     <div className="dashboard-controls">
-      <h2 id={titleId} className="dashboard-period-title">
-        {title}
-      </h2>
+      {!presetLocked && <RangeSwitch value={preset} onChange={onPresetChange} />}
       <PeriodPicker preset={preset} anchor={anchor} onChange={onAnchorChange} />
       {onDebugToggle && (
       <button

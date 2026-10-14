@@ -78,9 +78,7 @@ describe('Dashboard', () => {
         <Dashboard />
       </AuthContext.Provider>,
     )
-    expect(screen.getByRole('heading', { name: 'День' })).toBeInTheDocument()
-    expect(screen.queryByRole('heading', { name: 'Місяць' })).toBeNull()
-    expect(screen.queryByRole('heading', { name: 'Рік' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Місяць' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Debug' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Сервіс' })).toBeNull()
     expect(screen.queryByRole('tablist', { name: 'Режим інтерфейсу' })).toBeNull()
@@ -89,8 +87,7 @@ describe('Dashboard', () => {
 
   it('keeps the full toolset outside the signed-in app', () => {
     render(<Dashboard />)
-    const blocks = screen.getAllByRole('heading', { level: 2, name: /^(День|Місяць|Рік)$/ })
-    expect(blocks.map((h) => h.textContent)).toEqual(['День', 'Місяць', 'Рік'])
+    expect(screen.getAllByRole('button', { name: 'Місяць' }).length).toBeGreaterThan(0)
     expect(screen.getAllByRole('button', { name: 'Debug' }).length).toBeGreaterThan(0)
   })
 })

@@ -226,11 +226,8 @@ export function useDashboardData(input: {
   preset: RangePreset
   anchor: Date
   metricsAt?: Date | null
-  // live: false skips the /current poll for a block that shows no live
-  // cards (the month and year blocks of the Система page).
-  live?: boolean
 }): DashboardData {
-  const { organizationID, preset, anchor, metricsAt, live = true } = input
+  const { organizationID, preset, anchor, metricsAt } = input
   const anchorTime = anchor.getTime()
   const metricsAtTime = metricsAt ? metricsAt.getTime() : null
   const [config, setConfig] = useState<DashboardConfig>(FALLBACK_DASHBOARD_CONFIG)
@@ -341,7 +338,6 @@ export function useDashboardData(input: {
   // tab. A historical snapshot (metricsAt != null) is fetched once and not
   // polled, since the past is immutable.
   useEffect(() => {
-    if (!live) return
     let cancelled = false
     let inflight: AbortController | null = null
     let timer: number | null = null
@@ -388,7 +384,7 @@ export function useDashboardData(input: {
       if (timer !== null) window.clearInterval(timer)
       document.removeEventListener('visibilitychange', onVisibilityChange)
     }
-  }, [organizationID, metricsAtTime, live])
+  }, [organizationID, metricsAtTime])
 
   // Charts, summary, and DAM prices fetch on mount, whenever the user
   // changes preset or anchor, AND every DASHBOARD_CHART_REFRESH_MS so a

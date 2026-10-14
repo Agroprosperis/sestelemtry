@@ -57,21 +57,16 @@ export function MetricsPanel({
   pvForecastLoading,
   pvForecastCoverage,
 }: Props) {
-  // The live snapshot and the lifetime counters don't depend on the
-  // period, so only the day block carries them.
-  const isDay = preset === 'day'
   return (
     <div className="metrics-panel-stack">
-      {isDay && (
-        <CurrentSnapshotNarrative
-          liveAllocation={liveAllocation}
-          loading={loading}
-          debug={debug}
-          registers={registers}
-          metricsAt={metricsAt}
-          onMetricsAtChange={onMetricsAtChange}
-        />
-      )}
+      <CurrentSnapshotNarrative
+        liveAllocation={liveAllocation}
+        loading={loading}
+        debug={debug}
+        registers={registers}
+        metricsAt={metricsAt}
+        onMetricsAtChange={onMetricsAtChange}
+      />
       <DailySummaryNarrative
         flows={flows}
         preset={preset}
@@ -85,7 +80,7 @@ export function MetricsPanel({
         flowsLoaded={flowsLoaded}
         flowsGap={flowsGap}
       />
-      {isDay && (
+      {preset === 'day' && (
         <BatteryDayNarrative
           flows={flows}
           current={current}
@@ -97,14 +92,12 @@ export function MetricsPanel({
           flowsLoaded={flowsLoaded}
         />
       )}
-      {isDay && (
-        <AccumulatedSnapshotNarrative
-          current={current}
-          loading={loading}
-          debug={debug}
-          registers={registers}
-        />
-      )}
+      <AccumulatedSnapshotNarrative
+        current={current}
+        loading={loading}
+        debug={debug}
+        registers={registers}
+      />
     </div>
   )
 }
