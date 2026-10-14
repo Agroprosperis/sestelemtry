@@ -257,7 +257,12 @@ function CapexPaybackTooltip({ active, payload, staged }: CapexPaybackTooltipPro
 type EffectGrain = 'month' | 'quarter' | 'year'
 
 type EffectRow = {
+  // key is unique per bucket and drives the X axis: month labels repeat
+  // every year, and a category axis keyed by them resolves the tooltip
+  // to the first year carrying that label.
+  key: string
   label: string
+  title: string
   periodFact: number | null
   periodForecast: number | null
   // cum is one continuous fact+forecast cumulative line (per the final
@@ -275,7 +280,7 @@ function EffectTooltip({ active, payload }: EffectTooltipProps) {
   const row = payload[0].payload
   return (
     <div className="economics-trend-tip">
-      <div className="economics-trend-tip-day">{row.label}</div>
+      <div className="economics-trend-tip-day">{row.title}</div>
       {row.periodFact !== null ? (
         <div className="economics-trend-tip-row">
           <i style={{ background: '#60a5fa' }} />
@@ -418,21 +423,39 @@ export function EconomicsPaybackView({ data, capexUah, capexSteps, plannedPaybac
     }
     if (entries.length === 0) return []
 
-    type Bucket = { label: string; order: string; fact: number; forecast: number; hasFact: boolean; hasForecast: boolean }
+    type Bucket = {
+      label: string
+      title: string
+      order: string
+      fact: number
+      forecast: number
+      hasFact: boolean
+      hasForecast: boolean
+    }
     const map = new Map<string, Bucket>()
     for (const e of entries) {
       const y = e.month.slice(0, 4)
       const key =
         grain === 'month' ? e.month : grain === 'quarter' ? `${y}-Q${Math.ceil(Number(e.month.slice(5, 7)) / 3)}` : y
+      const quarterTitle = `${Q_ROMAN[Math.ceil(Number(e.month.slice(5, 7)) / 3) - 1]} кв. ${y}`
       const label =
         grain === 'month'
           ? e.month.slice(5, 7) === '01' || e.month === entries[0].month
             ? `${formatMonthShort(e.month)} ${y}`
             : formatMonthShort(e.month)
           : grain === 'quarter'
-            ? `${Q_ROMAN[Math.ceil(Number(e.month.slice(5, 7)) / 3) - 1]} кв. ${y}`
+            ? quarterTitle
             : y
-      const cur = map.get(key) ?? { label, order: key, fact: 0, forecast: 0, hasFact: false, hasForecast: false }
+      const title = grain === 'month' ? formatMonthTitle(e.month) : grain === 'quarter' ? quarterTitle : y
+      const cur = map.get(key) ?? {
+        label,
+        title,
+        order: key,
+        fact: 0,
+        forecast: 0,
+        hasFact: false,
+        hasForecast: false,
+      }
       if (e.forecast) {
         cur.forecast += e.value
         cur.hasForecast = true
@@ -448,13 +471,16 @@ export function EconomicsPaybackView({ data, capexUah, capexSteps, plannedPaybac
     return buckets.map((b) => {
       acc += b.fact + b.forecast
       return {
+        key: b.order,
         label: b.label,
+        title: b.title,
         periodFact: b.hasFact ? b.fact : null,
         periodForecast: b.hasForecast ? b.forecast : null,
         cum: acc,
       }
     })
   }, [monthsWithData, lastFactMonthKey, paidOff, monthlyPace, seasonalFactors, grain, prior])
+  const effectLabels = useMemo(() => new Map(effectRows.map((r) => [r.key, r.label])), [effectRows])
 
   const periodValues = effectRows.map((r) => (r.periodFact ?? 0) + (r.periodForecast ?? 0))
   const cumValues = effectRows.map((r) => r.cum)
@@ -758,7 +784,8 @@ export function EconomicsPaybackView({ data, capexUah, capexSteps, plannedPaybac
             <ComposedChart data={effectRows} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
               <CartesianGrid strokeDasharray="2 5" stroke={chrome.grid} vertical={false} />
               <XAxis
-                dataKey="label"
+                dataKey="key"
+                tickFormatter={(key: string) => effectLabels.get(key) ?? key}
                 tick={{ fontSize: 11, fill: chrome.tick }}
                 tickLine={false}
                 axisLine={false}
