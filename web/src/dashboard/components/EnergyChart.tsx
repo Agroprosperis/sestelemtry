@@ -321,10 +321,12 @@ export function EnergyChart({
     return idx > 0 ? s.slice(0, idx) : s
   }, [])
 
+  const summaryBlock = <EnergySummary summary={summary} loading={loading} />
+
   return (
     <div className="chart-card">
       <h2>{planOverlay?.title ?? 'Energy Trend'}</h2>
-      <EnergySummary summary={summary} loading={loading} />
+      {preset === 'day' && summaryBlock}
       <div className="chart-wrap">
         {loading ? (
           <ChartSkeleton preset={preset} />
@@ -560,6 +562,7 @@ export function EnergyChart({
           </ResponsiveContainer>
         )}
       </div>
+      {preset !== 'day' && summaryBlock}
     </div>
   )
 }
