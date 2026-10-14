@@ -31,7 +31,14 @@ export function DashboardControls({
   return (
     <div className="dashboard-controls">
       {!presetLocked && <RangeSwitch value={preset} onChange={onPresetChange} />}
-      <PeriodPicker preset={preset} anchor={anchor} onChange={onAnchorChange} />
+      {/* Without the switch the picker is the strip's first item and sits
+          at its left edge, so «Сьогодні» goes after it. */}
+      <PeriodPicker
+        preset={preset}
+        anchor={anchor}
+        onChange={onAnchorChange}
+        todaySide={presetLocked ? 'end' : 'start'}
+      />
       {onDebugToggle && (
       <button
         type="button"

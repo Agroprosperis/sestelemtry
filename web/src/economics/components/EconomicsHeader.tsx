@@ -265,6 +265,7 @@ export function EconomicsHeader({
             preset={range === 'portfolio' ? (portfolioScope === 'year' ? 'year' : 'month') : range}
             anchor={parseDateString(date)}
             onChange={(next) => onDateChange(formatDateString(next))}
+            todaySide="end"
           />
         )}
       </div>

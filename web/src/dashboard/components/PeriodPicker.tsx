@@ -6,6 +6,11 @@ type Props = {
   preset: RangePreset
   anchor: Date
   onChange: (next: Date) => void
+  // todaySide puts the «Сьогодні» button on the side away from the bar's
+  // anchored edge, so its appearing does not shift the arrows: 'start'
+  // for a picker pinned to the right of its bar, 'end' for one pinned
+  // to the left.
+  todaySide?: 'start' | 'end'
 }
 
 // MIN_REASONABLE_YEAR is the floor we use to reject mid-edit garbage
@@ -93,7 +98,7 @@ function DateSegmentInput({
   )
 }
 
-export function PeriodPicker({ preset, anchor, onChange }: Props) {
+export function PeriodPicker({ preset, anchor, onChange, todaySide = 'start' }: Props) {
   const id = useId()
   const now = useMemo(() => new Date(), [])
   const todayMax = useMemo(() => toDateInputValue(now), [now])
@@ -158,8 +163,15 @@ export function PeriodPicker({ preset, anchor, onChange }: Props) {
     )
   }
 
+  const todayButton = isAtCurrent ? null : (
+    <button type="button" className="period-today" onClick={() => onChange(startOfPeriod(preset, new Date()))}>
+      Сьогодні
+    </button>
+  )
+
   return (
     <div className="period-picker-wrap">
+      {todaySide === 'start' && todayButton}
       <div className="period-picker" role="group" aria-label="Period">
         <button type="button" className="period-nav" onClick={() => shift(-1)} aria-label="Previous period">
           ‹
@@ -177,15 +189,7 @@ export function PeriodPicker({ preset, anchor, onChange }: Props) {
           ›
         </button>
       </div>
-      {!isAtCurrent && (
-        <button
-          type="button"
-          className="period-today"
-          onClick={() => onChange(startOfPeriod(preset, new Date()))}
-        >
-          Сьогодні
-        </button>
-      )}
+      {todaySide === 'end' && todayButton}
     </div>
   )
 }
