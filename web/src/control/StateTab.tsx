@@ -68,7 +68,6 @@ export function StateTab({ site, status }: Props) {
   const health = status?.health
 
   return (
-    <div className="ctl-state-stack">
     <div className="ctl-state-grid">
       <div className="ctl-state-left">
         <div className="ctl-shadow-note">
@@ -216,18 +215,16 @@ export function StateTab({ site, status }: Props) {
             annotation,
           }}
         />
-      </div>
-    </div>
 
-    {/* Full-width diagnostics under the grid: checks + inverter fleet.
-        No health snapshot → nothing rendered (spec §8.2: не малювати
-        «0 інверторів» і порожню УЗЕ як OK). */}
-    {health && health.checks && health.checks.length > 0 && (
-      <HealthChecksCard checks={health.checks} alarms={health.alarms?.words} />
-    )}
-    {health?.inverters && health.inverters.length > 0 && (
-      <InvertersCard inverters={health.inverters} />
-    )}
+        {/* No health snapshot → nothing rendered (spec §8.2: не малювати
+            «0 інверторів» і порожню УЗЕ як OK). */}
+        {health && health.checks && health.checks.length > 0 && (
+          <HealthChecksCard checks={health.checks} alarms={health.alarms?.words} />
+        )}
+        {health?.inverters && health.inverters.length > 0 && (
+          <InvertersCard inverters={health.inverters} />
+        )}
+      </div>
     </div>
   )
 }

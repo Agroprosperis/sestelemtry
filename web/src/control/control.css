@@ -139,11 +139,6 @@
 
 /* --- layout of the «Стан» tab --- */
 
-.ctl-state-stack {
-  display: grid;
-  gap: 20px;
-}
-
 /* Every nested track is minmax(0, …): plain 1fr/auto floors at the
    content's min-content (nowrap numbers, chart summary), which inflated
    the columns until they overlapped and overflowed the viewport. */
