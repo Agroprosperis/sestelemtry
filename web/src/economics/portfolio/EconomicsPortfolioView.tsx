@@ -4,6 +4,7 @@ import { formatOrganizationLabel } from '../../dashboard/config'
 import { OptimumInfo } from '../monthly/EconomicsMonthlyView'
 import { formatMonthTitle, formatMwh, formatMwhNumber, formatPercent, formatPeriodTitle, formatUah, formatYearTitle } from '../monthly/format'
 import { useEconomicsPortfolioData } from '../useEconomicsPortfolioData'
+import { portfolioRoce, ROCE_TIP, siteRoce } from './roce'
 
 export type PortfolioScope = 'month' | 'year' | 'period'
 
@@ -271,6 +272,10 @@ function PortfolioBody({
           <thead>
             <tr>
               <th>Об'єкт</th>
+              <th>
+                ROCE (річний)
+                <OptimumInfo tip={ROCE_TIP} />
+              </th>
               <th>EBITDA</th>
               <th>Резерв графіка</th>
               <th>
@@ -296,6 +301,7 @@ function PortfolioBody({
                   </td>
                   {s.has_data ? (
                     <>
+                      <td>{formatPercent(siteRoce(s))}</td>
                       <td>{formatUah(s.ebitda_uah)}</td>
                       <td>{formatUah(s.schedule_reserve_uah)}</td>
                       <td>{formatUah(s.bess_reserve_uah)}</td>
@@ -304,13 +310,14 @@ function PortfolioBody({
                       <td>{formatPercent(captured)}</td>
                     </>
                   ) : (
-                    <td colSpan={6} className="economics-portfolio-empty-cell">немає даних</td>
+                    <td colSpan={7} className="economics-portfolio-empty-cell">немає даних</td>
                   )}
                 </tr>
               )
             })}
             <tr className="economics-table-summary-row">
               <td className="economics-month-table-left">Портфель</td>
+              <td>{formatPercent(portfolioRoce(sites))}</td>
               <td>{formatUah(totals.ebitda_uah)}</td>
               <td>{formatUah(totals.schedule_reserve_uah)}</td>
               <td>{formatUah(totals.bess_reserve_uah)}</td>

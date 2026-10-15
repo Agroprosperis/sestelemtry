@@ -1097,6 +1097,11 @@ export type EconomicsPortfolioSite = {
   grid_import_kwh: number
   grid_export_kwh: number
   ess_net_uah: number
+  // Invested capital at the end of the period (0 = none in the tariffs)
+  // and the months it is annualised over — the ROCE inputs. On the
+  // totals row capex_uah sums the objects that have data and CAPEX.
+  capex_uah?: number
+  months_with_data?: number
 }
 
 // EconomicsPortfolioTrendMonth is one month of the portfolio energy trend

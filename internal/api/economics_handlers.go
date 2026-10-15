@@ -1,8 +1,10 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"sort"
 	"strings"
@@ -1034,6 +1036,12 @@ type EconomicsPortfolioSite struct {
 	GridImportKwh      float64 `json:"grid_import_kwh"`
 	GridExportKwh      float64 `json:"grid_export_kwh"`
 	EssNetUah          float64 `json:"ess_net_uah"`
+	// CapexUah is the invested capital standing at the end of the
+	// period (0 when the tariffs carry none); with MonthsWithData it
+	// gives the object's ROCE the way the economics page's card does.
+	// On the total row it is the sum over the objects that have both.
+	CapexUah       float64 `json:"capex_uah"`
+	MonthsWithData int     `json:"months_with_data"`
 }
 
 // EconomicsPortfolioTrendMonth is one month of the portfolio energy trend
@@ -1125,6 +1133,54 @@ func portfolioSiteFromTotals(id, name string, t economics.MonthlyTotals, hasData
 	}
 }
 
+// epochEffectiveFrom is the catch-all tariff version the backend seeds
+// from the tariff form.
+const epochEffectiveFrom = "1970-01-01"
+
+// resolveCapexUah is the capital standing at the end of lastMonth
+// (YYYY-MM), resolved like the economics page's ROCE card
+// (web/src/economics/payback.ts capexResolver): the latest dated
+// version with CAPEX that takes effect by the end of that month, the
+// first such version for earlier months, and the tariff form's value
+// when no version carries CAPEX. The 1970 catch-all is a copy of the
+// form, not a dated stage. versions are ascending by effective date.
+func resolveCapexUah(versions []TariffScheduleVersion, formCapexUah float64, lastMonth string) float64 {
+	var funded []TariffScheduleVersion
+	for _, v := range versions {
+		if v.EffectiveFrom != epochEffectiveFrom && len(v.EffectiveFrom) == len("2006-01-02") && v.Tariffs.CapexUah > 0 {
+			funded = append(funded, v)
+		}
+	}
+	if len(funded) == 0 {
+		return math.Max(formCapexUah, 0)
+	}
+	monthEnd := lastMonth + "-31"
+	value := funded[0].Tariffs.CapexUah
+	for _, v := range funded {
+		if v.EffectiveFrom > monthEnd {
+			break
+		}
+		value = v.Tariffs.CapexUah
+	}
+	return value
+}
+
+// portfolioCapexUah reads an object's tariffs for resolveCapexUah. A
+// failed read leaves the object without ROCE rather than failing the
+// whole rollup.
+func (h *Handlers) portfolioCapexUah(ctx context.Context, orgID, lastMonth string) float64 {
+	versions, err := h.store.GetTariffScheduleVersions(ctx, orgID)
+	if err != nil {
+		h.log.Warn("api_economics_portfolio_capex", "organization_id", orgID, "err", err)
+		versions = nil
+	}
+	var form float64
+	if t, ok, err := h.store.GetOrgTariffs(ctx, orgID); err == nil && ok {
+		form = t.CapexUah
+	}
+	return resolveCapexUah(versions, form, lastMonth)
+}
+
 // economicsPortfolio serves a portfolio (all-objects) rollup for a month
 // or a year/window: per-object project effect + work-schedule and УЗЕ
 // reserves (project_net) + УЗЕ data-quality flags, plus a portfolio total.
@@ -1206,6 +1262,15 @@ func (h *Handlers) economicsPortfolio(w http.ResponseWriter, r *http.Request) {
 		totals  economics.MonthlyTotals
 		hasData bool
 		year    economics.StoredYear
+		capex   float64
+	}
+	// ROCE divides by the capital standing at the end of the period.
+	lastMonth := periodStr + "-12"
+	switch {
+	case scope == "month":
+		lastMonth = monthStr
+	case fromStr != "" || toStr != "":
+		lastMonth = toStr
 	}
 	rollups := make([]siteRollup, len(orgs))
 	var wg sync.WaitGroup
@@ -1217,13 +1282,14 @@ func (h *Handlers) economicsPortfolio(w http.ResponseWriter, r *http.Request) {
 			sem <- struct{}{}
 			defer func() { <-sem }()
 			ctx := r.Context()
+			capex := h.portfolioCapexUah(ctx, org.ID, lastMonth)
 			if scope == "month" {
 				t, err := h.economics.GetMonthTotals(ctx, org.ID, monthStr, loc.String())
 				if err != nil {
 					h.log.Warn("api_economics_portfolio_org", "organization_id", org.ID, "month", monthStr, "err", err)
 					return
 				}
-				rollups[i] = siteRollup{totals: t, hasData: t.DaysWithData > 0}
+				rollups[i] = siteRollup{totals: t, hasData: t.DaysWithData > 0, capex: capex}
 				return
 			}
 			var y economics.StoredYear
@@ -1237,13 +1303,14 @@ func (h *Handlers) economicsPortfolio(w http.ResponseWriter, r *http.Request) {
 				h.log.Warn("api_economics_portfolio_org", "organization_id", org.ID, "period", periodStr, "err", err)
 				return
 			}
-			rollups[i] = siteRollup{totals: y.Totals, hasData: y.MonthsWithData > 0, year: y}
+			rollups[i] = siteRollup{totals: y.Totals, hasData: y.MonthsWithData > 0, year: y, capex: capex}
 		}()
 	}
 	wg.Wait()
 
 	var totals economics.MonthlyTotals
 	var maxMonthsWithData int
+	var totalCapex float64
 	trendAcc := make(map[string]*EconomicsPortfolioTrendMonth)
 	var trendOrder []string
 
@@ -1266,7 +1333,19 @@ func (h *Handlers) economicsPortfolio(w http.ResponseWriter, r *http.Request) {
 			row.EbitdaUah += mr.Totals.Ebitda
 		}
 
-		resp.Sites = append(resp.Sites, portfolioSiteFromTotals(org.ID, org.Name, t, hasData))
+		site := portfolioSiteFromTotals(org.ID, org.Name, t, hasData)
+		site.CapexUah = rollups[i].capex
+		switch {
+		case !hasData:
+		case scope == "month":
+			site.MonthsWithData = 1
+		default:
+			site.MonthsWithData = y.MonthsWithData
+		}
+		if hasData && site.CapexUah > 0 {
+			totalCapex += site.CapexUah
+		}
+		resp.Sites = append(resp.Sites, site)
 		if hasData {
 			totals.Effect += t.Effect
 			totals.Ebitda += t.Ebitda
@@ -1319,6 +1398,11 @@ func (h *Handlers) economicsPortfolio(w http.ResponseWriter, r *http.Request) {
 		GridImportKwh:     totals.GridImport,
 		GridExportKwh:     totals.GridExport,
 		EssNetUah:         totals.EssNet,
+		CapexUah:          totalCapex,
+		MonthsWithData:    maxMonthsWithData,
+	}
+	if scope == "month" && totals.Ebitda != 0 {
+		total.MonthsWithData = 1
 	}
 	for _, s := range resp.Sites {
 		total.ScheduleReserveUah += s.ScheduleReserveUah
