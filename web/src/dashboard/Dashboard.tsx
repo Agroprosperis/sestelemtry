@@ -1,10 +1,13 @@
-import { lazy, Suspense, useState } from 'react'
+import { lazy, Suspense, useMemo, useState } from 'react'
 import { useAccess } from '../auth/authContext'
+import { useEconomicsAnnualData } from '../economics/useEconomicsAnnualData'
+import { useEconomicsMonthlyData } from '../economics/useEconomicsMonthlyData'
 import './dashboard.css'
 import { ModeTopBar, type TopBarMenuItem } from '../shell/ModeTopBar'
 import { navigateView } from '../shell/navigation'
 import { DashboardControls } from './components/DashboardControls'
 import { EnergyChart } from './components/EnergyChart'
+import { EnergyTrendCard } from './components/EnergyTrendCard'
 import { MetricsPanel } from './components/MetricsPanel'
 import { WeatherCard } from './components/WeatherCard'
 import { useDashboardData } from './hooks/useDashboardData'
@@ -13,6 +16,7 @@ import { useOrganizationParam } from './hooks/useOrganizationParam'
 import { useRangeParams } from './hooks/useRangeParams'
 import { useRegistersWhenDebug } from './hooks/useRegistersWhenDebug'
 import { useUzeDayPlan } from './hooks/useUzeDayPlan'
+import { monthTrendRows, yearTrendRows } from './transforms/energyTrend'
 
 // ExportDialog is also below-the-fold (it only renders when the user
 // clicks "Експорт даних"); lazy import keeps its form + custom-export
@@ -36,10 +40,8 @@ export function Dashboard() {
   const registers = useRegistersWhenDebug(debug)
 
   const {
-    config,
     current,
     liveAllocation,
-    energySeries,
     energySummary,
     energyFlows,
     damSeries,
@@ -70,6 +72,36 @@ export function Dashboard() {
     anchor,
     enabled: preset === 'day',
   })
+
+  // The month / year trend reads the economics rollups, which carry the
+  // per-day and per-month flow split (who covered the load, what went
+  // out). Each hook idles while its preset is not on screen.
+  const monthKey = `${anchor.getFullYear()}-${String(anchor.getMonth() + 1).padStart(2, '0')}`
+  const monthly = useEconomicsMonthlyData({
+    organizationID: preset === 'month' ? organizationID : '',
+    month: monthKey,
+  })
+  const annual = useEconomicsAnnualData({
+    organizationID: preset === 'year' ? organizationID : '',
+    period: String(anchor.getFullYear()),
+  })
+  const trend = useMemo(() => {
+    if (preset === 'month') {
+      return {
+        rows: monthTrendRows(monthly.month?.days ?? [], anchor),
+        loading: monthly.loading,
+        error: monthly.error,
+      }
+    }
+    if (preset === 'year') {
+      return {
+        rows: yearTrendRows(annual.year?.months ?? [], anchor.getFullYear()),
+        loading: annual.loading,
+        error: annual.error,
+      }
+    }
+    return null
+  }, [preset, anchor, monthly, annual])
 
   const serviceMenu: TopBarMenuItem[] = canService
     ? [
@@ -133,18 +165,26 @@ export function Dashboard() {
             anchor={anchor}
             preset={preset}
           />
-          <EnergyChart
-            metrics={config.energy_chart}
-            series={energySeries}
-            preset={preset}
-            summary={energySummary}
-            loading={loading}
-            damSeries={damSeries}
-            socSeries={socSeries}
-            powerSeries={powerSeries}
-            pvForecastSeries={pvForecastSeries}
-            aiPlan={aiPlan}
-          />
+          {preset === 'day' || !trend ? (
+            <EnergyChart
+              summary={energySummary}
+              loading={loading}
+              damSeries={damSeries}
+              socSeries={socSeries}
+              powerSeries={powerSeries}
+              pvForecastSeries={pvForecastSeries}
+              aiPlan={aiPlan}
+            />
+          ) : (
+            <EnergyTrendCard
+              preset={preset}
+              rows={trend.rows}
+              loading={trend.loading}
+              error={trend.error}
+              summary={energySummary}
+              summaryLoading={loading}
+            />
+          )}
         </div>
       </div>
 

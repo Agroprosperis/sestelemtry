@@ -1,5 +1,5 @@
-import { render, screen } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { fireEvent, render, screen } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AuthContext } from '../auth/authContext'
 import { accessFor, type AuthMe } from '../auth/permissions'
 import { Dashboard } from './Dashboard'
@@ -55,6 +55,18 @@ vi.mock('./hooks/useDashboardData', () => ({
   })),
 }))
 
+vi.mock('../economics/useEconomicsMonthlyData', () => ({
+  useEconomicsMonthlyData: vi.fn(() => ({ month: null, loading: false, error: null })),
+}))
+
+vi.mock('../economics/useEconomicsAnnualData', () => ({
+  useEconomicsAnnualData: vi.fn(() => ({ year: null, loading: false, error: null })),
+}))
+
+afterEach(() => {
+  window.history.replaceState({}, '', '/')
+})
+
 describe('Dashboard', () => {
   it('renders KPI card values from the data hook', () => {
     render(<Dashboard />)
@@ -89,5 +101,18 @@ describe('Dashboard', () => {
     render(<Dashboard />)
     expect(screen.getAllByRole('button', { name: 'Місяць' }).length).toBeGreaterThan(0)
     expect(screen.getAllByRole('button', { name: 'Debug' }).length).toBeGreaterThan(0)
+  })
+
+  it('swaps the day chart for the energy trend lines on month and year', () => {
+    render(<Dashboard />)
+    expect(screen.queryByText('Енерготренд за місяць')).toBeNull()
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Місяць' })[0])
+    expect(screen.getByText('Енерготренд за місяць')).toBeTruthy()
+    expect(screen.getByText('МВт·год/день')).toBeTruthy()
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Рік' })[0])
+    expect(screen.getByText('Тренд за рік')).toBeTruthy()
+    expect(screen.getByText('МВт·год/місяць')).toBeTruthy()
   })
 })

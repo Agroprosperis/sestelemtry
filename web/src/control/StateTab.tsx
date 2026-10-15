@@ -38,9 +38,7 @@ function fmtAge(seconds: number | undefined): string {
 export function StateTab({ site, status }: Props) {
   const anchor = useMemo(() => new Date(), [])
   const {
-    config,
     liveAllocation,
-    energySeries,
     energySummary,
     damSeries,
     socSeries,
@@ -197,9 +195,6 @@ export function StateTab({ site, status }: Props) {
         {error && <div className="ctl-notice err">Не вдалося завантажити дані: {error}</div>}
         <WeatherCard organizationID={site} anchor={anchor} preset="day" />
         <EnergyChart
-          metrics={config.energy_chart}
-          series={energySeries}
-          preset="day"
           summary={energySummary}
           loading={loading}
           damSeries={damSeries}

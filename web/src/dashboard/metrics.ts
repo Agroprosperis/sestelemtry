@@ -31,18 +31,6 @@ export const DAY_ENERGY_METRIC_KEYS = new Set<MetricKey>([
 
 export const DAY_ENERGY_METRIC_KEYS_LIST: MetricKey[] = Array.from(DAY_ENERGY_METRIC_KEYS)
 
-export const SOURCE_ENERGY_METRIC_KEYS: MetricKey[] = [
-  'accumulated_electricity_purchased_kwh',
-  'total_energy_discharged_kwh',
-  'accumulated_pv_energy_yield_kwh',
-]
-
-export const SINK_ENERGY_METRIC_KEYS: MetricKey[] = [
-  'accumulated_electricity_sold_kwh',
-  'total_energy_charged_kwh',
-  'accumulated_power_consumption_kwh',
-]
-
 export const ENERGY_TREND_METRIC_DIRECTIONS: Partial<Record<MetricKey, 1 | -1>> = {
   accumulated_electricity_purchased_kwh: 1,
   total_energy_discharged_kwh: 1,

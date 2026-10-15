@@ -1735,17 +1735,55 @@
   margin-bottom: 4px;
 }
 
-.energy-tooltip-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-}
-
-.energy-tooltip-head {
+.energy-trend-head {
   display: flex;
   justify-content: space-between;
-  font-weight: 600;
-  margin-bottom: 6px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+
+.energy-trend-card .energy-trend-head h2 {
+  margin: 0;
+}
+
+.energy-trend-subtitle {
+  margin: 2px 0 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.energy-trend-legend {
+  justify-content: flex-end;
+  margin-left: auto;
+}
+
+.energy-trend-swatch {
+  display: inline-block;
+  width: 18px;
+  height: 0;
+  border-top: 2px solid;
+  flex: 0 0 auto;
+}
+
+.energy-trend-swatch--dashed {
+  border-top-style: dashed;
+}
+
+.energy-trend-unit {
+  margin: 10px 0 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.energy-trend-tip {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 10px;
+  min-width: 220px;
+  font-size: 12px;
+  box-shadow: 0 8px 24px rgba(var(--shadow-color), 0.12);
 }
 
 .energy-tooltip-row {
@@ -1801,9 +1839,6 @@
   .energy-tooltip {
     min-width: 0;
     width: min(90vw, 460px);
-  }
-  .energy-tooltip-grid {
-    grid-template-columns: 1fr;
   }
   .energy-summary-grid {
     grid-template-columns: 1fr;

@@ -2,7 +2,6 @@ import { useCallback, useMemo, useState } from 'react'
 import {
   Area,
   Bar,
-  BarChart,
   CartesianGrid,
   ComposedChart,
   Legend,
@@ -15,24 +14,20 @@ import {
   YAxis,
 } from 'recharts'
 import type { UzePlanResponse } from '../../api'
-import type { DashboardMetric } from '../../types'
 import {
   AI_PLAN_COLOR,
   AI_PLAN_LOAD_COLOR,
   dayPowerColor,
-  energyColor,
   PV_FORECAST_COLOR,
 } from '../colors'
 import { formatChartNumber } from '../format'
 import { DAY_POWER_METRIC_KEYS, DAY_POWER_METRIC_LABELS } from '../metrics'
-import type { RangePreset } from '../range'
 import {
   type AiPlanBucket,
   aiPlanBuckets,
   aiPlanHasDispatch,
   aiPlanHasLoad,
 } from '../transforms/aiPlan'
-import type { EnergyRow } from '../transforms/buckets'
 import type { DAMChartRow } from '../transforms/dam'
 import type { PowerChartRow } from '../transforms/power'
 import type { PvForecastHourlyRow } from '../transforms/pvForecast'
@@ -41,13 +36,9 @@ import type { EnergySummary as Summary } from '../transforms/summary'
 import { useChartChrome } from '../../theme/useChartChrome'
 import { ChartSkeleton } from './ChartSkeleton'
 import { EnergySummary } from './EnergySummary'
-import { EnergyTooltip } from './EnergyTooltip'
 import { PowerTooltip } from './PowerTooltip'
 
 type Props = {
-  metrics: DashboardMetric[]
-  series: EnergyRow[]
-  preset: RangePreset
   summary: Summary
   loading: boolean
   damSeries?: DAMChartRow[]
@@ -101,12 +92,6 @@ const DAY_TICKS_PER_HOUR = 12
 // resize doesn't trigger a full recharts relayout per pixel.
 const RESIZE_DEBOUNCE_MS = 150
 
-function xAxisInterval(preset: RangePreset): number {
-  if (preset === 'day') return DAY_TICKS_PER_HOUR - 1
-  if (preset === 'month') return 2
-  return 0
-}
-
 type HourlyDamArea = { x1: string; x2: string; price: number }
 
 // hourlyDamAreas turns per-5-minute damSeries into one block per hour for
@@ -143,9 +128,6 @@ function damPriceDomain(areas: HourlyDamArea[]): [number, number] {
 }
 
 export function EnergyChart({
-  metrics,
-  series,
-  preset,
   summary,
   loading,
   damSeries,
@@ -158,22 +140,15 @@ export function EnergyChart({
   const chrome = useChartChrome()
   const aiEssLabel = planOverlay?.essLabel ?? AI_ESS_LABEL
   const aiSocLabel = planOverlay?.socLabel ?? AI_SOC_LABEL
-  const energyTooltip = useCallback(
-    (props: Omit<React.ComponentProps<typeof EnergyTooltip>, 'preset'>) => (
-      <EnergyTooltip {...props} preset={preset} />
-    ),
-    [preset],
-  )
   const powerTooltip = useCallback(
     (props: React.ComponentProps<typeof PowerTooltip>) => <PowerTooltip {...props} />,
     [],
   )
-  const tickInterval = xAxisInterval(preset)
 
   // Track which day-chart series the user has temporarily hidden by
   // clicking the corresponding legend item. State lives on the chart so
   // it survives re-renders triggered by data refetches but resets on
-  // unmount (preset change). The battery-side AI series start hidden —
+  // unmount. The battery-side AI series start hidden —
   // an opt-in overlay for comparing against the optimum — while the
   // recommended consumption schedule is on by default: it is the line
   // the operator acts on.
@@ -197,12 +172,8 @@ export function EnergyChart({
   // The forecast value is attached only at one bucket per hour (HH:30) —
   // recharts then renders one centered Bar per hour with its width fixed
   // by `barSize`, instead of 12 stacked thin bars per hour.
-  const planBuckets = useMemo<Map<number, AiPlanBucket>>(
-    () => (preset === 'day' ? aiPlanBuckets(aiPlan ?? null) : new Map()),
-    [preset, aiPlan],
-  )
+  const planBuckets = useMemo<Map<number, AiPlanBucket>>(() => aiPlanBuckets(aiPlan ?? null), [aiPlan])
   const dayData = useMemo<PowerChartRow[]>(() => {
-    if (preset !== 'day') return []
     const rows = powerSeries ?? []
     const priceByTime = new Map<string, number | null>()
     for (const row of damSeries ?? []) priceByTime.set(String(row.time), row.price)
@@ -242,11 +213,11 @@ export function EnergyChart({
       }
       return merged
     })
-  }, [preset, powerSeries, damSeries, socSeries, pvForecastSeries, planBuckets])
+  }, [powerSeries, damSeries, socSeries, pvForecastSeries, planBuckets])
   const hasSoc = (socSeries ?? []).some((r) => r.soc != null && Number.isFinite(r.soc))
   const hasPvForecast = (pvForecastSeries ?? []).length > 0
-  const hasAiPlan = preset === 'day' && aiPlanHasDispatch(aiPlan ?? null)
-  const hasAiLoad = preset === 'day' && aiPlanHasLoad(aiPlan ?? null)
+  const hasAiPlan = aiPlanHasDispatch(aiPlan ?? null)
+  const hasAiLoad = aiPlanHasLoad(aiPlan ?? null)
 
   const dayLabels = useMemo(() => dayData.map((r) => String(r.time)), [dayData])
   const hourlyAreas = useMemo(() => hourlyDamAreas(damSeries, dayLabels), [damSeries, dayLabels])
@@ -321,25 +292,22 @@ export function EnergyChart({
     return idx > 0 ? s.slice(0, idx) : s
   }, [])
 
-  const summaryBlock = <EnergySummary summary={summary} loading={loading} />
-
   return (
     <div className="chart-card">
       <h2>{planOverlay?.title ?? 'Energy Trend'}</h2>
-      {preset === 'day' && summaryBlock}
+      <EnergySummary summary={summary} loading={loading} />
       <div className="chart-wrap">
         {loading ? (
-          <ChartSkeleton preset={preset} />
-        ) : preset === 'day' ? (
-          !dayHasData ? (
-            <p className="chart-placeholder">No data available for selected range.</p>
-          ) : (
+          <ChartSkeleton preset="day" />
+        ) : !dayHasData ? (
+          <p className="chart-placeholder">No data available for selected range.</p>
+        ) : (
             <ResponsiveContainer width="100%" height="100%" debounce={RESIZE_DEBOUNCE_MS}>
               <ComposedChart data={dayData}>
                 <CartesianGrid strokeDasharray="3 3" stroke={chrome.grid} />
                 <XAxis
                   dataKey="time"
-                  interval={tickInterval}
+                  interval={DAY_TICKS_PER_HOUR - 1}
                   tickFormatter={dayTickFormatter}
                 />
                 <YAxis
@@ -529,40 +497,8 @@ export function EnergyChart({
                 />
               </ComposedChart>
             </ResponsiveContainer>
-          )
-        ) : series.length === 0 ? (
-          <p className="chart-placeholder">No data available for selected range.</p>
-        ) : (
-          <ResponsiveContainer width="100%" height="100%" debounce={RESIZE_DEBOUNCE_MS}>
-            <BarChart data={series} stackOffset="sign">
-              <CartesianGrid strokeDasharray="3 3" stroke={chrome.grid} />
-              <XAxis dataKey="time" interval={tickInterval} />
-              <YAxis tickFormatter={(v) => formatChartNumber(Number(v))} />
-              <Tooltip
-                content={energyTooltip}
-                offset={12}
-                allowEscapeViewBox={{ x: false, y: true }}
-                wrapperStyle={{ pointerEvents: 'none', zIndex: 5 }}
-                isAnimationActive={false}
-                cursor={{ fill: chrome.cursor }}
-              />
-              <Legend wrapperStyle={{ fontSize: 12 }} />
-              <ReferenceLine y={0} stroke={chrome.zero} />
-              {metrics.map((m) => (
-                <Bar
-                  key={m.key}
-                  dataKey={m.key}
-                  name={m.label}
-                  stackId="energy"
-                  fill={energyColor(m.key, preset)}
-                  isAnimationActive={false}
-                />
-              ))}
-            </BarChart>
-          </ResponsiveContainer>
         )}
       </div>
-      {preset !== 'day' && summaryBlock}
     </div>
   )
 }
