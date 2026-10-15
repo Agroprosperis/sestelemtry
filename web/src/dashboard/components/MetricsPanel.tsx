@@ -1,6 +1,7 @@
 import type { CurrentResponse, RegisterMeta } from '../../types'
 import type { RangePreset } from '../range'
 import type { EnergyFlows } from '../transforms/flows'
+import type { GridVoltage } from '../transforms/gridVoltage'
 import type { LiveAllocation } from '../transforms/liveAllocation'
 import { AccumulatedSnapshotNarrative } from './AccumulatedSnapshotNarrative'
 import { BatteryDayNarrative } from './BatteryDayNarrative'
@@ -36,6 +37,7 @@ type Props = {
   pvForecastTotal: number | null
   pvForecastLoading: boolean
   pvForecastCoverage: { covered: number; expected: number } | null
+  gridVoltage?: GridVoltage | null
 }
 
 export function MetricsPanel({
@@ -56,6 +58,7 @@ export function MetricsPanel({
   pvForecastTotal,
   pvForecastLoading,
   pvForecastCoverage,
+  gridVoltage = null,
 }: Props) {
   return (
     <div className="metrics-panel-stack">
@@ -66,6 +69,7 @@ export function MetricsPanel({
         registers={registers}
         metricsAt={metricsAt}
         onMetricsAtChange={onMetricsAtChange}
+        gridVoltage={gridVoltage}
       />
       <DailySummaryNarrative
         flows={flows}

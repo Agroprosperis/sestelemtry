@@ -12,6 +12,7 @@ import { MetricsPanel } from './components/MetricsPanel'
 import { WeatherCard } from './components/WeatherCard'
 import { useDashboardData } from './hooks/useDashboardData'
 import { useDebugMode } from './hooks/useDebugMode'
+import { useGridVoltage } from './hooks/useGridVoltage'
 import { useOrganizationParam } from './hooks/useOrganizationParam'
 import { useRangeParams } from './hooks/useRangeParams'
 import { useRegistersWhenDebug } from './hooks/useRegistersWhenDebug'
@@ -64,6 +65,9 @@ export function Dashboard() {
     anchor,
     metricsAt,
   })
+
+  // The voltage is a live reading only; a historical snapshot leaves it out.
+  const gridVoltage = useGridVoltage(organizationID, metricsAt === null)
 
   // Fetched on its own pipeline: the server solves a dynamic program for
   // the day, which must never gate the chart's own data from painting.
@@ -157,6 +161,7 @@ export function Dashboard() {
           pvForecastTotal={pvForecastTotal}
           pvForecastLoading={pvForecastLoading}
           pvForecastCoverage={pvForecastCoverage}
+          gridVoltage={gridVoltage}
         />
 
         <div className="dashboard-charts">

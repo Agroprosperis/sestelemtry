@@ -1411,6 +1411,22 @@
   font-weight: 500;
 }
 
+.energy-flow-live-node-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0 8px;
+}
+
+.energy-flow-live-node-volt {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 .energy-flow-live-soc {
   margin-top: 5px;
   display: grid;

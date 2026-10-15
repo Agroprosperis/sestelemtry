@@ -182,13 +182,15 @@ export function resetRegistersCache(): void {
 }
 
 export async function fetchCurrent(
-  input: string | { organizationID: string; at?: string },
+  input: string | { organizationID: string; at?: string; metricKeys?: string[] },
   signal?: AbortSignal,
 ): Promise<CurrentResponse> {
-  const params = typeof input === 'string' ? { organizationID: input } : input
+  const params: { organizationID: string; at?: string; metricKeys?: string[] } =
+    typeof input === 'string' ? { organizationID: input } : input
   const url = buildURL('/api/v1/current', {
     organization_id: params.organizationID,
     at: params.at,
+    metric_keys: params.metricKeys?.length ? params.metricKeys.join(',') : undefined,
   })
   const res = await apiFetch(url, { signal })
   if (!res.ok) {

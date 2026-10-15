@@ -1,4 +1,5 @@
 import type { RegisterMeta } from '../../types'
+import type { GridVoltage } from '../transforms/gridVoltage'
 import type { LiveAllocation } from '../transforms/liveAllocation'
 import { EnergyFlowLive } from './EnergyFlowLive'
 import { MetricsAtPicker } from './MetricsAtPicker'
@@ -23,6 +24,7 @@ type Props = {
   // the control «Стан» tab omits it and stays live-only.
   metricsAt?: Date | null
   onMetricsAtChange?: (next: Date | null) => void
+  gridVoltage?: GridVoltage | null
 }
 
 function formatSnapshotLabel(at: Date): string {
@@ -43,6 +45,7 @@ export function CurrentSnapshotNarrative({
   registers,
   metricsAt,
   onMetricsAtChange,
+  gridVoltage = null,
 }: Props) {
   return (
     <section
@@ -69,6 +72,7 @@ export function CurrentSnapshotNarrative({
         wrapInSection={false}
         debug={debug}
         registers={registers}
+        gridVoltage={gridVoltage}
       />
     </section>
   )

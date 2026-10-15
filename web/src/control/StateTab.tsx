@@ -8,6 +8,7 @@ import { CurrentSnapshotNarrative } from '../dashboard/components/CurrentSnapsho
 import { EnergyChart } from '../dashboard/components/EnergyChart'
 import { WeatherCard } from '../dashboard/components/WeatherCard'
 import { useDashboardData } from '../dashboard/hooks/useDashboardData'
+import { useGridVoltage } from '../dashboard/hooks/useGridVoltage'
 import type { BessHealth, EdgeSiteStatus, HealthCheck, InverterHealth } from './controlClient'
 import { PLAN_SOURCE_LABELS, REASON_LABELS } from './decisionLabels'
 import { appliedAnnotation, manifestPlanToUzePlan } from './manifestPlan'
@@ -48,6 +49,7 @@ export function StateTab({ site, status }: Props) {
     cardsLoading,
     error,
   } = useDashboardData({ organizationID: site, preset: 'day', anchor, metricsAt: null })
+  const gridVoltage = useGridVoltage(site, true)
 
   const payload = status?.manifest?.payload
   const manifestPlan = useMemo(() => manifestPlanToUzePlan(payload, anchor), [payload, anchor])
@@ -77,6 +79,7 @@ export function StateTab({ site, status }: Props) {
           loading={cardsLoading}
           debug={false}
           registers={null}
+          gridVoltage={gridVoltage}
         />
 
         <section className="ctl-card">

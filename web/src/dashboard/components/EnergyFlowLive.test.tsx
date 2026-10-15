@@ -43,6 +43,22 @@ describe('EnergyFlowLive', () => {
     expect(screen.getAllByText(/^експорт$/i).length).toBeGreaterThan(0)
   })
 
+  it('prints the grid voltage on the grid node when the site reports one', () => {
+    const allocation = buildAllocation({ grid_connected_active_power_kw: -45.88, load_power_kw: 45.88 })
+    const { container, rerender } = render(<EnergyFlowLive allocation={allocation} />)
+    expect(container.querySelector('.energy-flow-live-node-volt')).toBeNull()
+
+    rerender(
+      <EnergyFlowLive
+        allocation={allocation}
+        gridVoltage={{ kind: 'phase', volts: [227.4, 230.1, 229.2], at: new Date('2026-05-10T12:00:00Z') }}
+      />,
+    )
+    const volt = screen.getByText('227/230/229 В')
+    expect(volt.closest('.energy-flow-live-node--grid')).not.toBeNull()
+    expect(volt.getAttribute('title')).toContain('фаз')
+  })
+
   it('renders four animated edges', () => {
     const allocation = buildAllocation({
       active_pv_power_kw: 5,

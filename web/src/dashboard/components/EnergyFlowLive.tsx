@@ -10,6 +10,7 @@ import {
 import type { RegisterMeta } from '../../types'
 import { useCssVar } from '../../theme/useChartChrome'
 import { formatChartNumber } from '../format'
+import { formatGridVoltage, gridVoltageTitle, type GridVoltage } from '../transforms/gridVoltage'
 import type {
   LiveAllocation,
   LiveEssState,
@@ -219,6 +220,9 @@ type Props = {
   // ops tooling) don't have to thread them through.
   debug?: boolean
   registers?: Record<string, RegisterMeta> | null
+  // gridVoltage, when the site reports one, is printed on the «Мережа»
+  // node next to the import / export status.
+  gridVoltage?: GridVoltage | null
 }
 
 export function EnergyFlowLive({
@@ -227,6 +231,7 @@ export function EnergyFlowLive({
   wrapInSection = true,
   debug = false,
   registers = null,
+  gridVoltage = null,
 }: Props) {
   // ageSeconds drives the "Updated N seconds ago" pill in the
   // header. We re-tick every second instead of recomputing on
@@ -421,6 +426,13 @@ export function EnergyFlowLive({
           debug={debug}
           registers={registers}
           metricKeys={['grid_connected_active_power_kw']}
+          aside={
+            gridVoltage ? (
+              <span className="energy-flow-live-node-volt" title={gridVoltageTitle(gridVoltage)}>
+                {formatGridVoltage(gridVoltage)}
+              </span>
+            ) : null
+          }
         />
 
         <div
@@ -513,6 +525,8 @@ type NodeCardProps = {
   // Load node falls back to bus-balance math, not a single
   // register).
   metricKeys?: string[]
+  // aside sits at the end of the status line (the grid voltage).
+  aside?: React.ReactNode
 }
 
 function NodeCard({
@@ -528,6 +542,7 @@ function NodeCard({
   debug,
   registers,
   metricKeys,
+  aside,
 }: NodeCardProps) {
   const kwLabel = formatKw(kw)
   return (
@@ -553,7 +568,14 @@ function NodeCard({
         </h3>
       </div>
       <strong className="energy-flow-live-node-kw">{kwLabel}</strong>
-      <span className="energy-flow-live-node-status">{status}</span>
+      {aside ? (
+        <div className="energy-flow-live-node-foot">
+          <span className="energy-flow-live-node-status">{status}</span>
+          {aside}
+        </div>
+      ) : (
+        <span className="energy-flow-live-node-status">{status}</span>
+      )}
       {typeof soc === 'number' && Number.isFinite(soc) && (
         <div className="energy-flow-live-soc" aria-label={`SOC ${soc.toFixed(0)}%`}>
           <span className="energy-flow-live-soc-label">SOC {soc.toFixed(0)}%</span>
