@@ -52,3 +52,9 @@ export async function updateUser(id: number, patch: UserPatch): Promise<UserAcco
   if (!res.ok) throw await apiError(res, 'Не вдалося зберегти користувача')
   return (await res.json()) as UserAccount
 }
+
+// deleteUser removes the account with its sessions and grants.
+export async function deleteUser(id: number): Promise<void> {
+  const res = await apiFetch(buildURL('/api/v1/users', { user_id: String(id) }), { method: 'DELETE' })
+  if (!res.ok) throw await apiError(res, 'Не вдалося видалити користувача')
+}

@@ -35,6 +35,7 @@ type authStore interface {
 	UserGrants(ctx context.Context, userID int64) ([]auth.Grant, error)
 	AllGrants(ctx context.Context) (map[int64][]auth.Grant, error)
 	UpdateUser(ctx context.Context, id int64, upd userUpdate) (bool, error)
+	DeleteUser(ctx context.Context, id int64) (bool, error)
 	CreateSession(ctx context.Context, tokenHash []byte, userID int64, expiresAt time.Time) error
 	Session(ctx context.Context, tokenHash []byte) (storage.SessionRow, bool, error)
 	TouchSession(ctx context.Context, tokenHash []byte, lastSeen, expiresAt time.Time) error
@@ -110,6 +111,10 @@ func (s *AuthStore) UpdateUser(ctx context.Context, id int64, upd userUpdate) (b
 		su.Grants = &rows
 	}
 	return storage.UpdateUser(ctx, s.pool, id, su)
+}
+
+func (s *AuthStore) DeleteUser(ctx context.Context, id int64) (bool, error) {
+	return storage.DeleteUser(ctx, s.pool, id)
 }
 
 func (s *AuthStore) CreateSession(ctx context.Context, tokenHash []byte, userID int64, expiresAt time.Time) error {

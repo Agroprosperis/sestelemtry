@@ -15,6 +15,8 @@ import (
 
 const maxUserNameLen = 200
 
+const lastGlobalAdminMessage = "це останній адміністратор усіх організацій: спершу призначте іншого"
+
 type userCreateRequest struct {
 	Email    string      `json:"email"`
 	Name     string      `json:"name"`
@@ -37,8 +39,10 @@ type userUpdateRequest struct {
 //	GET              — every account with its grants
 //	POST             — create an account
 //	PUT ?user_id=    — change name, password, disabled flag or grants
+//	DELETE ?user_id= — delete an account with its sessions and grants
 //
-// Accounts are disabled rather than deleted.
+// The last enabled administrator of every organization can be neither
+// disabled, demoted nor deleted.
 func (h *Handlers) users(w http.ResponseWriter, r *http.Request) {
 	if !h.requireAuthConfigured(w) {
 		return
@@ -50,8 +54,10 @@ func (h *Handlers) users(w http.ResponseWriter, r *http.Request) {
 		h.createUser(w, r)
 	case http.MethodPut:
 		h.updateUser(w, r)
+	case http.MethodDelete:
+		h.deleteUser(w, r)
 	default:
-		w.Header().Set("Allow", "GET, POST, PUT")
+		w.Header().Set("Allow", "GET, POST, PUT, DELETE")
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
 }
@@ -193,15 +199,15 @@ func (h *Handlers) updateUser(w http.ResponseWriter, r *http.Request) {
 	if upd.Disabled != nil {
 		disabled = *upd.Disabled
 	}
-	if !user.Disabled && isGlobalAdmin(current) && (disabled || !isGlobalAdmin(grants)) {
-		others, err := h.otherGlobalAdmins(ctx, id)
+	if disabled || !isGlobalAdmin(grants) {
+		last, err := h.lastGlobalAdmin(ctx, user, current)
 		if err != nil {
 			h.log.Error("api_users_update", "err", err)
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 			return
 		}
-		if others == 0 {
-			http.Error(w, "це останній адміністратор усіх організацій: спершу призначте іншого", http.StatusConflict)
+		if last {
+			http.Error(w, lastGlobalAdminMessage, http.StatusConflict)
 			return
 		}
 	}
@@ -234,6 +240,61 @@ func (h *Handlers) updateUser(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, toUserJSON(user, grants))
 }
 
+// deleteUser removes an account for good; disabling keeps it. Your own
+// account can't be deleted here either.
+func (h *Handlers) deleteUser(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(strings.TrimSpace(r.URL.Query().Get("user_id")), 10, 64)
+	if err != nil {
+		http.Error(w, "user_id is required", http.StatusBadRequest)
+		return
+	}
+	ctx := r.Context()
+	user, ok, err := h.auth.store.UserByID(ctx, id)
+	if err != nil {
+		h.log.Error("api_users_delete", "err", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+	if !ok {
+		http.Error(w, "user not found", http.StatusNotFound)
+		return
+	}
+	grants, err := h.auth.store.UserGrants(ctx, id)
+	if err != nil {
+		h.log.Error("api_users_delete", "err", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+	last, err := h.lastGlobalAdmin(ctx, user, grants)
+	if err != nil {
+		h.log.Error("api_users_delete", "err", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+	if last {
+		http.Error(w, lastGlobalAdminMessage, http.StatusConflict)
+		return
+	}
+	by := principalFrom(ctx).UserID
+	if id == by {
+		http.Error(w, "свій обліковий запис видалити не можна", http.StatusConflict)
+		return
+	}
+	ok, err = h.auth.store.DeleteUser(ctx, id)
+	if err != nil {
+		h.log.Error("api_users_delete", "err", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+	if !ok {
+		http.Error(w, "user not found", http.StatusNotFound)
+		return
+	}
+	h.auth.forgetUser(id)
+	h.log.Info("api_users_delete_ok", "user_id", id, "by", by)
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // parseGrants validates the grants of a create/update request against
 // the roles and the configured organizations.
 func (h *Handlers) parseGrants(in []grantJSON) ([]auth.Grant, error) {
@@ -260,6 +321,17 @@ func (h *Handlers) parseGrants(in []grantJSON) ([]auth.Grant, error) {
 
 func isGlobalAdmin(grants []auth.Grant) bool {
 	return (&auth.Principal{Grants: grants}).IsGlobalAdmin()
+}
+
+// lastGlobalAdmin reports whether user, holding grants, is the only
+// enabled administrator of every organization: the one account left
+// that can manage the others.
+func (h *Handlers) lastGlobalAdmin(ctx context.Context, user storage.UserRow, grants []auth.Grant) (bool, error) {
+	if user.Disabled || !isGlobalAdmin(grants) {
+		return false, nil
+	}
+	others, err := h.otherGlobalAdmins(ctx, user.ID)
+	return others == 0, err
 }
 
 // otherGlobalAdmins counts the enabled administrators of every

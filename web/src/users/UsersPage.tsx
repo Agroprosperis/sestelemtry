@@ -81,6 +81,11 @@ export function UsersPage() {
             setIssued(handedOut ?? null)
             setReloadKey((k) => k + 1)
           }}
+          onDeleted={() => {
+            setEditing(null)
+            setIssued(null)
+            setReloadKey((k) => k + 1)
+          }}
         />
       ) : (
         <div className="users-toolbar">

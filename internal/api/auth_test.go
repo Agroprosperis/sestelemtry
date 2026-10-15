@@ -173,6 +173,7 @@ func TestAuthRouteMatrix(t *testing.T) {
 		{"admin", http.MethodPost, "/api/v1/alert-settings/test-email", denied},
 		{"admin", http.MethodPost, "/api/v1/alert-settings/test-email?organization_id=ze", ok},
 		{"admin", http.MethodGet, "/api/v1/users", denied},
+		{"admin", http.MethodDelete, "/api/v1/users?user_id=1", denied},
 		{"admin", http.MethodGet, "/swagger/openapi.yaml", ok},
 
 		{"global", http.MethodGet, "/api/v1/users", ok},
@@ -537,6 +538,46 @@ func TestUsersAPI(t *testing.T) {
 		"grants": []grantJSON{{Role: auth.RoleAdmin, OrganizationID: &ze}},
 	}); rec.Code != http.StatusConflict {
 		t.Fatalf("demote last global admin: status = %d, want 409", rec.Code)
+	}
+	if rec := serve(router, http.MethodDelete, rootTarget, global, nil); rec.Code != http.StatusConflict ||
+		!strings.Contains(rec.Body.String(), "останній адміністратор") {
+		t.Fatalf("delete last global admin: status = %d (%s), want 409", rec.Code, rec.Body.String())
+	}
+
+	// With a second administrator of every organization the first may
+	// go — but not by deleting their own account.
+	if rec := serve(router, http.MethodPut, target, global, map[string]any{
+		"grants": []grantJSON{{Role: auth.RoleAdmin}},
+	}); rec.Code != http.StatusOK {
+		t.Fatalf("promote: status = %d (%s)", rec.Code, rec.Body.String())
+	}
+	if rec := serve(router, http.MethodDelete, rootTarget, global, nil); rec.Code != http.StatusConflict ||
+		!strings.Contains(rec.Body.String(), "свій обліковий запис") {
+		t.Fatalf("delete own account: status = %d (%s), want 409", rec.Code, rec.Body.String())
+	}
+
+	// Deleting signs the account out at once, cached session included.
+	token, digest = auth.NewSessionToken()
+	_ = accounts.CreateSession(context.Background(), digest, created.ID, time.Now().Add(time.Hour))
+	userCookie = &http.Cookie{Name: sessionCookieName, Value: token}
+	if rec := serve(router, http.MethodGet, "/api/v1/auth/me", userCookie, nil); rec.Code != http.StatusOK {
+		t.Fatalf("session before delete: status = %d, want 200", rec.Code)
+	}
+	if rec := serve(router, http.MethodDelete, target, global, nil); rec.Code != http.StatusNoContent {
+		t.Fatalf("delete: status = %d (%s), want 204", rec.Code, rec.Body.String())
+	}
+	if rec := serve(router, http.MethodGet, "/api/v1/auth/me", userCookie, nil); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("session after delete: status = %d, want 401", rec.Code)
+	}
+	if rec := serve(router, http.MethodDelete, target, global, nil); rec.Code != http.StatusNotFound {
+		t.Fatalf("delete twice: status = %d, want 404", rec.Code)
+	}
+	if rec := serve(router, http.MethodDelete, "/api/v1/users", global, nil); rec.Code != http.StatusBadRequest {
+		t.Fatalf("delete without user_id: status = %d, want 400", rec.Code)
+	}
+	rec = serve(router, http.MethodGet, "/api/v1/users", global, nil)
+	if err := json.Unmarshal(rec.Body.Bytes(), &list); err != nil || len(list.Users) != 1 {
+		t.Fatalf("users after delete = %d (%v), want 1", len(list.Users), err)
 	}
 }
 

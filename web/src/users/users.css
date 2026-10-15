@@ -124,6 +124,24 @@
   user-select: all;
 }
 
+.users-delete {
+  margin-right: auto;
+  color: var(--err-text);
+}
+
+.users-delete-note {
+  margin-right: auto;
+  font-size: 0.85rem;
+  color: var(--err-text);
+}
+
+.alerts-secondary.users-delete-confirm {
+  color: var(--err-text);
+  background: var(--err-bg);
+  border-color: var(--err-border);
+  font-weight: 600;
+}
+
 .users-table td:last-child {
   text-align: right;
   white-space: nowrap;

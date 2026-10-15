@@ -231,6 +231,29 @@ paths:
           description: No such account
         "409":
           description: Would leave no enabled administrator of every organization
+    delete:
+      summary: Delete an account
+      operationId: deleteUser
+      description: |
+        Removes the account together with its sessions and grants. Neither
+        your own account nor the last enabled administrator of every
+        organization can be deleted.
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/CSRFHeader"
+        - name: user_id
+          in: query
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Account deleted
+        "404":
+          description: No such account
+        "409":
+          description: Your own account, or the last enabled administrator of every organization
   /healthz:
     get:
       summary: Health check

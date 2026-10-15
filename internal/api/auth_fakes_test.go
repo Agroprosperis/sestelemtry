@@ -139,6 +139,22 @@ func (m *memAuthStore) UpdateUser(_ context.Context, id int64, upd userUpdate) (
 	return true, nil
 }
 
+func (m *memAuthStore) DeleteUser(_ context.Context, id int64) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.users[id]; !ok {
+		return false, nil
+	}
+	delete(m.users, id)
+	delete(m.grants, id)
+	for k, s := range m.sessions {
+		if s.UserID == id {
+			delete(m.sessions, k)
+		}
+	}
+	return true, nil
+}
+
 func (m *memAuthStore) CreateSession(_ context.Context, tokenHash []byte, userID int64, expiresAt time.Time) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

@@ -266,6 +266,19 @@ func UpdateUser(ctx context.Context, pool *pgxpool.Pool, id int64, upd UserUpdat
 	return true, nil
 }
 
+// DeleteUser removes an account; its sessions and grants go with it
+// (ON DELETE CASCADE). The bool is false when no user has the id.
+func DeleteUser(ctx context.Context, pool *pgxpool.Pool, id int64) (bool, error) {
+	if pool == nil {
+		return false, fmt.Errorf("storage: nil pool")
+	}
+	tag, err := pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, id)
+	if err != nil {
+		return false, fmt.Errorf("storage: delete user: %w", err)
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
 func insertGrants(ctx context.Context, tx pgx.Tx, userID int64, grants []RoleGrantRow) error {
 	for _, g := range grants {
 		if _, err := tx.Exec(ctx, `

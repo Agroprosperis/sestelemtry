@@ -31,14 +31,25 @@ function json(body: unknown) {
 describe('UsersPage', () => {
   let puts: unknown[]
   let posts: { email: string; password: string; grants: unknown[] }[]
+  let deletes: string[]
+  let deleteRefusal: string
+  let accounts: unknown[]
 
   beforeEach(() => {
     puts = []
     posts = []
+    deletes = []
+    deleteRefusal = ''
+    accounts = [engineer]
     vi.stubGlobal(
       'fetch',
       vi.fn<typeof fetch>(async (input, init) => {
         const url = String(input)
+        if (url.includes('/api/v1/users') && init?.method === 'DELETE') {
+          if (deleteRefusal) return new Response(deleteRefusal, { status: 409 })
+          deletes.push(new URL(url).searchParams.get('user_id') ?? '')
+          return new Response(null, { status: 204 })
+        }
         if (url.includes('/api/v1/users') && init?.method === 'PUT') {
           puts.push(JSON.parse(String(init.body)))
           return json(engineer)
@@ -48,7 +59,7 @@ describe('UsersPage', () => {
           posts.push(body)
           return json({ ...engineer, id: 3, email: body.email, grants: body.grants, must_change_password: true })
         }
-        if (url.includes('/api/v1/users')) return json({ users: [engineer] })
+        if (url.includes('/api/v1/users')) return json({ users: accounts })
         return json({ sites: [] })
       }),
     )
@@ -102,5 +113,35 @@ describe('UsersPage', () => {
       disabled: false,
       grants: [{ role: 'engineer', organization_id: 'ze' }],
     })
+  })
+
+  it('deletes an account after a confirmation', async () => {
+    renderPage()
+    fireEvent.click(await screen.findByRole('button', { name: 'Змінити' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Видалити' }))
+    expect(screen.getByText(/Видалити eng@example.com назавжди/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Так, видалити' }))
+
+    await waitFor(() => expect(deletes).toEqual(['2']))
+    expect(await screen.findByRole('button', { name: 'Новий користувач' })).toBeInTheDocument()
+  })
+
+  it('shows why the API refused a deletion', async () => {
+    deleteRefusal = 'це останній адміністратор усіх організацій: спершу призначте іншого'
+    renderPage()
+    fireEvent.click(await screen.findByRole('button', { name: 'Змінити' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Видалити' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Так, видалити' }))
+
+    expect(await screen.findByText(deleteRefusal)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Зберегти' })).toBeEnabled()
+  })
+
+  it('offers no deletion of your own account', async () => {
+    accounts = [{ ...engineer, id: 1, email: 'root@example.com', name: 'Root', grants: root.grants }]
+    renderPage()
+    fireEvent.click(await screen.findByRole('button', { name: 'Змінити' }))
+    expect(screen.getByText(/Це ваш обліковий запис/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Видалити' })).toBeNull()
   })
 })

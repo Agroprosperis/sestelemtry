@@ -3,7 +3,7 @@ import { MIN_PASSWORD_LEN, ROLES, type Role } from '../auth/permissions'
 import { grantsFromScopes, scopesFromGrants, type RoleScope, type RoleScopes } from './grantScopes'
 import { generatePassword } from './password'
 import type { Issued, OrgOption } from './types'
-import { createUser, updateUser, type UserAccount } from './usersClient'
+import { createUser, deleteUser, updateUser, type UserAccount } from './usersClient'
 
 export function UserForm({
   user,
@@ -11,6 +11,7 @@ export function UserForm({
   organizations,
   onCancel,
   onSaved,
+  onDeleted,
 }: {
   user: UserAccount | null
   self: boolean
@@ -18,6 +19,7 @@ export function UserForm({
   onCancel: () => void
   // handedOut is set when the save gave someone a temporary password.
   onSaved: (handedOut?: Issued) => void
+  onDeleted: () => void
 }) {
   const passwordLabel = useId()
   const [email, setEmail] = useState(user?.email ?? '')
@@ -29,6 +31,7 @@ export function UserForm({
   const [scopes, setScopes] = useState<RoleScopes>(() => scopesFromGrants(user?.grants ?? []))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [confirmDelete, setConfirmDelete] = useState(false)
 
   const setScope = (role: Role, patch: Partial<RoleScope>) =>
     setScopes((prev) => ({ ...prev, [role]: { ...prev[role], ...patch } }))
@@ -65,6 +68,20 @@ export function UserForm({
       }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Не вдалося зберегти користувача')
+      setBusy(false)
+    }
+  }
+
+  const remove = async () => {
+    if (user === null) return
+    setBusy(true)
+    setError(null)
+    try {
+      await deleteUser(user.id)
+      onDeleted()
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Не вдалося видалити користувача')
+      setConfirmDelete(false)
       setBusy(false)
     }
   }
@@ -186,12 +203,34 @@ export function UserForm({
       {error ? <div className="alerts-banner alerts-banner-error">{error}</div> : null}
 
       <div className="alerts-actions">
-        <button type="button" className="alerts-secondary" onClick={onCancel} disabled={busy}>
-          Скасувати
-        </button>
-        <button type="submit" className="alerts-save" disabled={busy}>
-          {busy ? 'Збереження…' : user ? 'Зберегти' : 'Створити'}
-        </button>
+        {user && confirmDelete ? (
+          <>
+            <span className="users-delete-note">
+              Видалити {user.email} назавжди? Його сеанси та ролі буде видалено.
+            </span>
+            <button type="button" className="alerts-secondary" onClick={() => setConfirmDelete(false)} disabled={busy}>
+              Скасувати
+            </button>
+            <button type="button" className="alerts-secondary users-delete-confirm" onClick={() => void remove()} disabled={busy}>
+              {busy ? 'Видалення…' : 'Так, видалити'}
+            </button>
+          </>
+        ) : (
+          <>
+            {/* The API refuses your own account, so it isn't offered. */}
+            {user && !self ? (
+              <button type="button" className="alerts-secondary users-delete" onClick={() => setConfirmDelete(true)} disabled={busy}>
+                Видалити
+              </button>
+            ) : null}
+            <button type="button" className="alerts-secondary" onClick={onCancel} disabled={busy}>
+              Скасувати
+            </button>
+            <button type="submit" className="alerts-save" disabled={busy}>
+              {busy ? 'Збереження…' : user ? 'Зберегти' : 'Створити'}
+            </button>
+          </>
+        )}
       </div>
     </form>
   )
