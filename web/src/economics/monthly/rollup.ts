@@ -352,16 +352,43 @@ export function importPriceUahPerKwh(importCostUah: number, gridImportKwh: numbe
   return gridImportKwh > 0 ? importCostUah / gridImportKwh : NaN
 }
 
+// Genitive names of the counters behind counter_* flags.
+const COUNTER_FLAG_LABELS: Record<string, string> = {
+  pv: 'генерації СЕС',
+  grid_import: 'імпорту',
+  grid_export: 'експорту',
+  ess_charged: 'заряду УЗЕ',
+  ess_discharged: 'розряду УЗЕ',
+}
+
+function counterLabel(flag: string, prefix: string): string {
+  const name = flag.slice(prefix.length)
+  return COUNTER_FLAG_LABELS[name] ?? name
+}
+
 // dayQualityTip turns a day's reconciliation flags into one operator
-// sentence: these days ran on frozen / lagging FusionSolar counters, so
-// the hourly flow split — and every price attached to it — is
-// approximate. Routine bookkeeping flags (no_scale, load_rebalanced)
-// don't warrant a mark on their own.
+// sentence: these days ran on frozen / lagging counters, so the hourly
+// flow split — and every price attached to it — is approximate.
+// Routine bookkeeping flags (no_scale, load_rebalanced, a removed
+// counter seam or spike) don't warrant a mark on their own.
 export function dayQualityTip(flags?: string[]): string | null {
   if (!flags || flags.length === 0) return null
   const parts: string[] = []
   for (const f of flags) {
-    if (f.startsWith('import_lag:')) {
+    if (f.startsWith('counter_dropout:')) {
+      parts.push(
+        `Лічильник ${counterLabel(f, 'counter_dropout:')} випадав (SmartLogger втрачав пристрій) — енергію за час обриву дораховано рівномірно.`,
+      )
+    } else if (f.startsWith('counter_frozen:')) {
+      parts.push(`Лічильник ${counterLabel(f, 'counter_frozen:')} не змінювався — дані, імовірно, неповні.`)
+    } else if (f.startsWith('balance_negative:')) {
+      const kwh = Number(f.slice('balance_negative:'.length))
+      parts.push(
+        Number.isFinite(kwh)
+          ? `Лічильники не сходяться: віддано на ~${formatKwhNumber(kwh)} кВт·год більше, ніж надійшло.`
+          : 'Лічильники не сходяться: віддано більше, ніж надійшло.',
+      )
+    } else if (f.startsWith('import_lag:')) {
       const kwh = Number(f.slice('import_lag:'.length))
       parts.push(
         Number.isFinite(kwh)

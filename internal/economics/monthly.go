@@ -133,7 +133,10 @@ func dayHasCounterIssue(flags []string) bool {
 		if strings.HasPrefix(f, "import_lag") ||
 			strings.HasPrefix(f, "load_mismatch") ||
 			strings.HasPrefix(f, "counter_step") ||
-			strings.HasPrefix(f, "reconcile_rejected") {
+			strings.HasPrefix(f, "reconcile_rejected") ||
+			strings.HasPrefix(f, "counter_dropout") ||
+			strings.HasPrefix(f, "counter_frozen") ||
+			strings.HasPrefix(f, "balance_negative") {
 			return true
 		}
 	}

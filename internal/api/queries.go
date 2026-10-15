@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/nesh/sestelemetry/internal/alerts"
+	"github.com/nesh/sestelemetry/internal/counters"
 	"github.com/nesh/sestelemetry/internal/storage"
 )
 
@@ -317,18 +318,28 @@ func (s *Store) timeseriesDelta(ctx context.Context, organizationID string, metr
 		}
 		return nil
 	}, `
-		WITH bucketed AS (
+		WITH raw_buckets AS (
 			SELECT
 				time_bucket($1::interval, time, $6::text) AS bucket_time,
 				metric_key,
-				first(value, time) AS first_value,
-				last(value, time)  AS last_value
+				first(value, time) AS first_raw,
+				min(time)          AS first_time,
+				last(value, time)  AS last_raw,
+				max(time)          AS last_time
 			FROM telemetry_samples
 			WHERE organization_id = $2
 				AND metric_key = ANY($3)
 				AND time >= $4::timestamptz - $1::interval
 				AND time <= $5
 			GROUP BY bucket_time, metric_key
+		),
+		bucketed AS (
+			SELECT
+				bucket_time,
+				metric_key,
+				first_raw + counter_offset($2, metric_key, first_time) AS first_value,
+				last_raw + counter_offset($2, metric_key, last_time)   AS last_value
+			FROM raw_buckets
 		),
 		runmax AS (
 			SELECT
@@ -402,17 +413,25 @@ func (s *Store) timeseriesDelta(ctx context.Context, organizationID string, metr
 // DESC) index and scans no raw chunks.
 func (s *Store) timeseriesDeltaFromDaily(ctx context.Context, organizationID string, metricKeys []string, from, to time.Time, bucket, tz string) (TimeseriesResponse, error) {
 	rows, err := s.pool.Query(ctx, `
-		WITH bucketed AS (
+		WITH daily AS (
 			SELECT
-				time_bucket($1::interval, day, $6::text) AS bucket_time,
+				day,
 				metric_key,
-				first(first_value, day) AS first_value,
-				last(last_value, day)   AS last_value
+				first_value + counter_offset($2, metric_key, day) AS first_value,
+				last_value + counter_offset($2, metric_key, `+storage.DailyCAGGDayEnd("day")+`) AS last_value
 			FROM `+storage.DailyCAGGView+`
 			WHERE organization_id = $2
 				AND metric_key = ANY($3)
 				AND day >= $4::timestamptz - $1::interval
 				AND day <= $5
+		),
+		bucketed AS (
+			SELECT
+				time_bucket($1::interval, day, $6::text) AS bucket_time,
+				metric_key,
+				first(first_value, day) AS first_value,
+				last(last_value, day)   AS last_value
+			FROM daily
 			GROUP BY bucket_time, metric_key
 		),
 		runmax AS (
@@ -618,10 +637,9 @@ func (s *Store) timeseriesInstant(ctx context.Context, organizationID string, me
 //     sample exists we treat the period's first sample as the seed
 //     so the cards show in-period accumulation.
 //
-// `end - seed` is clamped at zero. When an inverter glitch rewrites
-// the counter mid-period the result will clamp; the dashboard then
-// refuses to fabricate a number rather than guessing across the
-// rollback.
+// Every reading carries its counter_offset(), so a SmartLogger device
+// dropout between seed and end does not shift the result. `end - seed`
+// is still clamped at zero for whatever the stitcher has not seen yet.
 //
 // The half-open semantic [from, to) matters: callers pass `to` as
 // "first instant of the next period" (e.g. start of next day for the
@@ -635,7 +653,7 @@ const summarySQLRaw = `
 	SELECT
 		m.metric_key,
 		(
-			SELECT value FROM telemetry_samples
+			SELECT value + counter_offset($1, m.metric_key, time) FROM telemetry_samples
 			WHERE organization_id = $1
 				AND metric_key = m.metric_key
 				AND time < $4
@@ -643,7 +661,7 @@ const summarySQLRaw = `
 			LIMIT 1
 		) AS end_value,
 		(
-			SELECT value FROM telemetry_samples
+			SELECT value + counter_offset($1, m.metric_key, time) FROM telemetry_samples
 			WHERE organization_id = $1
 				AND metric_key = m.metric_key
 				AND time < $3
@@ -651,7 +669,7 @@ const summarySQLRaw = `
 			LIMIT 1
 		) AS before_seed,
 		(
-			SELECT value FROM telemetry_samples
+			SELECT value + counter_offset($1, m.metric_key, time) FROM telemetry_samples
 			WHERE organization_id = $1
 				AND metric_key = m.metric_key
 				AND time >= $3
@@ -676,7 +694,8 @@ var summarySQLDaily = `
 	SELECT
 		m.metric_key,
 		(
-			SELECT last_value FROM ` + storage.DailyCAGGView + `
+			SELECT last_value + counter_offset($1, m.metric_key, ` + storage.DailyCAGGDayEnd("day") + `)
+			FROM ` + storage.DailyCAGGView + `
 			WHERE organization_id = $1
 				AND metric_key = m.metric_key
 				AND day < $4
@@ -684,7 +703,8 @@ var summarySQLDaily = `
 			LIMIT 1
 		) AS end_value,
 		(
-			SELECT last_value FROM ` + storage.DailyCAGGView + `
+			SELECT last_value + counter_offset($1, m.metric_key, ` + storage.DailyCAGGDayEnd("day") + `)
+			FROM ` + storage.DailyCAGGView + `
 			WHERE organization_id = $1
 				AND metric_key = m.metric_key
 				AND day < $3
@@ -692,7 +712,7 @@ var summarySQLDaily = `
 			LIMIT 1
 		) AS before_seed,
 		(
-			SELECT first_value FROM ` + storage.DailyCAGGView + `
+			SELECT first_value + counter_offset($1, m.metric_key, day) FROM ` + storage.DailyCAGGView + `
 			WHERE organization_id = $1
 				AND metric_key = m.metric_key
 				AND day >= $3
@@ -710,15 +730,10 @@ var summarySQLDaily = `
 // after the totals are read so the algebraic appliance-consumption
 // fallback applies identically on both the raw and CAGG paths.
 //
-// All accumulators currently use the same end-minus-seed lookup,
-// because that is the right answer for a healthy monotonic counter
-// and preserves the constant-time read regardless of period length.
-// A counter that rolls back mid-period (firmware bug, manual reset
-// on the inverter) will clamp the result to zero — the dashboard
-// flags this as "no usable data" rather than reconstructing a
-// plausible number from per-day deltas. Recovering from such a
-// rollback is a data-quality job (fix the bogus samples in the
-// hypertable), not a query-shape one.
+// All accumulators use the same end-minus-seed lookup on stitched
+// readings (raw + counter_offset), which keeps the read constant-time
+// regardless of period length. Rollbacks are bridged by the stitcher's
+// corrections, not here.
 func (s *Store) EnergySummary(ctx context.Context, organizationID string, metricKeys []string, from, to time.Time) (EnergySummaryResponse, error) {
 	if len(metricKeys) == 0 {
 		metricKeys = EnergySummaryAccumulators
@@ -1419,7 +1434,33 @@ func (s *Store) EnergyFlowSources(
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	segs, err := storage.CounterSegmentsInRange(ctx, s.pool, organizationID, counters.Metrics, from.UTC().Add(-lookback), to.UTC())
+	if err != nil {
+		return nil, fmt.Errorf("energy_flow corrections: %w", err)
+	}
+	applyCounterSegments(out, segs)
 	return out, nil
+}
+
+// applyCounterSegments adds each stitched counter's correction to its
+// raw readings, the same counter_offset() the delta queries apply.
+func applyCounterSegments(rows []EnergyFlowRawRow, segs []storage.CounterSegment) {
+	if len(segs) == 0 {
+		return
+	}
+	byMetric := make(map[string][]counters.Segment)
+	for _, g := range segs {
+		seg := counters.Segment{Start: g.StartsAt, StartOffset: g.OffsetStart, EndOffset: g.OffsetEnd}
+		if g.EndsAt != nil {
+			seg.End = *g.EndsAt
+		}
+		byMetric[g.MetricKey] = append(byMetric[g.MetricKey], seg)
+	}
+	for i := range rows {
+		if list, ok := byMetric[rows[i].MetricKey]; ok {
+			rows[i].Value += counters.OffsetAt(list, rows[i].Time)
+		}
+	}
 }
 
 func ParseCSV(input string) []string {

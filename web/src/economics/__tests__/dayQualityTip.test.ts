@@ -18,8 +18,17 @@ describe('dayQualityTip', () => {
     expect(tip).toContain('приблизні')
   })
 
+  it('names the counter a SmartLogger dropout or freeze hit', () => {
+    const tip = dayQualityTip(['counter_dropout:grid_import', 'counter_frozen:pv', 'balance_negative:8151'])
+    expect(tip).toContain('Лічильник імпорту випадав')
+    expect(tip).toContain('Лічильник генерації СЕС не змінювався')
+    expect(tip).toContain('8')
+    expect(tip).toContain('приблизні')
+  })
+
   it('ignores routine bookkeeping flags', () => {
     expect(dayQualityTip(['no_scale:grid_export', 'load_rebalanced'])).toBeNull()
+    expect(dayQualityTip(['counter_seam:pv', 'counter_spike:ess_charged'])).toBeNull()
     expect(dayQualityTip([])).toBeNull()
     expect(dayQualityTip(undefined)).toBeNull()
   })

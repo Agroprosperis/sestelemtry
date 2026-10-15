@@ -111,6 +111,13 @@ func main() {
 		log.Error("db_init_auth", "err", err)
 		os.Exit(1)
 	}
+	// Counter stitching corrections and the counter_offset() function
+	// every counter delta query calls. Idempotent; mirrored by
+	// 020_counter_stitch.sql.
+	if err := storage.InitCounterSchema(ctx, pool); err != nil {
+		log.Error("db_init_counters", "err", err)
+		os.Exit(1)
+	}
 
 	store := api.NewStore(pool)
 	// Boot-time feature detection: if the collector has run migration 004
@@ -280,18 +287,39 @@ func main() {
 	}
 	// The importer has no date guard: it protects live data per 24h
 	// window by skipping any day that already has real telemetry.
+	// Archive rows land in the past, under the counter stitcher's
+	// watermark, so each import asks it to rebuild the org.
+	requestStitchRebuild := func(ctx context.Context, orgID string, from time.Time) {
+		if err := storage.RequestCounterRebuild(ctx, pool, orgID, from); err != nil {
+			log.Error("counter_rebuild_request_failed", "organization_id", orgID, "err", err)
+		}
+	}
 	importer := fusionsolar.NewImporter(pool, log, hostsByOrg)
 	svc.SetFusionSolarImporter(func(ctx context.Context, orgID, accessToken, apiBase string, from, to time.Time, onProgress api.FusionProgressFunc) (any, error) {
 		client := fusionsolar.NewClient(apiBase, accessToken, 60*time.Second)
-		return importer.Import(ctx, client, orgID, from, to, onProgress)
+		res, err := importer.Import(ctx, client, orgID, from, to, onProgress)
+		if err == nil && res != nil && res.RowsWritten > 0 {
+			requestStitchRebuild(ctx, orgID, from)
+		}
+		return res, err
 	})
 	askoeHosts := map[string]askoe.OrgHosts{}
 	for id, oh := range hostsByOrg {
 		askoeHosts[id] = askoe.OrgHosts{Default: oh.Default, ByMetricKey: oh.ByMetricKey}
 	}
 	askoeImporter := askoe.NewImporter(pool, log, askoeHosts)
+	kyiv, err := time.LoadLocation("Europe/Kyiv")
+	if err != nil {
+		kyiv = time.UTC
+	}
 	svc.SetAskoeImporter(func(ctx context.Context, orgID string, files []askoe.WorkbookFile, onProgress func(done, total int, label string)) (any, error) {
-		return askoeImporter.Import(ctx, orgID, files, onProgress)
+		res, err := askoeImporter.Import(ctx, orgID, files, onProgress)
+		if err == nil && res != nil && res.RowsWritten > 0 {
+			if from, perr := time.ParseInLocation("2006-01-02", res.From, kyiv); perr == nil {
+				requestStitchRebuild(ctx, orgID, from)
+			}
+		}
+		return res, err
 	})
 	// Server-side OAuth client so the import page only needs the
 	// long-lived refresh token; the fixed app secret never leaves the

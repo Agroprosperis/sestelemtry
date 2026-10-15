@@ -34,6 +34,13 @@ const LegacyHourlyCAGGView = "telemetry_samples_hourly"
 // daily CAGG keyed by tz, not a runtime parameter.
 const caggDayBucketTZ = "Europe/Kyiv"
 
+// DailyCAGGDayEnd is the SQL for the last instant of the CAGG day held
+// in column col, DST-aware.
+func DailyCAGGDayEnd(col string) string {
+	return "((" + col + " AT TIME ZONE '" + caggDayBucketTZ + "') + interval '1 day') AT TIME ZONE '" +
+		caggDayBucketTZ + "' - interval '1 millisecond'"
+}
+
 // InitContinuousAggregates ensures the daily CAGG and its supporting
 // refresh policy + index exist, and drops the legacy hourly CAGG when
 // it is still around from migration 003. Idempotent: safe to call on

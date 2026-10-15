@@ -194,6 +194,16 @@ func (s *Service) ComputeDay(ctx context.Context, orgID, date, tz string) (Store
 	totals.Reconciled = recon.Applied
 	totals.QualityFlags = recon.Flags
 	totals.Reconciliation = recon.Detail
+	if src, ok := s.backend.(CounterEpisodeSource); ok {
+		episodes, err := src.CounterEpisodes(ctx, orgID, dayStart, dayEnd)
+		if err != nil {
+			return StoredDay{}, fmt.Errorf("counter episodes: %w", err)
+		}
+		totals.QualityFlags = append(totals.QualityFlags, counterFlags(episodes)...)
+	}
+	if flag, ok := balanceFlag(totals); ok {
+		totals.QualityFlags = append(totals.QualityFlags, flag)
+	}
 
 	// A day is final once it has fully elapsed in tz — no more
 	// telemetry is expected, so the cache can be served verbatim.

@@ -54,6 +54,20 @@ func (b *economicsBackend) Timeseries(ctx context.Context, orgID string, metricK
 	return out, nil
 }
 
+// CounterEpisodes reports the counter stitcher's episodes overlapping
+// [from, to) for the day's quality flags.
+func (b *economicsBackend) CounterEpisodes(ctx context.Context, orgID string, from, to time.Time) ([]economics.CounterEpisode, error) {
+	rows, err := storage.CounterEpisodesInRange(ctx, b.store.pool, orgID, from, to)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]economics.CounterEpisode, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, economics.CounterEpisode{MetricKey: r.MetricKey, Kind: r.Kind})
+	}
+	return out, nil
+}
+
 func (b *economicsBackend) DAMPrices(ctx context.Context, zone int, from, to time.Time) ([]economics.DAMHour, error) {
 	resp, err := b.store.DAMPrices(ctx, zone, from, to)
 	if err != nil {

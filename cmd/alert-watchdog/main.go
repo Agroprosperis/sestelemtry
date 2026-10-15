@@ -75,9 +75,14 @@ func main() {
 		fallbackPassword = cfg.Alerts.SMTP.Password
 	}
 
+	orgNames := make(map[string]string, len(cfg.Organizations))
+	for _, o := range cfg.Organizations {
+		orgNames[o.ID] = o.Name
+	}
 	wd := &watchdog{
 		log:                log,
 		devices:            monitoredDevices(cfg),
+		orgNames:           orgNames,
 		fallback:           alerts.SettingsFromConfig(cfg.Alerts),
 		fallbackPassword:   fallbackPassword,
 		warnedNoRecipients: map[string]bool{},
@@ -120,6 +125,12 @@ func main() {
 	// a fresh host and it only reads these tables.
 	if err := storage.InitAlertSettingsSchema(ctx, wd.pool); err != nil {
 		log.Error("db_schema_alert_settings", "err", err)
+		os.Exit(1)
+	}
+	// Counter episodes come from economics-recompute; the watchdog marks
+	// the ones it announced.
+	if err := storage.InitCounterSchema(ctx, wd.pool); err != nil {
+		log.Error("db_schema_counters", "err", err)
 		os.Exit(1)
 	}
 
@@ -166,6 +177,9 @@ type watchdog struct {
 	log     *slog.Logger
 	pool    *pgxpool.Pool
 	devices []monitoredDevice
+	// orgNames labels counter alerts, which concern an organization
+	// rather than one device.
+	orgNames map[string]string
 
 	// fallback / fallbackPassword are the config.yaml settings used
 	// until the notifications page saves something.
@@ -248,14 +262,138 @@ func (w *watchdog) runOnce(ctx context.Context) (time.Duration, error) {
 	}
 	w.logEnabledChange(true, eff)
 
-	targets, recipients := w.targets(eff)
-	if len(targets) == 0 || w.pool == nil {
+	if w.pool == nil {
 		return interval, nil
 	}
-	if err := w.check(ctx, eff, targets, recipients); err != nil {
+	targets, recipients := w.targets(eff)
+	if len(targets) > 0 {
+		if err := w.check(ctx, eff, targets, recipients); err != nil {
+			return interval, err
+		}
+	}
+	if err := w.checkCounters(ctx, eff, time.Now()); err != nil {
 		return interval, err
 	}
 	return interval, nil
+}
+
+const (
+	// counterAlertWindow limits announcements to episodes that started
+	// this recently, so the stitcher's first pass over months of history
+	// does not mail all of it.
+	counterAlertWindow = 5 * 24 * time.Hour
+	// counterAlertMinAge is how long a dropout must last before it is
+	// worth an email; a device missing for seconds is noise.
+	counterAlertMinAge = 15 * time.Minute
+	// counterAlertQuiet is how often one flapping counter may be
+	// announced.
+	counterAlertQuiet = 12 * time.Hour
+)
+
+// checkCounters announces the SmartLogger counters the stitcher saw
+// fall or freeze, and their recovery, one email per recipient list.
+func (w *watchdog) checkCounters(ctx context.Context, eff effective, now time.Time) error {
+	episodes, err := storage.CounterEpisodesToNotify(ctx, w.pool,
+		[]string{alerts.CounterKindDropout, alerts.CounterKindFrozen}, now.Add(-counterAlertWindow))
+	if err != nil {
+		return err
+	}
+	type batch struct {
+		recipients []string
+		events     []alerts.CounterEvent
+		episodes   []storage.CounterEpisode
+	}
+	batches := map[string]*batch{}
+	var order []string
+	for _, e := range episodes {
+		opening := e.NotifiedOpenAt == nil
+		if opening {
+			if e.EndedAt == nil && now.Sub(e.StartedAt) < counterAlertMinAge {
+				continue
+			}
+			quiet := e.EndedAt != nil && e.EndedAt.Sub(e.StartedAt) < counterAlertMinAge
+			if !quiet {
+				last, err := storage.LastCounterOpenNotification(ctx, w.pool, e.OrganizationID, e.MetricKey)
+				if err != nil {
+					return err
+				}
+				quiet = !last.IsZero() && now.Sub(last) < counterAlertQuiet
+			}
+			if quiet {
+				if err := markCounterEpisode(ctx, w.pool, e, true, true, now); err != nil {
+					return err
+				}
+				continue
+			}
+		}
+		delivery := eff.settings.DeliveryFor(e.OrganizationID, eff.overrides)
+		recipients := alerts.NormalizeRecipients(delivery.Recipients)
+		if !delivery.Enabled || len(recipients) == 0 {
+			continue
+		}
+		key := strings.Join(recipients, ",")
+		b, ok := batches[key]
+		if !ok {
+			b = &batch{recipients: recipients}
+			batches[key] = b
+			order = append(order, key)
+		}
+		b.events = append(b.events, alerts.CounterEvent{
+			OrganizationID:   e.OrganizationID,
+			OrganizationName: w.orgNames[e.OrganizationID],
+			MetricKey:        e.MetricKey,
+			Kind:             e.Kind,
+			Closed:           e.EndedAt != nil,
+			StartedAt:        e.StartedAt,
+			EndedAt:          e.EndedAt,
+			ValueBefore:      e.ValueBefore,
+			ValueAfter:       e.ValueAfter,
+			GapKwh:           e.GapKwh,
+		})
+		b.episodes = append(b.episodes, e)
+	}
+	if len(order) == 0 {
+		return nil
+	}
+	mailer, err := alerts.NewMailer(eff.settings.SMTP, eff.password)
+	if err != nil {
+		return fmt.Errorf("smtp settings: %w", err)
+	}
+	sort.Strings(order)
+	for _, key := range order {
+		b := batches[key]
+		msg, ok := alerts.BuildCounterMessage(b.events, now, time.Local)
+		if !ok {
+			continue
+		}
+		if err := mailer.Send(ctx, b.recipients, msg); err != nil {
+			// Left unmarked, so the next tick retries.
+			w.log.Error("alert_email_failed", "err", err, "counter_events", len(b.events))
+			continue
+		}
+		w.log.Info("alert_email_sent", "subject", msg.Subject, "counter_events", len(b.events), "recipients", len(b.recipients))
+		for _, e := range b.episodes {
+			if err := markCounterEpisode(ctx, w.pool, e, e.NotifiedOpenAt == nil, e.EndedAt != nil, now); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// markCounterEpisode records the episode's opening and/or closing as
+// dealt with. Marking both on an episode that is still open keeps a
+// silenced opening from being followed by a recovery email.
+func markCounterEpisode(ctx context.Context, pool *pgxpool.Pool, e storage.CounterEpisode, open, closing bool, at time.Time) error {
+	if open {
+		if err := storage.MarkCounterEpisodeNotified(ctx, pool, e.OrganizationID, e.MetricKey, e.StartedAt, true, at); err != nil {
+			return err
+		}
+	}
+	if closing {
+		return storage.MarkCounterEpisodeNotified(ctx, pool, e.OrganizationID, e.MetricKey, e.StartedAt, false, at)
+	}
+	return nil
 }
 
 // targets picks the devices to watch this tick and resolves where each
