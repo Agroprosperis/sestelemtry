@@ -169,12 +169,15 @@ func TestOptionalReads(t *testing.T) {
 		{Entry: registers.Entry{MetricKey: "grid_line_voltage_bc_v", DataType: registers.DTUint16, Gain: 0.1, Scope: registers.ScopeEdge}, PDUStart: 11, WordCount: 1, PDUEnd: 11},
 		{Entry: registers.Entry{MetricKey: "grid_line_voltage_ca_v", DataType: registers.DTUint16, Gain: 0.1, Scope: registers.ScopeEdge}, PDUStart: 12, WordCount: 1, PDUEnd: 12},
 	}
-	if opt := optionalReadsFor(config.ModbusDevice{MetricKeys: []string{"soc_percent"}}, all); opt.due(time.Now()) {
+	if opt, err := optionalReadsFor(config.ModbusDevice{MetricKeys: []string{"soc_percent"}}, all); err != nil || opt.due(time.Now()) {
 		t.Fatal("a whitelisted device reads only what it names")
 	}
-	opt := optionalReadsFor(config.ModbusDevice{}, all)
-	if !opt.due(time.Now()) || len(opt.entries) != 3 || len(opt.chunks) != 1 {
-		t.Fatalf("optional reads = %+v", opt)
+	if _, err := optionalReadsFor(config.ModbusDevice{}, all[:1]); err == nil {
+		t.Fatal("a catalog without the optional keys must say so")
+	}
+	opt, err := optionalReadsFor(config.ModbusDevice{}, all)
+	if err != nil || !opt.due(time.Now()) || len(opt.entries) != 3 || len(opt.chunks) != 1 {
+		t.Fatalf("optional reads = %+v, %v", opt, err)
 	}
 
 	var got []storage.Sample

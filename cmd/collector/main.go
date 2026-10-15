@@ -168,7 +168,10 @@ func runDevice(
 		return
 	}
 	chunks := modbusclient.PlanChunks(resolved)
-	opt := optionalReadsFor(dev, resolvedAll)
+	opt, err := optionalReadsFor(dev, resolvedAll)
+	if err != nil {
+		log.Warn("optional_reads_unavailable", "err", err, "hint", "the register catalog lacks the optional keys")
+	}
 	log.Info("device_start", "metrics", len(resolved), "modbus_reads", len(chunks), "optional_metrics", len(opt.entries))
 
 	t := time.NewTicker(org.PollInterval)
@@ -276,15 +279,15 @@ type optionalReads struct {
 	next    time.Time
 }
 
-func optionalReadsFor(dev config.ModbusDevice, resolvedAll []registers.ResolvedEntry) optionalReads {
+func optionalReadsFor(dev config.ModbusDevice, resolvedAll []registers.ResolvedEntry) (optionalReads, error) {
 	if len(dev.MetricKeys) > 0 {
-		return optionalReads{}
+		return optionalReads{}, nil
 	}
 	entries, err := registers.Subset(resolvedAll, optionalMetricKeys)
-	if err != nil || len(entries) == 0 {
-		return optionalReads{}
+	if err != nil {
+		return optionalReads{}, err
 	}
-	return optionalReads{entries: entries, chunks: modbusclient.PlanChunks(entries)}
+	return optionalReads{entries: entries, chunks: modbusclient.PlanChunks(entries)}, nil
 }
 
 func (o *optionalReads) due(now time.Time) bool {
