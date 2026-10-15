@@ -168,7 +168,8 @@ func runDevice(
 		return
 	}
 	chunks := modbusclient.PlanChunks(resolved)
-	log.Info("device_start", "metrics", len(resolved), "modbus_reads", len(chunks))
+	opt := optionalReadsFor(dev, resolvedAll)
+	log.Info("device_start", "metrics", len(resolved), "modbus_reads", len(chunks), "optional_metrics", len(opt.entries))
 
 	t := time.NewTicker(org.PollInterval)
 	defer t.Stop()
@@ -207,6 +208,9 @@ func runDevice(
 				return
 			}
 			log.Error("poll", "err", err)
+			_ = sess.Close()
+			sess = nil
+		} else if opt.due(time.Now()) && !pollOptional(ctx, log, cfg, org, dev, sess, &opt, pool) {
 			_ = sess.Close()
 			sess = nil
 		}
@@ -248,6 +252,78 @@ func pollAndStore(
 	}
 	log.Info("poll_ok", "samples", len(samples))
 	return nil
+}
+
+// optionalMetricKeys are read on top of the catalog by a device that
+// polls the whole of it (no metric_keys whitelist): the grid line
+// voltages behind the live flow's «Мережа» node. Some firmwares refuse
+// these registers, which is why the catalog keeps them out of the main
+// poll; here they go in their own request every optionalReadEvery, and
+// a refusal pauses them for optionalBackoff instead of failing the
+// poll. A whitelisted device (one logger of a dual site) names what it
+// reads itself.
+var optionalMetricKeys = []string{"grid_line_voltage_ab_v", "grid_line_voltage_bc_v", "grid_line_voltage_ca_v"}
+
+const (
+	optionalReadEvery = 10 * time.Second
+	optionalBackoff   = 10 * time.Minute
+)
+
+// optionalReads is a device's optional request and when it is next due.
+type optionalReads struct {
+	entries []registers.ResolvedEntry
+	chunks  []modbusclient.ReadChunk
+	next    time.Time
+}
+
+func optionalReadsFor(dev config.ModbusDevice, resolvedAll []registers.ResolvedEntry) optionalReads {
+	if len(dev.MetricKeys) > 0 {
+		return optionalReads{}
+	}
+	entries, err := registers.Subset(resolvedAll, optionalMetricKeys)
+	if err != nil || len(entries) == 0 {
+		return optionalReads{}
+	}
+	return optionalReads{entries: entries, chunks: modbusclient.PlanChunks(entries)}
+}
+
+func (o *optionalReads) due(now time.Time) bool {
+	return len(o.chunks) > 0 && !now.Before(o.next)
+}
+
+// pollOptional reads and stores the optional metrics. A refusal only
+// pauses them; it returns false when the session should be redialled
+// because the request timed out and a late reply could land on the
+// next read.
+func pollOptional(
+	ctx context.Context,
+	log *slog.Logger,
+	cfg *config.Root,
+	org config.Organization,
+	dev config.ModbusDevice,
+	sess modbusReader,
+	opt *optionalReads,
+	pool *pgxpool.Pool,
+) bool {
+	now := time.Now()
+	readCtx, cancel := context.WithTimeout(ctx, readBudgetForPoll(dev.RequestTimeout, len(opt.chunks)))
+	defer cancel()
+	data, err := readChunkData(readCtx, cfg.ModbusRegisterMap, sess, opt.chunks)
+	if err != nil {
+		opt.next = now.Add(optionalBackoff)
+		log.Warn("poll_optional", "err", err, "retry_in", optionalBackoff.String())
+		return !(errors.Is(err, context.DeadlineExceeded) || os.IsTimeout(err))
+	}
+	opt.next = now.Add(optionalReadEvery)
+	samples, err := buildSamples(org, dev, opt.entries, opt.chunks, data, now.UTC())
+	if err != nil {
+		log.Warn("poll_optional", "err", err)
+		return true
+	}
+	if err := insertSamples(ctx, pool, samples); err != nil {
+		log.Warn("poll_optional_store", "err", err)
+	}
+	return true
 }
 
 func readChunkData(ctx context.Context, registerMap config.ModbusRegisterMap, sess modbusReader, chunks []modbusclient.ReadChunk) (map[uint16][]byte, error) {

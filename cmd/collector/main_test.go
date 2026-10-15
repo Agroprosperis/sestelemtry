@@ -152,6 +152,69 @@ func TestPollAndStoreMissingSlice(t *testing.T) {
 	}
 }
 
+type failingModbusReader struct{ err error }
+
+func (f failingModbusReader) ReadHolding(context.Context, uint16, uint16) ([]byte, error) {
+	return nil, f.err
+}
+
+func (f failingModbusReader) ReadInput(context.Context, uint16, uint16) ([]byte, error) {
+	return nil, f.err
+}
+
+func TestOptionalReads(t *testing.T) {
+	all := []registers.ResolvedEntry{
+		{Entry: registers.Entry{MetricKey: "soc_percent", DataType: registers.DTUint16}, PDUStart: 0, WordCount: 1},
+		{Entry: registers.Entry{MetricKey: "grid_line_voltage_ab_v", DataType: registers.DTUint16, Gain: 0.1, Scope: registers.ScopeEdge}, PDUStart: 10, WordCount: 1, PDUEnd: 10},
+		{Entry: registers.Entry{MetricKey: "grid_line_voltage_bc_v", DataType: registers.DTUint16, Gain: 0.1, Scope: registers.ScopeEdge}, PDUStart: 11, WordCount: 1, PDUEnd: 11},
+		{Entry: registers.Entry{MetricKey: "grid_line_voltage_ca_v", DataType: registers.DTUint16, Gain: 0.1, Scope: registers.ScopeEdge}, PDUStart: 12, WordCount: 1, PDUEnd: 12},
+	}
+	if opt := optionalReadsFor(config.ModbusDevice{MetricKeys: []string{"soc_percent"}}, all); opt.due(time.Now()) {
+		t.Fatal("a whitelisted device reads only what it names")
+	}
+	opt := optionalReadsFor(config.ModbusDevice{}, all)
+	if !opt.due(time.Now()) || len(opt.entries) != 3 || len(opt.chunks) != 1 {
+		t.Fatalf("optional reads = %+v", opt)
+	}
+
+	var got []storage.Sample
+	prevInsert := insertSamples
+	insertSamples = func(_ context.Context, _ *pgxpool.Pool, samples []storage.Sample) error {
+		got = append(got, samples...)
+		return nil
+	}
+	t.Cleanup(func() { insertSamples = prevInsert })
+	cfg := &config.Root{ModbusRegisterMap: config.MapHolding}
+	org := config.Organization{ID: "de"}
+	dev := config.ModbusDevice{Modbus: config.Modbus{RequestTimeout: time.Second}}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	reader := &mockModbusReader{holding: map[uint16][]byte{10: {0x0f, 0xbe, 0x0f, 0xc8, 0x0f, 0xb4}}}
+	if !pollOptional(context.Background(), logger, cfg, org, dev, reader, &opt, nil) {
+		t.Fatal("a good read keeps the session")
+	}
+	if len(got) != 3 || got[0].Value != 403 || got[1].Value != 404 || got[2].Value != 402 {
+		t.Fatalf("samples = %+v", got)
+	}
+	if opt.due(time.Now()) || opt.due(time.Now().Add(optionalReadEvery-time.Second)) {
+		t.Fatal("the next read waits optionalReadEvery")
+	}
+
+	// A refusal pauses the reads but keeps the session; a timeout asks
+	// for a redial.
+	opt.next = time.Time{}
+	if !pollOptional(context.Background(), logger, cfg, org, dev, failingModbusReader{err: io.ErrUnexpectedEOF}, &opt, nil) {
+		t.Fatal("a refusal keeps the session")
+	}
+	if opt.due(time.Now().Add(optionalBackoff - time.Minute)) {
+		t.Fatal("a refusal pauses the optional reads")
+	}
+	opt.next = time.Time{}
+	if pollOptional(context.Background(), logger, cfg, org, dev, failingModbusReader{err: context.DeadlineExceeded}, &opt, nil) {
+		t.Fatal("a timeout redials the session")
+	}
+}
+
 func TestReadBudgetForPoll(t *testing.T) {
 	got := readBudgetForPoll(2*time.Second, 3)
 	if got != 8*time.Second {
