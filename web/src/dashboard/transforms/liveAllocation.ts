@@ -180,24 +180,45 @@ function freshestTimestamp(metrics: Iterable<CurrentMetric | undefined>): Date |
   return latest === null ? null : new Date(latest)
 }
 
+// A power reading this much older than the snapshot's freshest value
+// has stopped updating: the collector no longer stores the placeholder
+// an unanswering meter returns, so the last real reading just ages.
+export const STALE_READING_MS = 2 * 60 * 1000
+
+const POWER_KEYS = ['active_pv_power_kw', 'load_power_kw', 'grid_connected_active_power_kw', 'active_ess_power_kw']
+
+// withoutStalePower drops the power readings that lag the snapshot's
+// freshest value by more than STALE_READING_MS.
+function withoutStalePower(metrics: CurrentResponse['metrics']): CurrentResponse['metrics'] {
+  const latest = freshestTimestamp(Object.values(metrics))
+  if (!latest) return metrics
+  const cutoff = latest.getTime() - STALE_READING_MS
+  const out = { ...metrics }
+  for (const key of POWER_KEYS) {
+    const t = out[key] ? Date.parse(out[key].time) : NaN
+    if (Number.isFinite(t) && t < cutoff) delete out[key]
+  }
+  return out
+}
+
 export function liveAllocationFromCurrent(
   current: CurrentResponse | null,
   essDischargeSign: 1 | -1 = 1,
 ): LiveAllocation {
   if (!current) return NO_DATA_ALLOCATION
 
-  const m = current.metrics
+  const m = withoutStalePower(current.metrics)
   const pvKw = readNumber(m.active_pv_power_kw)
   // Grid meter offline / islanded: SmartLogger returns INT32_MAX
-  // (→ ~2.15e6 kW after gain). Detect before any bus math so we
-  // don't invent a multi-GW import and poison derived load.
+  // (→ ~2.15e6 kW after gain), which the collector now drops, so the
+  // reading goes stale instead. Detect either before any bus math so
+  // we don't invent a multi-GW import and poison derived load.
   const rawGrid = m.grid_connected_active_power_kw
     ? Number(m.grid_connected_active_power_kw.value)
     : null
+  const gridStale = Boolean(current.metrics.grid_connected_active_power_kw) && !m.grid_connected_active_power_kw
   const gridUnavailable =
-    rawGrid !== null &&
-    Number.isFinite(rawGrid) &&
-    isModbusPowerSentinel(rawGrid)
+    gridStale || (rawGrid !== null && Number.isFinite(rawGrid) && isModbusPowerSentinel(rawGrid))
   const gridKw = gridUnavailable ? 0 : readNumber(m.grid_connected_active_power_kw)
   const essKw = essDischargeSign * readNumber(m.active_ess_power_kw)
   // Prefer bus-balance derivation; raw 40503 is a backup-load-only

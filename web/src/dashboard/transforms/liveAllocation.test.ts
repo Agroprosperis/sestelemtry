@@ -249,6 +249,43 @@ describe('liveAllocationFromCurrent', () => {
     expect(out.status).toBe('normal')
   })
 
+  it('treats a grid reading that stopped updating as unavailable', () => {
+    // The collector drops the INT32_MAX placeholder, so a meter that
+    // stops answering leaves its last real reading behind, aging.
+    const out = liveAllocationFromCurrent({
+      organization_id: 'ke',
+      metrics: {
+        active_pv_power_kw: { metric_key: 'active_pv_power_kw', value: 0, time: '2026-10-15T20:23:51Z' },
+        active_ess_power_kw: { metric_key: 'active_ess_power_kw', value: -26.1, time: '2026-10-15T20:23:51Z' },
+        grid_connected_active_power_kw: {
+          metric_key: 'grid_connected_active_power_kw',
+          value: 31.4,
+          time: '2026-10-15T20:10:02Z',
+        },
+      },
+    })
+    expect(out.gridState).toBe('unavailable')
+    expect(out.gridKw).toBe(0)
+    expect(out.essState).toBe('charging')
+    expect(out.status).toBe('normal')
+  })
+
+  it('keeps a slightly older grid reading from the other logger of a dual site', () => {
+    const out = liveAllocationFromCurrent({
+      organization_id: 'ze',
+      metrics: {
+        active_pv_power_kw: { metric_key: 'active_pv_power_kw', value: 0, time: '2026-10-15T20:23:51Z' },
+        grid_connected_active_power_kw: {
+          metric_key: 'grid_connected_active_power_kw',
+          value: 424.9,
+          time: '2026-10-15T20:23:49Z',
+        },
+      },
+    })
+    expect(out.gridState).toBe('importing')
+    expect(out.gridKw).toBeCloseTo(424.9)
+  })
+
   it('isModbusPowerSentinel matches INT32 and UINT32 all-ones after gain', () => {
     expect(isModbusPowerSentinel(2147483647 * 0.001)).toBe(true)
     expect(isModbusPowerSentinel(2147483.65)).toBe(true)

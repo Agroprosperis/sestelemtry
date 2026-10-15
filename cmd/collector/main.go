@@ -363,6 +363,11 @@ func buildSamples(
 		if payload == nil {
 			return nil, errors.New("internal: missing modbus slice for " + e.MetricKey)
 		}
+		// No reading is better than a fake one: the API's latest-value
+		// lookups age it out, the charts show a gap.
+		if decode.IsInvalid(e.DataType, payload) {
+			continue
+		}
 		v, err := decode.Scaled(e.DataType, payload, e.Gain, e.Offset)
 		if err != nil {
 			return nil, err

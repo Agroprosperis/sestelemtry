@@ -37,6 +37,32 @@ func Scaled(dt registers.DataType, raw []byte, gain, offset float64) (float64, e
 	return out, nil
 }
 
+// IsInvalid reports whether raw holds the value Huawei devices return
+// for a reading they do not have (a meter or inverter that is not
+// answering the SmartLogger): all ones for unsigned types, the maximum
+// (or minimum) for signed ones. Scaled, these read as 2 147 483 kW and
+// the like, never as a measurement.
+func IsInvalid(dt registers.DataType, raw []byte) bool {
+	if len(raw) < wordBytes(dt) {
+		return false
+	}
+	switch dt {
+	case registers.DTUint16:
+		return binary.BigEndian.Uint16(raw) == math.MaxUint16
+	case registers.DTUint32:
+		return binary.BigEndian.Uint32(raw) == math.MaxUint32
+	case registers.DTInt32:
+		v := int32(binary.BigEndian.Uint32(raw))
+		return v == math.MaxInt32 || v == math.MinInt32
+	case registers.DTUint64:
+		return binary.BigEndian.Uint64(raw) == math.MaxUint64
+	case registers.DTInt64:
+		v := int64(binary.BigEndian.Uint64(raw))
+		return v == math.MaxInt64 || v == math.MinInt64
+	}
+	return false
+}
+
 func wordBytes(dt registers.DataType) int {
 	switch dt {
 	case registers.DTUint16:

@@ -131,6 +131,36 @@ func TestPollAndStoreUsesInputMap(t *testing.T) {
 	}
 }
 
+// A meter that is not answering reads as INT32_MAX; that sample is
+// dropped, the others of the poll are stored.
+func TestPollAndStoreDropsInvalidReadings(t *testing.T) {
+	var got []storage.Sample
+	prevInsert := insertSamples
+	insertSamples = func(_ context.Context, _ *pgxpool.Pool, samples []storage.Sample) error {
+		got = append([]storage.Sample(nil), samples...)
+		return nil
+	}
+	t.Cleanup(func() { insertSamples = prevInsert })
+
+	cfg := &config.Root{ModbusRegisterMap: config.MapHolding}
+	org := config.Organization{ID: "ke"}
+	dev := config.ModbusDevice{Modbus: config.Modbus{RequestTimeout: time.Second}}
+	resolved := []registers.ResolvedEntry{
+		{Entry: registers.Entry{MetricKey: "soc_percent", DataType: registers.DTUint16, Gain: 0.1}, PDUStart: 0, WordCount: 1, PDUEnd: 0},
+		{Entry: registers.Entry{MetricKey: "grid_connected_active_power_kw", DataType: registers.DTInt32, Gain: 0.001}, PDUStart: 1, WordCount: 2, PDUEnd: 2},
+	}
+	chunks := []modbusclient.ReadChunk{{Start: 0, Quantity: 3}}
+	reader := &mockModbusReader{holding: map[uint16][]byte{0: {0x03, 0x5c, 0x7f, 0xff, 0xff, 0xff}}}
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	if err := pollAndStore(context.Background(), logger, cfg, org, dev, reader, resolved, chunks, nil); err != nil {
+		t.Fatalf("pollAndStore error: %v", err)
+	}
+	if len(got) != 1 || got[0].MetricKey != "soc_percent" {
+		t.Fatalf("samples = %+v", got)
+	}
+}
+
 func TestPollAndStoreMissingSlice(t *testing.T) {
 	cfg := &config.Root{ModbusRegisterMap: config.MapHolding}
 	org := config.Organization{ID: "org-a"}
