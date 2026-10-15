@@ -273,7 +273,7 @@ function PortfolioBody({
             <tr>
               <th>Об'єкт</th>
               <th>
-                ROCE (річний)
+                ROCE
                 <OptimumInfo tip={ROCE_TIP} />
               </th>
               <th>EBITDA</th>

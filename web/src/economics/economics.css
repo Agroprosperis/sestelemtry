@@ -1311,6 +1311,9 @@
 
 .economics-table-scroll {
   overflow-x: auto;
+  /* The table sets the height; a bubble must never turn into a
+     vertical scrollbar. */
+  overflow-y: hidden;
   /* Cap to viewport so a 18-column table never blows out the
      page width on smaller screens. The `+ 48px` budget covers
      the parent's 16px padding on both sides plus a few pixels
@@ -3231,6 +3234,19 @@ button.economics-optimum-row.open {
 .economics-info:hover::after {
   opacity: 1;
   visibility: visible;
+}
+
+/* In a scrolling table the bubble above a header «i» is cut off by
+   the scroll box, so there it opens downward over the rows, and stays
+   out of the layout until hovered so it never adds scroll area. */
+.economics-table-scroll .economics-info::after {
+  top: calc(100% + 7px);
+  bottom: auto;
+  display: none;
+}
+
+.economics-table-scroll .economics-info[data-tip]:hover::after {
+  display: block;
 }
 
 .economics-optimum-note {
