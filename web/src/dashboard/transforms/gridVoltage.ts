@@ -1,8 +1,10 @@
 import type { CurrentResponse } from '../../types'
 
-// GridVoltage is the grid voltage shown on the «Мережа» node: the grid
-// meter's three phase voltages when the site reports them, otherwise the
-// line voltages the SmartLogger sees through the inverters / PCS.
+// GridVoltage is the grid voltage shown on the «Мережа» node: the line
+// voltages the SmartLogger sees through the inverters / PCS, which every
+// site reports, so the sites compare at a glance (nominal 400 V); the
+// grid meter's phase voltages (nominal 230 V) only where no line reading
+// is available.
 export type GridVoltage = {
   kind: 'phase' | 'line'
   volts: number[]
@@ -42,11 +44,11 @@ function readGroup(resp: CurrentResponse, keys: string[], now: number): { volts:
 }
 
 // gridVoltageFrom picks the best fresh reading across the snapshots
-// given (the site itself, then its edge shadow): meter phases first.
+// given (the site itself, then its edge shadow): line voltage first.
 export function gridVoltageFrom(snapshots: Array<CurrentResponse | null>, now: number): GridVoltage | null {
   const groups: Array<{ kind: GridVoltage['kind']; keys: string[] }> = [
-    { kind: 'phase', keys: PHASE_KEYS },
     ...LINE_GROUPS.map((keys) => ({ kind: 'line' as const, keys })),
+    { kind: 'phase', keys: PHASE_KEYS },
   ]
   for (const g of groups) {
     for (const snap of snapshots) {
@@ -59,11 +61,11 @@ export function gridVoltageFrom(snapshots: Array<CurrentResponse | null>, now: n
 }
 
 export function formatGridVoltage(v: GridVoltage): string {
-  return `${v.volts.map((x) => Math.round(x)).join('/')} В`
+  return `${v.kind === 'phase' ? 'Uф' : 'Uл'} ${v.volts.map((x) => Math.round(x)).join('/')} В`
 }
 
 export function gridVoltageTitle(v: GridVoltage): string {
   return v.kind === 'phase'
-    ? 'Напруга фаз A/B/C на лічильнику мережі'
-    : 'Лінійна напруга мережі AB/BC/CA (з боку інверторів)'
+    ? 'Фазна напруга A/B/C на лічильнику мережі, номінал 230 В'
+    : 'Лінійна напруга мережі AB/BC/CA з боку інверторів, номінал 400 В'
 }

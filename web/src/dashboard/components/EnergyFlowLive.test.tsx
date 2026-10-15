@@ -51,12 +51,12 @@ describe('EnergyFlowLive', () => {
     rerender(
       <EnergyFlowLive
         allocation={allocation}
-        gridVoltage={{ kind: 'phase', volts: [227.4, 230.1, 229.2], at: new Date('2026-05-10T12:00:00Z') }}
+        gridVoltage={{ kind: 'line', volts: [390.6, 394, 394.5], at: new Date('2026-05-10T12:00:00Z') }}
       />,
     )
-    const volt = screen.getByText('227/230/229 В')
+    const volt = screen.getByText('Uл 391/394/395 В')
     expect(volt.closest('.energy-flow-live-node--grid')).not.toBeNull()
-    expect(volt.getAttribute('title')).toContain('фаз')
+    expect(volt.getAttribute('title')).toContain('Лінійна')
   })
 
   it('renders four animated edges', () => {
