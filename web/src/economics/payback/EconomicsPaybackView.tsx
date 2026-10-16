@@ -54,6 +54,11 @@ type Props = {
   plannedPaybackMonths: number
 }
 
+// SHOW_PLAN_DEVIATION gates the «Відхилення від бізнес-плану» card,
+// hidden for now at the client's request; set it back to true to
+// restore the card.
+const SHOW_PLAN_DEVIATION = false
+
 // monthTitleLower renders "травень 2035" (lowercase month + year) for
 // inline notes and chart labels, per the mockup copy.
 function monthTitleLower(monthKey: string): string {
@@ -880,46 +885,48 @@ export function EconomicsPaybackView({ data, capexUah, capexSteps, plannedPaybac
             <SideRow icon="percent" tone="green" label="Чистий ефект (EBITDA)" value={formatUah(allTimeEbitda)} />
           </aside>
 
-          <aside
-            className="economics-card economics-month-section economics-payback-side"
-            aria-label="Відхилення від бізнес-плану"
-          >
-            <h3 className="economics-payback-side-title">
-              Відхилення від бізнес-плану
-              <OptimumInfo tip="Порівняння поточного прогнозу окупності з плановим терміном із бізнес-плану (поле «Бізнес-план окупності» в параметрах тарифів)." />
-            </h3>
-            {planMonths > 0 && deviationMonths !== null ? (
-              <>
-                <div className="economics-payback-dev-row">
-                  <span>Початкова окупність (план)</span>
-                  <b>{paybackLabel(planMonths / 12)}</b>
-                </div>
-                <div className="economics-payback-dev-row">
-                  <span>Поточний прогноз окупності</span>
-                  <b>{paybackDurationLabel}</b>
-                </div>
-                <div
-                  className={`economics-payback-dev-verdict ${deviationMonths > 0 ? 'bad' : deviationMonths < 0 ? 'good' : ''}`}
-                >
-                  <span>Відхилення</span>
-                  <span className="economics-payback-dev-verdict-value">
-                    <b>
-                      {deviationMonths === 0
-                        ? 'за планом'
-                        : `${deviationMonths > 0 ? '+' : '−'}${Math.abs(deviationMonths)} міс.`}
-                    </b>
-                    {deviationMonths !== 0 ? (
-                      <em>{deviationMonths > 0 ? 'погіршення від плану' : 'покращення від плану'}</em>
-                    ) : null}
-                  </span>
-                </div>
-              </>
-            ) : (
-              <p className="economics-month-muted">
-                Вкажіть «Бізнес-план окупності» в параметрах тарифів, щоб порівняти прогноз із планом.
-              </p>
-            )}
-          </aside>
+          {SHOW_PLAN_DEVIATION ? (
+            <aside
+              className="economics-card economics-month-section economics-payback-side"
+              aria-label="Відхилення від бізнес-плану"
+            >
+              <h3 className="economics-payback-side-title">
+                Відхилення від бізнес-плану
+                <OptimumInfo tip="Порівняння поточного прогнозу окупності з плановим терміном із бізнес-плану (поле «Бізнес-план окупності» в параметрах тарифів)." />
+              </h3>
+              {planMonths > 0 && deviationMonths !== null ? (
+                <>
+                  <div className="economics-payback-dev-row">
+                    <span>Початкова окупність (план)</span>
+                    <b>{paybackLabel(planMonths / 12)}</b>
+                  </div>
+                  <div className="economics-payback-dev-row">
+                    <span>Поточний прогноз окупності</span>
+                    <b>{paybackDurationLabel}</b>
+                  </div>
+                  <div
+                    className={`economics-payback-dev-verdict ${deviationMonths > 0 ? 'bad' : deviationMonths < 0 ? 'good' : ''}`}
+                  >
+                    <span>Відхилення</span>
+                    <span className="economics-payback-dev-verdict-value">
+                      <b>
+                        {deviationMonths === 0
+                          ? 'за планом'
+                          : `${deviationMonths > 0 ? '+' : '−'}${Math.abs(deviationMonths)} міс.`}
+                      </b>
+                      {deviationMonths !== 0 ? (
+                        <em>{deviationMonths > 0 ? 'погіршення від плану' : 'покращення від плану'}</em>
+                      ) : null}
+                    </span>
+                  </div>
+                </>
+              ) : (
+                <p className="economics-month-muted">
+                  Вкажіть «Бізнес-план окупності» в параметрах тарифів, щоб порівняти прогноз із планом.
+                </p>
+              )}
+            </aside>
+          ) : null}
 
           <aside className="economics-card economics-month-section economics-payback-side" aria-label="Примітка">
             <h3 className="economics-payback-side-title">
