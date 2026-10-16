@@ -54,10 +54,10 @@ type Props = {
   plannedPaybackMonths: number
 }
 
-// SHOW_PLAN_DEVIATION gates the «Відхилення від бізнес-плану» card,
-// hidden for now at the client's request; set it back to true to
-// restore the card.
-const SHOW_PLAN_DEVIATION = false
+// SHOW_PLAN_CARDS gates the «Відхилення від бізнес-плану» and
+// «Примітка» cards, hidden for now at the client's request; set it back
+// to true to restore both.
+const SHOW_PLAN_CARDS = false
 
 // monthTitleLower renders "травень 2035" (lowercase month + year) for
 // inline notes and chart labels, per the mockup copy.
@@ -885,7 +885,7 @@ export function EconomicsPaybackView({ data, capexUah, capexSteps, plannedPaybac
             <SideRow icon="percent" tone="green" label="Чистий ефект (EBITDA)" value={formatUah(allTimeEbitda)} />
           </aside>
 
-          {SHOW_PLAN_DEVIATION ? (
+          {SHOW_PLAN_CARDS ? (
             <aside
               className="economics-card economics-month-section economics-payback-side"
               aria-label="Відхилення від бізнес-плану"
@@ -928,17 +928,19 @@ export function EconomicsPaybackView({ data, capexUah, capexSteps, plannedPaybac
             </aside>
           ) : null}
 
-          <aside className="economics-card economics-month-section economics-payback-side" aria-label="Примітка">
-            <h3 className="economics-payback-side-title">
-              <span className="economics-payback-note-icon">i</span>
-              Примітка
-            </h3>
-            <p className="economics-payback-note">
-              Прогноз базується на фактичних даних за {model.totalMonthsWithData} міс. експлуатації з
-              урахуванням сезонності сонячного виробітку та може змінюватися залежно від фактичного виробітку
-              електроенергії, цін РДН, тарифів, операційних витрат та інших факторів.
-            </p>
-          </aside>
+          {SHOW_PLAN_CARDS ? (
+            <aside className="economics-card economics-month-section economics-payback-side" aria-label="Примітка">
+              <h3 className="economics-payback-side-title">
+                <span className="economics-payback-note-icon">i</span>
+                Примітка
+              </h3>
+              <p className="economics-payback-note">
+                Прогноз базується на фактичних даних за {model.totalMonthsWithData} міс. експлуатації з
+                урахуванням сезонності сонячного виробітку та може змінюватися залежно від фактичного виробітку
+                електроенергії, цін РДН, тарифів, операційних витрат та інших факторів.
+              </p>
+            </aside>
+          ) : null}
         </div>
       </div>
     </>
