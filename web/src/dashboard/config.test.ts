@@ -26,9 +26,12 @@ describe('energyFloorFor', () => {
   })
 
   // A floor later than the site's own start would silently re-hide the
-  // archive this map exists to expose.
+  // archive this map exists to expose. Only a site that came online after
+  // the fallback has nothing earlier to hide: de1 (Т1) since 2026-09-24.
   it('never lands after the conservative fallback', () => {
+    const commissionedLater = new Set(['de1'])
     for (const [id, day] of Object.entries(ORGANIZATION_OPERATION_START)) {
+      if (commissionedLater.has(id)) continue
       expect(day.getTime(), id).toBeLessThanOrEqual(MIN_RELIABLE_DATA_AT.getTime())
     }
   })

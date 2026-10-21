@@ -134,4 +134,31 @@ func TestElevatorCodeFor(t *testing.T) {
 	if _, ok := ElevatorCodeFor("demo-org"); ok {
 		t.Fatal("demo-org must be unsupported")
 	}
+	if _, ok := ElevatorCodeFor("de1"); ok {
+		t.Fatal("de1 has no forecast code of its own")
+	}
+}
+
+// DE forecasts the whole Дубовʼязівський elevator, which `de` stopped
+// being on 2026-09-24.
+func TestCodeCoversDay(t *testing.T) {
+	kyiv, err := time.LoadLocation("Europe/Kyiv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		org  string
+		day  time.Time
+		want bool
+	}{
+		{"de", time.Date(2026, 9, 23, 0, 0, 0, 0, kyiv), true},
+		{"de", time.Date(2026, 9, 24, 0, 0, 0, 0, kyiv), false},
+		{"de", time.Date(2027, 1, 1, 0, 0, 0, 0, kyiv), false},
+		{"ab", time.Date(2027, 1, 1, 0, 0, 0, 0, kyiv), true},
+	}
+	for _, c := range cases {
+		if got := CodeCoversDay(c.org, c.day); got != c.want {
+			t.Errorf("CodeCoversDay(%s, %s) = %v, want %v", c.org, c.day.Format("2006-01-02"), got, c.want)
+		}
+	}
 }

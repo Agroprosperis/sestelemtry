@@ -93,6 +93,11 @@ func (h *Handlers) pvPlanSummary(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, resp)
 		return
 	}
+	if !pvplan.CodeCoversDay(orgID, fromDay) {
+		resp.Supported = false
+		writeJSON(w, http.StatusOK, resp)
+		return
+	}
 	today := startOfCivilDay(time.Now(), loc)
 	if toDay.After(today) {
 		toDay = today
@@ -106,9 +111,15 @@ func (h *Handlers) pvPlanSummary(w http.ResponseWriter, r *http.Request) {
 	resp.FromDay = fromDay.Format("2006-01-02")
 	resp.ToDay = toDay.Format("2006-01-02")
 	resp.DaysExpected = int(civilDayIndex(toDay)-civilDayIndex(fromDay)) + 1
+	// Days past the code's validity stay expected but unplanned, so a
+	// period straddling it reports partial coverage.
+	planTo := toDay
+	for !pvplan.CodeCoversDay(orgID, planTo) {
+		planTo = planTo.AddDate(0, 0, -1)
+	}
 
 	start := time.Now()
-	cached, err := h.store.PvPlanDays(r.Context(), orgID, fromDay, toDay)
+	cached, err := h.store.PvPlanDays(r.Context(), orgID, fromDay, planTo)
 	if err != nil {
 		h.log.Warn("api_pv_plan_summary_cache",
 			"organization_id", orgID, "err", err,
@@ -122,7 +133,7 @@ func (h *Handlers) pvPlanSummary(w http.ResponseWriter, r *http.Request) {
 	}
 
 	plans, stale := pvPlanIndex(cached, today)
-	missing := pvPlanMissingDays(fromDay, toDay, plans, stale)
+	missing := pvPlanMissingDays(fromDay, planTo, plans, stale)
 	if len(missing) > 0 && h.pvPlan != nil {
 		fetched := h.fillPvPlanDays(r.Context(), orgID, code, missing)
 		if len(fetched) > 0 {
@@ -139,8 +150,8 @@ func (h *Handlers) pvPlanSummary(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	for _, p := range plans {
-		if p.PlannedKwh > 0 {
+	for day := fromDay; !day.After(planTo); day = day.AddDate(0, 0, 1) {
+		if p, ok := plans[pvPlanKey(day)]; ok && p.PlannedKwh > 0 {
 			resp.PlannedKwh += p.PlannedKwh
 			resp.DaysCovered++
 		}

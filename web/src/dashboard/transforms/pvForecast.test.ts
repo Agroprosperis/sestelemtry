@@ -36,6 +36,16 @@ describe('elevatorCodeFor', () => {
     expect(elevatorCodeFor('demo-org')).toBeNull()
     expect(elevatorCodeFor('')).toBeNull()
     expect(elevatorCodeFor('unknown')).toBeNull()
+    expect(elevatorCodeFor('de1', '2026-10-01')).toBeNull()
+  })
+
+  // DE forecasts the whole Дубовʼязівський elevator, which `de` stopped
+  // being on 2026-09-24.
+  it('drops the DE code for de from 2026-09-24', () => {
+    expect(elevatorCodeFor('de', '2026-09-23')).toBe('DE')
+    expect(elevatorCodeFor('de', '2026-09-24')).toBeNull()
+    expect(elevatorCodeFor('de', '2026-10-21')).toBeNull()
+    expect(elevatorCodeFor('ab', '2026-10-21')).toBe('AB')
   })
 })
 

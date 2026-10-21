@@ -13,18 +13,34 @@ export type PvForecastHourlyRow = {
 
 export type ElevatorCode = 'JE' | 'RE' | 'PE' | 'AB' | 'KE' | 'DE' | 'SM'
 
+const ELEVATOR_CODES: Record<string, ElevatorCode> = {
+  ze: 'JE',
+  pe: 'RE',
+  pde: 'PE',
+  ab: 'AB',
+  ke: 'KE',
+  de: 'DE',
+  sm: 'SM',
+}
+
+// CODE_UNTIL is the first local day (YYYY-MM-DD) a code no longer
+// describes its site. DE forecasts the whole Дубовʼязівський elevator;
+// from 2026-09-24 `de` is only its Т2 half and Т1 is the separate site
+// `de1` (ems-spec de_two_sites.md). Mirrors internal/pvplan.
+const CODE_UNTIL: Record<string, string> = {
+  de: '2026-09-24',
+}
+
 // elevatorCodeFor maps the dashboard's organization ID to the n8n flow's
 // elevator code. Elevators that we don't have a forecast for return null,
-// which signals callers to skip the network request entirely.
-export function elevatorCodeFor(organizationID: string): ElevatorCode | null {
-  if (organizationID === 'ze') return 'JE'
-  if (organizationID === 'pe') return 'RE'
-  if (organizationID === 'pde') return 'PE'
-  if (organizationID === 'ab') return 'AB'
-  if (organizationID === 'ke') return 'KE'
-  if (organizationID === 'de') return 'DE'
-  if (organizationID === 'sm') return 'SM'
-  return null
+// which signals callers to skip the network request entirely. Given a
+// local `day` (YYYY-MM-DD) it is also null once the code stops
+// describing the site.
+export function elevatorCodeFor(organizationID: string, day?: string): ElevatorCode | null {
+  const code = ELEVATOR_CODES[organizationID] ?? null
+  const until = CODE_UNTIL[organizationID]
+  if (code && until && day && day >= until) return null
+  return code
 }
 
 function pad(n: number): string {
