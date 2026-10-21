@@ -1,6 +1,6 @@
 import type { DashboardConfig } from '../types'
 
-export const KNOWN_ORGANIZATIONS = ['demo-org', 'pe', 'ze', 'ab', 'ke', 'pde', 'de', 'sm']
+export const KNOWN_ORGANIZATIONS = ['demo-org', 'pe', 'ze', 'ab', 'ke', 'pde', 'de1', 'de', 'sm']
 
 // ORGANIZATION_DISPLAY_NAMES maps an organization id to a
 // human-readable Ukrainian site name shown next to selectors,
@@ -20,7 +20,8 @@ export const ORGANIZATION_DISPLAY_NAMES: Record<string, string> = {
   ab: 'Агродар Бар',
   ke: 'Кролевецький елеватор',
   pde: 'Поділля елеватор',
-  de: 'Дубовязівський елеватор',
+  de1: "Дубов'язівський Т1",
+  de: "Дубов'язівський Т2",
   sm: 'Сорочанський мірошник',
 }
 
@@ -75,6 +76,7 @@ export const ORGANIZATION_OPERATION_START: Record<string, Date> = {
   pde: new Date(2025, 11, 24),
   sm: new Date(2026, 2, 30),
   de: new Date(2026, 3, 14),
+  de1: new Date(2026, 8, 24),
 }
 
 // energyFloorFor returns the earliest local instant the dashboard may

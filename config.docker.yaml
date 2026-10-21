@@ -108,8 +108,11 @@ organizations:
       connect_timeout: 2s
       request_timeout: 2s
 
+  # Since 2026-09-24 Дубовʼязівський is two separate sites (ems-spec
+  # de_two_sites.md): `de` is ДЕ2 (Т2) and keeps the history since April,
+  # `de1` is ДЕ1 (Т1) on its own SmartLogger.
   - id: de
-    name: Дубовязівський елеватор
+    name: Дубов'язівський Т2
     poll_interval: 1s
     location:
       latitude: 51.15119965
@@ -117,6 +120,20 @@ organizations:
       city: "Дубовʼязівка"
     modbus:
       host: 10.34.40.241
+      port: 502
+      unit_id: 99
+      connect_timeout: 2s
+      request_timeout: 2s
+
+  - id: de1
+    name: Дубов'язівський Т1
+    poll_interval: 1s
+    location:
+      latitude: 51.15119965
+      longitude: 33.383904
+      city: "Дубовʼязівка"
+    modbus:
+      host: 10.34.40.243
       port: 502
       unit_id: 99
       connect_timeout: 2s

@@ -214,6 +214,54 @@ func TestPvPlanSummaryCacheErrorReportsNoCoverage(t *testing.T) {
 	}
 }
 
+// DE's code forecasts the whole elevator, which `de` stopped being on
+// 2026-09-24: a period straddling that day plans only the days before
+// it, ignores whatever the cache still holds after it, and keeps the
+// later days expected so the coverage shows the gap.
+func TestPvPlanSummaryStopsAtCodeBoundary(t *testing.T) {
+	var rows []PvPlanDayTotal
+	for d := 20; d <= 26; d++ {
+		rows = append(rows, PvPlanDayTotal{Day: time.Date(2026, 9, d, 0, 0, 0, 0, time.UTC), PlannedKwh: 1000, FetchedAt: time.Now()})
+	}
+	store := &mockStore{pvPlanDays: rows}
+	h := NewHandlers(store, "*")
+
+	rec := httptest.NewRecorder()
+	h.pvPlanSummary(rec, pvPlanRequest("de",
+		"2026-09-20T00:00:00+03:00", "2026-09-27T00:00:00+03:00", "Europe/Kyiv"))
+
+	got := decodePvPlan(t, rec)
+	if !got.Supported {
+		t.Fatal("supported = false, want true: the period starts before the boundary")
+	}
+	if got.PlannedKwh != 4000 || got.DaysCovered != 4 {
+		t.Fatalf("plan = %v kWh over %d days, want 4000 over 4 (20–23 Sep)", got.PlannedKwh, got.DaysCovered)
+	}
+	if got.DaysExpected != 7 {
+		t.Fatalf("days_expected = %d, want 7 (20–26 Sep)", got.DaysExpected)
+	}
+	if store.pvPlanToDay.Format("2006-01-02") != "2026-09-23" {
+		t.Fatalf("cache queried to %v, want 2026-09-23", store.pvPlanToDay)
+	}
+}
+
+func TestPvPlanSummaryUnsupportedPastCodeBoundary(t *testing.T) {
+	store := &mockStore{}
+	h := NewHandlers(store, "*")
+
+	rec := httptest.NewRecorder()
+	h.pvPlanSummary(rec, pvPlanRequest("de",
+		"2026-10-01T00:00:00+03:00", "2026-10-08T00:00:00+03:00", "Europe/Kyiv"))
+
+	got := decodePvPlan(t, rec)
+	if got.Supported {
+		t.Fatal("supported = true, want false: DE no longer forecasts de after 2026-09-24")
+	}
+	if store.pvPlanOrg != "" {
+		t.Fatalf("store was queried for %q; a period past the boundary must not hit the cache", store.pvPlanOrg)
+	}
+}
+
 func TestPvPlanSummaryRejectsBadRequests(t *testing.T) {
 	h := NewHandlers(&mockStore{}, "*")
 

@@ -79,7 +79,8 @@ var Topology = map[string]PlantTopology{
 			{DevDn: "NE=251840603", DevTypeID: devTypeESS},
 		},
 	},
-	// 2113.001 Duboviazivskyi Elevator
+	// 2113.001 Duboviazivskyi Elevator T2 (ДЕ2; the whole elevator
+	// before 2026-09-24)
 	"de": {
 		PlantCode: "NE=246033234",
 		Logger:    Device{DevDn: "NE=246033236", DevTypeID: devTypeSmartLogger},
@@ -87,6 +88,15 @@ var Topology = map[string]PlantTopology{
 			{DevDn: "NE=255860612", DevTypeID: devTypeESS},
 			{DevDn: "NE=255860121", DevTypeID: devTypeESS},
 			{DevDn: "NE=255860367", DevTypeID: devTypeESS},
+		},
+	},
+	// 2113.003 Duboviazivskyi Elevator T1 (ДЕ1, from 2026-09-24)
+	"de1": {
+		PlantCode: "NE=356724888",
+		Logger:    Device{DevDn: "NE=356724894", DevTypeID: devTypeSmartLogger},
+		EssDevices: []Device{
+			{DevDn: "NE=364693859", DevTypeID: devTypeESS},
+			{DevDn: "NE=364694107", DevTypeID: devTypeESS},
 		},
 	},
 	// 2115.001 Sorochansky Miroshnyk

@@ -201,7 +201,7 @@ export function ExportDialog({ organizationID, initialAnchor, onClose }: Props) 
     return bucketChoice === 'auto' ? autoBucket(fromDate, toExclusive) : bucketChoice
   }, [bucketChoice, fromDate, toExclusive])
 
-  const hasElevator = elevatorCodeFor(organizationID) !== null
+  const hasElevator = elevatorCodeFor(organizationID, fromStr) !== null
   const isRaw = computedBucket === 'raw'
   // Raw mode only exposes columns that map to actual `telemetry_samples`
   // metrics (energy / soc / power). The DAM price comes from the

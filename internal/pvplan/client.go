@@ -43,10 +43,25 @@ var elevatorCodes = map[string]string{
 	"sm":  "SM",
 }
 
+// codeUntil is the first civil day (YYYY-MM-DD, site time) a code no
+// longer describes its site. DE forecasts the whole Дубовʼязівський
+// elevator; from 2026-09-24 `de` is only its Т2 half and Т1 is the
+// separate site `de1` (ems-spec de_two_sites.md).
+var codeUntil = map[string]string{
+	"de": "2026-09-24",
+}
+
 // ElevatorCodeFor resolves an organization id to its elevator code.
 func ElevatorCodeFor(organizationID string) (string, bool) {
 	code, ok := elevatorCodes[organizationID]
 	return code, ok
+}
+
+// CodeCoversDay reports whether the organization's code still forecasts
+// the site on `day`, a civil day in the site's zone.
+func CodeCoversDay(organizationID string, day time.Time) bool {
+	until, bounded := codeUntil[organizationID]
+	return !bounded || day.Format("2006-01-02") < until
 }
 
 // Client fetches single site-days from the forecast flow.

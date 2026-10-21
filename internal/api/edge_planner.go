@@ -308,6 +308,9 @@ func (h *Handlers) edgePvPlanForecast(ctx context.Context, siteID string, loc *t
 	out := map[time.Time]float64{}
 	got := false
 	for day := time.Date(start.In(loc).Year(), start.In(loc).Month(), start.In(loc).Day(), 0, 0, 0, 0, loc); day.Before(end); day = day.AddDate(0, 0, 1) {
+		if !pvplan.CodeCoversDay(siteID, day) {
+			continue
+		}
 		byHour, err := h.pvPlanForDay(ctx, siteID, code, day)
 		if err != nil {
 			h.edge.Log.Warn("edge_pv_forecast", "site_id", siteID, "day", day.Format("2006-01-02"), "err", err)
