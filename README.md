@@ -33,7 +33,7 @@ SameSite=Lax, 14 days, sliding). State-changing requests must also carry an
 | Role | Access |
 | --- | --- |
 | `admin` | everything within its organizations; on all organizations also users and site-wide alert settings |
-| `economist` | economics mode, tariffs, recompute, DAM price refresh |
+| `economist` | view only: economics mode and tariffs |
 | `engineer` | the analytics day chart |
 | `control_engineer` | the day chart, the «Керування» mode with confirming the УЗЕ plan and publishing manifests, and the per-site limits |
 | `ceo`, `investor` | view only: analytics for any period, economics and the «Керування» mode; no changes, no admin tools |

@@ -400,14 +400,16 @@ export function EconomicsHeader({
             />
             <span>Враховувати ПДВ у цінах</span>
           </label>
-          <button
-            type="button"
-            className="economics-tariffs-reset"
-            onClick={() => onTariffsChange(DEFAULT_TARIFFS)}
-            title="Скинути тарифи до дефолтних значень"
-          >
-            Скинути
-          </button>
+          {!readOnly && (
+            <button
+              type="button"
+              className="economics-tariffs-reset"
+              onClick={() => onTariffsChange(DEFAULT_TARIFFS)}
+              title="Скинути тарифи до дефолтних значень"
+            >
+              Скинути
+            </button>
+          )}
         </div>
         <TariffScheduleEditor
           key={organizationID}
@@ -415,6 +417,7 @@ export function EconomicsHeader({
           tariffs={tariffs}
           defaultEffectiveFrom={date}
           onLoadVersion={onTariffsChange}
+          readOnly={readOnly}
         />
         </fieldset>
       </details>

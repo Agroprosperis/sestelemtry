@@ -45,9 +45,14 @@ describe('accessFor', () => {
 
   it('lands an economist on economics and a role-less user nowhere', () => {
     const economist = accessFor(
-      me({ organizations: [{ id: 'ze', name: 'ZE', permissions: ['economics.read', 'economics.write'] }] }),
+      me({
+        grants: [{ role: 'economist', organization_id: 'ze' }],
+        organizations: [{ id: 'ze', name: 'ZE', permissions: ['economics.read'] }],
+      }),
     )
     expect(firstAllowedView(economist)).toBe('economics')
+    expect(economist.can('economics.read', 'ze')).toBe(true)
+    expect(economist.can('economics.write', 'ze')).toBe(false)
     expect(firstAllowedView(accessFor(me({})))).toBeNull()
   })
 

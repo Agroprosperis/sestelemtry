@@ -18,8 +18,8 @@ func TestRolePermissions(t *testing.T) {
 			[]Permission{PermAnalyticsFull, PermEconomicsRead, PermControl, PermControlWrite, PermTechnicalWrite, PermService}},
 		{RoleControlEngineer, []Permission{PermAnalyticsDay, PermControl, PermControlWrite, PermTechnicalWrite},
 			[]Permission{PermAnalyticsFull, PermEconomicsRead, PermEconomicsWrite, PermService}},
-		{RoleEconomist, []Permission{PermEconomicsRead, PermEconomicsWrite},
-			[]Permission{PermAnalyticsDay, PermControl, PermControlWrite, PermTechnicalWrite, PermService}},
+		{RoleEconomist, []Permission{PermEconomicsRead},
+			[]Permission{PermAnalyticsDay, PermEconomicsWrite, PermControl, PermControlWrite, PermTechnicalWrite, PermService}},
 		{RoleCEO, []Permission{PermAnalyticsDay, PermAnalyticsFull, PermEconomicsRead, PermControl},
 			[]Permission{PermEconomicsWrite, PermControlWrite, PermTechnicalWrite, PermService}},
 		{RoleInvestor, []Permission{PermAnalyticsDay, PermAnalyticsFull, PermEconomicsRead, PermControl},
@@ -62,7 +62,7 @@ func TestPrincipalScopes(t *testing.T) {
 	if !p.CanAll(PermAnalyticsDay) || p.CanAll(PermEconomicsRead) {
 		t.Fatal("CanAll must follow the all-organization grants only")
 	}
-	if !p.CanSome(PermEconomicsWrite) || p.CanSome(PermControl) {
+	if !p.CanSome(PermEconomicsRead) || p.CanSome(PermEconomicsWrite) || p.CanSome(PermControl) {
 		t.Fatal("CanSome must follow any grant")
 	}
 	if p.IsGlobalAdmin() {
@@ -72,7 +72,7 @@ func TestPrincipalScopes(t *testing.T) {
 		t.Fatal("an empty organization is never covered")
 	}
 	got := p.PermissionsOn("ze")
-	want := []Permission{PermAnalyticsDay, PermEconomicsRead, PermEconomicsWrite}
+	want := []Permission{PermAnalyticsDay, PermEconomicsRead}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("PermissionsOn(ze) = %v, want %v", got, want)
 	}

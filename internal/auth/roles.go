@@ -58,7 +58,7 @@ var viewerPermissions = []Permission{PermAnalyticsDay, PermAnalyticsFull, PermEc
 var rolePermissions = map[Role][]Permission{
 	RoleEngineer:        {PermAnalyticsDay},
 	RoleControlEngineer: {PermAnalyticsDay, PermControl, PermControlWrite, PermTechnicalWrite},
-	RoleEconomist:       {PermEconomicsRead, PermEconomicsWrite},
+	RoleEconomist:       {PermEconomicsRead},
 	RoleCEO:             viewerPermissions,
 	RoleInvestor:        viewerPermissions,
 	RoleAdmin: {

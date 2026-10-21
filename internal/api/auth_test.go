@@ -121,11 +121,14 @@ func TestAuthRouteMatrix(t *testing.T) {
 		{"economist", http.MethodGet, "/api/v1/dispatch/state?site_id=ze", denied},
 		{"engineer", http.MethodGet, "/api/v1/dispatch/effect?organization_id=ze&date=2026-10-07", denied},
 		{"economist", http.MethodGet, "/api/v1/pv-plan-summary?organization_id=ze" + year, ok},
-		{"economist", http.MethodPut, "/api/v1/organization-tariffs?organization_id=ze", ok},
-		{"economist", http.MethodDelete, "/api/v1/organization-tariff-schedule?organization_id=ze", ok},
-		{"economist", http.MethodPost, "/api/v1/economics/recompute?organization_id=ze", ok},
-		{"economist", http.MethodPost, "/api/v1/dam-prices/refresh", ok},
-		{"economist", http.MethodPost, "/api/v1/dam-prices/refresh-range", ok},
+		{"economist", http.MethodGet, "/api/v1/organization-tariffs?organization_id=ze", ok},
+		{"economist", http.MethodGet, "/api/v1/organization-tariff-schedule?organization_id=ze", ok},
+		{"economist", http.MethodPut, "/api/v1/organization-tariffs?organization_id=ze", denied},
+		{"economist", http.MethodPut, "/api/v1/organization-tariff-schedule?organization_id=ze", denied},
+		{"economist", http.MethodDelete, "/api/v1/organization-tariff-schedule?organization_id=ze", denied},
+		{"economist", http.MethodPost, "/api/v1/economics/recompute?organization_id=ze", denied},
+		{"economist", http.MethodPost, "/api/v1/dam-prices/refresh", denied},
+		{"economist", http.MethodPost, "/api/v1/dam-prices/refresh-range", denied},
 		{"economist", http.MethodGet, "/api/v1/current?organization_id=ze", denied},
 		{"economist", http.MethodGet, "/api/v1/edge/fleet", denied},
 		{"economist", http.MethodPut, "/api/v1/edge/settings?site_id=ze", denied},
@@ -217,7 +220,7 @@ func TestAuthEdgeUplinkKeepsBearer(t *testing.T) {
 
 func TestAuthRequiresCSRFHeader(t *testing.T) {
 	h, accounts := authTestHandlers(t, nil)
-	cookie := sessionCookie(t, accounts, "eco@example.com", auth.Grant{Role: auth.RoleEconomist})
+	cookie := sessionCookie(t, accounts, "admin@example.com", auth.Grant{Role: auth.RoleAdmin})
 	router := authOnlyRouter(h)
 	for _, target := range []string{"/api/v1/organization-tariffs?organization_id=ze", "/api/v1/auth/login"} {
 		req := httptest.NewRequest(http.MethodPut, target, strings.NewReader(`{}`))

@@ -15,7 +15,7 @@ const mixed: AuthMe = {
     { role: 'engineer', organization_id: 'pe' },
   ],
   organizations: [
-    { id: 'ze', name: 'ZE', permissions: ['economics.read', 'economics.write'] },
+    { id: 'ze', name: 'ZE', permissions: ['economics.read'] },
     { id: 'pe', name: 'PE', permissions: ['analytics.day'] },
   ],
 }

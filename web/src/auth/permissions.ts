@@ -17,7 +17,7 @@ export type Role = 'admin' | 'economist' | 'engineer' | 'control_engineer' | 'ce
 
 export const ROLES: { id: Role; label: string; hint: string }[] = [
   { id: 'admin', label: 'Адміністратор', hint: 'усі розділи й налаштування' },
-  { id: 'economist', label: 'Економіст', hint: 'економіка, тарифи, перерахунок' },
+  { id: 'economist', label: 'Економіст', hint: 'перегляд економіки й тарифів' },
   { id: 'engineer', label: 'Інженер', hint: 'денний енергетичний графік' },
   {
     id: 'control_engineer',

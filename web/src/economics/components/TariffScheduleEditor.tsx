@@ -60,6 +60,7 @@ type Props = {
   // above so the operator can edit and re-save it (upsert on the same
   // effective date overwrites the version).
   onLoadVersion: (tariffs: Tariffs) => void
+  readOnly?: boolean
 }
 
 type Status = 'idle' | 'loading' | 'saving' | 'error'
@@ -69,7 +70,13 @@ type Status = 'idle' | 'loading' | 'saving' | 'error'
 // effective from a civil date; a historical day uses the latest version
 // on or before it. Saving a version takes effect on the next recompute
 // (run it from the import page) or the next read of a non-final day.
-export function TariffScheduleEditor({ organizationID, tariffs, defaultEffectiveFrom, onLoadVersion }: Props) {
+export function TariffScheduleEditor({
+  organizationID,
+  tariffs,
+  defaultEffectiveFrom,
+  onLoadVersion,
+  readOnly = false,
+}: Props) {
   const [versions, setVersions] = useState<TariffScheduleVersion[]>([])
   // A typed or loaded date applies until the viewed day changes.
   const [dateDraft, setDateDraft] = useState<{ base: string; value: string } | null>(null)
@@ -168,40 +175,42 @@ export function TariffScheduleEditor({ organizationID, tariffs, defaultEffective
       <header className="economics-tariff-schedule-head">
         <h3 id="tariff-schedule-title">Версії тарифів за датами</h3>
         <p>
-          Кожен історичний день використовує останню версію, що діє на цю дату.
-          Збереження бере поточні значення форми вище. Зміни застосуються після
-          перерахунку економіки (сторінка «Імпорт даних»).
+          {readOnly
+            ? 'Кожен історичний день використовує останню версію, що діє на цю дату.'
+            : 'Кожен історичний день використовує останню версію, що діє на цю дату. Збереження бере поточні значення форми вище. Зміни застосуються після перерахунку економіки (сторінка «Імпорт даних»).'}
         </p>
       </header>
 
-      <form
-        className="economics-tariff-schedule-add"
-        onSubmit={(e) => {
-          e.preventDefault()
-          void onSaveVersion()
-        }}
-      >
-        <label className="economics-field economics-tariff-schedule-add-field">
-          <span>Діє з</span>
-          <input
-            type="date"
-            value={effectiveFrom}
-            onChange={(e) => setEffectiveFrom(e.target.value)}
-          />
-        </label>
-        <button
-          type="submit"
-          className="economics-tariff-schedule-save"
-          disabled={status === 'saving'}
+      {!readOnly && (
+        <form
+          className="economics-tariff-schedule-add"
+          onSubmit={(e) => {
+            e.preventDefault()
+            void onSaveVersion()
+          }}
         >
-          {status === 'saving' ? 'Зберігаємо…' : 'Зберегти версію'}
-        </button>
-        <span className="economics-tariff-schedule-add-hint">
-          {editingFrom
-            ? `Редагування версії від ${formatEffectiveFrom(editingFrom).primary} — збереження перезапише її значеннями з форми вище.`
-            : 'Зберігаються поточні значення з форми вище.'}
-        </span>
-      </form>
+          <label className="economics-field economics-tariff-schedule-add-field">
+            <span>Діє з</span>
+            <input
+              type="date"
+              value={effectiveFrom}
+              onChange={(e) => setEffectiveFrom(e.target.value)}
+            />
+          </label>
+          <button
+            type="submit"
+            className="economics-tariff-schedule-save"
+            disabled={status === 'saving'}
+          >
+            {status === 'saving' ? 'Зберігаємо…' : 'Зберегти версію'}
+          </button>
+          <span className="economics-tariff-schedule-add-hint">
+            {editingFrom
+              ? `Редагування версії від ${formatEffectiveFrom(editingFrom).primary} — збереження перезапише її значеннями з форми вище.`
+              : 'Зберігаються поточні значення з форми вище.'}
+          </span>
+        </form>
+      )}
 
       {error && (
         <p className="economics-tariff-schedule-error" role="alert">
@@ -263,7 +272,7 @@ export function TariffScheduleEditor({ organizationID, tariffs, defaultEffective
                   </span>
                   <small>грн</small>
                 </th>
-                <th scope="col" className="actions" aria-label="Дії" />
+                {!readOnly && <th scope="col" className="actions" aria-label="Дії" />}
               </tr>
             </thead>
             <tbody>
@@ -300,28 +309,30 @@ export function TariffScheduleEditor({ organizationID, tariffs, defaultEffective
                       {v.tariffs.roundtripEfficiency > 0 ? formatNumber(v.tariffs.roundtripEfficiency) : 'емпір.'}
                     </td>
                     <td className="num">{formatCapex(v.tariffs.capexUah)}</td>
-                    <td className="actions">
-                      <button
-                        type="button"
-                        className="economics-tariff-schedule-edit"
-                        onClick={() => onEdit(v)}
-                        disabled={status === 'saving'}
-                        title="Завантажити значення цієї версії у форму вище для редагування"
-                        aria-label={`Редагувати версію, що діє з ${eff.primary}`}
-                      >
-                        {isEditing ? 'Редагується' : 'Редагувати'}
-                      </button>
-                      <button
-                        type="button"
-                        className="economics-tariff-schedule-del"
-                        onClick={() => void onDelete(v.effectiveFrom)}
-                        disabled={status === 'saving'}
-                        title="Видалити версію"
-                        aria-label={`Видалити версію, що діє з ${eff.primary}`}
-                      >
-                        Видалити
-                      </button>
-                    </td>
+                    {!readOnly && (
+                      <td className="actions">
+                        <button
+                          type="button"
+                          className="economics-tariff-schedule-edit"
+                          onClick={() => onEdit(v)}
+                          disabled={status === 'saving'}
+                          title="Завантажити значення цієї версії у форму вище для редагування"
+                          aria-label={`Редагувати версію, що діє з ${eff.primary}`}
+                        >
+                          {isEditing ? 'Редагується' : 'Редагувати'}
+                        </button>
+                        <button
+                          type="button"
+                          className="economics-tariff-schedule-del"
+                          onClick={() => void onDelete(v.effectiveFrom)}
+                          disabled={status === 'saving'}
+                          title="Видалити версію"
+                          aria-label={`Видалити версію, що діє з ${eff.primary}`}
+                        >
+                          Видалити
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 )
               })}
