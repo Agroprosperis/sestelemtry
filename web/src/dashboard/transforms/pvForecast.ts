@@ -20,17 +20,19 @@ const ELEVATOR_CODES: Record<string, ElevatorCode> = {
   ab: 'AB',
   ke: 'KE',
   de: 'DE',
+  de1: 'DE',
   sm: 'SM',
 }
 
 // WHOLE_ELEVATOR_FROM is the first local day (YYYY-MM-DD) a code
 // forecasts more than its site. DE forecasts the whole Дубовʼязівський
-// elevator; from 2026-09-24 `de` is only its Т2 half and Т1 is the
-// separate site `de1` (ems-spec de_two_sites.md). Until the flow has a
-// Т2 code, `de` keeps showing DE labelled as the whole elevator's
+// elevator; from 2026-09-24 it is two sites, `de` (Т2) and `de1` (Т1,
+// which starts that day; ems-spec de_two_sites.md). Until the flow has
+// per-site codes both show DE labelled as the whole elevator's
 // forecast. Mirrors internal/pvplan.
 const WHOLE_ELEVATOR_FROM: Record<string, string> = {
   de: '2026-09-24',
+  de1: '2026-09-24',
 }
 
 export const PV_FORECAST_WHOLE_ELEVATOR_LABEL = 'весь елеватор'
