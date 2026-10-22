@@ -168,11 +168,11 @@ func runDevice(
 		return
 	}
 	chunks := modbusclient.PlanChunks(resolved)
-	opt, err := optionalReadsFor(dev, resolvedAll)
+	opts, err := optionalReadsFor(dev, resolvedAll)
 	if err != nil {
-		log.Warn("optional_reads_unavailable", "err", err, "hint", "the register catalog lacks the optional keys")
+		log.Warn("optional_reads_unavailable", "err", err, "hint", "the register catalog lacks these optional keys; the other optional reads still run")
 	}
-	log.Info("device_start", "metrics", len(resolved), "modbus_reads", len(chunks), "optional_metrics", len(opt.entries))
+	log.Info("device_start", "metrics", len(resolved), "modbus_reads", len(chunks), "optional_metrics", optionalMetricCount(opts))
 
 	t := time.NewTicker(org.PollInterval)
 	defer t.Stop()
@@ -213,7 +213,7 @@ func runDevice(
 			log.Error("poll", "err", err)
 			_ = sess.Close()
 			sess = nil
-		} else if opt.due(time.Now()) && !pollOptional(ctx, log, cfg, org, dev, sess, &opt, pool) {
+		} else if !pollOptionalDue(ctx, log, cfg, org, dev, sess, opts, pool) {
 			_ = sess.Close()
 			sess = nil
 		}
@@ -257,45 +257,94 @@ func pollAndStore(
 	return nil
 }
 
-// optionalMetricKeys are read on top of the catalog by a device that
-// polls the whole of it (no metric_keys whitelist): the grid line
-// voltages behind the live flow's «Мережа» node. Some firmwares refuse
+// optionalGroups are read on top of the catalog by a device that polls
+// the whole of it (no metric_keys whitelist). Some firmwares refuse
 // these registers, which is why the catalog keeps them out of the main
-// poll; here they go in their own request every optionalReadEvery, and
-// a refusal pauses them for optionalBackoff instead of failing the
-// poll. A whitelisted device (one logger of a dual site) names what it
-// reads itself.
-var optionalMetricKeys = []string{"grid_line_voltage_ab_v", "grid_line_voltage_bc_v", "grid_line_voltage_ca_v"}
+// poll. Each group goes in its own request every `every` (0 = every
+// poll), and a refusal pauses only that group for optionalBackoff
+// instead of failing the poll. A whitelisted device (one logger of a
+// dual site) names what it reads itself.
+var optionalGroups = []optionalGroup{
+	// Grid line voltages behind the live flow's «Мережа» node.
+	{keys: []string{"grid_line_voltage_ab_v", "grid_line_voltage_bc_v", "grid_line_voltage_ca_v"}, every: 10 * time.Second},
+	// Array actual SOC (40527), compared second by second with 40515.
+	{keys: []string{"array_soc_percent"}},
+}
 
-const (
-	optionalReadEvery = 10 * time.Second
-	optionalBackoff   = 10 * time.Minute
-)
+const optionalBackoff = 10 * time.Minute
 
-// optionalReads is a device's optional request and when it is next due.
-type optionalReads struct {
+// optionalGroup is one optional request: the catalog keys it reads and
+// how often.
+type optionalGroup struct {
+	keys  []string
+	every time.Duration
+}
+
+// optionalRead is a device's resolved optional request and when it is
+// next due.
+type optionalRead struct {
+	optionalGroup
 	entries []registers.ResolvedEntry
 	chunks  []modbusclient.ReadChunk
 	next    time.Time
 }
 
-func optionalReadsFor(dev config.ModbusDevice, resolvedAll []registers.ResolvedEntry) (optionalReads, error) {
+// optionalReadsFor resolves the optional groups a device reads. A group
+// whose keys the catalog lacks is left out and reported; the others
+// still run.
+func optionalReadsFor(dev config.ModbusDevice, resolvedAll []registers.ResolvedEntry) ([]*optionalRead, error) {
 	if len(dev.MetricKeys) > 0 {
-		return optionalReads{}, nil
+		return nil, nil
 	}
-	entries, err := registers.Subset(resolvedAll, optionalMetricKeys)
-	if err != nil {
-		return optionalReads{}, err
+	var reads []*optionalRead
+	var errs []error
+	for _, g := range optionalGroups {
+		entries, err := registers.Subset(resolvedAll, g.keys)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		reads = append(reads, &optionalRead{optionalGroup: g, entries: entries, chunks: modbusclient.PlanChunks(entries)})
 	}
-	return optionalReads{entries: entries, chunks: modbusclient.PlanChunks(entries)}, nil
+	return reads, errors.Join(errs...)
 }
 
-func (o *optionalReads) due(now time.Time) bool {
+func optionalMetricCount(reads []*optionalRead) int {
+	n := 0
+	for _, o := range reads {
+		n += len(o.entries)
+	}
+	return n
+}
+
+func (o *optionalRead) due(now time.Time) bool {
 	return len(o.chunks) > 0 && !now.Before(o.next)
 }
 
-// pollOptional reads and stores the optional metrics. A refusal only
-// pauses them; it returns false when the session should be redialled
+// pollOptionalDue runs every optional read that is due. It returns
+// false as soon as one asks for a redial; the rest wait for the next
+// poll.
+func pollOptionalDue(
+	ctx context.Context,
+	log *slog.Logger,
+	cfg *config.Root,
+	org config.Organization,
+	dev config.ModbusDevice,
+	sess modbusReader,
+	reads []*optionalRead,
+	pool *pgxpool.Pool,
+) bool {
+	now := time.Now()
+	for _, o := range reads {
+		if o.due(now) && !pollOptional(ctx, log, cfg, org, dev, sess, o, pool) {
+			return false
+		}
+	}
+	return true
+}
+
+// pollOptional reads and stores one optional request. A refusal only
+// pauses it; it returns false when the session should be redialled
 // because the request timed out and a late reply could land on the
 // next read.
 func pollOptional(
@@ -305,7 +354,7 @@ func pollOptional(
 	org config.Organization,
 	dev config.ModbusDevice,
 	sess modbusReader,
-	opt *optionalReads,
+	opt *optionalRead,
 	pool *pgxpool.Pool,
 ) bool {
 	now := time.Now()
@@ -314,13 +363,13 @@ func pollOptional(
 	data, err := readChunkData(readCtx, cfg.ModbusRegisterMap, sess, opt.chunks)
 	if err != nil {
 		opt.next = now.Add(optionalBackoff)
-		log.Warn("poll_optional", "err", err, "retry_in", optionalBackoff.String())
+		log.Warn("poll_optional", "metrics", strings.Join(opt.keys, ","), "err", err, "retry_in", optionalBackoff.String())
 		return !(errors.Is(err, context.DeadlineExceeded) || os.IsTimeout(err))
 	}
-	opt.next = now.Add(optionalReadEvery)
+	opt.next = now.Add(opt.every)
 	samples, err := buildSamples(org, dev, opt.entries, opt.chunks, data, now.UTC())
 	if err != nil {
-		log.Warn("poll_optional", "err", err)
+		log.Warn("poll_optional", "metrics", strings.Join(opt.keys, ","), "err", err)
 		return true
 	}
 	if err := insertSamples(ctx, pool, samples); err != nil {
