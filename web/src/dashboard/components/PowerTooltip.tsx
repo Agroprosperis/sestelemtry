@@ -150,7 +150,9 @@ export function PowerTooltip({ active, label, payload }: Props) {
             className="energy-tooltip-dot"
             style={{ backgroundColor: pvForecastEntry?.color ?? '#16a34a' }}
           />
-          <span className="energy-tooltip-name">Прогноз СЕС</span>
+          <span className="energy-tooltip-name">
+            {pvForecastEntry?.name ? String(pvForecastEntry.name) : 'Прогноз СЕС'}
+          </span>
           <span className="energy-tooltip-value">
             {formatChartNumber(pvForecastValue)} кВт
           </span>

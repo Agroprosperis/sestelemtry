@@ -1593,6 +1593,15 @@ components:
           format: date
           description: Clamped to today.
           example: "2026-08-27"
+        whole_elevator_from:
+          type: string
+          format: date
+          description: >
+            Set when the period reaches the day from which the site's
+            forecast code covers the whole elevator rather than the site
+            (de = Дубовʼязівський Т2 from 2026-09-24): the plan from that
+            day on is the whole elevator's, not the site's.
+          example: "2026-09-24"
       required: [organization_id, supported, planned_kwh, days_covered, days_expected]
     UzePlanHour:
       type: object

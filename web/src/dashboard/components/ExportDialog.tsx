@@ -10,7 +10,11 @@ import {
   type CustomExportBucket,
   type CustomExportColumns,
 } from '../customExport'
-import { elevatorCodeFor } from '../transforms/pvForecast'
+import {
+  PV_FORECAST_WHOLE_ELEVATOR_LABEL,
+  elevatorCodeFor,
+  forecastIsWholeElevator,
+} from '../transforms/pvForecast'
 
 // saveBlob writes an in-memory Blob to disk under `filename` via an
 // off-DOM anchor. Used for the raw zip once it has fully downloaded
@@ -201,7 +205,8 @@ export function ExportDialog({ organizationID, initialAnchor, onClose }: Props) 
     return bucketChoice === 'auto' ? autoBucket(fromDate, toExclusive) : bucketChoice
   }, [bucketChoice, fromDate, toExclusive])
 
-  const hasElevator = elevatorCodeFor(organizationID, fromStr) !== null
+  const hasElevator = elevatorCodeFor(organizationID) !== null
+  const forecastWholeElevator = forecastIsWholeElevator(organizationID, toStr)
   const isRaw = computedBucket === 'raw'
   // Raw mode only exposes columns that map to actual `telemetry_samples`
   // metrics (energy / soc / power). The DAM price comes from the
@@ -447,7 +452,9 @@ export function ExportDialog({ organizationID, initialAnchor, onClose }: Props) 
                     onChange={() => toggleColumn(opt.id)}
                   />
                   <span>
-                    {opt.label}
+                    {opt.id === 'forecast' && forecastWholeElevator
+                      ? `${opt.label} · ${PV_FORECAST_WHOLE_ELEVATOR_LABEL}`
+                      : opt.label}
                     {opt.hint && <em className="export-dialog-hint">{opt.hint}</em>}
                   </span>
                 </label>

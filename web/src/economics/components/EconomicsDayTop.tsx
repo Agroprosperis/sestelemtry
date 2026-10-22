@@ -2,6 +2,7 @@ import { Line, LineChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YA
 import type { DailyTotals, HourEconomicsRow } from '../compute'
 import type { Tariffs } from '../tariffs'
 import { useChartChrome } from '../../theme/useChartChrome'
+import { PV_FORECAST_WHOLE_ELEVATOR_NOTE, pvPlanCaption } from '../../dashboard/transforms/pvForecast'
 import { Card } from './EconomicsTopSection'
 import type { EconomicsPvPlan } from './EconomicsTopSection'
 import { KPI_ICONS as ICONS } from './kpiIconPaths'
@@ -296,9 +297,11 @@ export function EconomicsDayTop({ totals: t, rows, tariffs, pvPlan = null }: Pro
         </Card>
 
         <Card tone="amber" icon={ICONS.sun} label="Генерація СЕС" value={kwh(t.pv)}>
-          {Number.isFinite(planKwh) ? (
+          {pvPlan && Number.isFinite(planKwh) ? (
             <>
-              <span>План: {kwh(planKwh)}</span>
+              <span title={pvPlan.wholeElevator ? PV_FORECAST_WHOLE_ELEVATOR_NOTE : undefined}>
+                {pvPlanCaption(pvPlan.wholeElevator)}: {kwh(planKwh)}
+              </span>
               <span>Виконання плану: {pct(planDone)}</span>
             </>
           ) : (

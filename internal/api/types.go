@@ -265,6 +265,11 @@ type PvPlanSummaryResponse struct {
 	DaysExpected   int     `json:"days_expected"`
 	FromDay        string  `json:"from_day,omitempty"`
 	ToDay          string  `json:"to_day,omitempty"`
+	// WholeElevatorFrom is set when the period reaches the day from
+	// which the site's code forecasts the whole elevator rather than the
+	// site (de = Т2 from 2026-09-24): the plan from that day on is the
+	// whole elevator's.
+	WholeElevatorFrom string `json:"whole_elevator_from,omitempty"`
 }
 
 // LocationInfo is the geographic site of an organization, exposed via

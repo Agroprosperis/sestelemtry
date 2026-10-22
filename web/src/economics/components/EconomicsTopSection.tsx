@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import type { EconomicsMonthlyTotals } from '../../api'
+import { PV_FORECAST_WHOLE_ELEVATOR_NOTE, pvPlanCaption } from '../../dashboard/transforms/pvForecast'
 import { formatMwh, formatPercent, formatPrice, formatUah } from '../monthly/format'
 import { PERIOD_WORDS, reserveSplit, uahShort, type PeriodScope } from '../monthly/rollup'
 import { KpiIcon as Icon } from './kpiIcons'
@@ -11,6 +12,8 @@ export type EconomicsPvPlan = {
   plannedKwh: number
   daysCovered: number
   daysExpected: number
+  // wholeElevator: the plan is the whole elevator's, not the site's.
+  wholeElevator?: boolean
 }
 
 type Props = {
@@ -406,8 +409,17 @@ export function EconomicsTopSection({
             badge={<DeltaBadge value={planDelta} polarity="up-good" unit="pct" note="до плану" />}
           >
             {pvPlan ? (
-              <span title={planPartial ? `План покриває ${pvPlan.daysCovered} з ${pvPlan.daysExpected} дн. періоду` : undefined}>
-                План: {formatMwh(pvPlan.plannedKwh)}
+              <span
+                title={
+                  [
+                    planPartial ? `План покриває ${pvPlan.daysCovered} з ${pvPlan.daysExpected} дн. періоду` : '',
+                    pvPlan.wholeElevator ? PV_FORECAST_WHOLE_ELEVATOR_NOTE : '',
+                  ]
+                    .filter(Boolean)
+                    .join(' ') || undefined
+                }
+              >
+                {pvPlanCaption(pvPlan.wholeElevator)}: {formatMwh(pvPlan.plannedKwh)}
                 {planPartial ? ' *' : ''}
               </span>
             ) : (

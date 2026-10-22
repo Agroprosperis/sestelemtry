@@ -37,6 +37,7 @@ type Props = {
   pvForecastTotal: number | null
   pvForecastLoading: boolean
   pvForecastCoverage: { covered: number; expected: number } | null
+  pvForecastWholeElevator?: boolean
   gridVoltage?: GridVoltage | null
 }
 
@@ -58,6 +59,7 @@ export function MetricsPanel({
   pvForecastTotal,
   pvForecastLoading,
   pvForecastCoverage,
+  pvForecastWholeElevator = false,
   gridVoltage = null,
 }: Props) {
   return (
@@ -80,6 +82,7 @@ export function MetricsPanel({
         pvForecastTotal={pvForecastTotal}
         pvForecastLoading={pvForecastLoading}
         pvForecastCoverage={pvForecastCoverage}
+        pvForecastWholeElevator={pvForecastWholeElevator}
         loading={flowsRefreshing}
         flowsLoaded={flowsLoaded}
         flowsGap={flowsGap}

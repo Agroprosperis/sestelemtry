@@ -3,6 +3,7 @@ import { useCssVar } from '../../theme/useChartChrome'
 import { formatPeriodLabel } from '../format'
 import type { RangePreset } from '../range'
 import type { EnergyFlows } from '../transforms/flows'
+import { PV_FORECAST_WHOLE_ELEVATOR_NOTE } from '../transforms/pvForecast'
 import { LoadingSpinner } from './LoadingSpinner'
 import { ModbusAddr } from './ModbusAddr'
 
@@ -25,6 +26,9 @@ type Props = {
   // period holds (the forecast flow's history stops short of it), so
   // the ring's percentage is measured against a partial plan.
   pvForecastCoverage?: { covered: number; expected: number } | null
+  // pvForecastWholeElevator is set when the plan is the whole
+  // elevator's rather than the site's, so the ring overstates the plan.
+  pvForecastWholeElevator?: boolean
   // loading tracks the period-flow allocator. Drives only the
   // header spinner (and aria-busy); the actual numbers are gated
   // by `flowsLoaded` so background refreshes don't wipe stale-
@@ -257,6 +261,7 @@ export function DailySummaryNarrative({
   pvForecastTotal,
   pvForecastLoading = false,
   pvForecastCoverage = null,
+  pvForecastWholeElevator = false,
   loading,
   flowsLoaded = false,
   flowsGap = null,
@@ -339,6 +344,9 @@ export function DailySummaryNarrative({
           {pvForecastCoverage.expected} днів періоду — порівняння з планом
           неповне.
         </p>
+      )}
+      {flowsLoaded && !pvForecastLoading && pvForecastWholeElevator && (pvForecastTotal ?? 0) > 0 && (
+        <p className="summary-coverage-note">{PV_FORECAST_WHOLE_ELEVATOR_NOTE}</p>
       )}
       <div className="summary-hero">
         <div className="summary-hero-text">

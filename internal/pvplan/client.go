@@ -43,11 +43,13 @@ var elevatorCodes = map[string]string{
 	"sm":  "SM",
 }
 
-// codeUntil is the first civil day (YYYY-MM-DD, site time) a code no
-// longer describes its site. DE forecasts the whole Дубовʼязівський
-// elevator; from 2026-09-24 `de` is only its Т2 half and Т1 is the
-// separate site `de1` (ems-spec de_two_sites.md).
-var codeUntil = map[string]string{
+// wholeElevatorFrom is the first civil day (YYYY-MM-DD, site time) a
+// code forecasts more than its site. DE forecasts the whole
+// Дубовʼязівський elevator; from 2026-09-24 `de` is only its Т2 half and
+// Т1 is the separate site `de1` (ems-spec de_two_sites.md). Until the
+// flow has a Т2 code, `de` keeps showing DE, flagged as the whole
+// elevator's forecast; control never plans on it.
+var wholeElevatorFrom = map[string]string{
 	"de": "2026-09-24",
 }
 
@@ -57,11 +59,18 @@ func ElevatorCodeFor(organizationID string) (string, bool) {
 	return code, ok
 }
 
-// CodeCoversDay reports whether the organization's code still forecasts
-// the site on `day`, a civil day in the site's zone.
+// CodeCoversDay reports whether the organization's code forecasts
+// exactly the site on `day`, a civil day in the site's zone.
 func CodeCoversDay(organizationID string, day time.Time) bool {
-	until, bounded := codeUntil[organizationID]
-	return !bounded || day.Format("2006-01-02") < until
+	from, bounded := wholeElevatorFrom[organizationID]
+	return !bounded || day.Format("2006-01-02") < from
+}
+
+// WholeElevatorFrom returns the first civil day (YYYY-MM-DD) from which
+// the organization's code forecasts the whole elevator rather than the
+// site, or "" when it always forecasts the site.
+func WholeElevatorFrom(organizationID string) string {
+	return wholeElevatorFrom[organizationID]
 }
 
 // Client fetches single site-days from the forecast flow.

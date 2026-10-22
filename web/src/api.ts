@@ -299,6 +299,9 @@ export async function fetchEnergySummary(
 //
 // `days_covered` below `days_expected` means part of the period
 // predates the flow's own history, so the sum understates it.
+//
+// `whole_elevator_from` is set when the plan from that day on is the
+// whole elevator's rather than the site's (de = Т2 from 2026-09-24).
 export type PvPlanSummaryResponse = {
   organization_id: string
   supported: boolean
@@ -307,6 +310,7 @@ export type PvPlanSummaryResponse = {
   days_expected: number
   from_day?: string
   to_day?: string
+  whole_elevator_from?: string
 }
 
 // fetchPvPlanSummary returns the period plan for month/year views. The

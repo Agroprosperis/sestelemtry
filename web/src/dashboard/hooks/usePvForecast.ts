@@ -68,7 +68,7 @@ export function usePvForecast(input: {
 }): UsePvForecastResult {
   const { organizationID } = input
   const forecastDay = forecastDayFromAnchor(input.anchor)
-  const elevator = elevatorCodeFor(organizationID, forecastDay)
+  const elevator = elevatorCodeFor(organizationID)
   const key = elevator ? cacheKey(elevator, forecastDay) : null
 
   const [state, setState] = useState<FetchState>({
