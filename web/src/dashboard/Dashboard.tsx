@@ -52,6 +52,7 @@ export function Dashboard() {
     pvForecastTotal,
     pvForecastLoading,
     pvForecastCoverage,
+    pvForecastWholeElevator,
     loading,
     cardsLoading,
     flowsRefreshing,
@@ -161,6 +162,7 @@ export function Dashboard() {
           pvForecastTotal={pvForecastTotal}
           pvForecastLoading={pvForecastLoading}
           pvForecastCoverage={pvForecastCoverage}
+          pvForecastWholeElevator={pvForecastWholeElevator}
           gridVoltage={gridVoltage}
         />
 
@@ -178,6 +180,7 @@ export function Dashboard() {
               socSeries={socSeries}
               powerSeries={powerSeries}
               pvForecastSeries={pvForecastSeries}
+              pvForecastWholeElevator={pvForecastWholeElevator}
               aiPlan={aiPlan}
             />
           ) : (

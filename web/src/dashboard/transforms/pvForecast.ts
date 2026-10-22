@@ -23,24 +23,44 @@ const ELEVATOR_CODES: Record<string, ElevatorCode> = {
   sm: 'SM',
 }
 
-// CODE_UNTIL is the first local day (YYYY-MM-DD) a code no longer
-// describes its site. DE forecasts the whole Дубовʼязівський elevator;
-// from 2026-09-24 `de` is only its Т2 half and Т1 is the separate site
-// `de1` (ems-spec de_two_sites.md). Mirrors internal/pvplan.
-const CODE_UNTIL: Record<string, string> = {
+// WHOLE_ELEVATOR_FROM is the first local day (YYYY-MM-DD) a code
+// forecasts more than its site. DE forecasts the whole Дубовʼязівський
+// elevator; from 2026-09-24 `de` is only its Т2 half and Т1 is the
+// separate site `de1` (ems-spec de_two_sites.md). Until the flow has a
+// Т2 code, `de` keeps showing DE labelled as the whole elevator's
+// forecast. Mirrors internal/pvplan.
+const WHOLE_ELEVATOR_FROM: Record<string, string> = {
   de: '2026-09-24',
 }
 
+export const PV_FORECAST_WHOLE_ELEVATOR_LABEL = 'весь елеватор'
+export const PV_FORECAST_WHOLE_ELEVATOR_NOTE =
+  'Прогноз СЕС — на весь елеватор (Т1 і Т2 разом): окремого прогнозу для цього вводу ще немає, тож план завищений.'
+
 // elevatorCodeFor maps the dashboard's organization ID to the n8n flow's
 // elevator code. Elevators that we don't have a forecast for return null,
-// which signals callers to skip the network request entirely. Given a
-// local `day` (YYYY-MM-DD) it is also null once the code stops
-// describing the site.
-export function elevatorCodeFor(organizationID: string, day?: string): ElevatorCode | null {
-  const code = ELEVATOR_CODES[organizationID] ?? null
-  const until = CODE_UNTIL[organizationID]
-  if (code && until && day && day >= until) return null
-  return code
+// which signals callers to skip the network request entirely.
+export function elevatorCodeFor(organizationID: string): ElevatorCode | null {
+  return ELEVATOR_CODES[organizationID] ?? null
+}
+
+// forecastIsWholeElevator reports whether the forecast for a period
+// ending on `lastDay` (local YYYY-MM-DD, inclusive) includes days where
+// the code describes the whole elevator rather than the site.
+export function forecastIsWholeElevator(organizationID: string, lastDay: string): boolean {
+  const from = WHOLE_ELEVATOR_FROM[organizationID]
+  return from !== undefined && lastDay >= from
+}
+
+// pvForecastLabel is the forecast series name, marked when the
+// forecast is the whole elevator's.
+export function pvForecastLabel(wholeElevator: boolean): string {
+  return wholeElevator ? `Прогноз СЕС (${PV_FORECAST_WHOLE_ELEVATOR_LABEL})` : 'Прогноз СЕС'
+}
+
+// pvPlanCaption labels a period plan line the same way.
+export function pvPlanCaption(wholeElevator = false): string {
+  return wholeElevator ? `План (${PV_FORECAST_WHOLE_ELEVATOR_LABEL})` : 'План'
 }
 
 function pad(n: number): string {

@@ -161,4 +161,7 @@ func TestCodeCoversDay(t *testing.T) {
 			t.Errorf("CodeCoversDay(%s, %s) = %v, want %v", c.org, c.day.Format("2006-01-02"), got, c.want)
 		}
 	}
+	if de, ab := WholeElevatorFrom("de"), WholeElevatorFrom("ab"); de != "2026-09-24" || ab != "" {
+		t.Errorf("WholeElevatorFrom: de = %q, ab = %q; want 2026-09-24 and empty", de, ab)
+	}
 }

@@ -22,6 +22,8 @@ import { damChartRows, type DAMChartRow } from '../transforms/dam'
 import { powerChartRows, type PowerChartRow } from '../transforms/power'
 import {
   aggregatePvForecastHourly,
+  forecastDayFromAnchor,
+  forecastIsWholeElevator,
   type PvForecastHourlyRow,
 } from '../transforms/pvForecast'
 import { socChartRows, type SOCChartRow } from '../transforms/soc'
@@ -99,9 +101,13 @@ export type FlowsGap = { covered: number; expected: number }
 // plan in kWh plus how many of its days actually carry a forecast.
 // `plannedKwh: null` means there is no plan to compare against (the
 // organization isn't in the forecast flow, or no day in range has one).
-type PvPlanRange = { plannedKwh: number | null; coverage: FlowsGap | null }
+type PvPlanRange = {
+  plannedKwh: number | null
+  coverage: FlowsGap | null
+  wholeElevator: boolean
+}
 
-const EMPTY_PV_PLAN_RANGE: PvPlanRange = { plannedKwh: null, coverage: null }
+const EMPTY_PV_PLAN_RANGE: PvPlanRange = { plannedKwh: null, coverage: null, wholeElevator: false }
 
 // pvPlanRangeFrom reads the plan endpoint's coverage fields with the
 // same "ignore a one-day shortfall" rule the flow gap uses: the missing
@@ -112,6 +118,7 @@ function pvPlanRangeFrom(resp: {
   planned_kwh: number
   days_covered: number
   days_expected: number
+  whole_elevator_from?: string
 }): PvPlanRange {
   if (!resp.supported || resp.days_covered <= 0 || !(resp.planned_kwh > 0)) {
     return EMPTY_PV_PLAN_RANGE
@@ -123,6 +130,7 @@ function pvPlanRangeFrom(resp: {
       missing >= FLOWS_GAP_MIN_MISSING_DAYS
         ? { covered: resp.days_covered, expected: resp.days_expected }
         : null,
+    wholeElevator: Boolean(resp.whole_elevator_from),
   }
 }
 
@@ -172,6 +180,9 @@ export type DashboardData = {
   // days than the period holds — the forecast flow's history doesn't
   // reach back that far, so the plan understates the period.
   pvForecastCoverage: FlowsGap | null
+  // pvForecastWholeElevator is true when the forecast on screen is the
+  // whole elevator's rather than the site's (de = Т2 from 2026-09-24).
+  pvForecastWholeElevator: boolean
   // loading reflects the charts/summary fetch state and is what `EnergyChart`
   // shows the "Loading..." placeholder for. Cards have their own
   // `cardsLoading` flag so they don't go blank between live ticks.
@@ -304,6 +315,10 @@ export function useDashboardData(input: {
   const pvForecastLoading =
     preset === 'day' ? pvForecast.loading : pvPlan?.scope !== planScope
   const pvForecastCoverage = preset === 'day' ? null : pvPlanRange.coverage
+  const pvForecastWholeElevator =
+    preset === 'day'
+      ? forecastIsWholeElevator(organizationID, forecastDayFromAnchor(anchor))
+      : pvPlanRange.wholeElevator
 
   const configRef = useRef(config)
   useEffect(() => {
@@ -799,6 +814,7 @@ export function useDashboardData(input: {
     pvForecastTotal,
     pvForecastLoading,
     pvForecastCoverage,
+    pvForecastWholeElevator,
     loading,
     cardsLoading,
     flowsRefreshing,

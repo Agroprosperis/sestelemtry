@@ -30,7 +30,7 @@ import {
 } from '../transforms/aiPlan'
 import type { DAMChartRow } from '../transforms/dam'
 import type { PowerChartRow } from '../transforms/power'
-import type { PvForecastHourlyRow } from '../transforms/pvForecast'
+import { pvForecastLabel, type PvForecastHourlyRow } from '../transforms/pvForecast'
 import type { SOCChartRow } from '../transforms/soc'
 import type { EnergySummary as Summary } from '../transforms/summary'
 import { useChartChrome } from '../../theme/useChartChrome'
@@ -45,6 +45,9 @@ type Props = {
   socSeries?: SOCChartRow[]
   powerSeries?: PowerChartRow[]
   pvForecastSeries?: PvForecastHourlyRow[]
+  // pvForecastWholeElevator marks the forecast series as the whole
+  // elevator's rather than the site's.
+  pvForecastWholeElevator?: boolean
   aiPlan?: UzePlanResponse | null
   // planOverlay re-skins the AI plan series when the chart shows a
   // manifest plan instead of the retrospective optimum (control mode):
@@ -68,7 +71,6 @@ const SOC_LABEL = 'SOC'
 // the day-chart rows. We anchor one non-null sample per hour at the HH:30
 // bucket and let recharts' `connectNulls` smooth the line through them.
 const PV_FORECAST_KEY = 'planned_ac_kw'
-const PV_FORECAST_LABEL = 'Прогноз СЕС'
 // 5-min buckets, so HH:30 is index 6 within each 12-bucket hour.
 const PV_FORECAST_BUCKET_OFFSET = 6
 // The AI recommendation: the ESS dispatch an optimally-run battery would
@@ -134,10 +136,12 @@ export function EnergyChart({
   socSeries,
   powerSeries,
   pvForecastSeries,
+  pvForecastWholeElevator = false,
   aiPlan,
   planOverlay,
 }: Props) {
   const chrome = useChartChrome()
+  const pvForecastName = pvForecastLabel(pvForecastWholeElevator)
   const aiEssLabel = planOverlay?.essLabel ?? AI_ESS_LABEL
   const aiSocLabel = planOverlay?.socLabel ?? AI_SOC_LABEL
   const powerTooltip = useCallback(
@@ -243,7 +247,7 @@ export function EnergyChart({
       color: dayPowerColor(key),
     }))
     if (hasPvForecast) {
-      items.push({ id: PV_FORECAST_KEY, label: PV_FORECAST_LABEL, color: PV_FORECAST_COLOR })
+      items.push({ id: PV_FORECAST_KEY, label: pvForecastName, color: PV_FORECAST_COLOR })
     }
     if (hasAiPlan) {
       items.push({ id: AI_ESS_KEY, label: aiEssLabel, color: AI_PLAN_COLOR })
@@ -259,7 +263,7 @@ export function EnergyChart({
       items.push({ id: AI_SOC_KEY, label: aiSocLabel, color: chrome.socPlan })
     }
     return items
-  }, [hasSoc, hasPvForecast, hasAiPlan, hasAiLoad, aiEssLabel, aiSocLabel, chrome.soc, chrome.socPlan])
+  }, [hasSoc, hasPvForecast, pvForecastName, hasAiPlan, hasAiLoad, aiEssLabel, aiSocLabel, chrome.soc, chrome.socPlan])
 
   const renderDayLegend = useCallback(
     () => (
@@ -417,7 +421,7 @@ export function EnergyChart({
                     yAxisId="power"
                     type="monotone"
                     dataKey={PV_FORECAST_KEY}
-                    name={PV_FORECAST_LABEL}
+                    name={pvForecastName}
                     stroke={PV_FORECAST_COLOR}
                     strokeWidth={2}
                     strokeDasharray="5 4"

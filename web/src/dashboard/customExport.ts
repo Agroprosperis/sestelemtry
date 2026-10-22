@@ -242,7 +242,7 @@ export async function fetchCustomExportData(input: CustomExportInput): Promise<E
   const flowKeys = columns.flow ? [...FLOW_EXPORT_METRICS] : []
   const powerKeys = columns.power ? [...POWER_EXPORT_METRICS] : []
   const deviceKeys = columns.device ? [...DEVICE_EXPORT_METRICS] : []
-  const elevator = columns.forecast ? elevatorCodeFor(organizationID, toDateOnly(from)) : null
+  const elevator = columns.forecast ? elevatorCodeFor(organizationID) : null
 
   const energyP = energyKeys.length
     ? fetchTimeseries(

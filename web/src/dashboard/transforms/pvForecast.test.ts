@@ -4,6 +4,9 @@ import {
   aggregatePvForecastHourly,
   elevatorCodeFor,
   forecastDayFromAnchor,
+  forecastIsWholeElevator,
+  pvForecastLabel,
+  pvPlanCaption,
 } from './pvForecast'
 
 function point(over: Partial<PvForecastPoint>): PvForecastPoint {
@@ -36,16 +39,29 @@ describe('elevatorCodeFor', () => {
     expect(elevatorCodeFor('demo-org')).toBeNull()
     expect(elevatorCodeFor('')).toBeNull()
     expect(elevatorCodeFor('unknown')).toBeNull()
-    expect(elevatorCodeFor('de1', '2026-10-01')).toBeNull()
+    expect(elevatorCodeFor('de1')).toBeNull()
   })
 
-  // DE forecasts the whole Дубовʼязівський elevator, which `de` stopped
-  // being on 2026-09-24.
-  it('drops the DE code for de from 2026-09-24', () => {
-    expect(elevatorCodeFor('de', '2026-09-23')).toBe('DE')
-    expect(elevatorCodeFor('de', '2026-09-24')).toBeNull()
-    expect(elevatorCodeFor('de', '2026-10-21')).toBeNull()
-    expect(elevatorCodeFor('ab', '2026-10-21')).toBe('AB')
+  it('keeps DE on de after the split', () => {
+    expect(elevatorCodeFor('de')).toBe('DE')
+  })
+})
+
+// DE forecasts the whole Дубовʼязівський elevator, which `de` stopped
+// being on 2026-09-24.
+describe('forecastIsWholeElevator', () => {
+  it('flags de periods reaching 2026-09-24', () => {
+    expect(forecastIsWholeElevator('de', '2026-09-23')).toBe(false)
+    expect(forecastIsWholeElevator('de', '2026-09-24')).toBe(true)
+    expect(forecastIsWholeElevator('de', '2026-10-22')).toBe(true)
+    expect(forecastIsWholeElevator('ab', '2026-10-22')).toBe(false)
+  })
+
+  it('marks the series label and the plan caption', () => {
+    expect(pvForecastLabel(false)).toBe('Прогноз СЕС')
+    expect(pvForecastLabel(true)).toBe('Прогноз СЕС (весь елеватор)')
+    expect(pvPlanCaption()).toBe('План')
+    expect(pvPlanCaption(true)).toBe('План (весь елеватор)')
   })
 })
 

@@ -52,6 +52,7 @@ export function usePvPlanSummary(input: Input): EconomicsPvPlan | null {
                 plannedKwh: resp.planned_kwh,
                 daysCovered: resp.days_covered,
                 daysExpected: resp.days_expected,
+                wholeElevator: Boolean(resp.whole_elevator_from),
               }
             : null,
         )
