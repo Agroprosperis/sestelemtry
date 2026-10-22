@@ -29,8 +29,7 @@ import (
 const DefaultWebhookURL = "https://granary.app.n8n.cloud/webhook/96bac28d-5020-48b3-8f23-0bc189029c00"
 
 // elevatorCodes maps organization ids to the n8n flow's elevator codes.
-// Mirrors web/src/dashboard/transforms/pvForecast.ts and
-// edgePvElevatorCode in internal/api/edge_planner.go. An org missing
+// Mirrors web/src/dashboard/transforms/pvForecast.ts. An org missing
 // here (demo-org) has no forecast at all, which callers report as
 // "unsupported" rather than as a zero plan.
 var elevatorCodes = map[string]string{
@@ -40,17 +39,19 @@ var elevatorCodes = map[string]string{
 	"ab":  "AB",
 	"ke":  "KE",
 	"de":  "DE",
+	"de1": "DE",
 	"sm":  "SM",
 }
 
 // wholeElevatorFrom is the first civil day (YYYY-MM-DD, site time) a
 // code forecasts more than its site. DE forecasts the whole
-// Дубовʼязівський elevator; from 2026-09-24 `de` is only its Т2 half and
-// Т1 is the separate site `de1` (ems-spec de_two_sites.md). Until the
-// flow has a Т2 code, `de` keeps showing DE, flagged as the whole
+// Дубовʼязівський elevator; from 2026-09-24 it is two sites, `de` (Т2)
+// and `de1` (Т1, which starts that day; ems-spec de_two_sites.md).
+// Until the flow has per-site codes both show DE, flagged as the whole
 // elevator's forecast; control never plans on it.
 var wholeElevatorFrom = map[string]string{
-	"de": "2026-09-24",
+	"de":  "2026-09-24",
+	"de1": "2026-09-24",
 }
 
 // ElevatorCodeFor resolves an organization id to its elevator code.

@@ -257,6 +257,13 @@ func TestPvPlanSummaryWholeElevatorOnlyFromBoundary(t *testing.T) {
 	if got := decodePvPlan(t, rec); !got.Supported || got.WholeElevatorFrom != "" {
 		t.Fatalf("August = %+v, want supported and unflagged", got)
 	}
+
+	rec = httptest.NewRecorder()
+	h.pvPlanSummary(rec, pvPlanRequest("de1",
+		"2026-10-01T00:00:00+03:00", "2026-10-08T00:00:00+03:00", "Europe/Kyiv"))
+	if got := decodePvPlan(t, rec); !got.Supported || got.WholeElevatorFrom != "2026-09-24" {
+		t.Fatalf("de1 October = %+v, want the DE plan flagged as the whole elevator", got)
+	}
 }
 
 func TestPvPlanSummaryRejectsBadRequests(t *testing.T) {

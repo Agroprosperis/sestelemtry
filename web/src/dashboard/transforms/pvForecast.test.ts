@@ -39,11 +39,11 @@ describe('elevatorCodeFor', () => {
     expect(elevatorCodeFor('demo-org')).toBeNull()
     expect(elevatorCodeFor('')).toBeNull()
     expect(elevatorCodeFor('unknown')).toBeNull()
-    expect(elevatorCodeFor('de1')).toBeNull()
   })
 
-  it('keeps DE on de after the split', () => {
+  it('shows the whole elevator DE on both Дубовʼязівський sites', () => {
     expect(elevatorCodeFor('de')).toBe('DE')
+    expect(elevatorCodeFor('de1')).toBe('DE')
   })
 })
 
@@ -54,6 +54,7 @@ describe('forecastIsWholeElevator', () => {
     expect(forecastIsWholeElevator('de', '2026-09-23')).toBe(false)
     expect(forecastIsWholeElevator('de', '2026-09-24')).toBe(true)
     expect(forecastIsWholeElevator('de', '2026-10-22')).toBe(true)
+    expect(forecastIsWholeElevator('de1', '2026-10-22')).toBe(true)
     expect(forecastIsWholeElevator('ab', '2026-10-22')).toBe(false)
   })
 

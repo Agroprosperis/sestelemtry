@@ -134,13 +134,13 @@ func TestElevatorCodeFor(t *testing.T) {
 	if _, ok := ElevatorCodeFor("demo-org"); ok {
 		t.Fatal("demo-org must be unsupported")
 	}
-	if _, ok := ElevatorCodeFor("de1"); ok {
-		t.Fatal("de1 has no forecast code of its own")
+	if code, ok := ElevatorCodeFor("de1"); !ok || code != "DE" {
+		t.Fatalf("ElevatorCodeFor(de1) = %q, %v; want the whole elevator's DE", code, ok)
 	}
 }
 
 // DE forecasts the whole Дубовʼязівський elevator, which `de` stopped
-// being on 2026-09-24.
+// being on 2026-09-24, the day `de1` started.
 func TestCodeCoversDay(t *testing.T) {
 	kyiv, err := time.LoadLocation("Europe/Kyiv")
 	if err != nil {
@@ -154,6 +154,7 @@ func TestCodeCoversDay(t *testing.T) {
 		{"de", time.Date(2026, 9, 23, 0, 0, 0, 0, kyiv), true},
 		{"de", time.Date(2026, 9, 24, 0, 0, 0, 0, kyiv), false},
 		{"de", time.Date(2027, 1, 1, 0, 0, 0, 0, kyiv), false},
+		{"de1", time.Date(2026, 10, 22, 0, 0, 0, 0, kyiv), false},
 		{"ab", time.Date(2027, 1, 1, 0, 0, 0, 0, kyiv), true},
 	}
 	for _, c := range cases {
@@ -161,7 +162,7 @@ func TestCodeCoversDay(t *testing.T) {
 			t.Errorf("CodeCoversDay(%s, %s) = %v, want %v", c.org, c.day.Format("2006-01-02"), got, c.want)
 		}
 	}
-	if de, ab := WholeElevatorFrom("de"), WholeElevatorFrom("ab"); de != "2026-09-24" || ab != "" {
-		t.Errorf("WholeElevatorFrom: de = %q, ab = %q; want 2026-09-24 and empty", de, ab)
+	if de, de1, ab := WholeElevatorFrom("de"), WholeElevatorFrom("de1"), WholeElevatorFrom("ab"); de != "2026-09-24" || de1 != "2026-09-24" || ab != "" {
+		t.Errorf("WholeElevatorFrom: de = %q, de1 = %q, ab = %q; want 2026-09-24, 2026-09-24 and empty", de, de1, ab)
 	}
 }
