@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"sync"
@@ -192,22 +193,43 @@ func (f failingModbusReader) ReadInput(context.Context, uint16, uint16) ([]byte,
 	return nil, f.err
 }
 
+// refusingReader answers the starts it holds and refuses the rest, the
+// way a firmware answers a register it does not know.
+type refusingReader struct{ holding map[uint16][]byte }
+
+func (r refusingReader) ReadHolding(_ context.Context, start, _ uint16) ([]byte, error) {
+	if b, ok := r.holding[start]; ok {
+		return b, nil
+	}
+	return nil, errors.New("modbus exception 2: illegal data address")
+}
+
+func (r refusingReader) ReadInput(ctx context.Context, start, quantity uint16) ([]byte, error) {
+	return r.ReadHolding(ctx, start, quantity)
+}
+
 func TestOptionalReads(t *testing.T) {
 	all := []registers.ResolvedEntry{
 		{Entry: registers.Entry{MetricKey: "soc_percent", DataType: registers.DTUint16}, PDUStart: 0, WordCount: 1},
 		{Entry: registers.Entry{MetricKey: "grid_line_voltage_ab_v", DataType: registers.DTUint16, Gain: 0.1, Scope: registers.ScopeEdge}, PDUStart: 10, WordCount: 1, PDUEnd: 10},
 		{Entry: registers.Entry{MetricKey: "grid_line_voltage_bc_v", DataType: registers.DTUint16, Gain: 0.1, Scope: registers.ScopeEdge}, PDUStart: 11, WordCount: 1, PDUEnd: 11},
 		{Entry: registers.Entry{MetricKey: "grid_line_voltage_ca_v", DataType: registers.DTUint16, Gain: 0.1, Scope: registers.ScopeEdge}, PDUStart: 12, WordCount: 1, PDUEnd: 12},
+		{Entry: registers.Entry{MetricKey: "array_soc_percent", DataType: registers.DTUint16, Gain: 0.1, Scope: registers.ScopeEdge}, PDUStart: 20, WordCount: 1, PDUEnd: 20},
 	}
-	if opt, err := optionalReadsFor(config.ModbusDevice{MetricKeys: []string{"soc_percent"}}, all); err != nil || opt.due(time.Now()) {
+	if reads, err := optionalReadsFor(config.ModbusDevice{MetricKeys: []string{"soc_percent"}}, all); err != nil || len(reads) != 0 {
 		t.Fatal("a whitelisted device reads only what it names")
 	}
-	if _, err := optionalReadsFor(config.ModbusDevice{}, all[:1]); err == nil {
-		t.Fatal("a catalog without the optional keys must say so")
+	reads, err := optionalReadsFor(config.ModbusDevice{}, []registers.ResolvedEntry{all[0], all[4]})
+	if err == nil || len(reads) != 1 || reads[0].entries[0].MetricKey != "array_soc_percent" {
+		t.Fatalf("a catalog without the voltages must say so and keep array SOC: %+v, %v", reads, err)
 	}
-	opt, err := optionalReadsFor(config.ModbusDevice{}, all)
-	if err != nil || !opt.due(time.Now()) || len(opt.entries) != 3 || len(opt.chunks) != 1 {
-		t.Fatalf("optional reads = %+v, %v", opt, err)
+	reads, err = optionalReadsFor(config.ModbusDevice{}, all)
+	if err != nil || len(reads) != 2 || optionalMetricCount(reads) != 4 {
+		t.Fatalf("optional reads = %+v, %v", reads, err)
+	}
+	volts, soc := reads[0], reads[1]
+	if len(volts.chunks) != 1 || len(soc.chunks) != 1 {
+		t.Fatalf("chunks: voltages %+v, array SOC %+v", volts.chunks, soc.chunks)
 	}
 
 	var got []storage.Sample
@@ -221,29 +243,45 @@ func TestOptionalReads(t *testing.T) {
 	org := config.Organization{ID: "de"}
 	dev := config.ModbusDevice{Modbus: config.Modbus{RequestTimeout: time.Second}}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	voltages := []byte{0x0f, 0xbe, 0x0f, 0xc8, 0x0f, 0xb4}
 
-	reader := &mockModbusReader{holding: map[uint16][]byte{10: {0x0f, 0xbe, 0x0f, 0xc8, 0x0f, 0xb4}}}
-	if !pollOptional(context.Background(), logger, cfg, org, dev, reader, &opt, nil) {
-		t.Fatal("a good read keeps the session")
+	reader := &mockModbusReader{holding: map[uint16][]byte{10: voltages, 20: {0x03, 0x84}}}
+	if !pollOptionalDue(context.Background(), logger, cfg, org, dev, reader, reads, nil) {
+		t.Fatal("good reads keep the session")
 	}
-	if len(got) != 3 || got[0].Value != 403 || got[1].Value != 404 || got[2].Value != 402 {
+	if len(got) != 4 || got[0].Value != 403 || got[1].Value != 404 || got[2].Value != 402 ||
+		got[3].MetricKey != "array_soc_percent" || got[3].Value != 90 {
 		t.Fatalf("samples = %+v", got)
 	}
-	if opt.due(time.Now()) || opt.due(time.Now().Add(optionalReadEvery-time.Second)) {
-		t.Fatal("the next read waits optionalReadEvery")
+	now := time.Now()
+	if volts.due(now) || volts.due(now.Add(volts.every-time.Second)) {
+		t.Fatal("the voltages wait their interval")
+	}
+	if !soc.due(now) {
+		t.Fatal("array SOC is read on every poll")
 	}
 
-	// A refusal pauses the reads but keeps the session; a timeout asks
-	// for a redial.
-	opt.next = time.Time{}
-	if !pollOptional(context.Background(), logger, cfg, org, dev, failingModbusReader{err: io.ErrUnexpectedEOF}, &opt, nil) {
+	// A firmware that refuses 40527 pauses only array SOC; the voltages
+	// are still stored and keep their own schedule.
+	volts.next, soc.next = time.Time{}, time.Time{}
+	got = nil
+	refusing := refusingReader{holding: map[uint16][]byte{10: voltages}}
+	if !pollOptionalDue(context.Background(), logger, cfg, org, dev, refusing, reads, nil) {
 		t.Fatal("a refusal keeps the session")
 	}
-	if opt.due(time.Now().Add(optionalBackoff - time.Minute)) {
-		t.Fatal("a refusal pauses the optional reads")
+	if len(got) != 3 {
+		t.Fatalf("the voltages must still be stored, got %+v", got)
 	}
-	opt.next = time.Time{}
-	if pollOptional(context.Background(), logger, cfg, org, dev, failingModbusReader{err: context.DeadlineExceeded}, &opt, nil) {
+	if soc.due(time.Now().Add(optionalBackoff - time.Minute)) {
+		t.Fatal("a refusal pauses array SOC")
+	}
+	if !volts.due(time.Now().Add(volts.every)) {
+		t.Fatal("the voltages keep their own schedule")
+	}
+
+	// A timeout asks for a redial.
+	soc.next = time.Time{}
+	if pollOptional(context.Background(), logger, cfg, org, dev, failingModbusReader{err: context.DeadlineExceeded}, soc, nil) {
 		t.Fatal("a timeout redials the session")
 	}
 }

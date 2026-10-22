@@ -189,6 +189,19 @@ registers:
     gain: 0.1
     offset: 0
 
+  # Array actual SOC: the second SOC register, kept next to 40515 to
+  # check whether it holds while 40515 drops to 0 %. Firmware support is
+  # unverified, so the collector reads it as its own optional request,
+  # never inside the main poll.
+  - metric_key: array_soc_percent
+    name: Array actual SOC
+    address: 40527
+    data_type: UINT16
+    swap_type: ABCD_BE
+    gain: 0.1
+    offset: 0
+    scope: edge
+
   - metric_key: pcs_shutdown
     name: ESS PCS shut down
     address: 40540

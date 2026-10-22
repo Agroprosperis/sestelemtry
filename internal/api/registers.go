@@ -69,6 +69,7 @@ var ModbusRegisterMetadata = map[string]RegisterMeta{
 	"electricity_sold_day_kwh":              {Address: 40511, DataType: "UINT32", Gain: 0.01},
 	"electricity_purchased_day_kwh":         {Address: 40513, DataType: "UINT32", Gain: 0.01},
 	"soc_percent":                           {Address: 40515, DataType: "UINT16", Gain: 0.1},
+	"array_soc_percent":                     {Address: 40527, DataType: "UINT16", Gain: 0.1},
 	"pv_rated_kw":                           {Address: 40396, DataType: "UINT32", Gain: 0.001},
 	"ess_rated_kw":                          {Address: 40398, DataType: "UINT32", Gain: 0.001},
 	"ess_rated_kwh":                         {Address: 40484, DataType: "UINT32", Gain: 0.001},
