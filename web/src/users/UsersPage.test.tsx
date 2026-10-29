@@ -144,4 +144,54 @@ describe('UsersPage', () => {
     expect(screen.getByText(/Це ваш обліковий запис/)).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Видалити' })).toBeNull()
   })
+
+  it('sorts by surname and role, and filters by search query and role', async () => {
+    accounts = [
+      {
+        ...engineer,
+        id: 2,
+        email: 'ysytnyk@example.com',
+        name: 'Юрченко Андрій',
+        grants: [{ role: 'ceo', organization_id: 'ze' }],
+      },
+      {
+        ...engineer,
+        id: 3,
+        email: 'abodiagin@example.com',
+        name: 'Бодягін Олександр',
+        grants: [{ role: 'investor', organization_id: null }],
+      },
+      {
+        ...engineer,
+        id: 4,
+        email: 'alisovyi@example.com',
+        name: 'Лісовий Андрій',
+        grants: [{ role: 'control_engineer', organization_id: 'ze' }],
+      },
+    ]
+    renderPage()
+
+    // Default sort: ascending by Ukrainian surname (Бодягін, Лісовий, Юрченко)
+    await screen.findByText('Бодягін Олександр')
+    const rowsBySurname = () =>
+      screen.getAllByRole('row').slice(1).map((r) => r.querySelector('.alerts-org-name')?.textContent)
+    expect(rowsBySurname()).toEqual(['Бодягін Олександр', 'Лісовий Андрій', 'Юрченко Андрій'])
+
+    // Toggle surname sort descending
+    fireEvent.click(screen.getByRole('button', { name: /Користувач/ }))
+    expect(rowsBySurname()).toEqual(['Юрченко Андрій', 'Лісовий Андрій', 'Бодягін Олександр'])
+
+    // Sort by role ascending (ROLES order: control_engineer -> ceo -> investor)
+    fireEvent.click(screen.getByRole('button', { name: /Ролі/ }))
+    expect(rowsBySurname()).toEqual(['Лісовий Андрій', 'Юрченко Андрій', 'Бодягін Олександр'])
+
+    // Filter by role
+    fireEvent.change(screen.getByLabelText('Фільтр за роллю'), { target: { value: 'ceo' } })
+    expect(rowsBySurname()).toEqual(['Юрченко Андрій'])
+
+    // Reset role filter and search by name / email
+    fireEvent.change(screen.getByLabelText('Фільтр за роллю'), { target: { value: 'all' } })
+    fireEvent.change(screen.getByLabelText('Пошук користувача'), { target: { value: 'лісовий' } })
+    expect(rowsBySurname()).toEqual(['Лісовий Андрій'])
+  })
 })
