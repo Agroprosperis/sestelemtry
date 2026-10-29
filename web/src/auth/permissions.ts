@@ -18,11 +18,11 @@ export type Role = 'admin' | 'economist' | 'engineer' | 'control_engineer' | 'ce
 export const ROLES: { id: Role; label: string; hint: string }[] = [
   { id: 'admin', label: 'Адміністратор', hint: 'усі розділи й налаштування' },
   { id: 'economist', label: 'Економіст', hint: 'перегляд економіки й тарифів' },
-  { id: 'engineer', label: 'Інженер', hint: 'денний енергетичний графік' },
+  { id: 'engineer', label: 'Інженер', hint: 'енергетичні графіки (день, місяць, рік)' },
   {
     id: 'control_engineer',
     label: 'Інженер-керування',
-    hint: 'денний графік, керування, технічні ліміти',
+    hint: 'енергетичні графіки, керування, технічні ліміти',
   },
   { id: 'ceo', label: 'Генеральний директор', hint: 'перегляд аналітики, економіки й керування без змін' },
   { id: 'investor', label: 'Інвестор', hint: 'перегляд аналітики, економіки й керування без змін' },

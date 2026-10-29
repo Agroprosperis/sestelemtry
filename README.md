@@ -34,13 +34,12 @@ SameSite=Lax, 14 days, sliding). State-changing requests must also carry an
 | --- | --- |
 | `admin` | everything within its organizations; on all organizations also users and site-wide alert settings |
 | `economist` | view only: economics mode and tariffs |
-| `engineer` | the analytics day chart |
-| `control_engineer` | the day chart, the «Керування» mode with confirming the УЗЕ plan and publishing manifests, and the per-site limits |
+| `engineer` | analytics for any period (day, month, year) |
+| `control_engineer` | analytics for any period, the «Керування» mode with confirming the УЗЕ plan and publishing manifests, and the per-site limits |
 | `ceo`, `investor` | view only: analytics for any period, economics and the «Керування» mode; no changes, no admin tools |
 
 A role is granted on one organization, several, or all of them (including
-organizations added to `config.yaml` later). Telemetry reads longer than
-49 h need `admin`, `ceo` or `investor` (the month and year presets).
+organizations added to `config.yaml` later).
 
 - On a database without accounts the API creates `admin` / `admin`. Sign in
   right after the first start: until that account sets its own password

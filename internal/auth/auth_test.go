@@ -14,10 +14,10 @@ func TestRolePermissions(t *testing.T) {
 		want []Permission
 		deny []Permission
 	}{
-		{RoleEngineer, []Permission{PermAnalyticsDay},
-			[]Permission{PermAnalyticsFull, PermEconomicsRead, PermControl, PermControlWrite, PermTechnicalWrite, PermService}},
-		{RoleControlEngineer, []Permission{PermAnalyticsDay, PermControl, PermControlWrite, PermTechnicalWrite},
-			[]Permission{PermAnalyticsFull, PermEconomicsRead, PermEconomicsWrite, PermService}},
+		{RoleEngineer, []Permission{PermAnalyticsDay, PermAnalyticsFull},
+			[]Permission{PermEconomicsRead, PermEconomicsWrite, PermControl, PermControlWrite, PermTechnicalWrite, PermService}},
+		{RoleControlEngineer, []Permission{PermAnalyticsDay, PermAnalyticsFull, PermControl, PermControlWrite, PermTechnicalWrite},
+			[]Permission{PermEconomicsRead, PermEconomicsWrite, PermService}},
 		{RoleEconomist, []Permission{PermEconomicsRead},
 			[]Permission{PermAnalyticsDay, PermEconomicsWrite, PermControl, PermControlWrite, PermTechnicalWrite, PermService}},
 		{RoleCEO, []Permission{PermAnalyticsDay, PermAnalyticsFull, PermEconomicsRead, PermControl},
@@ -72,7 +72,7 @@ func TestPrincipalScopes(t *testing.T) {
 		t.Fatal("an empty organization is never covered")
 	}
 	got := p.PermissionsOn("ze")
-	want := []Permission{PermAnalyticsDay, PermEconomicsRead}
+	want := []Permission{PermAnalyticsDay, PermAnalyticsFull, PermEconomicsRead}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("PermissionsOn(ze) = %v, want %v", got, want)
 	}

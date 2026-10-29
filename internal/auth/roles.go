@@ -56,8 +56,8 @@ const (
 var viewerPermissions = []Permission{PermAnalyticsDay, PermAnalyticsFull, PermEconomicsRead, PermControl}
 
 var rolePermissions = map[Role][]Permission{
-	RoleEngineer:        {PermAnalyticsDay},
-	RoleControlEngineer: {PermAnalyticsDay, PermControl, PermControlWrite, PermTechnicalWrite},
+	RoleEngineer:        {PermAnalyticsDay, PermAnalyticsFull},
+	RoleControlEngineer: {PermAnalyticsDay, PermAnalyticsFull, PermControl, PermControlWrite, PermTechnicalWrite},
 	RoleEconomist:       {PermEconomicsRead},
 	RoleCEO:             viewerPermissions,
 	RoleInvestor:        viewerPermissions,

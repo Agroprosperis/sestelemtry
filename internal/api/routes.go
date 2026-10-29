@@ -155,9 +155,11 @@ func (h *Handlers) routes() []route {
 		{"/api/v1/alert-settings/test-email", h.alertSettingsTestEmail, need(service)},
 		{"/api/v1/organization-alert-settings", h.organizationAlertSettings,
 			anyAdmin.on(http.MethodPut, service)},
+		// The analytics month and year presets render the energy-flow
+		// trend from the monthly and annual rollups.
 		{"/api/v1/economics/daily", h.economicsDaily, need(econRead)},
-		{"/api/v1/economics/monthly", h.economicsMonthly, need(econRead)},
-		{"/api/v1/economics/annual", h.economicsAnnual, need(econRead)},
+		{"/api/v1/economics/monthly", h.economicsMonthly, need(onOrg(auth.PermAnalyticsFull, auth.PermEconomicsRead))},
+		{"/api/v1/economics/annual", h.economicsAnnual, need(onOrg(auth.PermAnalyticsFull, auth.PermEconomicsRead))},
 		{"/api/v1/economics/portfolio", h.economicsPortfolio, need(onAnyOrg(auth.PermEconomicsRead))},
 		{"/api/v1/economics/recompute", h.economicsRecompute, need(econEdit)},
 		{"/api/v1/economics/data-range", h.economicsDataRange, need(econRead)},
