@@ -457,6 +457,9 @@ func TestUsersAPI(t *testing.T) {
 	if !created.MustChangePassword {
 		t.Fatal("a password handed out by an administrator must be temporary")
 	}
+	if created.LastSeenAt != nil {
+		t.Fatalf("new account LastSeenAt = %v, want nil", created.LastSeenAt)
+	}
 
 	bad := []userCreateRequest{
 		{Email: "economist@example.com", Password: "economics rules"},
@@ -522,6 +525,11 @@ func TestUsersAPI(t *testing.T) {
 	}
 	if len(list.Users) != 2 {
 		t.Fatalf("users = %d, want 2", len(list.Users))
+	}
+	for _, u := range list.Users {
+		if u.LastSeenAt == nil || u.LastSeenAt.IsZero() {
+			t.Fatalf("user %s LastSeenAt = %v, want non-zero timestamp kept after session revocation", u.Email, u.LastSeenAt)
+		}
 	}
 
 	// A reset by an administrator is temporary again; setting your own

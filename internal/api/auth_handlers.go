@@ -244,10 +244,16 @@ type userJSON struct {
 	// handed and sets its own at the next sign-in.
 	MustChangePassword bool        `json:"must_change_password"`
 	Grants             []grantJSON `json:"grants"`
+	LastSeenAt         *time.Time  `json:"last_seen_at"`
 	CreatedAt          time.Time   `json:"created_at"`
 }
 
 func toUserJSON(u storage.UserRow, grants []auth.Grant) userJSON {
+	var lastSeen *time.Time
+	if u.LastSeenAt != nil {
+		utc := u.LastSeenAt.UTC()
+		lastSeen = &utc
+	}
 	return userJSON{
 		ID:                 u.ID,
 		Email:              u.Email,
@@ -256,6 +262,7 @@ func toUserJSON(u storage.UserRow, grants []auth.Grant) userJSON {
 		AuthProvider:       u.AuthProvider,
 		MustChangePassword: u.MustChangePassword,
 		Grants:             grantsJSON(grants),
+		LastSeenAt:         lastSeen,
 		CreatedAt:          u.CreatedAt.UTC(),
 	}
 }

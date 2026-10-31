@@ -13,11 +13,32 @@ import { fetchUsers, type UserAccount } from './usersClient'
 import './users.css'
 
 type RoleFilter = 'all' | 'none' | Role
-type SortKey = 'name' | 'role'
+type SortKey = 'name' | 'role' | 'last_seen'
 type SortDir = 'asc' | 'desc'
 
 const UK_COLLATOR = new Intl.Collator('uk', { sensitivity: 'base', numeric: true })
 const ROLE_ORDER = new Map<Role, number>(ROLES.map((r, i) => [r.id, i]))
+const LAST_SEEN_FORMATTER = new Intl.DateTimeFormat('uk-UA', {
+  timeZone: 'Europe/Kyiv',
+  day: '2-digit',
+  month: '2-digit',
+  year: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+})
+
+function formatLastSeen(iso: string | null | undefined): string | null {
+  if (!iso) return null
+  const ms = Date.parse(iso)
+  if (!Number.isFinite(ms)) return null
+  return LAST_SEEN_FORMATTER.format(new Date(ms))
+}
+
+function lastSeenMs(u: UserAccount): number | null {
+  if (!u.last_seen_at) return null
+  const ms = Date.parse(u.last_seen_at)
+  return Number.isFinite(ms) ? ms : null
+}
 
 function surnameKey(u: UserAccount): string {
   const name = u.name.trim()
@@ -42,6 +63,13 @@ function compareUsers(
   orgName: (id: string) => string,
 ): number {
   const sign = sortDir === 'asc' ? 1 : -1
+  if (sortKey === 'last_seen') {
+    const ta = lastSeenMs(a)
+    const tb = lastSeenMs(b)
+    if (ta === null && tb !== null) return 1
+    if (ta !== null && tb === null) return -1
+    if (ta !== null && tb !== null && ta !== tb) return (ta - tb) * sign
+  }
   if (sortKey === 'role') {
     const rankDiff = primaryRoleRank(a) - primaryRoleRank(b)
     if (rankDiff !== 0) return rankDiff * sign
@@ -86,7 +114,7 @@ export function UsersPage() {
       setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
     } else {
       setSortKey(key)
-      setSortDir('asc')
+      setSortDir(key === 'last_seen' ? 'desc' : 'asc')
     }
   }
 
@@ -254,6 +282,18 @@ export function UsersPage() {
                     </span>
                   </button>
                 </th>
+                <th aria-sort={sortKey === 'last_seen' ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}>
+                  <button
+                    type="button"
+                    className={`users-sort-btn${sortKey === 'last_seen' ? ' is-active' : ''}`}
+                    onClick={() => toggleSort('last_seen')}
+                  >
+                    <span>Активність</span>
+                    <span className="users-sort-arrow" aria-hidden="true">
+                      {sortKey === 'last_seen' ? (sortDir === 'asc' ? '↑' : '↓') : '↕'}
+                    </span>
+                  </button>
+                </th>
                 <th>Стан</th>
                 <th />
               </tr>
@@ -261,6 +301,7 @@ export function UsersPage() {
             <tbody>
               {visibleUsers.map((u) => {
                 const lines = grantSummary(u.grants, orgName)
+                const lastSeen = formatLastSeen(u.last_seen_at)
                 return (
                   <tr key={u.id}>
                     <td>
@@ -276,6 +317,13 @@ export function UsersPage() {
                         </ul>
                       ) : (
                         <span className="users-muted">без ролей</span>
+                      )}
+                    </td>
+                    <td className="users-last-seen">
+                      {lastSeen ? (
+                        <time dateTime={u.last_seen_at ?? undefined}>{lastSeen}</time>
+                      ) : (
+                        <span className="users-muted">—</span>
                       )}
                     </td>
                     <td>

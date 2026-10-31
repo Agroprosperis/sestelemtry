@@ -19,11 +19,13 @@ CREATE TABLE IF NOT EXISTS users (
     auth_provider    text NOT NULL DEFAULT 'local',
     external_subject text NOT NULL DEFAULT '',
     must_change_password boolean NOT NULL DEFAULT false,
+    last_seen_at     timestamptz,
     created_at       timestamptz NOT NULL DEFAULT now(),
     updated_at       timestamptz NOT NULL DEFAULT now()
 );
 
 ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password boolean NOT NULL DEFAULT false;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_at timestamptz;
 
 CREATE UNIQUE INDEX IF NOT EXISTS users_email_lower ON users (lower(email));
 CREATE UNIQUE INDEX IF NOT EXISTS users_external_subject

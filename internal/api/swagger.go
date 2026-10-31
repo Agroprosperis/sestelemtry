@@ -1207,6 +1207,11 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Grant"
+        last_seen_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Most recent authenticated activity, or null if the user has never signed in.
         created_at:
           type: string
           format: date-time

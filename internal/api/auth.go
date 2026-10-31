@@ -21,9 +21,10 @@ const (
 	// asked again. It is also the longest a revoked session can survive
 	// on a second API process.
 	sessionCacheTTL = 30 * time.Second
-	// sessionTouchEvery bounds how often the sliding expiry is written
-	// back while a session is in use.
-	sessionTouchEvery = 10 * time.Minute
+	// sessionTouchEvery bounds how often the sliding expiry and the
+	// user's last_seen_at timestamp are written back while a session is
+	// in use.
+	sessionTouchEvery = 1 * time.Minute
 	sessionCachePrune = 1024
 
 	loginMaxFailures = 5

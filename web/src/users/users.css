@@ -147,6 +147,12 @@
   white-space: nowrap;
 }
 
+.users-last-seen {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+}
+
 .users-count {
   margin-left: 8px;
   font-size: 0.78rem;

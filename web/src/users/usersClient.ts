@@ -10,6 +10,7 @@ export type UserAccount = {
   // Still on the temporary password it was given.
   must_change_password: boolean
   grants: AuthGrant[]
+  last_seen_at: string | null
   created_at: string
 }
 

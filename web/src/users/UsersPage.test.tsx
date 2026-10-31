@@ -21,6 +21,7 @@ const engineer = {
   must_change_password: false,
   // "old" was removed from config.yaml after the grant was made.
   grants: [{ role: 'engineer', organization_id: 'old' }],
+  last_seen_at: null,
   created_at: '2026-09-01T00:00:00Z',
 }
 
@@ -153,6 +154,7 @@ describe('UsersPage', () => {
         email: 'ysytnyk@example.com',
         name: 'Юрченко Андрій',
         grants: [{ role: 'ceo', organization_id: 'ze' }],
+        last_seen_at: '2026-10-30T08:15:00Z',
       },
       {
         ...engineer,
@@ -160,6 +162,7 @@ describe('UsersPage', () => {
         email: 'abodiagin@example.com',
         name: 'Бодягін Олександр',
         grants: [{ role: 'investor', organization_id: null }],
+        last_seen_at: null,
       },
       {
         ...engineer,
@@ -167,6 +170,7 @@ describe('UsersPage', () => {
         email: 'alisovyi@example.com',
         name: 'Лісовий Андрій',
         grants: [{ role: 'control_engineer', organization_id: 'ze' }],
+        last_seen_at: '2026-10-31T14:40:00Z',
       },
     ]
     renderPage()
@@ -176,6 +180,7 @@ describe('UsersPage', () => {
     const rowsBySurname = () =>
       screen.getAllByRole('row').slice(1).map((r) => r.querySelector('.alerts-org-name')?.textContent)
     expect(rowsBySurname()).toEqual(['Бодягін Олександр', 'Лісовий Андрій', 'Юрченко Андрій'])
+    expect(screen.getByText('31.10.2026, 16:40')).toBeInTheDocument()
 
     // Toggle surname sort descending
     fireEvent.click(screen.getByRole('button', { name: /Користувач/ }))
@@ -184,6 +189,12 @@ describe('UsersPage', () => {
     // Sort by role ascending (ROLES order: control_engineer -> ceo -> investor)
     fireEvent.click(screen.getByRole('button', { name: /Ролі/ }))
     expect(rowsBySurname()).toEqual(['Лісовий Андрій', 'Юрченко Андрій', 'Бодягін Олександр'])
+
+    // Sort by last activity (first click: most recent first; never seen stays last)
+    fireEvent.click(screen.getByRole('button', { name: /Активність/ }))
+    expect(rowsBySurname()).toEqual(['Лісовий Андрій', 'Юрченко Андрій', 'Бодягін Олександр'])
+    fireEvent.click(screen.getByRole('button', { name: /Активність/ }))
+    expect(rowsBySurname()).toEqual(['Юрченко Андрій', 'Лісовий Андрій', 'Бодягін Олександр'])
 
     // Filter by role
     fireEvent.change(screen.getByLabelText('Фільтр за роллю'), { target: { value: 'ceo' } })

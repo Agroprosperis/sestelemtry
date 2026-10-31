@@ -158,7 +158,15 @@ func (m *memAuthStore) DeleteUser(_ context.Context, id int64) (bool, error) {
 func (m *memAuthStore) CreateSession(_ context.Context, tokenHash []byte, userID int64, expiresAt time.Time) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.sessions[string(tokenHash)] = storage.SessionRow{UserID: userID, ExpiresAt: expiresAt, LastSeenAt: time.Now()}
+	now := time.Now()
+	m.sessions[string(tokenHash)] = storage.SessionRow{UserID: userID, ExpiresAt: expiresAt, LastSeenAt: now}
+	if u, ok := m.users[userID]; ok {
+		if u.LastSeenAt == nil || now.After(*u.LastSeenAt) {
+			t := now
+			u.LastSeenAt = &t
+			m.users[userID] = u
+		}
+	}
 	return nil
 }
 
@@ -176,6 +184,13 @@ func (m *memAuthStore) TouchSession(_ context.Context, tokenHash []byte, lastSee
 	if s, ok := m.sessions[string(tokenHash)]; ok {
 		s.LastSeenAt, s.ExpiresAt = lastSeen, expiresAt
 		m.sessions[string(tokenHash)] = s
+		if u, ok := m.users[s.UserID]; ok {
+			if u.LastSeenAt == nil || lastSeen.After(*u.LastSeenAt) {
+				t := lastSeen
+				u.LastSeenAt = &t
+				m.users[s.UserID] = u
+			}
+		}
 	}
 	return nil
 }

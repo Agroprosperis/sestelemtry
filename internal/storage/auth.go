@@ -33,10 +33,12 @@ func InitAuthSchema(ctx context.Context, pool *pgxpool.Pool) error {
 			auth_provider    text NOT NULL DEFAULT 'local',
 			external_subject text NOT NULL DEFAULT '',
 			must_change_password boolean NOT NULL DEFAULT false,
+			last_seen_at     timestamptz,
 			created_at       timestamptz NOT NULL DEFAULT now(),
 			updated_at       timestamptz NOT NULL DEFAULT now()
 		)`,
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password boolean NOT NULL DEFAULT false`,
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_at timestamptz`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS users_email_lower ON users (lower(email))`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS users_external_subject
 			ON users (auth_provider, external_subject) WHERE external_subject <> ''`,
@@ -48,6 +50,10 @@ func InitAuthSchema(ctx context.Context, pool *pgxpool.Pool) error {
 			expires_at   timestamptz NOT NULL
 		)`,
 		`CREATE INDEX IF NOT EXISTS sessions_user ON sessions (user_id)`,
+		`UPDATE users u
+			SET last_seen_at = s.last_seen_at
+			FROM (SELECT user_id, max(last_seen_at) AS last_seen_at FROM sessions GROUP BY user_id) s
+			WHERE u.id = s.user_id AND (u.last_seen_at IS NULL OR s.last_seen_at > u.last_seen_at)`,
 		`CREATE TABLE IF NOT EXISTS role_grants (
 			user_id         bigint NOT NULL REFERENCES users (id) ON DELETE CASCADE,
 			role            text NOT NULL,
@@ -78,6 +84,7 @@ type UserRow struct {
 	// MustChangePassword locks the account out of everything but a
 	// password change (the factory admin/admin).
 	MustChangePassword bool
+	LastSeenAt         *time.Time
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
 }
@@ -90,12 +97,12 @@ type RoleGrantRow struct {
 	OrganizationID string
 }
 
-const userColumns = `id, email, name, password_hash, disabled, auth_provider, external_subject, must_change_password, created_at, updated_at`
+const userColumns = `id, email, name, password_hash, disabled, auth_provider, external_subject, must_change_password, last_seen_at, created_at, updated_at`
 
 func scanUser(row pgx.Row) (UserRow, error) {
 	var u UserRow
 	err := row.Scan(&u.ID, &u.Email, &u.Name, &u.PasswordHash, &u.Disabled,
-		&u.AuthProvider, &u.ExternalSubject, &u.MustChangePassword, &u.CreatedAt, &u.UpdatedAt)
+		&u.AuthProvider, &u.ExternalSubject, &u.MustChangePassword, &u.LastSeenAt, &u.CreatedAt, &u.UpdatedAt)
 	return u, err
 }
 
@@ -337,13 +344,21 @@ type SessionRow struct {
 }
 
 // InsertSession stores a new session under the hash of its cookie
-// secret.
+// secret and updates the user's last_seen_at.
 func InsertSession(ctx context.Context, pool *pgxpool.Pool, tokenHash []byte, userID int64, expiresAt time.Time) error {
 	if pool == nil {
 		return fmt.Errorf("storage: nil pool")
 	}
 	if _, err := pool.Exec(ctx, `
-		INSERT INTO sessions (token_hash, user_id, expires_at) VALUES ($1, $2, $3)
+		WITH s AS (
+			INSERT INTO sessions (token_hash, user_id, expires_at)
+			VALUES ($1, $2, $3)
+			RETURNING user_id, last_seen_at
+		)
+		UPDATE users u
+		SET last_seen_at = GREATEST(u.last_seen_at, s.last_seen_at)
+		FROM s
+		WHERE u.id = s.user_id
 	`, tokenHash, userID, expiresAt); err != nil {
 		return fmt.Errorf("storage: insert session: %w", err)
 	}
@@ -374,7 +389,16 @@ func TouchSession(ctx context.Context, pool *pgxpool.Pool, tokenHash []byte, las
 		return fmt.Errorf("storage: nil pool")
 	}
 	if _, err := pool.Exec(ctx, `
-		UPDATE sessions SET last_seen_at = $2, expires_at = $3 WHERE token_hash = $1
+		WITH s AS (
+			UPDATE sessions
+			SET last_seen_at = $2, expires_at = $3
+			WHERE token_hash = $1
+			RETURNING user_id, last_seen_at
+		)
+		UPDATE users u
+		SET last_seen_at = GREATEST(u.last_seen_at, s.last_seen_at)
+		FROM s
+		WHERE u.id = s.user_id
 	`, tokenHash, lastSeen, expiresAt); err != nil {
 		return fmt.Errorf("storage: touch session: %w", err)
 	}
