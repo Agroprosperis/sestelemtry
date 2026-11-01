@@ -5,6 +5,7 @@ import {
   fetchRawSamplesCsv,
   fetchRegisters,
   fetchWeatherForecastFromAPI,
+  readNdjson,
   refreshDAMPrices,
   resetRegistersCache,
   UNAUTHORIZED_EVENT,
@@ -344,5 +345,38 @@ describe('refreshDAMPrices', () => {
     await expect(
       refreshDAMPrices({ date: '2026-05-25' }),
     ).rejects.toThrow(/dam-prices refresh failed: 502 — oree: status 502/)
+  })
+})
+
+describe('readNdjson', () => {
+  function chunked(...chunks: Array<string | Uint8Array>): Response {
+    const encoder = new TextEncoder()
+    return new Response(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          for (const c of chunks) controller.enqueue(typeof c === 'string' ? encoder.encode(c) : c)
+          controller.close()
+        },
+      }),
+    )
+  }
+
+  it('reassembles lines split across chunks, inside a Cyrillic letter too', async () => {
+    const line = new TextEncoder().encode('{"text":"Привіт"}\n')
+    // Byte 10 is the middle of «П», a two-byte letter.
+    const events: unknown[] = []
+    await readNdjson(chunked('{"type":"tool"}\n', line.slice(0, 10), line.slice(10), '\n{"type":"done"}'), (e) => events.push(e))
+    expect(events).toEqual([{ type: 'tool' }, { text: 'Привіт' }, { type: 'done' }])
+  })
+
+  it('stops at the first event the caller rejects', async () => {
+    const seen: unknown[] = []
+    await expect(
+      readNdjson(chunked('{"n":1}\n{"n":2}\n{"n":3}\n'), (e) => {
+        seen.push(e)
+        if ((e as { n: number }).n === 2) throw new Error('stop')
+      }),
+    ).rejects.toThrow('stop')
+    expect(seen).toHaveLength(2)
   })
 })

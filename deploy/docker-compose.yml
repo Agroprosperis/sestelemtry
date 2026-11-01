@@ -61,6 +61,13 @@ services:
       # must set its own password at the first sign-in.
       AUTH_BOOTSTRAP_EMAIL: ${AUTH_BOOTSTRAP_EMAIL:-}
       AUTH_BOOTSTRAP_PASSWORD: ${AUTH_BOOTSTRAP_PASSWORD:-}
+      # AI assistant (POST /api/v1/chat): enabled only when the key and
+      # the model are both set. Put them in deploy/.env, not here.
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      OPENAI_REASONING_EFFORT: ${OPENAI_REASONING_EFFORT:-}
+      AI_CHAT_DAILY_LIMIT: ${AI_CHAT_DAILY_LIMIT:-}
     # Mount the same YAML the collector reads so the API can populate
     # /api/v1/organizations (org id, display name, location). Without
     # the mount + -config flag the endpoint returns an empty list and

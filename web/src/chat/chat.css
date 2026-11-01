@@ -1,0 +1,306 @@
+/* The AI assistant: a side panel over the page (not modal, so the
+   cards it talks about stay visible) and its top-bar toggle. */
+
+.chat-drawer {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  bottom: 12px;
+  z-index: 55;
+  width: min(420px, calc(100vw - 24px));
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+
+.chat-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 12px 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.chat-head-title {
+  flex: 1;
+  min-width: 0;
+}
+
+.chat-head-title h2 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 15px;
+  color: var(--text);
+}
+
+.chat-head-title h2 svg {
+  color: var(--accent);
+}
+
+.chat-head-title span {
+  display: block;
+  font-size: 12px;
+  color: var(--text-subtle);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chat-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.chat-icon-btn:hover:not(:disabled) {
+  background: var(--bg-muted);
+  border-color: var(--border-strong);
+}
+
+.chat-icon-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.chat-log {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  background: var(--bg-sunken);
+}
+
+.chat-msg {
+  max-width: 92%;
+  padding: 9px 12px;
+  border-radius: 12px;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.chat-msg.user {
+  align-self: flex-end;
+  white-space: pre-wrap;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-border);
+}
+
+.chat-msg.assistant {
+  align-self: flex-start;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+}
+
+.chat-msg p,
+.chat-msg ul {
+  margin: 0 0 6px;
+}
+
+.chat-msg ul {
+  padding-left: 18px;
+}
+
+.chat-msg > :last-child {
+  margin-bottom: 0;
+}
+
+.chat-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-subtle);
+}
+
+.chat-spin {
+  animation: chat-spin 0.9s linear infinite;
+}
+
+@keyframes chat-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-spin {
+    animation: none;
+  }
+}
+
+.chat-error {
+  font-size: 12.5px;
+  color: var(--err-text);
+}
+
+.chat-sources {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chat-msg ul.chat-sources {
+  padding-left: 0;
+}
+
+.chat-sources li {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-sunken);
+  color: var(--text-secondary);
+}
+
+.chat-starters {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: auto;
+}
+
+.chat-starters p {
+  margin: 0 0 2px;
+  font-size: 12.5px;
+  color: var(--text-subtle);
+}
+
+.chat-starter {
+  text-align: left;
+  padding: 8px 11px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-elevated);
+  font: inherit;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.chat-starter:hover {
+  background: var(--bg-muted);
+  border-color: var(--border-strong);
+}
+
+.chat-input {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 10px 12px 6px;
+  border-top: 1px solid var(--border);
+}
+
+.chat-input textarea {
+  flex: 1;
+  max-height: 140px;
+  resize: none;
+  padding: 8px 10px;
+  border: 1px solid var(--input-border);
+  border-radius: 10px;
+  background: var(--input-bg);
+  font: inherit;
+  font-size: 13.5px;
+  color: var(--text);
+}
+
+.chat-input textarea:focus {
+  outline: 2px solid var(--accent-ring);
+  border-color: var(--accent);
+}
+
+.chat-send {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  padding: 0 14px;
+  border: none;
+  border-radius: 10px;
+  background: var(--info-fill);
+  color: var(--on-accent);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.chat-send:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.chat-send.stop {
+  background: var(--bg-elevated);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+}
+
+.chat-note {
+  margin: 0;
+  padding: 0 12px 10px;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+/* --- «Пояснити» on a card header (the last item pushed right) --- */
+
+.chat-explain-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  margin-left: auto;
+  border: 1px solid var(--accent-border);
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  cursor: pointer;
+}
+
+.chat-explain-btn:hover {
+  border-color: var(--accent);
+}
+
+.chat-explain-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* --- top-bar toggle --- */
+
+.chat-toggle[aria-pressed='true'] {
+  background: var(--accent-soft);
+  border-color: var(--accent-border);
+  color: var(--accent-text);
+}
+
+.chat-toggle svg {
+  color: var(--accent);
+}
+
+@container (max-width: 1120px) {
+  .chat-toggle span {
+    display: none;
+  }
+}

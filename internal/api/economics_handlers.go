@@ -1239,9 +1239,26 @@ func (h *Handlers) economicsPortfolio(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	q := portfolioQuery{Scope: scope, Label: label, Month: monthStr, Period: periodStr, From: fromStr, To: toStr}
+	visible := func(org string) bool { return h.visibleTo(r, org, auth.PermEconomicsRead) }
+	writeJSON(w, http.StatusOK, h.portfolioRollup(r.Context(), q, loc, visible))
+}
+
+// portfolioQuery is one portfolio period: a month (Scope "month"), a
+// calendar year (Period) or a window of months (From..To, both YYYY-MM).
+type portfolioQuery struct {
+	Scope, Label            string
+	Month, Period, From, To string
+}
+
+// portfolioRollup builds the portfolio over the organizations visible
+// accepts. The economics route and the assistant's portfolio tool both
+// answer from it.
+func (h *Handlers) portfolioRollup(ctx context.Context, q portfolioQuery, loc *time.Location, visible func(org string) bool) EconomicsPortfolioResponse {
+	scope, monthStr, periodStr, fromStr, toStr := q.Scope, q.Month, q.Period, q.From, q.To
 	resp := EconomicsPortfolioResponse{
 		Scope: scope,
-		Label: label,
+		Label: q.Label,
 		Tz:    loc.String(),
 		Sites: make([]EconomicsPortfolioSite, 0, len(h.organizations)),
 	}
@@ -1250,7 +1267,7 @@ func (h *Handlers) economicsPortfolio(w http.ResponseWriter, r *http.Request) {
 	// covers only the organizations the caller may read economics of.
 	orgs := make([]OrganizationInfo, 0, len(h.organizations))
 	for _, org := range h.organizations {
-		if org.ID != demoOrgID && h.visibleTo(r, org.ID, auth.PermEconomicsRead) {
+		if org.ID != demoOrgID && visible(org.ID) {
 			orgs = append(orgs, org)
 		}
 	}
@@ -1281,7 +1298,6 @@ func (h *Handlers) economicsPortfolio(w http.ResponseWriter, r *http.Request) {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			ctx := r.Context()
 			capex := h.portfolioCapexUah(ctx, org.ID, lastMonth)
 			if scope == "month" {
 				t, err := h.economics.GetMonthTotals(ctx, org.ID, monthStr, loc.String())
@@ -1415,8 +1431,7 @@ func (h *Handlers) economicsPortfolio(w http.ResponseWriter, r *http.Request) {
 	for _, ym := range trendOrder {
 		resp.Trend = append(resp.Trend, *trendAcc[ym])
 	}
-
-	writeJSON(w, http.StatusOK, resp)
+	return resp
 }
 
 // maxRecomputeRange caps the recompute span. Unlike the on-read

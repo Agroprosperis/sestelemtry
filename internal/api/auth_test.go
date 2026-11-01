@@ -192,6 +192,13 @@ func TestAuthRouteMatrix(t *testing.T) {
 
 		{"", http.MethodGet, "/healthz", ok},
 		{"", http.MethodGet, "/readyz", ok},
+		{"economist", http.MethodPost, "/api/v1/chat?organization_id=ze", ok},
+		{"economist", http.MethodPost, "/api/v1/chat?organization_id=ab", denied},
+		{"engineer", http.MethodPost, "/api/v1/chat?organization_id=ze", ok},
+		{"engineer", http.MethodPost, "/api/v1/chat?organization_id=ze-edge", ok},
+		{"engineer", http.MethodPost, "/api/v1/chat", denied},
+		{"", http.MethodPost, "/api/v1/chat?organization_id=ze", anon},
+
 		{"", http.MethodPost, "/api/v1/auth/login", ok},
 		{"", http.MethodGet, "/api/v1/current?organization_id=ze", anon},
 		{"", http.MethodGet, "/api/v1/auth/me", anon},

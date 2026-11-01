@@ -43,6 +43,8 @@ export type AuthMe = {
   must_change_password: boolean
   grants: AuthGrant[]
   organizations: AuthOrganization[]
+  // The API has the AI assistant configured (POST /api/v1/chat).
+  ai_chat?: boolean
 }
 
 export type AppView = 'dashboard' | 'economics' | 'control' | 'station' | 'import' | 'alerts' | 'users'

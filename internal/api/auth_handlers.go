@@ -53,6 +53,8 @@ type AuthMeResponse struct {
 	MustChangePassword bool               `json:"must_change_password"`
 	Grants             []grantJSON        `json:"grants"`
 	Organizations      []authOrganization `json:"organizations"`
+	// AIChat: the API has an assistant configured (POST /api/v1/chat).
+	AIChat bool `json:"ai_chat"`
 }
 
 func grantsJSON(grants []auth.Grant) []grantJSON {
@@ -75,6 +77,7 @@ func (h *Handlers) meResponse(p *auth.Principal) AuthMeResponse {
 		MustChangePassword: p.MustChangePassword,
 		Grants:             grantsJSON(p.Grants),
 		Organizations:      []authOrganization{},
+		AIChat:             h.assistant != nil,
 	}
 	for _, org := range h.organizations {
 		perms := p.PermissionsOn(org.ID)

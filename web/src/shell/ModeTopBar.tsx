@@ -3,9 +3,11 @@
 // the single object picker + mode switch + edge status chips (IOT2050
 // online, active mode, manifest delivery state).
 
+import { Sparkle } from '@phosphor-icons/react'
 import { useEffect, useRef, useState } from 'react'
 import { useAccess } from '../auth/authContext'
 import { UserMenu } from '../auth/UserMenu'
+import { useChat, useChatTarget } from '../chat/chatContext'
 import { fetchEdgeFleet, type EdgeSiteStatus } from '../control/controlClient'
 import { formatOrganizationLabel } from '../dashboard/config'
 import { ThemeToggle } from '../theme/ThemeToggle'
@@ -72,6 +74,8 @@ export function ModeTopBar({
   // Only the modes the user may open; with just one there is nothing to
   // switch to, so the switch is left out.
   const modes = MODES.filter((m) => access.canView(m.view))
+  const chat = useChat()
+  useChatTarget(mode, organizationID)
 
   useEffect(() => {
     if (!menuOpen) return
@@ -268,6 +272,19 @@ export function ModeTopBar({
             </div>
           )}
         </div>
+      )}
+
+      {chat && organizationID && (
+        <button
+          type="button"
+          className="ctl-topbar-menu-btn chat-toggle"
+          aria-pressed={chat.open}
+          title="ШІ-асистент"
+          onClick={chat.toggle}
+        >
+          <Sparkle size={16} weight="fill" aria-hidden="true" />
+          <span>ШІ-асистент</span>
+        </button>
       )}
 
       <UserMenu />

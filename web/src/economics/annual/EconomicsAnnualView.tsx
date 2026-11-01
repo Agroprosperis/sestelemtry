@@ -6,6 +6,7 @@ import type {
   EconomicsAnnualResponse,
   EconomicsMonthlyTotals,
 } from '../../api'
+import { ExplainButton } from '../../chat/ExplainButton'
 import { formatOrganizationLabel } from '../../dashboard/config'
 import { useChartChrome } from '../../theme/useChartChrome'
 import {
@@ -276,6 +277,9 @@ function AnnualAiAnalysis({
           <span className="economics-ai-mark" aria-hidden="true">AI</span>
           <h3 className="economics-month-section-title">AI-аналіз року</h3>
         </div>
+        <ExplainButton
+          question={`Поясни AI-аналіз за період ${periodTitle}: що головне в цифрах, які місяці слабші і що варто зробити першим.`}
+        />
         <span className="economics-ai-badge">річний управлінський висновок</span>
       </div>
 

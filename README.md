@@ -59,6 +59,45 @@ organizations added to `config.yaml` later).
   `deploy/docker-compose.yml` does). Over plain HTTP the password travels
   unencrypted.
 
+## AI assistant (OpenAI)
+
+The top bar's **ШІ-асистент** opens a side panel where a signed-in user asks,
+in Ukrainian, about the selected object; the ✦ button on the period summary,
+battery and economics AI-analysis cards asks it about that card. The browser
+never talks to OpenAI: `POST /api/v1/chat?organization_id=` (an NDJSON
+stream) runs the turn on the API against the OpenAI Responses API, and the
+model answers from read-only tools the API runs itself — the live snapshot,
+the energy balance of a period, PV plan against the meter, the economics
+day/month/year rollups, the УЗЕ optimum plan, DAM prices, the weather
+forecast, the station passport (service roles) and the portfolio of every
+object whose economics the user reads. The tools read what the dashboard
+reads: nothing is written, no raw samples go out, and every tool but the
+portfolio is bound to the organization in the request.
+
+Set in `deploy/.env`; without both the key and the model the assistant is
+off and the button is hidden:
+
+| Variable | Meaning |
+| --- | --- |
+| `OPENAI_API_KEY` | API key; never leaves the server |
+| `OPENAI_MODEL` | model id (one with function calling) |
+| `OPENAI_REASONING_EFFORT` | optional `low` / `medium` / `high`, for reasoning models only — others reject it |
+| `OPENAI_BASE_URL` | optional compatible gateway instead of `https://api.openai.com` |
+| `AI_CHAT_DAILY_LIMIT` | turns per user per Kyiv day, default 100 |
+
+Every role may ask about its organizations; the tools it gets are the ones
+its screens would show. An economist gets no live telemetry, and a role
+without `economics.read` gets energy figures with the money left out, even
+where the route behind a tool would return it.
+
+What goes to OpenAI: the question, the earlier turns of the conversation
+(kept only in the browser tab) and the aggregated figures the tools return,
+sent with `store: false`. The API logs one row per turn in `ai_chat_usage`
+(`migrations/021_ai_chat.sql`, also created on startup) — user,
+organization, tools, tokens, status, never the text — and the daily limit
+counts those rows. A user runs one turn at a time, and a turn is cut off
+after two minutes.
+
 ## Run with Docker Compose (DB + collector + API + web)
 
 The `web` service is nginx: it serves the built dashboard over HTTPS on 443
@@ -438,7 +477,8 @@ What the host keeps outside git, so a pull never touches it:
 - `/etc/sestelemetry/tls/`: the dashboard certificate (see «Run with Docker
   Compose»);
 - `deploy/.env` (`chmod 600`): `EDGE_SITE_TOKENS`, `SMTP_PASSWORD`, and
-  optionally `AUTH_BOOTSTRAP_EMAIL` / `AUTH_BOOTSTRAP_PASSWORD`.
+  optionally `AUTH_BOOTSTRAP_EMAIL` / `AUTH_BOOTSTRAP_PASSWORD` and the
+  assistant's `OPENAI_*` (see «AI assistant»).
 
 First install:
 

@@ -1328,6 +1328,39 @@ export type ImportRunOptions = {
   onProgress?: (progress: ImportProgress) => void
 }
 
+// readNdjson hands each line of an NDJSON body (one JSON value per
+// line) to onEvent as it arrives. A throw from onEvent stops reading
+// and cancels the body.
+export async function readNdjson(res: Response, onEvent: (event: unknown) => void): Promise<void> {
+  const handleLine = (raw: string) => {
+    const line = raw.trim()
+    if (line) onEvent(JSON.parse(line))
+  }
+  if (!res.body) {
+    for (const line of (await res.text()).split('\n')) handleLine(line)
+    return
+  }
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      let nl: number
+      while ((nl = buffer.indexOf('\n')) >= 0) {
+        handleLine(buffer.slice(0, nl))
+        buffer = buffer.slice(nl + 1)
+      }
+    }
+    handleLine(buffer + decoder.decode())
+  } catch (e) {
+    reader.cancel().catch(() => {})
+    throw e
+  }
+}
+
 // consumeImportStream reads the NDJSON progress stream the long-running
 // import endpoints emit (one JSON object per line: progress | done |
 // error) and resolves with the final `result`. It tolerates an older,
@@ -1342,15 +1375,9 @@ async function consumeImportStream<T>(res: Response, onProgress?: ImportRunOptio
     return (await res.json()) as T
   }
 
-  const reader = res.body.getReader()
-  const decoder = new TextDecoder()
-  let buffer = ''
   let result: T | undefined
-
-  const handleLine = (raw: string) => {
-    const line = raw.trim()
-    if (!line) return
-    const ev = JSON.parse(line) as {
+  await readNdjson(res, (raw) => {
+    const ev = raw as {
       type?: string
       done?: number
       total?: number
@@ -1368,19 +1395,7 @@ async function consumeImportStream<T>(res: Response, onProgress?: ImportRunOptio
       // Legacy non-streaming server: the line is the result object.
       result = ev as unknown as T
     }
-  }
-
-  for (;;) {
-    const { done, value } = await reader.read()
-    if (done) break
-    buffer += decoder.decode(value, { stream: true })
-    let nl: number
-    while ((nl = buffer.indexOf('\n')) >= 0) {
-      handleLine(buffer.slice(0, nl))
-      buffer = buffer.slice(nl + 1)
-    }
-  }
-  handleLine(buffer)
+  })
 
   if (result === undefined) {
     throw new Error('import stream ended without a result')

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -20,6 +21,7 @@ import (
 	"github.com/nesh/sestelemetry/internal/economics"
 	"github.com/nesh/sestelemetry/internal/energyflow"
 	"github.com/nesh/sestelemetry/internal/fusionsolar"
+	"github.com/nesh/sestelemetry/internal/openai"
 	"github.com/nesh/sestelemetry/internal/oree"
 	"github.com/nesh/sestelemetry/internal/pvplan"
 	"github.com/nesh/sestelemetry/internal/storage"
@@ -116,6 +118,12 @@ func main() {
 	// 020_counter_stitch.sql.
 	if err := storage.InitCounterSchema(ctx, pool); err != nil {
 		log.Error("db_init_counters", "err", err)
+		os.Exit(1)
+	}
+	// Usage log of the AI assistant (daily limit + audit). Idempotent;
+	// mirrored by 021_ai_chat.sql.
+	if err := storage.InitAIChatSchema(ctx, pool); err != nil {
+		log.Error("db_init_ai_chat", "err", err)
 		os.Exit(1)
 	}
 
@@ -384,6 +392,38 @@ func main() {
 	}
 	svc.SetEconomicsService(econSvc)
 	log.Info("api_economics_enabled")
+
+	// AI assistant behind POST /api/v1/chat: on only when both
+	// OPENAI_API_KEY and OPENAI_MODEL are set. The key never leaves the
+	// server; the dashboard learns from /auth/me whether to show it.
+	openaiKey := strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
+	openaiModel := strings.TrimSpace(os.Getenv("OPENAI_MODEL"))
+	switch {
+	case openaiKey != "" && openaiModel != "":
+		dailyLimit := api.DefaultChatDailyLimit
+		if raw := strings.TrimSpace(os.Getenv("AI_CHAT_DAILY_LIMIT")); raw != "" {
+			if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+				dailyLimit = n
+			} else {
+				log.Warn("api_ai_chat_daily_limit_invalid", "value", raw, "default", dailyLimit)
+			}
+		}
+		effort := strings.TrimSpace(os.Getenv("OPENAI_REASONING_EFFORT"))
+		svc.SetAssistant(api.AssistantOptions{
+			Model: openai.NewClient(openai.Config{
+				APIKey:          openaiKey,
+				Model:           openaiModel,
+				BaseURL:         os.Getenv("OPENAI_BASE_URL"),
+				ReasoningEffort: effort,
+			}),
+			ModelName:  openaiModel,
+			Usage:      api.NewChatUsageStore(pool),
+			DailyLimit: dailyLimit,
+		})
+		log.Info("api_ai_chat_enabled", "model", openaiModel, "reasoning_effort", effort, "daily_limit", dailyLimit)
+	case openaiKey != "" || openaiModel != "":
+		log.Warn("api_ai_chat_disabled", "hint", "set OPENAI_API_KEY and OPENAI_MODEL together")
+	}
 
 	server := &http.Server{
 		Addr:              *listenAddr,

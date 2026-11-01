@@ -6,6 +6,7 @@ import {
   BatteryMedium,
 } from '@phosphor-icons/react'
 import type { ReactElement } from 'react'
+import { ExplainButton } from '../../chat/ExplainButton'
 import type { CurrentResponse } from '../../types'
 import { useCssVar } from '../../theme/useChartChrome'
 import { formatPeriodLabel } from '../format'
@@ -308,6 +309,9 @@ export function BatteryDayNarrative({
         {showFirstLoadSpinner && (
           <LoadingSpinner label="Завантаження стану батареї" />
         )}
+        <ExplainButton
+          question={`Поясни картку «${TITLES[preset]} · ${periodLabel}»: як працювала УЗЕ — заряд, розряд, SOC — і що вона могла зробити краще.`}
+        />
         <button
           type="button"
           className={`metrics-group-refresh${refreshing ? ' is-spinning' : ''}`}

@@ -165,6 +165,9 @@ func (h *Handlers) routes() []route {
 		{"/api/v1/economics/data-range", h.economicsDataRange, need(econRead)},
 		// The economics day report shows the optimum too.
 		{"/api/v1/uze-plan", h.uzePlan, need(onOrg(auth.PermAnalyticsDay, auth.PermEconomicsRead))},
+		// Any role on the organization may ask the assistant; the tools
+		// it gets follow the screens that role opens.
+		{"/api/v1/chat", h.aiChat, need(onOrg(auth.PermAnalyticsDay, auth.PermEconomicsRead, auth.PermControl, auth.PermService))},
 		{"/api/v1/edge/batch", h.edgeBatch, edgeRoute},
 		{"/api/v1/edge/heartbeat", h.edgeHeartbeat, edgeRoute},
 		{"/api/v1/edge/manifest", h.edgeManifest, edgeRoute},
@@ -273,10 +276,17 @@ func (h *Handlers) authorize(p *auth.Principal, rule accessRule, r *http.Request
 	if !h.canOnOrg(p, org, rule.anyOf...) {
 		return "forbidden", false
 	}
-	if rule.capWindow && !h.canOnOrg(p, org, auth.PermAnalyticsFull) && telemetryWindow(r) > maxDayWindow {
+	if rule.capWindow && !h.windowAllowed(p, org, telemetryWindow(r)) {
 		return fmt.Sprintf("forbidden: this role reads at most %s of telemetry per request", maxDayWindow), false
 	}
 	return "", true
+}
+
+// windowAllowed reports whether p may read a telemetry window this long
+// on org: past maxDayWindow it takes analytics.full. The assistant's
+// energy tool applies the same rule.
+func (h *Handlers) windowAllowed(p *auth.Principal, org string, window time.Duration) bool {
+	return window <= maxDayWindow || h.canOnOrg(p, org, auth.PermAnalyticsFull)
 }
 
 // canOnOrg reports whether p holds any of perms on org. Edge shadow

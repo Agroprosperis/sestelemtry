@@ -1125,6 +1125,98 @@ paths:
               schema:
                 type: string
                 example: internal server error
+  /api/v1/chat:
+    post:
+      summary: Ask the AI assistant about an organization
+      operationId: postChat
+      description: |
+        Runs one assistant turn on the OpenAI Responses API. The model
+        answers from read-only tools bound to organization_id and offered
+        by the caller's permissions on it (no money without
+        economics.read). The body is the conversation as the browser keeps
+        it; nothing is stored but a usage row (ai_chat_usage). The answer
+        streams as NDJSON — one event per line: "tool" (a lookup started:
+        name, label), "delta" (answer text), "sources" (labels of the data
+        used), then "done" (usage) or "error" (a message for the user).
+        503 when OPENAI_API_KEY / OPENAI_MODEL are not set.
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/CSRFHeader"
+        - name: organization_id
+          in: query
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [messages]
+              properties:
+                messages:
+                  type: array
+                  description: The conversation, ending with the question. Only the last 12 are used.
+                  items:
+                    type: object
+                    required: [role, text]
+                    properties:
+                      role:
+                        type: string
+                        enum: [user, assistant]
+                      text:
+                        type: string
+                        description: At most 4000 characters for the question.
+                context:
+                  type: object
+                  description: The dashboard query string (a hint for the prompt only).
+                  properties:
+                    view: {type: string, example: economics}
+                    tab: {type: string}
+                    preset: {type: string, example: month}
+                    range: {type: string, example: month}
+                    anchor: {type: string, example: "2026-05-01"}
+                    from: {type: string, example: "2026-01"}
+                    to: {type: string, example: "2026-12"}
+                    operation_start: {type: string, example: "2024-08-01"}
+      responses:
+        "200":
+          description: NDJSON event stream
+          content:
+            application/x-ndjson:
+              schema:
+                type: object
+                properties:
+                  type:
+                    type: string
+                    enum: [tool, delta, sources, done, error]
+                  name: {type: string}
+                  label: {type: string}
+                  text: {type: string}
+                  sources:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        label: {type: string}
+                  usage:
+                    type: object
+                    properties:
+                      input_tokens: {type: integer}
+                      output_tokens: {type: integer}
+                  error: {type: string}
+        "400":
+          description: Missing organization_id or a malformed conversation
+        "403":
+          description: No grant on the organization
+        "409":
+          description: The user's previous turn is still running
+        "429":
+          description: The user's daily limit (AI_CHAT_DAILY_LIMIT) is spent
+        "503":
+          description: The assistant is not configured
 components:
   securitySchemes:
     sessionCookie:
@@ -1168,6 +1260,9 @@ components:
         must_change_password:
           type: boolean
           description: The account may do nothing but change its password.
+        ai_chat:
+          type: boolean
+          description: The API has the AI assistant configured (POST /api/v1/chat).
         grants:
           type: array
           items:

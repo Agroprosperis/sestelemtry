@@ -11,6 +11,7 @@ import type {
 import { UzeCyclesAccordion } from './UzeCycleChart'
 import { EconomicsTopSection, type EconomicsPvPlan } from '../components/EconomicsTopSection'
 import { EconomicsOverviewRow } from '../components/EconomicsOverviewRow'
+import { ExplainButton } from '../../chat/ExplainButton'
 import { formatOrganizationLabel } from '../../dashboard/config'
 import {
   formatCycles,
@@ -353,6 +354,9 @@ function MonthlyAiAnalysis({
           <span className="economics-ai-mark" aria-hidden="true">AI</span>
           <h3 className="economics-month-section-title">AI-аналіз місяця</h3>
         </div>
+        <ExplainButton
+          question={`Поясни AI-аналіз за ${formatMonthTitle(month)}: що головне в цифрах, звідки резерви і що варто зробити першим.`}
+        />
         <span className="economics-ai-badge">управлінський висновок</span>
       </div>
 

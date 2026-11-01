@@ -6,6 +6,7 @@ import { ForcedPasswordPage } from './auth/ForcedPasswordPage'
 import { LoginPage } from './auth/LoginPage'
 import { firstAllowedView, type AppView } from './auth/permissions'
 import { useSession } from './auth/useSession'
+import { ChatProvider } from './chat/ChatProvider'
 import { ControlPage } from './control/ControlPage'
 import { Dashboard } from './dashboard/Dashboard'
 import { EconomicsPage } from './economics/EconomicsPage'
@@ -112,7 +113,11 @@ function App() {
     )
   }
 
-  return <AuthContext.Provider value={auth}>{renderView(shown)}</AuthContext.Provider>
+  return (
+    <AuthContext.Provider value={auth}>
+      <ChatProvider>{renderView(shown)}</ChatProvider>
+    </AuthContext.Provider>
+  )
 }
 
 function renderView(view: View) {

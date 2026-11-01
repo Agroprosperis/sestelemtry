@@ -1,3 +1,4 @@
+import { ExplainButton } from '../../chat/ExplainButton'
 import type { RegisterMeta } from '../../types'
 import { useCssVar } from '../../theme/useChartChrome'
 import { formatPeriodLabel } from '../format'
@@ -331,6 +332,9 @@ export function DailySummaryNarrative({
         {showFirstLoadSpinner && (
           <LoadingSpinner label="Завантаження підсумку" />
         )}
+        <ExplainButton
+          question={`Поясни картку «${TITLES[preset]} · ${periodLabel}»: скільки виробила СЕС, звідки елеватор брав енергію, куди пішов виробіток і як це співвідноситься з прогнозом.`}
+        />
       </header>
       {flowsLoaded && flowsGap && (
         <p className="summary-coverage-note">

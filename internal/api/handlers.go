@@ -84,6 +84,10 @@ type Handlers struct {
 	// auth enforces sessions and the route table's permissions. nil
 	// serves every route openly (handler tests).
 	auth *Auth
+	// assistant backs POST /api/v1/chat. nil when no OpenAI key and
+	// model were configured — the route answers 503 and /auth/me tells
+	// the dashboard to hide the assistant.
+	assistant *assistant
 }
 
 // SetPvPlanClient installs the forecast-flow client that fills the

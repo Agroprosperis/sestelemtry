@@ -79,19 +79,24 @@ func (h *Handlers) pvPlanSummary(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "to must be after from", http.StatusBadRequest)
 		return
 	}
+	writeJSON(w, http.StatusOK, h.pvPlanTotal(r.Context(), orgID, from, to, loc))
+}
 
+// pvPlanTotal sums the planned generation of the civil days [from, to)
+// touches, clamped to today, filling the pv_plan_daily cache from the
+// flow on the way. The summary route and the assistant's pv_plan tool
+// both answer from it.
+func (h *Handlers) pvPlanTotal(ctx context.Context, orgID string, from, to time.Time, loc *time.Location) PvPlanSummaryResponse {
 	resp := PvPlanSummaryResponse{OrganizationID: orgID}
 	code, supported := pvplan.ElevatorCodeFor(orgID)
 	if !supported {
-		writeJSON(w, http.StatusOK, resp)
-		return
+		return resp
 	}
 	resp.Supported = true
 
 	fromDay, toDay, _ := civilDaySpan(from, to, loc)
 	if fromDay.IsZero() {
-		writeJSON(w, http.StatusOK, resp)
-		return
+		return resp
 	}
 	today := startOfCivilDay(time.Now(), loc)
 	if toDay.After(today) {
@@ -100,8 +105,7 @@ func (h *Handlers) pvPlanSummary(w http.ResponseWriter, r *http.Request) {
 	if toDay.Before(fromDay) {
 		// The whole period is still in the future: no plan to report,
 		// and nothing about that is an error.
-		writeJSON(w, http.StatusOK, resp)
-		return
+		return resp
 	}
 	resp.FromDay = fromDay.Format("2006-01-02")
 	resp.ToDay = toDay.Format("2006-01-02")
@@ -111,7 +115,7 @@ func (h *Handlers) pvPlanSummary(w http.ResponseWriter, r *http.Request) {
 	}
 
 	start := time.Now()
-	cached, err := h.store.PvPlanDays(r.Context(), orgID, fromDay, toDay)
+	cached, err := h.store.PvPlanDays(ctx, orgID, fromDay, toDay)
 	if err != nil {
 		h.log.Warn("api_pv_plan_summary_cache",
 			"organization_id", orgID, "err", err,
@@ -120,19 +124,18 @@ func (h *Handlers) pvPlanSummary(w http.ResponseWriter, r *http.Request) {
 		// A cache read failure says nothing about the period, so report
 		// zero coverage and let the client show a placeholder instead of
 		// a plan that happens to be missing most of its days.
-		writeJSON(w, http.StatusOK, resp)
-		return
+		return resp
 	}
 
 	plans, stale := pvPlanIndex(cached, today)
 	missing := pvPlanMissingDays(fromDay, toDay, plans, stale)
 	if len(missing) > 0 && h.pvPlan != nil {
-		fetched := h.fillPvPlanDays(r.Context(), orgID, code, missing)
+		fetched := h.fillPvPlanDays(ctx, orgID, code, missing)
 		if len(fetched) > 0 {
 			for _, d := range fetched {
 				plans[pvPlanKey(d.Day)] = d
 			}
-			if err := h.store.SavePvPlanDays(r.Context(), orgID, fetched); err != nil {
+			if err := h.store.SavePvPlanDays(ctx, orgID, fetched); err != nil {
 				// The numbers are already good for this response; only
 				// the next request pays for the lost cache write.
 				h.log.Warn("api_pv_plan_summary_save",
@@ -156,7 +159,7 @@ func (h *Handlers) pvPlanSummary(w http.ResponseWriter, r *http.Request) {
 		"fetched_days", len(missing),
 		"duration_ms", time.Since(start).Milliseconds(),
 	)
-	writeJSON(w, http.StatusOK, resp)
+	return resp
 }
 
 func pvPlanKey(day time.Time) string {
