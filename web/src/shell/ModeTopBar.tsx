@@ -1,18 +1,19 @@
 // ModeTopBar is the app-wide strip above the analytics dashboard, the
 // «Керування» view and the service pages (station passport, import):
-// the single object picker + mode switch + edge status chips (IOT2050
-// online, active mode, manifest delivery state).
+// the single object picker + mode switch. Edge status chips live in the
+// row under the bar («Система», «Керування»); service pages keep them here.
 
 import { Sparkle } from '@phosphor-icons/react'
 import { useEffect, useRef, useState } from 'react'
 import { useAccess } from '../auth/authContext'
 import { UserMenu } from '../auth/UserMenu'
 import { useChat, useChatTarget } from '../chat/chatContext'
-import { fetchEdgeFleet, type EdgeSiteStatus } from '../control/controlClient'
+import type { EdgeSiteStatus } from '../control/controlClient'
 import { formatOrganizationLabel } from '../dashboard/config'
 import { ThemeToggle } from '../theme/ThemeToggle'
 import { EdgeStatusChips } from './EdgeStatusChips'
 import { navigateView } from './navigation'
+import { useEdgeSiteStatus } from './useEdgeSiteStatus'
 import './shell.css'
 
 // 'none' is for the service pages (station, import): no mode is
@@ -43,8 +44,6 @@ type Props = {
   status?: EdgeSiteStatus | null
 }
 
-const FLEET_POLL_MS = 60_000
-
 const MODES: { mode: Exclude<ConsoleMode, 'none'>; view: 'dashboard' | 'economics' | 'control'; label: string }[] = [
   { mode: 'analytics', view: 'dashboard', label: 'Система' },
   { mode: 'economics', view: 'economics', label: 'Економіка' },
@@ -60,7 +59,6 @@ export function ModeTopBar({
   menu,
   status,
 }: Props) {
-  const [fleetStatus, setFleetStatus] = useState<EdgeSiteStatus | null>(null)
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement | null>(null)
   const access = useAccess()
@@ -86,33 +84,11 @@ export function ModeTopBar({
     }
   }, [menuOpen])
 
-  // Economics is about money, not live hardware — no chips there, and
-  // no point polling the fleet for them.
-  const showChips = mode !== 'economics'
-
-  // Without a shared poll the bar checks the fleet itself, so any page
-  // can show whether the selected object has an edge device online.
-  useEffect(() => {
-    if (status !== undefined || !showChips) return
-    let cancelled = false
-    const load = () =>
-      fetchEdgeFleet()
-        .then((f) => {
-          if (cancelled) return
-          setFleetStatus((f.sites ?? []).find((s) => s.site_id === organizationID) ?? null)
-        })
-        .catch(() => !cancelled && setFleetStatus(null))
-    void load()
-    const id = window.setInterval(load, FLEET_POLL_MS)
-    return () => {
-      cancelled = true
-      window.clearInterval(id)
-    }
-  }, [status, organizationID, showChips])
-
-  const st = status !== undefined ? status : fleetStatus
-  // On «Керування» the chips live in the tab row, so the bar stays one line.
-  const chipsInBar = showChips && mode !== 'control'
+  // Economics is about money, not live hardware. «Керування» and
+  // «Система» render the chips in their own row under the bar.
+  const chipsInBar = mode !== 'economics' && mode !== 'control' && mode !== 'analytics'
+  const ownStatus = useEdgeSiteStatus(organizationID, status === undefined && chipsInBar)
+  const st = status !== undefined ? status : ownStatus
 
   return (
     // The wrapper is a CSS container: compaction steps in shell.css key

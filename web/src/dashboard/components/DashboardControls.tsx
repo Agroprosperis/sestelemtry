@@ -1,4 +1,6 @@
 import { Bug } from '@phosphor-icons/react'
+import type { EdgeSiteStatus } from '../../control/controlClient'
+import { EdgeStatusChips } from '../../shell/EdgeStatusChips'
 import type { RangePreset } from '../range'
 import { PeriodPicker } from './PeriodPicker'
 import { RangeSwitch } from './RangeSwitch'
@@ -13,6 +15,7 @@ type Props = {
   debug: boolean
   // Without a handler the debug toggle is not offered.
   onDebugToggle?: () => void
+  edgeStatus?: EdgeSiteStatus | null
 }
 
 // DashboardControls is the full-width strip under the mode top bar:
@@ -27,6 +30,7 @@ export function DashboardControls({
   onAnchorChange,
   debug,
   onDebugToggle,
+  edgeStatus = null,
 }: Props) {
   return (
     <div className="dashboard-controls">
@@ -55,6 +59,7 @@ export function DashboardControls({
         <span>Debug</span>
       </button>
       )}
+      <EdgeStatusChips status={edgeStatus} mode="analytics" />
     </div>
   )
 }

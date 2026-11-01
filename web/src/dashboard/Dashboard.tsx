@@ -4,6 +4,7 @@ import { useEconomicsAnnualData } from '../economics/useEconomicsAnnualData'
 import { useEconomicsMonthlyData } from '../economics/useEconomicsMonthlyData'
 import './dashboard.css'
 import { ModeTopBar, type TopBarMenuItem } from '../shell/ModeTopBar'
+import { useEdgeSiteStatus } from '../shell/useEdgeSiteStatus'
 import { navigateView } from '../shell/navigation'
 import { DashboardControls } from './components/DashboardControls'
 import { EnergyChart } from './components/EnergyChart'
@@ -39,6 +40,7 @@ export function Dashboard() {
   const { debug: debugWanted, toggleDebug } = useDebugMode()
   const debug = canService && debugWanted
   const registers = useRegistersWhenDebug(debug)
+  const edgeStatus = useEdgeSiteStatus(organizationID, true)
 
   const {
     current,
@@ -135,6 +137,7 @@ export function Dashboard() {
         onAnchorChange={setAnchor}
         debug={debug}
         onDebugToggle={canService ? toggleDebug : undefined}
+        edgeStatus={edgeStatus}
       />
 
       {error && (
