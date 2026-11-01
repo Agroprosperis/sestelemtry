@@ -74,8 +74,15 @@
   margin-bottom: 8px;
 }
 
+.economics-modal-wide {
+  max-width: 960px;
+}
+
 .economics-modal-head h2 {
   margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
   font-size: 18px;
   font-weight: 700;
   color: var(--text);

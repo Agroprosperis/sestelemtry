@@ -5,6 +5,7 @@ import { useOrganizationParam } from '../dashboard/hooks/useOrganizationParam'
 import { ModeTopBar, type TopBarMenuItem } from '../shell/ModeTopBar'
 import { dailyTotals } from './compute'
 import { EconomicsDamPricesModal } from './components/EconomicsDamPricesModal'
+import { EconomicsTariffsModal } from './components/EconomicsTariffsModal'
 import { EconomicsHeader, type EconomicsRange } from './components/EconomicsHeader'
 import { EconomicsDayTop } from './components/EconomicsDayTop'
 import { EconomicsRecomputeModal } from './components/EconomicsRecomputeModal'
@@ -208,6 +209,8 @@ export function EconomicsPage() {
   const [damRefreshError, setDamRefreshError] = useState<string | null>(null)
   const [recomputeOpen, setRecomputeOpen] = useState(false)
   const [damImportOpen, setDamImportOpen] = useState(false)
+  const [tariffsOpen, setTariffsOpen] = useState(false)
+  const closeTariffs = useCallback(() => setTariffsOpen(false), [])
 
   const onRefreshDam = useCallback(async () => {
     setDamRefreshState('loading')
@@ -362,13 +365,16 @@ export function EconomicsPage() {
 
   // The economics-specific admin actions live in the shell's «Сервіс»
   // menu (the DAM buttons left the header toolbar).
-  const serviceMenu: TopBarMenuItem[] = canEdit
-    ? [
-        { id: 'dam-refresh', label: 'Оновити ціни РДН', onSelect: () => void onRefreshDam() },
-        { id: 'dam-import', label: 'Імпорт цін РДН', onSelect: () => setDamImportOpen(true) },
-        { id: 'recompute', label: 'Перерахунок економіки', onSelect: () => setRecomputeOpen(true) },
-      ]
-    : []
+  const serviceMenu: TopBarMenuItem[] = [
+    { id: 'tariffs', label: 'Параметри тарифів', onSelect: () => setTariffsOpen(true) },
+    ...(canEdit
+      ? [
+          { id: 'dam-refresh', label: 'Оновити ціни РДН', onSelect: () => void onRefreshDam() },
+          { id: 'dam-import', label: 'Імпорт цін РДН', onSelect: () => setDamImportOpen(true) },
+          { id: 'recompute', label: 'Перерахунок економіки', onSelect: () => setRecomputeOpen(true) },
+        ]
+      : []),
+  ]
 
   return (
     <main className="economics-page">
@@ -395,7 +401,6 @@ export function EconomicsPage() {
       )}
 
       <EconomicsHeader
-        organizationID={organizationID}
         range={range}
         onRangeChange={setRange}
         portfolioScope={portfolioScope}
@@ -407,12 +412,20 @@ export function EconomicsPage() {
         }}
         date={date}
         onDateChange={setDate}
-        tariffs={tariffs}
-        onTariffsChange={setTariffs}
-        tariffsStatus={tariffsStatus}
-        tariffsError={tariffsError}
-        readOnly={!canEdit}
       />
+
+      {tariffsOpen && (
+        <EconomicsTariffsModal
+          organizationID={organizationID}
+          date={date}
+          tariffs={tariffs}
+          onTariffsChange={setTariffs}
+          tariffsStatus={tariffsStatus}
+          tariffsError={tariffsError}
+          readOnly={!canEdit}
+          onClose={closeTariffs}
+        />
+      )}
 
       {recomputeOpen && (
         <EconomicsRecomputeModal
