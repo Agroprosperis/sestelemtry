@@ -1,6 +1,19 @@
 /* App-wide shell: the top bar (Об'єкт + Режим + status chips) shared by
    the analytics dashboard, the «Керування» mode and the service pages. */
 
+/* The strip under the mode bar — period controls, economics range,
+   control tabs — keeps one height so switching modes doesn't jump
+   the page. The control-tab pill is the reference. */
+:root {
+  --mode-subrow-height: 44px;
+}
+
+.dashboard-controls,
+.economics-header-row,
+.ctl-tabs-row {
+  min-height: var(--mode-subrow-height);
+}
+
 .ctl-topbar-wrap {
   container-type: inline-size;
   min-width: 0;

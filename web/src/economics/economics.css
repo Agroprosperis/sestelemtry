@@ -1794,7 +1794,7 @@
 .economics-range-switch button {
   border: 0;
   background: transparent;
-  padding: 6px 14px;
+  padding: 8px 14px;
   font-size: 13px;
   font-weight: 600;
   color: var(--text-secondary);
