@@ -25,7 +25,8 @@
   display: inline-flex;
   align-items: center;
   gap: 10px;
-  min-width: 0;
+  /* A shrinking brand slid the logo under the object label. */
+  flex-shrink: 0;
 }
 
 .ctl-topbar-logo {
@@ -57,7 +58,9 @@
   display: inline-flex;
   align-items: center;
   flex: 0 1 260px;
-  min-width: 0;
+  /* The picker gives way to a crowded bar, but not to nothing: at zero
+     it vanished and «Об'єкт» ran into «Режим». */
+  min-width: 150px;
 }
 
 .ctl-topbar-object select {

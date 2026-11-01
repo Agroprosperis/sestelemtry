@@ -182,11 +182,12 @@ function AnswerBubble({ entry }: { entry: ChatEntry }) {
       {entry.stopped && !entry.pending && <div className="chat-status">Відповідь зупинено.</div>}
       {entry.error && <div className="chat-error">{entry.error}</div>}
       {entry.sources && entry.sources.length > 0 && (
-        <ul className="chat-sources" aria-label="Джерела">
+        <p className="chat-sources">
+          <span className="chat-sources-label">Джерела:</span>
           {entry.sources.map((s) => (
-            <li key={s.label}>{s.label}</li>
+            <span key={s.label}>{s.label}</span>
           ))}
-        </ul>
+        </p>
       )}
     </div>
   )
