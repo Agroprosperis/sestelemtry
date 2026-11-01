@@ -332,6 +332,12 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
+html {
+  /* Keep the layout width steady when a page grows past the viewport:
+     the scrollbar otherwise appears and the page narrows by its width. */
+  scrollbar-gutter: stable;
+}
+
 body {
   margin: 0;
   background: var(--bg-page);

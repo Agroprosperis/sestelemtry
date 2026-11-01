@@ -10,7 +10,10 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  flex-wrap: wrap;
+  /* One line. Wrapping is what made the bar jump to a second row — and
+     grow in height — whenever the status chips arrived or the page
+     narrowed by a scrollbar. The object picker shrinks instead. */
+  flex-wrap: nowrap;
   padding: 10px 12px;
   background: var(--bg-elevated);
   border: 1px solid var(--border);
@@ -53,6 +56,7 @@
 .ctl-topbar-object {
   display: inline-flex;
   align-items: center;
+  flex: 0 1 260px;
   min-width: 0;
 }
 
@@ -64,7 +68,8 @@
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--input-bg);
-  min-width: 210px;
+  width: 100%;
+  min-width: 0;
   /* A <select> auto-sizes to its widest option; cap it so one long
      org name can't blow the bar onto a second line. */
   max-width: 260px;
@@ -115,8 +120,11 @@
     display: none;
   }
 
+  .ctl-topbar-object {
+    flex-basis: 230px;
+  }
+
   .ctl-topbar-object select {
-    min-width: 175px;
     max-width: 230px;
     font-size: 13px;
   }
@@ -172,14 +180,14 @@
   gap: 8px;
   margin-left: auto;
   flex-wrap: nowrap;
-  min-width: 0;
+  flex-shrink: 0;
 }
 
 .ctl-topbar-chips {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   justify-content: flex-end;
 }
 
