@@ -122,7 +122,6 @@ export function ModeTopBar({
 
       {modes.length > 1 && (
       <div className="ctl-topbar-mode">
-        <span className="ctl-topbar-label">Режим</span>
         <div className="ctl-mode-switch" role="tablist" aria-label="Режим інтерфейсу">
           {modes.map((m) => (
             <button
