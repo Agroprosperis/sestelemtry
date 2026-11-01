@@ -34,6 +34,9 @@ type AISettings struct {
 	ReasoningEffort string `json:"reasoning_effort"`
 	// DailyLimit is how many turns one user gets per Kyiv day.
 	DailyLimit int `json:"daily_limit"`
+	// FollowUps offers the next questions under every answer, at the
+	// cost of one more short model request per turn.
+	FollowUps bool `json:"follow_ups"`
 }
 
 const (
@@ -86,7 +89,7 @@ type AISettingsResponse struct {
 	AISettings
 	APIKeyConfigured bool `json:"api_key_configured"`
 	// Saved is false until the first save; the payload then holds the
-	// defaults.
+	// defaults (next questions on).
 	Saved bool `json:"saved"`
 }
 
@@ -149,6 +152,9 @@ func (h *Handlers) getAISettings(w http.ResponseWriter, r *http.Request) {
 		h.log.Error("api_ai_settings_get", "err", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
+	}
+	if !saved {
+		settings.FollowUps = true
 	}
 	settings.Normalize()
 	writeJSON(w, http.StatusOK, AISettingsResponse{AISettings: settings, APIKeyConfigured: keySet, Saved: saved})

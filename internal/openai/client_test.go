@@ -120,6 +120,24 @@ func TestRespondAsksForEncryptedReasoningWhenEffortSet(t *testing.T) {
 	}
 }
 
+func TestRespondAsksForStructuredOutput(t *testing.T) {
+	var payload map[string]any
+	srv := streamServer(t, sse(completedEvent), func(_ *http.Request, p map[string]any) { payload = p })
+	c := NewClient(Config{APIKey: "k", Model: "m", BaseURL: srv.URL, HTTPClient: srv.Client()})
+	schema := json.RawMessage(`{"type":"object","properties":{"questions":{"type":"array","items":{"type":"string"}}},"required":["questions"],"additionalProperties":false}`)
+	if _, err := c.Respond(context.Background(), Request{Format: &TextFormat{Name: "follow_ups", Schema: schema}}, nil); err != nil {
+		t.Fatalf("Respond: %v", err)
+	}
+	text, _ := payload["text"].(map[string]any)
+	format, _ := text["format"].(map[string]any)
+	if format["type"] != "json_schema" || format["name"] != "follow_ups" || format["strict"] != true || format["schema"] == nil {
+		t.Errorf("text = %v", payload["text"])
+	}
+	if _, ok := payload["tool_choice"]; ok {
+		t.Error("tool_choice sent without tools")
+	}
+}
+
 func TestRespondStreamsTextAndUsage(t *testing.T) {
 	body := sse(
 		`{"type":"response.created","response":{}}`,

@@ -99,6 +99,36 @@ describe('AI assistant panel', () => {
     expect(body.context).toMatchObject({ view: 'economics', range: 'month', anchor: '2026-05-01', operation_start: '2024-08-01' })
   })
 
+  it('offers the next questions under the latest answer and asks one on click', async () => {
+    const fetchSpy = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        ndjson(
+          { type: 'delta', text: 'СЕС виробила 1,2 МВт·год.' },
+          { type: 'status', label: 'Добираю наступні питання…' },
+          { type: 'suggestions', suggestions: ['Як було вчора?', 'Куди пішов експорт?'] },
+          { type: 'done' },
+        ),
+      )
+      .mockResolvedValueOnce(ndjson({ type: 'delta', text: 'Учора — 1,0 МВт·год.' }, { type: 'done' }))
+    vi.stubGlobal('fetch', fetchSpy)
+    render(app(me, 'ze', 'analytics'))
+    fireEvent.click(screen.getByRole('button', { name: 'ШІ-асистент' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Як зараз працює станція?' }))
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Як було вчора?' }))
+
+    expect(await screen.findByText('Учора — 1,0 МВт·год.')).toBeInTheDocument()
+    const body = JSON.parse(String(fetchSpy.mock.calls[1][1]?.body))
+    expect(body.messages).toEqual([
+      { role: 'user', text: 'Як зараз працює станція?' },
+      { role: 'assistant', text: 'СЕС виробила 1,2 МВт·год.' },
+      { role: 'user', text: 'Як було вчора?' },
+    ])
+    // The answered turn's buttons are gone; the new answer has none.
+    expect(screen.queryByRole('button', { name: 'Куди пішов експорт?' })).not.toBeInTheDocument()
+  })
+
   it('shows the API refusal and keeps one conversation per object', async () => {
     vi.stubGlobal(
       'fetch',

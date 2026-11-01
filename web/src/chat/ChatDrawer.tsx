@@ -105,7 +105,15 @@ export function ChatDrawer({ target, conversation, onClose }: Props) {
             ))}
           </div>
         ) : (
-          entries.map((entry) => <ChatBubble key={entry.id} entry={entry} />)
+          entries.map((entry, i) => (
+            <ChatBubble
+              key={entry.id}
+              entry={entry}
+              // Only the latest answer offers its next questions, and
+              // not while another one is on its way.
+              onAsk={i === entries.length - 1 && !busy ? submit : undefined}
+            />
+          ))
         )}
       </div>
 
@@ -141,10 +149,27 @@ export function ChatDrawer({ target, conversation, onClose }: Props) {
   )
 }
 
-function ChatBubble({ entry }: { entry: ChatEntry }) {
+function ChatBubble({ entry, onAsk }: { entry: ChatEntry; onAsk?: (question: string) => void }) {
   if (entry.role === 'user') {
     return <div className="chat-msg user">{entry.text}</div>
   }
+  return (
+    <>
+      <AnswerBubble entry={entry} />
+      {onAsk && entry.suggestions && entry.suggestions.length > 0 && (
+        <div className="chat-suggestions" aria-label="Наступні питання">
+          {entry.suggestions.map((q) => (
+            <button key={q} type="button" className="chat-suggestion" onClick={() => onAsk(q)}>
+              {q}
+            </button>
+          ))}
+        </div>
+      )}
+    </>
+  )
+}
+
+function AnswerBubble({ entry }: { entry: ChatEntry }) {
   return (
     <div className="chat-msg assistant" aria-busy={entry.pending === true}>
       {entry.text && <AnswerText text={entry.text} />}

@@ -505,6 +505,48 @@ func TestChatRefusesBeforeAskingTheModel(t *testing.T) {
 	}
 }
 
+func TestChatSuggestsNextQuestions(t *testing.T) {
+	store := &mockStore{}
+	h, accounts := authTestHandlers(t, store)
+	cookie := sessionCookie(t, accounts, "ceo@example.com", auth.Grant{Role: auth.RoleCEO, OrganizationID: "ze"})
+	answer := openai.Result{Text: "СЕС виробила 1,2 МВт·год.", Usage: openai.Usage{InputTokens: 100, OutputTokens: 10}}
+	ask := func(followUps openai.Result) (*scriptedModel, *memChatUsage, []aichat.Event) {
+		t.Helper()
+		model := &scriptedModel{turns: []openai.Result{answer, followUps}}
+		usage := &memChatUsage{}
+		enableAssistant(h, store, model, usage, 0)
+		store.aiSettings.FollowUps = true
+		rec := serve(h.Router(), http.MethodPost, "/api/v1/chat?organization_id=ze", cookie, chatBody("Скільки виробила СЕС?"))
+		return model, usage, readEvents(t, rec)
+	}
+
+	model, usage, events := ask(openai.Result{
+		Text:  `{"questions":["Як було вчора?","Куди пішов експорт?"]}`,
+		Usage: openai.Usage{InputTokens: 40, OutputTokens: 8},
+	})
+	if got := eventTypes(events); got != "delta,status,suggestions,done" {
+		t.Fatalf("events = %s", got)
+	}
+	if !slices.Equal(events[2].Suggestions, []string{"Як було вчора?", "Куди пішов експорт?"}) {
+		t.Errorf("suggestions = %q", events[2].Suggestions)
+	}
+	if u := events[3].Usage; u == nil || u.InputTokens != 140 || u.OutputTokens != 18 {
+		t.Errorf("done usage = %+v, want the answer and the follow-ups summed", u)
+	}
+	if usage.rows[0].InputTokens != 140 {
+		t.Errorf("usage row = %+v", usage.rows[0])
+	}
+	if len(model.reqs) != 2 || model.reqs[1].Format == nil || len(model.reqs[1].Tools) != 0 {
+		t.Errorf("follow-up request = %+v", model.reqs[len(model.reqs)-1])
+	}
+
+	// An unreadable pick costs the buttons, not the answer.
+	_, usage, events = ask(openai.Result{Text: "Ось питання: …"})
+	if got := eventTypes(events); got != "delta,status,done" || usage.rows[0].Status != "ok" {
+		t.Errorf("unreadable follow-ups: events %s, status %q", got, usage.rows[0].Status)
+	}
+}
+
 func TestChatModelFailureIsAnErrorEvent(t *testing.T) {
 	store := &mockStore{}
 	h, accounts := authTestHandlers(t, store)

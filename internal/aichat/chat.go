@@ -68,21 +68,27 @@ type Request struct {
 
 // Event is one line of a turn's progress stream.
 type Event struct {
-	Type    string        `json:"type"`
-	Name    string        `json:"name,omitempty"`
-	Label   string        `json:"label,omitempty"`
-	Text    string        `json:"text,omitempty"`
-	Sources []Source      `json:"sources,omitempty"`
-	Usage   *openai.Usage `json:"usage,omitempty"`
-	Error   string        `json:"error,omitempty"`
+	Type        string        `json:"type"`
+	Name        string        `json:"name,omitempty"`
+	Label       string        `json:"label,omitempty"`
+	Text        string        `json:"text,omitempty"`
+	Sources     []Source      `json:"sources,omitempty"`
+	Suggestions []string      `json:"suggestions,omitempty"`
+	Usage       *openai.Usage `json:"usage,omitempty"`
+	Error       string        `json:"error,omitempty"`
 }
 
 const (
 	EventTool    = "tool"
 	EventDelta   = "delta"
 	EventSources = "sources"
-	EventDone    = "done"
-	EventError   = "error"
+	// EventStatus is a progress line that is not a tool (e.g. picking
+	// the next questions).
+	EventStatus = "status"
+	// EventSuggestions carries the questions the user may ask next.
+	EventSuggestions = "suggestions"
+	EventDone        = "done"
+	EventError       = "error"
 )
 
 // Outcome is what a turn did, for the audit record.

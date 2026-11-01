@@ -26,6 +26,7 @@ function settingsOf(s: AISettingsState): AISettings {
     base_url: s.base_url,
     reasoning_effort: s.reasoning_effort,
     daily_limit: s.daily_limit,
+    follow_ups: s.follow_ups,
   }
 }
 
@@ -35,7 +36,8 @@ function sameSettings(a: AISettings, b: AISettings): boolean {
     a.model.trim() === b.model.trim() &&
     a.base_url.trim().replace(/\/+$/, '') === b.base_url.trim().replace(/\/+$/, '') &&
     a.reasoning_effort === b.reasoning_effort &&
-    a.daily_limit === b.daily_limit
+    a.daily_limit === b.daily_limit &&
+    a.follow_ups === b.follow_ups
   )
 }
 
@@ -226,6 +228,18 @@ export function AISettingsPage() {
             <p className="alerts-section-sub">
               Модель має підтримувати виклик функцій (function calling). Reasoning вмикайте лише для
               reasoning-моделей: інші відхиляють цей параметр.
+            </p>
+            <label className="alerts-checkbox">
+              <input
+                type="checkbox"
+                checked={form.follow_ups}
+                onChange={(e) => update({ follow_ups: e.target.checked })}
+              />
+              <span>Пропонувати наступні питання кнопками під кожною відповіддю</span>
+            </label>
+            <p className="alerts-section-sub">
+              Це ще один короткий запит до моделі після кожної відповіді; питання зважають на те, які
+              дані доступні ролі користувача.
             </p>
           </section>
 

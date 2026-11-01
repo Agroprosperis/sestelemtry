@@ -50,8 +50,8 @@ func TestAISettingsKeepTheKeyOnTheServer(t *testing.T) {
 	}
 
 	got, _ := getAISettingsResponse(t, router, cookie)
-	if got.Saved || got.Enabled || got.APIKeyConfigured || got.DailyLimit != DefaultChatDailyLimit {
-		t.Fatalf("before the first save = %+v", got)
+	if got.Saved || got.Enabled || got.APIKeyConfigured || got.DailyLimit != DefaultChatDailyLimit || !got.FollowUps {
+		t.Fatalf("before the first save = %+v, want the defaults with next questions on", got)
 	}
 
 	on := AISettings{Enabled: true, Model: "m1"}

@@ -9,6 +9,8 @@ export type AISettings = {
   base_url: string
   reasoning_effort: ReasoningEffort
   daily_limit: number
+  // follow_ups offers the next questions under every answer.
+  follow_ups: boolean
 }
 
 // AISettingsState adds what the server reports about the stored key:

@@ -8,6 +8,8 @@ export type ChatEntry = {
   // status is the running lookup's progress line while an answer streams.
   status?: string
   sources?: ChatSource[]
+  // suggestions are the questions offered as buttons under the answer.
+  suggestions?: string[]
   error?: string
   // stopped: the user hung up before the answer finished.
   stopped?: boolean

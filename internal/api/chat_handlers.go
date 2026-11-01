@@ -35,6 +35,9 @@ const (
 	maxChatQuestionRunes = 4000
 	maxChatHistoryRunes  = 6000
 	chatTurnTimeout      = 120 * time.Second
+	// chatFollowUpTimeout bounds picking the next questions; the answer
+	// is already on screen, so a slow pick just goes without them.
+	chatFollowUpTimeout = 20 * time.Second
 )
 
 // ChatUsage is the assistant's usage log: the daily limit counts it,
@@ -371,6 +374,20 @@ func (h *Handlers) aiChat(w http.ResponseWriter, r *http.Request) {
 		}
 		if len(out.Sources) > 0 {
 			emit(aichat.Event{Type: aichat.EventSources, Sources: out.Sources})
+		}
+		if live.settings.FollowUps {
+			emit(aichat.Event{Type: aichat.EventStatus, Label: "Добираю наступні питання…"})
+			fctx, fcancel := context.WithTimeout(ctx, chatFollowUpTimeout)
+			questions, usage, err := aichat.FollowUps(fctx, live.model, req.Messages, out.Text, turn.Tools)
+			fcancel()
+			out.Usage.InputTokens += usage.InputTokens
+			out.Usage.OutputTokens += usage.OutputTokens
+			switch {
+			case err != nil && r.Context().Err() == nil:
+				h.log.Warn("api_chat_follow_ups", "organization_id", orgID, "err", err)
+			case len(questions) > 0:
+				emit(aichat.Event{Type: aichat.EventSuggestions, Suggestions: questions})
+			}
 		}
 		emit(aichat.Event{Type: aichat.EventDone, Usage: &out.Usage})
 	case r.Context().Err() != nil:

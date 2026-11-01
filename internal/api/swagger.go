@@ -1137,7 +1137,9 @@ paths:
         it; nothing is stored but a usage row (ai_chat_usage). The answer
         streams as NDJSON — one event per line: "tool" (a lookup started:
         name, label), "delta" (answer text), "sources" (labels of the data
-        used), then "done" (usage) or "error" (a message for the user).
+        used), with follow_ups on "status" (label) and "suggestions" (the
+        next questions to offer), then "done" (usage) or "error" (a
+        message for the user).
         503 until the assistant is switched on with a key and a model
         (/api/v1/ai-settings).
       security:
@@ -1192,10 +1194,13 @@ paths:
                 properties:
                   type:
                     type: string
-                    enum: [tool, delta, sources, done, error]
+                    enum: [tool, status, delta, sources, suggestions, done, error]
                   name: {type: string}
                   label: {type: string}
                   text: {type: string}
+                  suggestions:
+                    type: array
+                    items: {type: string}
                   sources:
                     type: array
                     items:
@@ -1411,6 +1416,12 @@ components:
           minimum: 1
           maximum: 10000
           description: Turns per user per Kyiv day (default 100).
+        follow_ups:
+          type: boolean
+          description: Offer the next questions under every answer (one more short model request per turn; on by default).
+        follow_ups:
+          type: boolean
+          description: Offer the next questions under every answer (one more short model request per turn; on by default).
     User:
       type: object
       properties:

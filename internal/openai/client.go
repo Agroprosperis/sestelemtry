@@ -97,6 +97,15 @@ type Request struct {
 	// ToolChoice "none" forbids function calls for this turn; empty
 	// leaves the choice to the model.
 	ToolChoice string
+	// Format, when set, makes the answer JSON matching its schema
+	// (Structured Outputs, strict); Result.Text then holds that JSON.
+	Format *TextFormat
+}
+
+// TextFormat is a strict-mode JSON Schema the answer has to follow.
+type TextFormat struct {
+	Name   string
+	Schema json.RawMessage
 }
 
 // FunctionCall is a tool call the model asked for.
@@ -233,6 +242,17 @@ type reasoningJSON struct {
 	Effort string `json:"effort"`
 }
 
+type textJSON struct {
+	Format textFormatJSON `json:"format"`
+}
+
+type textFormatJSON struct {
+	Type   string          `json:"type"`
+	Name   string          `json:"name"`
+	Schema json.RawMessage `json:"schema"`
+	Strict bool            `json:"strict"`
+}
+
 type requestJSON struct {
 	Model           string            `json:"model"`
 	Instructions    string            `json:"instructions,omitempty"`
@@ -244,6 +264,7 @@ type requestJSON struct {
 	MaxOutputTokens int               `json:"max_output_tokens,omitempty"`
 	Reasoning       *reasoningJSON    `json:"reasoning,omitempty"`
 	Include         []string          `json:"include,omitempty"`
+	Text            *textJSON         `json:"text,omitempty"`
 }
 
 func (c *Client) body(req Request) ([]byte, error) {
@@ -273,6 +294,9 @@ func (c *Client) body(req Request) ([]byte, error) {
 	if effort := strings.TrimSpace(c.cfg.ReasoningEffort); effort != "" {
 		body.Reasoning = &reasoningJSON{Effort: effort}
 		body.Include = []string{"reasoning.encrypted_content"}
+	}
+	if f := req.Format; f != nil {
+		body.Text = &textJSON{Format: textFormatJSON{Type: "json_schema", Name: f.Name, Schema: f.Schema, Strict: true}}
 	}
 	return json.Marshal(body)
 }

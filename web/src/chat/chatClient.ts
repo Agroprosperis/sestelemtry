@@ -26,8 +26,10 @@ export type ChatUsage = { input_tokens: number; output_tokens: number }
 // ChatEvent is one NDJSON line of POST /api/v1/chat.
 export type ChatEvent =
   | { type: 'tool'; name: string; label: string }
+  | { type: 'status'; label: string }
   | { type: 'delta'; text: string }
   | { type: 'sources'; sources: ChatSource[] }
+  | { type: 'suggestions'; suggestions: string[] }
   | { type: 'done'; usage?: ChatUsage }
   | { type: 'error'; error: string }
 

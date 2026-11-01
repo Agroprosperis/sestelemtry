@@ -79,9 +79,12 @@ page (`?view=ai`, in the user menu): the switch, the API key, the model
 (one with function calling), the reasoning effort (reasoning models only —
 others reject it), an optional compatible gateway instead of
 `https://api.openai.com`, and the turns per user per Kyiv day (default
-100). **Перевірити зʼєднання** asks the model one short question with the
-settings as typed. Until the assistant is switched on with a key and a
-model, `/api/v1/chat` answers 503 and the button is hidden.
+100), and whether to offer the next questions as buttons under every
+answer (on by default; one more short structured-output request per turn,
+picked from what that user's assistant can read). **Перевірити зʼєднання**
+asks the model one short question with the settings as typed. Until the
+assistant is switched on with a key and a model, `/api/v1/chat` answers 503
+and the button is hidden.
 
 The settings live in `ai_settings` (`migrations/022_ai_settings.sql`, also
 created on startup) behind `GET`/`PUT /api/v1/ai-settings`, and a save takes

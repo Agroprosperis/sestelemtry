@@ -20,6 +20,7 @@ const stored: AISettingsState = {
   base_url: '',
   reasoning_effort: '',
   daily_limit: 100,
+  follow_ups: true,
   api_key_configured: true,
   saved: true,
 }
@@ -73,13 +74,21 @@ describe('AI assistant settings page', () => {
     expect(screen.getByRole('button', { name: 'Зберегти' })).toBeDisabled()
 
     fireEvent.change(screen.getByLabelText('Запитів на користувача за добу'), { target: { value: '20' } })
+    fireEvent.click(screen.getByLabelText('Пропонувати наступні питання кнопками під кожною відповіддю'))
     fireEvent.click(screen.getByRole('button', { name: 'Зберегти' }))
 
     expect(await screen.findByText('Збережено')).toBeInTheDocument()
     expect(refreshMe).toHaveBeenCalledTimes(1)
     const put = calls.find((c) => c.method === 'PUT')
     expect(put?.url).toContain('/api/v1/ai-settings')
-    expect(put?.body).toEqual({ enabled: true, model: 'm1', base_url: '', reasoning_effort: '', daily_limit: 20 })
+    expect(put?.body).toEqual({
+      enabled: true,
+      model: 'm1',
+      base_url: '',
+      reasoning_effort: '',
+      daily_limit: 20,
+      follow_ups: false,
+    })
   })
 
   it('deletes the key only through its button, switching the assistant off', async () => {

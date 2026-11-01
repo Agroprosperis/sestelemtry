@@ -52,9 +52,10 @@ export function useConversation(organizationID: string): Conversation {
         organizationID,
         { messages: [...history, { role: 'user', text }], context: readPageContext(organizationID) },
         (ev) => {
-          if (ev.type === 'tool') patch((e) => ({ ...e, status: ev.label }))
+          if (ev.type === 'tool' || ev.type === 'status') patch((e) => ({ ...e, status: ev.label }))
           else if (ev.type === 'delta') patch((e) => ({ ...e, text: e.text + ev.text, status: undefined }))
           else if (ev.type === 'sources') patch((e) => ({ ...e, sources: ev.sources }))
+          else if (ev.type === 'suggestions') patch((e) => ({ ...e, suggestions: ev.suggestions }))
           else if (ev.type === 'error') patch((e) => ({ ...e, error: ev.error }))
         },
         ac.signal,
