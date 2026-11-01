@@ -41,6 +41,14 @@
   cursor: default;
 }
 
+.ctl-tabs-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
 .ctl-tabs {
   display: inline-flex;
   gap: 4px;

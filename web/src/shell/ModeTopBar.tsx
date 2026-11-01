@@ -11,6 +11,7 @@ import { useChat, useChatTarget } from '../chat/chatContext'
 import { fetchEdgeFleet, type EdgeSiteStatus } from '../control/controlClient'
 import { formatOrganizationLabel } from '../dashboard/config'
 import { ThemeToggle } from '../theme/ThemeToggle'
+import { EdgeStatusChips } from './EdgeStatusChips'
 import { navigateView } from './navigation'
 import './shell.css'
 
@@ -49,14 +50,6 @@ const MODES: { mode: Exclude<ConsoleMode, 'none'>; view: 'dashboard' | 'economic
   { mode: 'economics', view: 'economics', label: 'Економіка' },
   { mode: 'control', view: 'control', label: 'Керування' },
 ]
-
-function shortManifestID(id: string): string {
-  // ze-20260826-a1b2c3d4 → ZE-a1b2 (mock: «Manifest ZE-0642»)
-  const parts = id.split('-')
-  const site = (parts[0] ?? '').toUpperCase()
-  const hash = parts[parts.length - 1] ?? ''
-  return `${site}-${hash.slice(0, 4)}`
-}
 
 export function ModeTopBar({
   mode,
@@ -118,9 +111,8 @@ export function ModeTopBar({
   }, [status, organizationID, showChips])
 
   const st = status !== undefined ? status : fleetStatus
-  const decision = st?.decision?.record
-  const modeChip = (decision?.mode || st?.heartbeat?.status || '').toUpperCase()
-  const manifest = st?.manifest
+  // On «Керування» the chips live in the tab row, so the bar stays one line.
+  const chipsInBar = showChips && mode !== 'control'
 
   return (
     // The wrapper is a CSS container: compaction steps in shell.css key
@@ -173,48 +165,7 @@ export function ModeTopBar({
       )}
 
       <div className="ctl-topbar-end">
-      {showChips && (
-      <div className="ctl-topbar-chips">
-        {st && (
-          <span className={'ctl-chip ' + (st.heartbeat.online ? 'ok' : 'err')}>
-            <span className="ctl-dot" />
-            IOT2050 {st.heartbeat.online ? 'online' : 'offline'}
-          </span>
-        )}
-        {modeChip && <span className="ctl-chip plain">{modeChip}</span>}
-        {mode === 'control' && st?.health && (
-          <span
-            className={'ctl-chip ' + (st.health.ok ? 'ok' : 'warn')}
-            title={
-              st.health.ok
-                ? 'Усі перевірки health пройдено'
-                : (st.health.checks ?? [])
-                    .filter((c) => !c.ok && (c.severity === 'warning' || c.severity === 'alarm'))
-                    .map((c) => c.label || c.id)
-                    .join(', ') || 'Є відхилення'
-            }
-          >
-            {st.health.ok ? 'діагностика OK' : 'є відхилення'}
-          </span>
-        )}
-        {mode === 'control' && manifest?.manifest_id && (
-          <span
-            className={
-              'ctl-chip ' +
-              (manifest.state === 'applied' ? 'ok' : manifest.state === 'expired' ? 'err' : 'warn')
-            }
-            title={`Manifest ${manifest.manifest_id}`}
-          >
-            {shortManifestID(manifest.manifest_id)}{' '}
-            {manifest.state === 'applied'
-              ? 'applied'
-              : manifest.state === 'expired'
-                ? 'прострочений'
-                : 'очікує'}
-          </span>
-        )}
-      </div>
-      )}
+      {chipsInBar && <EdgeStatusChips status={st} mode={mode} />}
 
       {menu && menu.length > 0 && (
         <div className="ctl-topbar-menu" ref={menuRef}>

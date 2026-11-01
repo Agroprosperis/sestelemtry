@@ -11,6 +11,7 @@ import { useAccess } from '../auth/authContext'
 import { useOrganizationParam } from '../dashboard/hooks/useOrganizationParam'
 import { fetchEdgeSites, fetchEdgeStatus, type EdgeSiteStatus } from './controlClient'
 import { JournalTab } from './JournalTab'
+import { EdgeStatusChips } from '../shell/EdgeStatusChips'
 import { ModeTopBar, type TopBarMenuItem } from '../shell/ModeTopBar'
 import { navigateEconomicsDay, navigateView } from '../shell/navigation'
 import { ModesTab } from './ModesTab'
@@ -119,18 +120,21 @@ export function ControlPage() {
         status={status}
       />
 
-      <nav className="ctl-tabs" aria-label="Розділи керування">
-        {TAB_LABELS.map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            className={tab === t.id ? 'active' : ''}
-            onClick={() => switchTab(t.id)}
-          >
-            {t.label}
-          </button>
-        ))}
-      </nav>
+      <div className="ctl-tabs-row">
+        <nav className="ctl-tabs" aria-label="Розділи керування">
+          {TAB_LABELS.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              className={tab === t.id ? 'active' : ''}
+              onClick={() => switchTab(t.id)}
+            >
+              {t.label}
+            </button>
+          ))}
+        </nav>
+        <EdgeStatusChips status={status} mode="control" />
+      </div>
 
       {!site ? (
         <div className="ctl-card">
