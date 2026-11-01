@@ -47,12 +47,14 @@ export type AuthMe = {
   ai_chat?: boolean
 }
 
-export type AppView = 'dashboard' | 'economics' | 'control' | 'station' | 'import' | 'alerts' | 'users'
+export type AppView = 'dashboard' | 'economics' | 'control' | 'station' | 'import' | 'alerts' | 'users' | 'ai'
 
 // The first view a user may open is where they land.
-const VIEW_ORDER: AppView[] = ['dashboard', 'economics', 'control', 'station', 'import', 'alerts', 'users']
+const VIEW_ORDER: AppView[] = ['dashboard', 'economics', 'control', 'station', 'import', 'alerts', 'users', 'ai']
 
-const VIEW_PERMISSION: Record<Exclude<AppView, 'users'>, Permission> = {
+// users and ai (the assistant's settings) serve every organization, so
+// only administrators of all of them open those.
+const VIEW_PERMISSION: Record<Exclude<AppView, 'users' | 'ai'>, Permission> = {
   dashboard: 'analytics.day',
   economics: 'economics.read',
   control: 'control',
@@ -103,7 +105,7 @@ export function accessFor(me: AuthMe): Access {
   const organizations = (permission: Permission) =>
     me.organizations.filter((o) => o.permissions.includes(permission)).map((o) => o.id)
   const canView = (view: AppView) =>
-    view === 'users' ? me.global_admin : organizations(VIEW_PERMISSION[view]).length > 0
+    view === 'users' || view === 'ai' ? me.global_admin : organizations(VIEW_PERMISSION[view]).length > 0
   return { restricted: true, globalAdmin: me.global_admin, can, organizations, canView }
 }
 

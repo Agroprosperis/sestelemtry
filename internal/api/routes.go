@@ -150,6 +150,9 @@ func (h *Handlers) routes() []route {
 		// Site-wide SMTP and default recipients apply to every
 		// organization.
 		{"/api/v1/alert-settings", h.alertSettings, globalOnly},
+		// So do the assistant's key, model and limit.
+		{"/api/v1/ai-settings", h.aiSettings, globalOnly},
+		{"/api/v1/ai-settings/test", h.aiSettingsTest, globalOnly},
 		// Without organization_id the test goes to the default list,
 		// which only an admin of every organization may use.
 		{"/api/v1/alert-settings/test-email", h.alertSettingsTestEmail, need(service)},

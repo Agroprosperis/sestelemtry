@@ -1138,7 +1138,8 @@ paths:
         streams as NDJSON — one event per line: "tool" (a lookup started:
         name, label), "delta" (answer text), "sources" (labels of the data
         used), then "done" (usage) or "error" (a message for the user).
-        503 when OPENAI_API_KEY / OPENAI_MODEL are not set.
+        503 until the assistant is switched on with a key and a model
+        (/api/v1/ai-settings).
       security:
         - sessionCookie: []
       parameters:
@@ -1214,9 +1215,118 @@ paths:
         "409":
           description: The user's previous turn is still running
         "429":
-          description: The user's daily limit (AI_CHAT_DAILY_LIMIT) is spent
+          description: The user's daily limit (daily_limit in /api/v1/ai-settings) is spent
         "503":
-          description: The assistant is not configured
+          description: The assistant is switched off or has no key or model
+  /api/v1/ai-settings:
+    get:
+      summary: AI assistant settings
+      operationId: getAISettings
+      description: |
+        Administrators of every organization only. The API key is never
+        returned, only whether one is stored. saved is false until the
+        first save (the payload then holds the defaults).
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Current settings
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/AISettings"
+                  - type: object
+                    properties:
+                      api_key_configured:
+                        type: boolean
+                      saved:
+                        type: boolean
+        "403":
+          description: Not an administrator of every organization
+    put:
+      summary: Save the AI assistant settings
+      operationId: putAISettings
+      description: |
+        Takes effect without a restart. api_key omitted or null keeps the
+        stored key; an empty string clears it. The stored key only serves
+        the base_url it was saved with: changing base_url takes the key
+        again.
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/CSRFHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/AISettings"
+                - type: object
+                  properties:
+                    api_key:
+                      type: string
+                      nullable: true
+      responses:
+        "204":
+          description: Settings saved
+        "400":
+          description: Invalid settings, or a key is required (switching on, a new base_url)
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "адресу API змінено: введіть ключ ще раз, щоб він не пішов на іншу адресу"
+        "403":
+          description: Not an administrator of every organization
+  /api/v1/ai-settings/test:
+    post:
+      summary: Ask the model one short question with the settings as typed
+      operationId: testAISettings
+      description: |
+        Nothing is saved. Without api_key the stored key is used, on the
+        stored base_url only.
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/CSRFHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/AISettings"
+                - type: object
+                  properties:
+                    api_key:
+                      type: string
+                      nullable: true
+      responses:
+        "200":
+          description: The model answered
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  model: {type: string}
+                  reply: {type: string}
+                  usage:
+                    type: object
+                    properties:
+                      input_tokens: {type: integer}
+                      output_tokens: {type: integer}
+        "400":
+          description: No model, or no usable key
+        "502":
+          description: The API refused or did not answer; the body is its reason
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "API відповіло 401: invalid_api_key Incorrect API key provided"
 components:
   securitySchemes:
     sessionCookie:
@@ -1262,7 +1372,7 @@ components:
           description: The account may do nothing but change its password.
         ai_chat:
           type: boolean
-          description: The API has the AI assistant configured (POST /api/v1/chat).
+          description: The AI assistant is switched on with a key and a model (POST /api/v1/chat).
         grants:
           type: array
           items:
@@ -1281,6 +1391,26 @@ components:
                 items:
                   type: string
                   enum: [analytics.day, analytics.full, economics.read, economics.write, control, technical.write, service]
+    AISettings:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+        model:
+          type: string
+          description: Responses API model id; it has to support function calling.
+        base_url:
+          type: string
+          description: Compatible gateway; empty means https://api.openai.com.
+        reasoning_effort:
+          type: string
+          enum: ["", minimal, low, medium, high]
+          description: For reasoning models only; others reject it.
+        daily_limit:
+          type: integer
+          minimum: 1
+          maximum: 10000
+          description: Turns per user per Kyiv day (default 100).
     User:
       type: object
       properties:

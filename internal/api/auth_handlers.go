@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"math"
@@ -53,7 +54,8 @@ type AuthMeResponse struct {
 	MustChangePassword bool               `json:"must_change_password"`
 	Grants             []grantJSON        `json:"grants"`
 	Organizations      []authOrganization `json:"organizations"`
-	// AIChat: the API has an assistant configured (POST /api/v1/chat).
+	// AIChat: the assistant is switched on with a key and a model
+	// (POST /api/v1/chat).
 	AIChat bool `json:"ai_chat"`
 }
 
@@ -70,14 +72,14 @@ func grantsJSON(grants []auth.Grant) []grantJSON {
 	return out
 }
 
-func (h *Handlers) meResponse(p *auth.Principal) AuthMeResponse {
+func (h *Handlers) meResponse(ctx context.Context, p *auth.Principal) AuthMeResponse {
 	resp := AuthMeResponse{
 		User:               authUserInfo{ID: p.UserID, Email: p.Email, Name: p.Name},
 		GlobalAdmin:        p.IsGlobalAdmin(),
 		MustChangePassword: p.MustChangePassword,
 		Grants:             grantsJSON(p.Grants),
 		Organizations:      []authOrganization{},
-		AIChat:             h.assistant != nil,
+		AIChat:             h.assistantOn(ctx),
 	}
 	for _, org := range h.organizations {
 		perms := p.PermissionsOn(org.ID)
@@ -132,7 +134,7 @@ func (h *Handlers) authLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	h.auth.setSessionCookie(w, token, expires)
 	h.log.Info("api_auth_login_ok", "user_id", p.UserID)
-	writeJSON(w, http.StatusOK, h.meResponse(p))
+	writeJSON(w, http.StatusOK, h.meResponse(r.Context(), p))
 }
 
 // authLogout handles POST /api/v1/auth/logout. It succeeds without a
@@ -165,7 +167,7 @@ func (h *Handlers) authMe(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	writeJSON(w, http.StatusOK, h.meResponse(principalFrom(r.Context())))
+	writeJSON(w, http.StatusOK, h.meResponse(r.Context(), principalFrom(r.Context())))
 }
 
 // authPassword handles POST /api/v1/auth/password: the signed-in user

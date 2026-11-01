@@ -67,12 +67,17 @@ export function useSession(): SessionState {
     setBootKey((k) => k + 1)
   }, [])
 
+  const refreshMe = useCallback(async () => {
+    const me = await fetchMe()
+    if (me) setSession({ status: 'signed-in', me })
+  }, [])
+
   const auth = useMemo<AuthContextValue | null>(
     () =>
       session.status === 'signed-in'
-        ? { me: session.me, access: accessFor(session.me), logout: signOut }
+        ? { me: session.me, access: accessFor(session.me), logout: signOut, refreshMe }
         : null,
-    [session, signOut],
+    [session, signOut, refreshMe],
   )
 
   return { session, auth, onSignedIn, refresh, signOut }

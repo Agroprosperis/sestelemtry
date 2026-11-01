@@ -87,6 +87,18 @@ describe('accessFor', () => {
     expect(firstAllowedView(global)).toBe('users')
   })
 
+  it('keeps the assistant settings for administrators of every organization', () => {
+    expect(accessFor(me({ global_admin: true })).canView('ai')).toBe(true)
+    const siteAdmin = accessFor(
+      me({
+        grants: [{ role: 'admin', organization_id: 'ze' }],
+        organizations: [{ id: 'ze', name: 'ZE', permissions: ['analytics.day', 'economics.read', 'service'] }],
+      }),
+    )
+    expect(siteAdmin.canView('ai')).toBe(false)
+    expect(mixed.canView('ai')).toBe(false)
+  })
+
   it('restricts nothing outside the signed-in app', () => {
     expect(UNRESTRICTED.can('service', 'anything')).toBe(true)
     expect(UNRESTRICTED.organizations('control')).toBeNull()

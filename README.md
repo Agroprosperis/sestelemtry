@@ -32,7 +32,7 @@ SameSite=Lax, 14 days, sliding). State-changing requests must also carry an
 
 | Role | Access |
 | --- | --- |
-| `admin` | everything within its organizations; on all organizations also users and site-wide alert settings |
+| `admin` | everything within its organizations; on all organizations also users, site-wide alert settings and the AI assistant settings |
 | `economist` | view only: economics mode and tariffs |
 | `engineer` | analytics for any period (day, month, year) |
 | `control_engineer` | analytics for any period, the «Керування» mode with confirming the УЗЕ plan and publishing manifests, and the per-site limits |
@@ -74,16 +74,22 @@ object whose economics the user reads. The tools read what the dashboard
 reads: nothing is written, no raw samples go out, and every tool but the
 portfolio is bound to the organization in the request.
 
-Set in `deploy/.env`; without both the key and the model the assistant is
-off and the button is hidden:
+An administrator of every organization connects it on the **ШІ-асистент**
+page (`?view=ai`, in the user menu): the switch, the API key, the model
+(one with function calling), the reasoning effort (reasoning models only —
+others reject it), an optional compatible gateway instead of
+`https://api.openai.com`, and the turns per user per Kyiv day (default
+100). **Перевірити зʼєднання** asks the model one short question with the
+settings as typed. Until the assistant is switched on with a key and a
+model, `/api/v1/chat` answers 503 and the button is hidden.
 
-| Variable | Meaning |
-| --- | --- |
-| `OPENAI_API_KEY` | API key; never leaves the server |
-| `OPENAI_MODEL` | model id (one with function calling) |
-| `OPENAI_REASONING_EFFORT` | optional `low` / `medium` / `high`, for reasoning models only — others reject it |
-| `OPENAI_BASE_URL` | optional compatible gateway instead of `https://api.openai.com` |
-| `AI_CHAT_DAILY_LIMIT` | turns per user per Kyiv day, default 100 |
+The settings live in `ai_settings` (`migrations/022_ai_settings.sql`, also
+created on startup) behind `GET`/`PUT /api/v1/ai-settings`, and a save takes
+effect without a restart. Like the SMTP password, the key sits in its own
+column in plain text and is never returned by the API — the page only learns
+whether one is stored, and saving without touching the field leaves it alone.
+The stored key only goes to the address it was saved with: changing the
+gateway takes typing the key again.
 
 Every role may ask about its organizations; the tools it gets are the ones
 its screens would show. An economist gets no live telemetry, and a role
@@ -477,8 +483,7 @@ What the host keeps outside git, so a pull never touches it:
 - `/etc/sestelemetry/tls/`: the dashboard certificate (see «Run with Docker
   Compose»);
 - `deploy/.env` (`chmod 600`): `EDGE_SITE_TOKENS`, `SMTP_PASSWORD`, and
-  optionally `AUTH_BOOTSTRAP_EMAIL` / `AUTH_BOOTSTRAP_PASSWORD` and the
-  assistant's `OPENAI_*` (see «AI assistant»).
+  optionally `AUTH_BOOTSTRAP_EMAIL` / `AUTH_BOOTSTRAP_PASSWORD`.
 
 First install:
 

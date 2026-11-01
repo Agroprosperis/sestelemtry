@@ -110,6 +110,31 @@ type mockStore struct {
 	orgAlertSettingsErr   error
 	orgAlertLastOrg       string
 	orgAlertLastWrite     alerts.OrgSettings
+
+	// aiSettings nil means nothing saved; aiKey "" means no key stored.
+	aiSettings *AISettings
+	aiKey      string
+	aiWrites   int
+}
+
+func (m *mockStore) GetAISettings(_ context.Context) (AISettings, bool, bool, error) {
+	if m.aiSettings == nil {
+		return AISettings{}, false, false, nil
+	}
+	return *m.aiSettings, m.aiKey != "", true, nil
+}
+
+func (m *mockStore) AIAPIKey(_ context.Context) (string, error) {
+	return m.aiKey, nil
+}
+
+func (m *mockStore) UpsertAISettings(_ context.Context, settings AISettings, apiKey *string) error {
+	m.aiSettings = &settings
+	if apiKey != nil {
+		m.aiKey = *apiKey
+	}
+	m.aiWrites++
+	return nil
 }
 
 func (m *mockStore) GetAlertSettings(_ context.Context) (alerts.Settings, bool, bool, error) {

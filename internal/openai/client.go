@@ -22,7 +22,7 @@ import (
 	"time"
 )
 
-// DefaultBaseURL is the public API host; OPENAI_BASE_URL points the
+// DefaultBaseURL is the public API host; Config.BaseURL points the
 // client at a compatible gateway instead.
 const DefaultBaseURL = "https://api.openai.com"
 

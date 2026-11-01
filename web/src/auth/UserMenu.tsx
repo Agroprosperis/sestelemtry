@@ -66,6 +66,18 @@ export function UserMenu() {
               Користувачі
             </button>
           )}
+          {me.global_admin && (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setOpen(false)
+                navigateView('ai')
+              }}
+            >
+              ШІ-асистент
+            </button>
+          )}
           <button
             type="button"
             role="menuitem"

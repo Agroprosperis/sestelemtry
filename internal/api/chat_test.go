@@ -52,6 +52,20 @@ func toolCallTurn(name, args string) openai.Result {
 	}
 }
 
+// enableAssistant saves settings that switch the assistant on and makes
+// model its client. The returned slice collects the configs the
+// assistant built clients for.
+func enableAssistant(h *Handlers, store *mockStore, model aichat.Model, usage ChatUsage, dailyLimit int) *[]openai.Config {
+	store.aiSettings = &AISettings{Enabled: true, Model: "test-model", DailyLimit: dailyLimit}
+	store.aiKey = "sk-test"
+	built := &[]openai.Config{}
+	h.SetAssistant(AssistantOptions{Usage: usage, NewModel: func(cfg openai.Config) aichat.Model {
+		*built = append(*built, cfg)
+		return model
+	}})
+	return built
+}
+
 type memChatUsage struct {
 	mu    sync.Mutex
 	count int
@@ -126,7 +140,7 @@ func TestChatStreamsAnswerFromTools(t *testing.T) {
 		{Text: "Пік — 9000 ₴/МВт·год о 19:00.", Usage: openai.Usage{InputTokens: 200, OutputTokens: 20}},
 	}}
 	usage := &memChatUsage{}
-	h.SetAssistant(AssistantOptions{Model: model, ModelName: "test-model", Usage: usage})
+	built := enableAssistant(h, store, model, usage, 0)
 	cookie := sessionCookie(t, accounts, "econ@example.com", auth.Grant{Role: auth.RoleEconomist, OrganizationID: "ze"})
 
 	rec := serve(h.Router(), http.MethodPost, "/api/v1/chat?organization_id=ze", cookie, chatBody("Коли сьогодні найдорожча година?"))
@@ -171,6 +185,9 @@ func TestChatStreamsAnswerFromTools(t *testing.T) {
 	}
 	if store.damZone != 2 {
 		t.Errorf("DAM zone = %d, want the default 2", store.damZone)
+	}
+	if len(*built) != 1 || (*built)[0].APIKey != "sk-test" || (*built)[0].Model != "test-model" {
+		t.Errorf("model clients built = %+v, want one from the saved settings", *built)
 	}
 
 	if len(usage.rows) != 1 {
@@ -436,7 +453,8 @@ func TestChatPassportAndPortfolio(t *testing.T) {
 }
 
 func TestChatRefusesBeforeAskingTheModel(t *testing.T) {
-	h, accounts := authTestHandlers(t, nil)
+	store := &mockStore{}
+	h, accounts := authTestHandlers(t, store)
 	router := h.Router()
 	cookie := sessionCookie(t, accounts, "ceo@example.com", auth.Grant{Role: auth.RoleCEO, OrganizationID: "ze"})
 	const target = "/api/v1/chat?organization_id=ze"
@@ -444,10 +462,14 @@ func TestChatRefusesBeforeAskingTheModel(t *testing.T) {
 	if rec := serve(router, http.MethodPost, target, cookie, chatBody("?")); rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("without an assistant: status = %d", rec.Code)
 	}
+	h.SetAssistant(AssistantOptions{Usage: &memChatUsage{}})
+	if rec := serve(router, http.MethodPost, target, cookie, chatBody("?")); rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("nothing saved on the settings page: status = %d", rec.Code)
+	}
 
 	model := &scriptedModel{turns: []openai.Result{{Text: "ok"}}}
 	usage := &memChatUsage{}
-	h.SetAssistant(AssistantOptions{Model: model, ModelName: "m", Usage: usage, DailyLimit: 3})
+	enableAssistant(h, store, model, usage, 3)
 
 	bad := []chatRequest{
 		{},
@@ -484,12 +506,10 @@ func TestChatRefusesBeforeAskingTheModel(t *testing.T) {
 }
 
 func TestChatModelFailureIsAnErrorEvent(t *testing.T) {
-	h, accounts := authTestHandlers(t, nil)
+	store := &mockStore{}
+	h, accounts := authTestHandlers(t, store)
 	usage := &memChatUsage{}
-	h.SetAssistant(AssistantOptions{
-		Model: &scriptedModel{err: &openai.APIError{Status: http.StatusTooManyRequests, Message: "rate limited"}},
-		Usage: usage,
-	})
+	enableAssistant(h, store, &scriptedModel{err: &openai.APIError{Status: http.StatusTooManyRequests, Message: "rate limited"}}, usage, 0)
 	cookie := sessionCookie(t, accounts, "eng@example.com", auth.Grant{Role: auth.RoleEngineer, OrganizationID: "ze"})
 	rec := serve(h.Router(), http.MethodPost, "/api/v1/chat?organization_id=ze", cookie, chatBody("?"))
 	events := readEvents(t, rec)
@@ -502,7 +522,8 @@ func TestChatModelFailureIsAnErrorEvent(t *testing.T) {
 }
 
 func TestAuthMeTellsWhetherTheAssistantIsOn(t *testing.T) {
-	h, accounts := authTestHandlers(t, nil)
+	store := &mockStore{}
+	h, accounts := authTestHandlers(t, store)
 	cookie := sessionCookie(t, accounts, "eng@example.com", auth.Grant{Role: auth.RoleEngineer, OrganizationID: "ze"})
 	me := func() AuthMeResponse {
 		t.Helper()
@@ -516,9 +537,13 @@ func TestAuthMeTellsWhetherTheAssistantIsOn(t *testing.T) {
 	if me().AIChat {
 		t.Error("ai_chat on without an assistant")
 	}
-	h.SetAssistant(AssistantOptions{Model: &scriptedModel{}, Usage: &memChatUsage{}})
+	h.SetAssistant(AssistantOptions{Usage: &memChatUsage{}})
+	if me().AIChat {
+		t.Error("ai_chat on with nothing saved on the settings page")
+	}
+	enableAssistant(h, store, &scriptedModel{}, &memChatUsage{}, 0)
 	if !me().AIChat {
-		t.Error("ai_chat off with an assistant")
+		t.Error("ai_chat off with the assistant switched on")
 	}
 }
 

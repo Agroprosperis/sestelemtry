@@ -84,9 +84,9 @@ type Handlers struct {
 	// auth enforces sessions and the route table's permissions. nil
 	// serves every route openly (handler tests).
 	auth *Auth
-	// assistant backs POST /api/v1/chat. nil when no OpenAI key and
-	// model were configured — the route answers 503 and /auth/me tells
-	// the dashboard to hide the assistant.
+	// assistant backs POST /api/v1/chat with the settings saved on the
+	// «ШІ-асистент» page. nil (handler tests) or switched off there: the
+	// route answers 503 and /auth/me tells the dashboard to hide it.
 	assistant *assistant
 }
 
@@ -206,6 +206,16 @@ type storeReader interface {
 	LoadOrgAlertSettings(ctx context.Context) (map[string]alerts.OrgSettings, error)
 	// UpsertOrgAlertSettings replaces one organization's override.
 	UpsertOrgAlertSettings(ctx context.Context, organizationID string, settings alerts.OrgSettings) error
+	// GetAISettings returns the assistant settings, whether an API key
+	// is stored, and whether anything has been saved. The key itself is
+	// never part of this result.
+	GetAISettings(ctx context.Context) (AISettings, bool, bool, error)
+	// AIAPIKey returns the stored API key. Separate from GetAISettings
+	// so every use of the secret is greppable.
+	AIAPIKey(ctx context.Context) (string, error)
+	// UpsertAISettings replaces the assistant settings. A nil apiKey
+	// leaves the stored key untouched.
+	UpsertAISettings(ctx context.Context, settings AISettings, apiKey *string) error
 	Ready(ctx context.Context) error
 }
 

@@ -6,6 +6,7 @@ import { ForcedPasswordPage } from './auth/ForcedPasswordPage'
 import { LoginPage } from './auth/LoginPage'
 import { firstAllowedView, type AppView } from './auth/permissions'
 import { useSession } from './auth/useSession'
+import { AISettingsPage } from './chat/AISettingsPage'
 import { ChatProvider } from './chat/ChatProvider'
 import { ControlPage } from './control/ControlPage'
 import { Dashboard } from './dashboard/Dashboard'
@@ -32,6 +33,7 @@ function readView(): View {
   if (view === 'alerts') return 'alerts'
   if (view === 'control') return 'control'
   if (view === 'users') return 'users'
+  if (view === 'ai') return 'ai'
   // The standalone planner was replaced by the desk in the control
   // mode's «План УЗЕ» tab; old ?view=planner links (bookmarks,
   // dashboard header) land there. The URL is normalised so
@@ -138,6 +140,9 @@ function renderView(view: View) {
   }
   if (view === 'users') {
     return <UsersPage />
+  }
+  if (view === 'ai') {
+    return <AISettingsPage />
   }
   return <Dashboard />
 }

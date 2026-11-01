@@ -23,7 +23,7 @@ import (
 
 const (
 	// DefaultChatDailyLimit is how many assistant turns one user gets
-	// per Kyiv day when AI_CHAT_DAILY_LIMIT is unset.
+	// per Kyiv day until the settings page sets another limit.
 	DefaultChatDailyLimit = 100
 
 	// maxChatBody fits maxChatMessages messages at their rune caps in
@@ -61,44 +61,119 @@ func (s *ChatUsageStore) RecordTurn(ctx context.Context, row storage.AIChatUsage
 	return storage.InsertAIChatUsage(ctx, s.pool, row)
 }
 
+// aiSettingsTTL bounds how long a read of the saved settings is reused;
+// a save through this process drops it at once.
+const aiSettingsTTL = 30 * time.Second
+
 // AssistantOptions configures SetAssistant.
 type AssistantOptions struct {
-	Model aichat.Model
-	// ModelName is recorded with every turn.
-	ModelName  string
-	Usage      ChatUsage
-	DailyLimit int
+	Usage ChatUsage
+	// NewModel builds the model client for the saved settings; nil uses
+	// the OpenAI Responses API client.
+	NewModel func(openai.Config) aichat.Model
 }
 
 type assistant struct {
-	model      aichat.Model
-	modelName  string
-	usage      ChatUsage
-	dailyLimit int
+	usage    ChatUsage
+	newModel func(openai.Config) aichat.Model
 
 	mu sync.Mutex
 	// busy holds the users with a turn in flight: one at a time each.
 	busy map[int64]bool
+	// live is the assistant as the settings last read define it, reused
+	// for aiSettingsTTL so /auth/me and every turn don't each query the
+	// database. revision grows on every save, so a read that raced one
+	// doesn't cache the settings it replaced.
+	live     *liveAssistant
+	liveAt   time.Time
+	revision int
 }
 
-// SetAssistant enables POST /api/v1/chat. A nil Model or Usage leaves
-// it disabled.
+// liveAssistant is the assistant under the current settings.
+type liveAssistant struct {
+	settings AISettings
+	// model is nil while the assistant is off or lacks a key or model.
+	model aichat.Model
+}
+
+// SetAssistant enables POST /api/v1/chat, run on the settings saved
+// through /api/v1/ai-settings. A nil Usage leaves it disabled.
 func (h *Handlers) SetAssistant(opts AssistantOptions) {
-	if opts.Model == nil || opts.Usage == nil {
+	if opts.Usage == nil {
 		h.assistant = nil
 		return
 	}
-	limit := opts.DailyLimit
-	if limit <= 0 {
-		limit = DefaultChatDailyLimit
+	newModel := opts.NewModel
+	if newModel == nil {
+		newModel = func(cfg openai.Config) aichat.Model { return openai.NewClient(cfg) }
 	}
-	h.assistant = &assistant{
-		model:      opts.Model,
-		modelName:  opts.ModelName,
-		usage:      opts.Usage,
-		dailyLimit: limit,
-		busy:       map[int64]bool{},
+	h.assistant = &assistant{usage: opts.Usage, newModel: newModel, busy: map[int64]bool{}}
+}
+
+// newAIModel builds a model client the way the assistant does, also
+// for the settings page's connection test.
+func (h *Handlers) newAIModel(cfg openai.Config) aichat.Model {
+	if h.assistant != nil {
+		return h.assistant.newModel(cfg)
 	}
+	return openai.NewClient(cfg)
+}
+
+// liveAssistant returns the assistant as the saved settings define it.
+func (h *Handlers) liveAssistant(ctx context.Context) (liveAssistant, error) {
+	a := h.assistant
+	a.mu.Lock()
+	if a.live != nil && time.Since(a.liveAt) < aiSettingsTTL {
+		live := *a.live
+		a.mu.Unlock()
+		return live, nil
+	}
+	rev := a.revision
+	a.mu.Unlock()
+
+	settings, keySet, saved, err := h.store.GetAISettings(ctx)
+	if err != nil {
+		return liveAssistant{}, err
+	}
+	settings.Normalize()
+	live := liveAssistant{settings: settings}
+	if saved && keySet && settings.Enabled && settings.Model != "" {
+		key, err := h.store.AIAPIKey(ctx)
+		if err != nil {
+			return liveAssistant{}, err
+		}
+		if key != "" {
+			live.model = a.newModel(settings.openaiConfig(key))
+		}
+	}
+	a.mu.Lock()
+	if a.revision == rev {
+		a.live, a.liveAt = &live, time.Now()
+	}
+	a.mu.Unlock()
+	return live, nil
+}
+
+// forget drops the cached settings after a save.
+func (a *assistant) forget() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.revision++
+	a.live = nil
+}
+
+// assistantOn reports whether a chat turn would run now; /auth/me
+// shows or hides the assistant by it.
+func (h *Handlers) assistantOn(ctx context.Context) bool {
+	if h.assistant == nil {
+		return false
+	}
+	live, err := h.liveAssistant(ctx)
+	if err != nil {
+		h.log.Warn("api_ai_settings_read", "err", err)
+		return false
+	}
+	return live.model != nil
 }
 
 func (a *assistant) begin(userID int64) bool {
@@ -218,6 +293,17 @@ func (h *Handlers) aiChat(w http.ResponseWriter, r *http.Request) {
 		loc = time.UTC
 	}
 
+	live, err := h.liveAssistant(r.Context())
+	if err != nil {
+		h.log.Error("api_chat_settings", "err", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+	if live.model == nil {
+		http.Error(w, "ШІ-асистент вимкнено", http.StatusServiceUnavailable)
+		return
+	}
+
 	if !a.begin(userID) {
 		http.Error(w, "попередня відповідь ще формується", http.StatusConflict)
 		return
@@ -231,8 +317,8 @@ func (h *Handlers) aiChat(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
-	if used >= a.dailyLimit {
-		http.Error(w, fmt.Sprintf("Денний ліміт ШІ-асистента (%d запитів) вичерпано. Спробуйте завтра.", a.dailyLimit), http.StatusTooManyRequests)
+	if limit := live.settings.DailyLimit; used >= limit {
+		http.Error(w, fmt.Sprintf("Денний ліміт ШІ-асистента (%d запитів) вичерпано. Спробуйте завтра.", limit), http.StatusTooManyRequests)
 		return
 	}
 
@@ -276,7 +362,7 @@ func (h *Handlers) aiChat(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), chatTurnTimeout)
 	defer cancel()
 	start := time.Now()
-	out, runErr := aichat.Run(ctx, a.model, turn, emit)
+	out, runErr := aichat.Run(ctx, live.model, turn, emit)
 	status := "ok"
 	switch {
 	case runErr == nil:
@@ -311,7 +397,7 @@ func (h *Handlers) aiChat(w http.ResponseWriter, r *http.Request) {
 	if err := a.usage.RecordTurn(context.WithoutCancel(r.Context()), storage.AIChatUsageRow{
 		UserID:         userID,
 		OrganizationID: orgID,
-		Model:          a.modelName,
+		Model:          live.settings.Model,
 		Tools:          out.Tools,
 		InputTokens:    out.Usage.InputTokens,
 		OutputTokens:   out.Usage.OutputTokens,
