@@ -56,6 +56,29 @@ func TestEconomicsDailyUnconfigured(t *testing.T) {
 	}
 }
 
+// storedDayBackend serves one persisted, still-running day.
+type storedDayBackend struct {
+	stubEconomicsBackend
+	computedAt time.Time
+}
+
+func (b storedDayBackend) LoadDay(_ context.Context, orgID string, day time.Time, tz string) (economics.StoredDay, bool, error) {
+	return economics.StoredDay{OrganizationID: orgID, Day: day, Tz: tz, Rows: make([]*economics.HourRow, 24), ComputedAt: b.computedAt}, true, nil
+}
+
+// A running day reports when the daemon last computed it, so the page
+// can say how current its numbers are.
+func TestEconomicsDailyReportsComputedAt(t *testing.T) {
+	h := NewHandlers(&mockStore{}, "*")
+	h.SetEconomicsService(economics.NewService(storedDayBackend{computedAt: time.Date(2026, 11, 2, 11, 16, 0, 0, time.UTC)}))
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/economics/daily?organization_id=ze&date=2026-11-02&tz=Europe/Kyiv", nil)
+	rec := httptest.NewRecorder()
+	h.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"computed_at":"2026-11-02T11:16:00Z"`) {
+		t.Fatalf("status %d, body %s; want computed_at 2026-11-02T11:16:00Z", rec.Code, rec.Body.String())
+	}
+}
+
 func TestEconomicsMonthlyUnconfigured(t *testing.T) {
 	h := NewHandlers(&mockStore{}, "*")
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/economics/monthly?organization_id=org-a&month=2026-06", nil)

@@ -60,6 +60,9 @@ type StoredYear struct {
 	// the window, so the frontend can annualise the all-time EBITDA over
 	// the full operating span (window + prior) for the payback estimate.
 	PriorMonthsWithData int
+	// ComputedAt is when the window's newest stored day was last written
+	// (see newestComputedAt). Zero without data.
+	ComputedAt time.Time
 }
 
 // AggregateYear folds a calendar year of persisted daily + hourly
@@ -436,6 +439,7 @@ func (s *Service) GetYear(ctx context.Context, orgID, period, tz string) (Stored
 		return StoredYear{}, err
 	}
 	result.OrganizationID = orgID
+	result.ComputedAt = newestComputedAt(daily)
 	if prior, priorMonths, perr := s.backend.SumEbitdaBefore(ctx, orgID, firstDay); perr == nil {
 		result.PriorEbitda = prior
 		result.PriorMonthsWithData = priorMonths
@@ -496,6 +500,7 @@ func (s *Service) GetPeriod(ctx context.Context, orgID, from, to, tz string) (St
 		return StoredYear{}, err
 	}
 	result.OrganizationID = orgID
+	result.ComputedAt = newestComputedAt(daily)
 	if prior, priorMonths, perr := s.backend.SumEbitdaBefore(ctx, orgID, firstDay); perr == nil {
 		result.PriorEbitda = prior
 		result.PriorMonthsWithData = priorMonths

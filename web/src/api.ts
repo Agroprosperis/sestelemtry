@@ -604,6 +604,9 @@ export type EconomicsDailyResponse = {
   reconciled?: boolean
   quality_flags?: string[]
   reconciliation?: Record<string, EconomicsReconcileField>
+  // computed_at (RFC3339) is when the day was last computed: for a day
+  // still running, the moment its numbers are current as of.
+  computed_at?: string
 }
 
 // fetchEconomicsDaily reads the server-computed economics for one day.
@@ -984,6 +987,8 @@ export type EconomicsMonthlyResponse = {
   days: EconomicsMonthlyDay[]
   hourly_margin: EconomicsMonthlyDayMargin[]
   uze_cycles: EconomicsUzeCycle[]
+  // computed_at (RFC3339): when the month's newest day was last computed.
+  computed_at?: string
 }
 
 // fetchEconomicsMonthly reads the server-computed month rollup. The
@@ -1052,6 +1057,8 @@ export type EconomicsAnnualResponse = {
   months: EconomicsAnnualMonthRollup[]
   quarters: EconomicsAnnualQuarter[]
   monthly_margin: EconomicsAnnualMonthMargin[]
+  // computed_at (RFC3339): when the window's newest day was last computed.
+  computed_at?: string
 }
 
 // fetchEconomicsAnnual reads the server-computed rollup. Pass `period`
