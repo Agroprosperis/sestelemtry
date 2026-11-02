@@ -7,6 +7,7 @@ import { dailyTotals } from './compute'
 import { EconomicsDamPricesModal } from './components/EconomicsDamPricesModal'
 import { EconomicsTariffsModal } from './components/EconomicsTariffsModal'
 import { EconomicsHeader, type EconomicsRange } from './components/EconomicsHeader'
+import { economicsAsOfLabel } from './components/formatAsOf'
 import { EconomicsDayTop } from './components/EconomicsDayTop'
 import { EconomicsRecomputeModal } from './components/EconomicsRecomputeModal'
 import { EconomicsTable } from './components/EconomicsTable'
@@ -293,6 +294,15 @@ export function EconomicsPage() {
   })
   const yearFromMonth = useWindow ? windowFrom : `${period}-01`
   const yearToMonth = useWindow ? windowTo : `${period}-12`
+
+  const asOf =
+    range === 'day' && !data.loading && data.computedAt
+      ? economicsAsOfLabel(data.computedAt, date, 'day')
+      : range === 'month' && !monthly.loading && monthly.month?.computed_at
+        ? economicsAsOfLabel(monthly.month.computed_at, monthEndDay(month), 'month')
+        : range === 'year' && !annual.loading && annual.year?.computed_at
+          ? economicsAsOfLabel(annual.year.computed_at, monthEndDay(yearToMonth), useWindow ? 'period' : 'year')
+          : null
   const pvPlanYear = usePvPlanSummary({
     organizationID: range === 'year' ? organizationID : '',
     fromDay: range === 'year' ? `${yearFromMonth}-01` : '',
@@ -412,15 +422,7 @@ export function EconomicsPage() {
         }}
         date={date}
         onDateChange={setDate}
-        computedAt={
-          range === 'day' && !data.loading
-            ? data.computedAt
-            : range === 'month' && !monthly.loading
-              ? (monthly.month?.computed_at ?? null)
-              : range === 'year' && !annual.loading
-                ? (annual.year?.computed_at ?? null)
-                : null
-        }
+        asOf={asOf}
       />
 
       {tariffsOpen && (
