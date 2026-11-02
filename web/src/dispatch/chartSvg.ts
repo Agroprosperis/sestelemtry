@@ -66,6 +66,29 @@ export type ChartLayout = {
 const esc = (s: string | number): string =>
   String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 
+// priceInk tints one РДН label from the cheapest hour on screen to the
+// dearest. Light and dark each get their own stops so the figure stays
+// readable on both themes; t is 0 at the low end and 1 at the high end.
+function priceInk(t: number): { light: string; dark: string } {
+  const u = Math.min(1, Math.max(0, t))
+  const mix = (a: number[], b: number[], k: number) => a.map((c, i) => Math.round(c + (b[i] - c) * k))
+  const hex = (rgb: number[]) => '#' + rgb.map((c) => c.toString(16).padStart(2, '0')).join('')
+  const sample = (stops: number[][]) =>
+    u <= 0.5 ? hex(mix(stops[0], stops[1], u * 2)) : hex(mix(stops[1], stops[2], (u - 0.5) * 2))
+  return {
+    light: sample([
+      [3, 105, 161],
+      [180, 83, 9],
+      [157, 55, 57],
+    ]),
+    dark: sample([
+      [125, 211, 252],
+      [251, 191, 36],
+      [252, 165, 165],
+    ]),
+  }
+}
+
 const modeColors: Record<string, { fill: string; ink: string }> = {
   manual: { fill: 'var(--d-mode-manual)', ink: 'var(--d-mode-manual-ink)' },
   draft: { fill: 'var(--d-mode-draft)', ink: 'var(--d-mode-draft-ink)' },
@@ -95,7 +118,9 @@ export function buildChartSvg(c: ChartInput): ChartLayout {
   const actionY = bottom + timeLanes * 16 + 11
   const modeY = actionY + 39
   const total = c.editable ? modeY + 23 : bottom + timeLanes * 16 + 12
-  const priceLanes = Math.max(1, Math.ceil(32 / step))
+  // Prices share one baseline. A second lane used to keep narrow
+  // columns from colliding and made the figures jump between hours.
+  const priceLanes = 1
   const labelRoom = s.price && c.values ? priceLanes * 14 + 12 : 12
   const priceStrip = combined && s.price && (s.pv || s.load || s.grid || batteryOn)
   const stripH = priceStrip ? labelRoom + 13 : 0
@@ -241,10 +266,29 @@ export function buildChartSvg(c: ChartInput): ChartLayout {
         '<rect data-mark="price" x="' + (bx(i) + step * 0.17) + '" y="' + priceY(p) + '" width="' + step * 0.66 +
         '" height="' + (priceBottom - priceY(p)) + '" fill="var(--d-price)" opacity="var(--d-price-opacity)"/>'
     })
-    visible.forEach((i, k) => {
+    const shown = visible.flatMap((i) => {
       const p = c.priceAt(i)
-      if (c.values && hasValue(p))
-        svg += text(fmt(p), x(i), top + 13 + (k % priceLanes) * 14, 'text-anchor="middle" class="d-price-label' + (p >= 12 ? ' is-high' : '') + '"')
+      return c.values && hasValue(p) ? [{ i, p }] : []
+    })
+    const lo = Math.min(...shown.map((v) => v.p))
+    const hi = Math.max(...shown.map((v) => v.p))
+    // A 12px "10,5" is wider than a narrow hour column, so the type
+    // shrinks with the column and the row stays on one line.
+    const priceFont = step < 36 ? Math.max(9, Math.min(12, Math.round(step * 0.36))) : 12
+    shown.forEach(({ i, p }) => {
+      const ink = priceInk(hi > lo ? (p - lo) / (hi - lo) : 0.5)
+      const size = priceFont === 12 ? '' : ';font-size:' + priceFont + 'px'
+      svg += text(
+        fmt(p),
+        x(i),
+        top + 13,
+        'text-anchor="middle" class="d-price-label" style="--ink-light:' +
+          ink.light +
+          ';--ink-dark:' +
+          ink.dark +
+          size +
+          '"',
+      )
     })
   }
   if (batteryOn || combined) {
