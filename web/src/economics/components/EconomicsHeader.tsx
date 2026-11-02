@@ -1,5 +1,4 @@
 import { PeriodPicker } from '../../dashboard/components/PeriodPicker'
-import { economicsAsOfLabel } from './formatAsOf'
 import { EconomicsPeriodPicker } from './EconomicsPeriodPicker'
 
 // parseDateString and formatDateString translate between the
@@ -42,9 +41,9 @@ type Props = {
   onWindowChange: (from: string, to: string) => void
   date: string
   onDateChange: (next: string) => void
-  // computedAt is the server's last compute timestamp (RFC3339). Empty
-  // hides the as-of line (no data, or a view that has no stamp).
-  computedAt?: string | null
+  // asOf is the «Дані станом на …» line (see economicsAsOfLabel). Null
+  // hides it (no data yet, or a view that has no compute stamp).
+  asOf?: string | null
 }
 
 export function EconomicsHeader({
@@ -56,9 +55,8 @@ export function EconomicsHeader({
   onWindowChange,
   date,
   onDateChange,
-  computedAt = null,
+  asOf = null,
 }: Props) {
-  const asOf = computedAt ? economicsAsOfLabel(computedAt) : null
   return (
     <header className="economics-header">
       <div className="economics-header-row">
