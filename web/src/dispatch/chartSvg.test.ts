@@ -77,6 +77,16 @@ describe('desk chart', () => {
     expect(svg).toMatch(/data-mark="pv" [^>]*stroke="var\(--d-pv-forecast\)"/)
   })
 
+  it('draws РДН prices on one line, tinted from cheap to dear', () => {
+    const { svg } = buildChartSvg(input())
+    const labels = [
+      ...svg.matchAll(/<text x="[^"]+" y="([^"]+)" text-anchor="middle" class="d-price-label" style="([^"]*)">/g),
+    ]
+    expect(labels.length).toBeGreaterThan(2)
+    expect(new Set(labels.map((m) => m[1])).size).toBe(1)
+    expect(new Set(labels.map((m) => m[2])).size).toBeGreaterThan(1)
+  })
+
   it('reports the geometry used for pointer hits', () => {
     const l = buildChartSvg(input())
     expect(l.first).toBe(-8)

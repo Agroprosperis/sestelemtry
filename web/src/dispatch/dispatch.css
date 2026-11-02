@@ -329,11 +329,8 @@
 .d-chart .d-price-label {
   font-size: 12px;
   font-weight: 500;
-  fill: #0369a1;
-}
-
-.d-chart .d-price-label.is-high {
-  fill: #9d3739;
+  font-variant-numeric: tabular-nums;
+  fill: var(--ink-light, #0369a1);
 }
 
 .d-chart .d-soc-axis {
@@ -384,7 +381,7 @@
 }
 
 [data-theme='dark'] .d-chart .d-price-label {
-  fill: #7dd3fc;
+  fill: var(--ink-dark, #7dd3fc);
 }
 
 [data-theme='dark'] .d-chart .d-power-label {
