@@ -27,6 +27,10 @@ export type EconomicsData = {
   // diagnostics (e.g. "load_mismatch:0.07").
   reconciled: boolean
   qualityFlags: string[]
+  // isFinal is true once the day has fully elapsed; computedAt (RFC3339)
+  // is when the server last computed it, null while nothing has loaded.
+  isFinal: boolean
+  computedAt: string | null
 }
 
 type Input = {
@@ -54,6 +58,8 @@ const EMPTY_DAY: DayValues = {
   skipDiagnostics: null,
   reconciled: false,
   qualityFlags: [],
+  isFinal: false,
+  computedAt: null,
 }
 
 export function useEconomicsData(input: Input): EconomicsData {
@@ -85,6 +91,8 @@ export function useEconomicsData(input: Input): EconomicsData {
             skipDiagnostics: null,
             reconciled: resp.reconciled ?? false,
             qualityFlags: resp.quality_flags ?? [],
+            isFinal: resp.is_final,
+            computedAt: resp.computed_at ?? null,
           },
           error: null,
         })

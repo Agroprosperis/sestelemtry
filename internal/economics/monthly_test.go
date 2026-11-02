@@ -9,6 +9,23 @@ import (
 
 func floatPtr(v float64) *float64 { return &v }
 
+// How current a period is comes from its newest day; a past day that was
+// recomputed later says nothing about it.
+func TestNewestComputedAt(t *testing.T) {
+	kyiv := time.FixedZone("EET", 2*3600)
+	at := func(hour int) time.Time { return time.Date(2026, 11, 2, hour, 0, 0, 0, time.UTC) }
+	daily := []DailyRecord{
+		{Day: time.Date(2026, 11, 2, 0, 0, 0, 0, kyiv), ComputedAt: at(11)},
+		{Day: time.Date(2026, 11, 1, 0, 0, 0, 0, kyiv), ComputedAt: at(12)},
+	}
+	if got := newestComputedAt(daily); !got.Equal(at(11)) {
+		t.Fatalf("newestComputedAt = %v, want %v (the newest day's)", got, at(11))
+	}
+	if !newestComputedAt(nil).IsZero() {
+		t.Fatal("no days must give zero")
+	}
+}
+
 // TestAggregateMonthCountsFlaggedDays pins which day-level quality flags
 // mark a day as approximate in the month rollup: counter-issue flags
 // (import_lag / load_mismatch / reconcile_rejected) count, routine

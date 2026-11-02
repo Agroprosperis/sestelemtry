@@ -25,6 +25,12 @@
   flex-wrap: wrap;
 }
 
+.economics-as-of {
+  margin: 8px 0 0;
+  color: var(--text-subtle);
+  font-size: 13px;
+}
+
 /* The DAM refresh runs from the «Сервіс» menu, which closes on click —
    this strip carries the in-flight / error lifecycle instead. */
 .economics-dam-status {

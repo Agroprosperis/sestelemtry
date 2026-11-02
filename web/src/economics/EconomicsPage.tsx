@@ -412,6 +412,15 @@ export function EconomicsPage() {
         }}
         date={date}
         onDateChange={setDate}
+        computedAt={
+          range === 'day' && !data.loading
+            ? data.computedAt
+            : range === 'month' && !monthly.loading
+              ? (monthly.month?.computed_at ?? null)
+              : range === 'year' && !annual.loading
+                ? (annual.year?.computed_at ?? null)
+                : null
+        }
       />
 
       {tariffsOpen && (

@@ -466,6 +466,23 @@ type StoredMonth struct {
 	// cycleReserveThresholdUah), sorted by reserve desc, each carrying the
 	// full hourly optimal-vs-fact schedule the cycle chart renders (§1.3).
 	Cycles []UzeCycle
+
+	// ComputedAt is when the month's newest stored day was last written:
+	// the moment its numbers are current as of. Zero without data.
+	ComputedAt time.Time
+}
+
+// newestComputedAt returns the ComputedAt of the latest day in daily.
+// A past day recomputed later says nothing about how current the newest
+// one is, so this is not the maximum over all days.
+func newestComputedAt(daily []DailyRecord) time.Time {
+	var newest DailyRecord
+	for _, d := range daily {
+		if d.Day.After(newest.Day) {
+			newest = d
+		}
+	}
+	return newest.ComputedAt
 }
 
 // socRun is one stretch of hours the monthly SOC dynamic program can
@@ -1003,5 +1020,6 @@ func (s *Service) getMonth(ctx context.Context, orgID, month, tz string, perDay 
 
 	result := aggregateMonth(month, loc, daily, hourly, schedule.EssRatingsFor, perDay)
 	result.OrganizationID = orgID
+	result.ComputedAt = newestComputedAt(daily)
 	return result, nil
 }

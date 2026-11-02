@@ -75,6 +75,19 @@ type EconomicsDailyResponse struct {
 	Reconciled     bool                                `json:"reconciled"`
 	QualityFlags   []string                            `json:"quality_flags,omitempty"`
 	Reconciliation map[string]economics.ReconcileField `json:"reconciliation,omitempty"`
+
+	// ComputedAt is when the day was last computed (RFC3339, UTC): for a
+	// day still running, the moment its numbers are current as of.
+	ComputedAt string `json:"computed_at,omitempty"`
+}
+
+// computedAtJSON renders an economics ComputedAt for the wire; zero (no
+// stored data) stays empty.
+func computedAtJSON(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.UTC().Format(time.RFC3339)
 }
 
 func economicsHourToJSON(r *economics.HourRow) *EconomicsHour {
@@ -156,6 +169,11 @@ func (h *Handlers) economicsDaily(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	computedAt := day.ComputedAt
+	if computedAt.IsZero() {
+		// GetDay computed (and saved) the day just now.
+		computedAt = time.Now()
+	}
 	resp := EconomicsDailyResponse{
 		OrganizationID: orgID,
 		Date:           dateStr,
@@ -165,6 +183,7 @@ func (h *Handlers) economicsDaily(w http.ResponseWriter, r *http.Request) {
 		Reconciled:     day.Totals.Reconciled,
 		QualityFlags:   day.Totals.QualityFlags,
 		Reconciliation: day.Totals.Reconciliation,
+		ComputedAt:     computedAtJSON(computedAt),
 	}
 	for i, row := range day.Rows {
 		resp.Hours[i] = economicsHourToJSON(row)
@@ -669,6 +688,9 @@ type EconomicsMonthlyResponse struct {
 	Days           []EconomicsMonthlyDay       `json:"days"`
 	HourlyMargin   []EconomicsMonthlyDayMargin `json:"hourly_margin"`
 	UzeCycles      []EconomicsUzeCycle         `json:"uze_cycles"`
+	// ComputedAt is when the month's newest day was last computed
+	// (RFC3339, UTC); empty without data.
+	ComputedAt string `json:"computed_at,omitempty"`
 }
 
 // marginCellsToJSON maps a row of heatmap cells. Both grids — the
@@ -853,6 +875,7 @@ func (h *Handlers) economicsMonthly(w http.ResponseWriter, r *http.Request) {
 		Days:           make([]EconomicsMonthlyDay, 0, len(month.Days)),
 		HourlyMargin:   make([]EconomicsMonthlyDayMargin, 0, len(month.HourlyMargin)),
 		UzeCycles:      make([]EconomicsUzeCycle, 0, len(month.Cycles)),
+		ComputedAt:     computedAtJSON(month.ComputedAt),
 	}
 	for _, d := range month.Days {
 		resp.Days = append(resp.Days, monthlyDayToJSON(d))
@@ -910,6 +933,9 @@ type EconomicsAnnualResponse struct {
 	Months              []EconomicsAnnualMonthRollup `json:"months"`
 	Quarters            []EconomicsAnnualQuarter     `json:"quarters"`
 	MonthlyMargin       []EconomicsAnnualMonthMargin `json:"monthly_margin"`
+	// ComputedAt is when the window's newest day was last computed
+	// (RFC3339, UTC); empty without data.
+	ComputedAt string `json:"computed_at,omitempty"`
 }
 
 // economicsAnnual serves a calendar-year rollup of the per-month
@@ -985,6 +1011,7 @@ func (h *Handlers) economicsAnnual(w http.ResponseWriter, r *http.Request) {
 		Months:              make([]EconomicsAnnualMonthRollup, 0, len(year.Months)),
 		Quarters:            make([]EconomicsAnnualQuarter, 0, len(year.Quarters)),
 		MonthlyMargin:       make([]EconomicsAnnualMonthMargin, 0, len(year.MonthlyMargin)),
+		ComputedAt:          computedAtJSON(year.ComputedAt),
 	}
 	for _, m := range year.Months {
 		resp.Months = append(resp.Months, EconomicsAnnualMonthRollup{
