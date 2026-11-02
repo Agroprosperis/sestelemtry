@@ -130,9 +130,22 @@ export function EconomicsDayTop({ totals: t, rows, tariffs, pvPlan = null }: Pro
   const essChargeAndWear = t.essNet - t.revenueEssSelf - t.revenueEssExport
 
   // Енергетичний баланс.
-  const hoursWithData = Math.max(1, t.hoursWithData)
+  // The rest of today comes back as all-zero rows that already carry the
+  // day's РДН price, so the average counts only priced hours with any
+  // energy flow.
+  const loadHours = rows.filter(
+    (r) =>
+      r !== null &&
+      r.rdnUahPerKwh !== null &&
+      (r.economics.load > 0 ||
+        r.flow.gridImport > 0 ||
+        r.flow.gridExport > 0 ||
+        r.flow.pv > 0 ||
+        r.flow.essCharged > 0 ||
+        r.flow.essDischarged > 0),
+  ).length
   const peakLoadKw = rows.reduce((m, r) => (r ? Math.max(m, r.economics.load) : m), 0)
-  const avgLoadKw = t.load / hoursWithData
+  const avgLoadKw = t.load / Math.max(1, loadHours)
   const importShare = t.load > 0 ? t.gridImport / t.load : NaN
   const exportShare = t.pv > 0 ? t.gridExport / t.pv : NaN
   const ownEnergy = t.pvToLoad + t.essToLoad
