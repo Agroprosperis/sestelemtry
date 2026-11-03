@@ -11,6 +11,9 @@ type Props = {
   // for a picker pinned to the right of its bar, 'end' for one pinned
   // to the left.
   todaySide?: 'start' | 'end'
+  // aheadDays lets the day picker move this many civil days past today.
+  // Month and year stay capped at the current period.
+  aheadDays?: number
 }
 
 // MIN_REASONABLE_YEAR is the floor we use to reject mid-edit garbage
@@ -98,11 +101,17 @@ function DateSegmentInput({
   )
 }
 
-export function PeriodPicker({ preset, anchor, onChange, todaySide = 'start' }: Props) {
+export function PeriodPicker({ preset, anchor, onChange, todaySide = 'start', aheadDays = 0 }: Props) {
   const id = useId()
   const now = useMemo(() => new Date(), [])
-  const todayMax = useMemo(() => toDateInputValue(now), [now])
   const monthMax = useMemo(() => toMonthInputValue(now), [now])
+  const dayHorizon = useMemo(() => {
+    const d = startOfPeriod('day', now)
+    d.setDate(d.getDate() + (preset === 'day' ? aheadDays : 0))
+    return d
+  }, [now, preset, aheadDays])
+  const dayMax = toDateInputValue(dayHorizon)
+  const atDayHorizon = startOfPeriod('day', anchor).getTime() >= dayHorizon.getTime()
   const currentYear = now.getFullYear()
   const yearOptions = useMemo(() => {
     const start = currentYear - 9
@@ -123,10 +132,10 @@ export function PeriodPicker({ preset, anchor, onChange, todaySide = 'start' }: 
         id={id}
         type="date"
         committed={committed}
-        max={todayMax}
+        max={dayMax}
         onCommit={(next) => {
           const parsed = parseDateInputValue(next)
-          if (parsed) onChange(parsed)
+          if (parsed && parsed.getTime() <= dayHorizon.getTime()) onChange(parsed)
         }}
       />
     )
@@ -184,7 +193,7 @@ export function PeriodPicker({ preset, anchor, onChange, todaySide = 'start' }: 
           className="period-nav"
           onClick={() => shift(1)}
           aria-label="Next period"
-          disabled={isAtCurrent}
+          disabled={preset === 'day' ? atDayHorizon : isAtCurrent}
         >
           ›
         </button>

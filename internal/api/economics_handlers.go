@@ -13,6 +13,7 @@ import (
 
 	"github.com/nesh/sestelemetry/internal/auth"
 	"github.com/nesh/sestelemetry/internal/economics"
+	"github.com/nesh/sestelemetry/internal/pvplan"
 )
 
 // demoOrgID is the synthetic demo organization shipped in the example
@@ -259,11 +260,10 @@ type UzePlanResponse struct {
 	Warnings []string      `json:"warnings,omitempty"`
 }
 
-// uzePlan serves the recommended УЗЕ dispatch for one day — what an
-// optimally-run battery would have done given that day's actual PV, load
-// and РДН prices. It is a retrospective benchmark (perfect foresight over
-// realised flows), not a forecast: without a load plan there is nothing
-// to optimise against for hours that have not happened yet.
+// uzePlan serves the recommended УЗЕ dispatch for one day. A past day or
+// today is the retrospective benchmark (perfect foresight over realised
+// flows). The next civil day in the request timezone is a forecast: today's
+// consumption profile, the generation forecast and that day's РДН prices.
 //
 //	GET /api/v1/uze-plan?organization_id=&date=YYYY-MM-DD&tz=
 func (h *Handlers) uzePlan(w http.ResponseWriter, r *http.Request) {
@@ -290,12 +290,20 @@ func (h *Handlers) uzePlan(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	if _, err := time.ParseInLocation("2006-01-02", dateStr, loc); err != nil {
+	parsed, err := time.ParseInLocation("2006-01-02", dateStr, loc)
+	if err != nil {
 		http.Error(w, "date must be YYYY-MM-DD", http.StatusBadRequest)
 		return
 	}
 
-	plan, err := h.economics.GetDayPlan(r.Context(), orgID, dateStr, loc.String())
+	now := time.Now().In(loc)
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
+	var plan economics.DayPlan
+	if parsed.Equal(today.AddDate(0, 0, 1)) {
+		plan, err = h.economics.GetForecastDayPlan(r.Context(), orgID, dateStr, loc.String(), now, h.forecastPV(r.Context(), orgID, parsed))
+	} else {
+		plan, err = h.economics.GetDayPlan(r.Context(), orgID, dateStr, loc.String())
+	}
 	if err != nil {
 		h.log.Error("api_uze_plan", "organization_id", orgID, "date", dateStr, "tz", loc.String(), "err", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
@@ -345,6 +353,27 @@ func (h *Handlers) uzePlan(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// forecastPV is tomorrow's generation forecast in kWh by hour start.
+// A missing client, an unknown site, or a code that forecasts the whole
+// elevator (not this site) yields nil: the plan then runs on consumption
+// and prices alone, and a fetch failure is logged rather than failing
+// the recommendation.
+func (h *Handlers) forecastPV(ctx context.Context, orgID string, day time.Time) map[int]float64 {
+	if h.pvPlan == nil || !pvplan.CodeCoversDay(orgID, day) {
+		return nil
+	}
+	code, ok := pvplan.ElevatorCodeFor(orgID)
+	if !ok {
+		return nil
+	}
+	byHour, err := h.pvPlan.DayHourly(ctx, code, day)
+	if err != nil {
+		h.log.Error("api_uze_plan_forecast_pv", "organization_id", orgID, "date", day.Format("2006-01-02"), "err", err)
+		return nil
+	}
+	return byHour
 }
 
 // EconomicsMonthExtreme is the best / worst day of the month.

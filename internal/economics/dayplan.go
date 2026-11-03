@@ -35,6 +35,10 @@ const (
 	WarnPartialPrices    = "PARTIAL_RDN"
 	WarnNoSoc            = "NO_SOC"
 	WarnTelemetryAnomaly = "TELEMETRY_ANOMALY"
+	// WarnForecastLoad says the consumption shape was copied from today
+	// (and yesterday, for hours today has not closed), not measured on
+	// the day being planned.
+	WarnForecastLoad = "FORECAST_LOAD"
 )
 
 // DayPlanHour is one hour of the recommended УЗЕ dispatch.
@@ -495,4 +499,171 @@ func (s *Service) GetDayPlan(ctx context.Context, orgID, date, tz string) (DayPl
 	plan.OrganizationID = orgID
 	plan.Tz = loc.String()
 	return plan, nil
+}
+
+// GetForecastDayPlan is the day-ahead recommendation for a date that has
+// not happened yet. Consumption is today's profile (an hour today has not
+// closed yet is taken from yesterday), generation is the supplied forecast
+// in kWh keyed by hour 0..23, and prices are that day's РДН. The starting
+// SOC is the latest known residual, not a projection to midnight. Fact is
+// not compared: there is no fact yet.
+//
+// Today's stored hours are only as complete as the last recompute of the
+// day (economics.today_interval apart), so an hour counts as closed when
+// it ended before that recompute, not merely before now.
+//
+// Available is false when there is no consumption profile, no forecast
+// generation and no price — nothing to draw a plan from.
+func (s *Service) GetForecastDayPlan(ctx context.Context, orgID, date, tz string, now time.Time, pvByHour map[int]float64) (DayPlan, error) {
+	loc, err := loadLocation(tz)
+	if err != nil {
+		return DayPlan{}, err
+	}
+	parsed, err := time.ParseInLocation("2006-01-02", date, loc)
+	if err != nil {
+		return DayPlan{}, fmt.Errorf("date must be YYYY-MM-DD")
+	}
+	dayStart := time.Date(parsed.Year(), parsed.Month(), parsed.Day(), 0, 0, 0, 0, loc)
+	todayStart := dayStart.AddDate(0, 0, -1)
+
+	today, err := s.backend.LoadHourlyRange(ctx, orgID, todayStart, dayStart)
+	if err != nil {
+		return DayPlan{}, fmt.Errorf("load today: %w", err)
+	}
+	yesterday, err := s.backend.LoadHourlyRange(ctx, orgID, todayStart.AddDate(0, 0, -1), todayStart)
+	if err != nil {
+		return DayPlan{}, fmt.Errorf("load yesterday: %w", err)
+	}
+	dam, err := s.backend.DAMPrices(ctx, DAMZone, dayStart, dayStart)
+	if err != nil {
+		return DayPlan{}, fmt.Errorf("dam prices: %w", err)
+	}
+	measuredUntil := now
+	if days, err := s.backend.LoadDailyRange(ctx, orgID, todayStart, todayStart); err == nil {
+		for _, d := range days {
+			if !d.ComputedAt.IsZero() && d.ComputedAt.Before(measuredUntil) {
+				measuredUntil = d.ComputedAt
+			}
+		}
+	}
+
+	schedule, _ := s.backend.TariffSchedule(ctx, orgID)
+	tariffs, ok := schedule.ResolveForDay(dayStart)
+	if !ok {
+		tariffs = DefaultTariffs
+	}
+	ratings := schedule.EssRatingsFor(dayStart).withPowerFallback()
+
+	hours, haveLoad, havePV, havePrice, startKwh := syntheticForecastHours(dayStart, todayStart, measuredUntil.In(loc), today, yesterday, pvByHour, buildPriceMap(dam), tariffs)
+	plan := DayPlan{OrganizationID: orgID, Date: date, Tz: loc.String(), CapacityKwh: ratings.CapacityKwh, PowerKw: ratings.PowerLimitKw}
+	if !haveLoad && !havePV && !havePrice {
+		return plan, nil
+	}
+	if startKwh != nil {
+		v := *startKwh
+		hours[0].EssRemainingKwhStart = &v
+	}
+
+	params := deriveOptimumParams(hours, ratings.CapacityKwh, ratings.DegradationUahPerKwh, ratings.PowerLimitKw, ratings.RoundtripEff)
+	dayOpts := buildDayOpts(hours, loc, nil)
+	plan = buildDayPlan(date, dayOpts[date], params, ratings.CapacityKwh, ratings.PowerLimitKw, loc)
+	plan.OrganizationID = orgID
+	plan.Tz = loc.String()
+	if haveLoad {
+		plan.Warnings = append(plan.Warnings, WarnForecastLoad)
+	}
+	return plan, nil
+}
+
+// syntheticForecastHours builds the 24 hours the day-ahead optimizer sees.
+// An hour of today is closed once its end is at or before measuredUntil; a
+// still-open hour keeps yesterday's consumption so the profile is a full
+// day. Hours are built from the local clock so a DST change cannot shift
+// them.
+func syntheticForecastHours(dayStart, todayStart, measuredUntil time.Time, today, yesterday []HourlyRecord, pvByHour, prices map[int]float64, tariffs Tariffs) (hours []HourlyRecord, haveLoad, havePV, havePrice bool, start *float64) {
+	loc := dayStart.Location()
+	byToday := indexForecastHours(today, loc)
+	byYesterday := indexForecastHours(yesterday, loc)
+	haveLoad = len(byToday)+len(byYesterday) > 0
+	for _, v := range pvByHour {
+		if v > 0 {
+			havePV = true
+			break
+		}
+	}
+	havePrice = len(prices) > 0
+
+	hours = make([]HourlyRecord, 24)
+	for h := 0; h < 24; h++ {
+		load := 0.0
+		hourEnd := time.Date(todayStart.Year(), todayStart.Month(), todayStart.Day(), h+1, 0, 0, 0, loc)
+		closed := !hourEnd.After(measuredUntil)
+		if src, ok := forecastLoadSource(h, closed, byToday, byYesterday); ok {
+			load = src.PVToLoad + src.GridToLoad + src.EssToLoad
+		}
+		pv := 0.0
+		if pvByHour != nil {
+			pv = pvByHour[h]
+		}
+		surplus := math.Max(pv-load, 0)
+		rec := HourlyRecord{
+			HourStart:  time.Date(dayStart.Year(), dayStart.Month(), dayStart.Day(), h, 0, 0, 0, loc),
+			PV:         pv,
+			PVToLoad:   math.Min(pv, load),
+			PVToGrid:   surplus,
+			GridToLoad: math.Max(load-pv, 0),
+		}
+		if price, ok := prices[h]; ok {
+			p := price
+			rec.Rdn = &p
+			rec.ImportPrice, rec.ExportPrice = ImportExportPrices(tariffs, p)
+		}
+		hours[h] = rec
+	}
+	start = latestForecastResidual(byToday)
+	if start == nil {
+		start = latestForecastResidual(byYesterday)
+	}
+	return hours, haveLoad, havePV, havePrice, start
+}
+
+func indexForecastHours(recs []HourlyRecord, loc *time.Location) map[int]HourlyRecord {
+	out := make(map[int]HourlyRecord, len(recs))
+	for _, r := range recs {
+		out[r.HourStart.In(loc).Hour()] = r
+	}
+	return out
+}
+
+func forecastLoadSource(hour int, closed bool, today, yesterday map[int]HourlyRecord) (HourlyRecord, bool) {
+	if closed {
+		if r, ok := today[hour]; ok {
+			return r, true
+		}
+	}
+	if r, ok := yesterday[hour]; ok {
+		return r, true
+	}
+	if r, ok := today[hour]; ok {
+		return r, true
+	}
+	return HourlyRecord{}, false
+}
+
+func latestForecastResidual(byHour map[int]HourlyRecord) *float64 {
+	best := -1
+	var v float64
+	for h, r := range byHour {
+		if r.EssRemainingKwhStart == nil {
+			continue
+		}
+		if h > best {
+			best = h
+			v = *r.EssRemainingKwhStart
+		}
+	}
+	if best < 0 {
+		return nil
+	}
+	return &v
 }

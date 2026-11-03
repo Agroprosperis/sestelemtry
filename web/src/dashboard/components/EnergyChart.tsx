@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Area,
   Bar,
@@ -122,6 +122,21 @@ function hourlyDamAreas(
   return out
 }
 
+// emptyDayRows is the 5-minute axis of one day, used when the selected
+// day has no power telemetry (tomorrow) so prices and the forecast
+// still have somewhere to land.
+function emptyDayRows(): PowerChartRow[] {
+  const out: PowerChartRow[] = []
+  for (let i = 0; i < 24 * DAY_TICKS_PER_HOUR; i++) {
+    const hour = Math.floor(i / DAY_TICKS_PER_HOUR)
+    const minute = (i % DAY_TICKS_PER_HOUR) * 5
+    out.push({
+      time: `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`,
+    })
+  }
+  return out
+}
+
 function damPriceDomain(areas: HourlyDamArea[]): [number, number] {
   if (areas.length === 0) return [0, 0]
   let max = 0
@@ -178,7 +193,7 @@ export function EnergyChart({
   // by `barSize`, instead of 12 stacked thin bars per hour.
   const planBuckets = useMemo<Map<number, AiPlanBucket>>(() => aiPlanBuckets(aiPlan ?? null), [aiPlan])
   const dayData = useMemo<PowerChartRow[]>(() => {
-    const rows = powerSeries ?? []
+    const rows = powerSeries && powerSeries.length > 0 ? powerSeries : emptyDayRows()
     const priceByTime = new Map<string, number | null>()
     for (const row of damSeries ?? []) priceByTime.set(String(row.time), row.price)
     const socByTime = new Map<string, number | null>()
@@ -233,6 +248,35 @@ export function EnergyChart({
       return typeof v === 'number' && Number.isFinite(v)
     }),
   )
+  // A day that has not happened yet (the calendar set to tomorrow) has no
+  // power telemetry. The chart still draws when a price, a generation
+  // forecast or the recommendation is present.
+  const hasOutlook =
+    hasPvForecast || hourlyAreas.length > 0 || hasAiPlan || hasAiLoad
+  const showChart = dayHasData || hasOutlook
+  // On a telemetry-less day the recommendation is the chart, not an
+  // opt-in overlay, so it starts visible. Leaving that day restores the
+  // usual hidden default. A legend click in between still sticks. Judged
+  // only once the day has loaded: mid-load every day looks telemetry-less.
+  // A plan overlay that is visible by default (control mode) is left alone.
+  const outlook = !loading && !dayHasData && hasOutlook
+  const keepPlanVisible = planOverlay?.defaultVisible ?? false
+  const wasOutlook = useRef(false)
+  useEffect(() => {
+    if (keepPlanVisible || outlook === wasOutlook.current) return
+    wasOutlook.current = outlook
+    setHiddenSeries((prev) => {
+      const next = new Set(prev)
+      if (outlook) {
+        next.delete(AI_ESS_KEY)
+        next.delete(AI_SOC_KEY)
+      } else {
+        next.add(AI_ESS_KEY)
+        next.add(AI_SOC_KEY)
+      }
+      return next
+    })
+  }, [outlook, keepPlanVisible])
 
   // dayLegendItems pins the legend order explicitly: power lines first
   // (in their canonical PV/ESS/Grid/Load order), then the DAM price band,
@@ -299,11 +343,12 @@ export function EnergyChart({
   return (
     <div className="chart-card">
       <h2>{planOverlay?.title ?? 'Energy Trend'}</h2>
-      <EnergySummary summary={summary} loading={loading} />
+      {/* A day that has not happened has no fact to sum. */}
+      {!outlook && <EnergySummary summary={summary} loading={loading} />}
       <div className="chart-wrap">
         {loading ? (
           <ChartSkeleton preset="day" />
-        ) : !dayHasData ? (
+        ) : !showChart ? (
           <p className="chart-placeholder">No data available for selected range.</p>
         ) : (
             <ResponsiveContainer width="100%" height="100%" debounce={RESIZE_DEBOUNCE_MS}>

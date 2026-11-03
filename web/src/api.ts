@@ -688,7 +688,8 @@ export type UzePlanResponse = {
 
 // fetchUzeDayPlan reads the recommended УЗЕ dispatch for one day — what
 // an optimally-run battery would have done given that day's actual PV,
-// load and РДН prices. Retrospective benchmark, not a forecast.
+// load and РДН prices. For tomorrow the server plans ahead instead: today's
+// consumption profile, the generation forecast and tomorrow's РДН.
 export async function fetchUzeDayPlan(
   input: { organizationID: string; date: string; tz?: string },
   signal?: AbortSignal,

@@ -42,6 +42,7 @@ export function DashboardControls({
         anchor={anchor}
         onChange={onAnchorChange}
         todaySide={presetLocked ? 'end' : 'start'}
+        aheadDays={preset === 'day' ? 1 : 0}
       />
       {onDebugToggle && (
       <button

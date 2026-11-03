@@ -588,3 +588,141 @@ func TestGetDayPlanRejectsBadDate(t *testing.T) {
 		t.Error("expected an error for a non-ISO date")
 	}
 }
+
+func TestGetForecastDayPlanChargesCheapAndDischargesDear(t *testing.T) {
+	b, loc := newKyivBackend(t)
+	tomorrow := time.Date(2026, 4, 2, 0, 0, 0, 0, loc)
+	today := tomorrow.AddDate(0, 0, -1)
+	rem := 80.0
+	hourly := make([]HourlyRecord, 24)
+	dam := make([]DAMHour, 24)
+	for h := 0; h < 24; h++ {
+		hourly[h] = HourlyRecord{
+			HourStart:            today.Add(time.Duration(h) * time.Hour),
+			GridToLoad:           100,
+			EssRemainingKwhStart: &rem,
+		}
+		price := 5000.0
+		switch {
+		case h >= 1 && h <= 3:
+			price = 1000
+		case h >= 19 && h <= 21:
+			price = 15000
+		}
+		p := price
+		dam[h] = DAMHour{DeliveryDate: tomorrow, Hour: h + 1, Zone: DAMZone, PriceUAHPerMWh: &p}
+	}
+	b.hourly = hourly
+	b.dam = dam
+
+	plan, err := NewService(b).GetForecastDayPlan(context.Background(), "ze", "2026-04-02", loc.String(), tomorrow, nil)
+	if err != nil {
+		t.Fatalf("GetForecastDayPlan: %v", err)
+	}
+	if !plan.Available {
+		t.Fatal("expected an available plan")
+	}
+	var night, evening float64
+	for _, h := range plan.Hours {
+		if h.Hour >= 1 && h.Hour <= 3 {
+			night += h.RecommendedEssKw
+		}
+		if h.Hour >= 19 && h.Hour <= 21 {
+			evening += h.RecommendedEssKw
+		}
+	}
+	if night >= 0 {
+		t.Errorf("cheap night ess power = %.1f, want charging (negative)", night)
+	}
+	if evening <= 0 {
+		t.Errorf("dear evening ess power = %.1f, want discharging (positive)", evening)
+	}
+	found := false
+	for _, w := range plan.Warnings {
+		if w == WarnForecastLoad {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("warnings %v, want %s", plan.Warnings, WarnForecastLoad)
+	}
+}
+
+func TestForecastHoursUseYesterdayUntilTodayCloses(t *testing.T) {
+	loc := time.FixedZone("Kyiv", 3*3600)
+	tomorrow := time.Date(2026, 4, 2, 0, 0, 0, 0, loc)
+	today := tomorrow.AddDate(0, 0, -1)
+	yesterday := today.AddDate(0, 0, -1)
+	// 10:00 today: hours 0..9 are closed, hour 10 is still open.
+	now := today.Add(10 * time.Hour)
+	var todayRecs, yestRecs []HourlyRecord
+	for h := 0; h < 24; h++ {
+		todayRecs = append(todayRecs, HourlyRecord{HourStart: today.Add(time.Duration(h) * time.Hour), GridToLoad: 10})
+		yestRecs = append(yestRecs, HourlyRecord{HourStart: yesterday.Add(time.Duration(h) * time.Hour), GridToLoad: 80})
+	}
+	hours, _, _, _, _ := syntheticForecastHours(tomorrow, today, now, todayRecs, yestRecs, nil, nil, flatTariffs)
+	if got := hours[9].GridToLoad; got != 10 {
+		t.Errorf("closed hour 9 load = %v, want today's 10", got)
+	}
+	if got := hours[10].GridToLoad; got != 80 {
+		t.Errorf("open hour 10 load = %v, want yesterday's 80", got)
+	}
+}
+
+// The today pass runs every economics.today_interval, so an hour that
+// ended after the last recompute is still partial in storage and must not
+// stand for tomorrow's consumption.
+func TestGetForecastDayPlanTrustsOnlyHoursBeforeTheLastRecompute(t *testing.T) {
+	b, loc := newKyivBackend(t)
+	tomorrow := time.Date(2026, 4, 2, 0, 0, 0, 0, loc)
+	today := tomorrow.AddDate(0, 0, -1)
+	yesterday := today.AddDate(0, 0, -1)
+	var hourly []HourlyRecord
+	for h := 0; h < 24; h++ {
+		// Today's stored hour 9 was written at 09:05: five minutes of load.
+		todayLoad := 100.0
+		if h == 9 {
+			todayLoad = 8
+		}
+		hourly = append(hourly,
+			HourlyRecord{HourStart: yesterday.Add(time.Duration(h) * time.Hour), GridToLoad: 90},
+			HourlyRecord{HourStart: today.Add(time.Duration(h) * time.Hour), GridToLoad: todayLoad},
+		)
+	}
+	b.hourly = hourly
+	b.saved = map[string]StoredDay{
+		today.Format("2006-01-02"): {Day: today, ComputedAt: today.Add(9*time.Hour + 5*time.Minute)},
+	}
+	p := 5000.0
+	b.dam = []DAMHour{{DeliveryDate: tomorrow, Hour: 10, Zone: DAMZone, PriceUAHPerMWh: &p}}
+
+	now := today.Add(11*time.Hour + 30*time.Minute)
+	plan, err := NewService(b).GetForecastDayPlan(context.Background(), "ze", "2026-04-02", loc.String(), now, nil)
+	if err != nil {
+		t.Fatalf("GetForecastDayPlan: %v", err)
+	}
+	if !plan.Available {
+		t.Fatal("expected an available plan")
+	}
+	var total float64
+	for _, h := range plan.Hours {
+		if h.RecommendedLoadKw != nil {
+			total += *h.RecommendedLoadKw
+		}
+	}
+	// Hours 0..8 from today (100 each), 9..23 from yesterday (90 each).
+	if want := 9*100.0 + 15*90.0; math.Abs(total-want) > 1e-6 {
+		t.Errorf("Σ planned load = %.1f, want %.1f (partial hour 9 must come from yesterday)", total, want)
+	}
+}
+
+func TestGetForecastDayPlanUnavailableWithoutInputs(t *testing.T) {
+	b, loc := newKyivBackend(t)
+	plan, err := NewService(b).GetForecastDayPlan(context.Background(), "ze", "2026-04-02", loc.String(), time.Date(2026, 4, 2, 0, 0, 0, 0, loc), nil)
+	if err != nil {
+		t.Fatalf("GetForecastDayPlan: %v", err)
+	}
+	if plan.Available {
+		t.Fatal("expected no plan when consumption, forecast and prices are all missing")
+	}
+}

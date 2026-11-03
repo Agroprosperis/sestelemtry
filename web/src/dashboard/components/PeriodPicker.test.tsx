@@ -22,6 +22,29 @@ describe('PeriodPicker', () => {
     expect(onChange).toHaveBeenCalledWith(startOfPeriod('month', new Date()))
   })
 
+  it('lets the day picker move one day ahead when asked', () => {
+    const onChange = vi.fn()
+    const today = startOfPeriod('day', new Date())
+    render(<PeriodPicker preset="day" anchor={today} onChange={onChange} aheadDays={1} />)
+
+    expect(screen.getByRole('button', { name: 'Next period' })).toBeEnabled()
+    fireEvent.click(screen.getByRole('button', { name: 'Next period' }))
+
+    const next = onChange.mock.calls[0][0] as Date
+    const tomorrow = new Date(today)
+    tomorrow.setDate(tomorrow.getDate() + 1)
+    expect(next.getTime()).toBe(tomorrow.getTime())
+  })
+
+  it('stops the day picker on tomorrow', () => {
+    const today = startOfPeriod('day', new Date())
+    const tomorrow = new Date(today)
+    tomorrow.setDate(tomorrow.getDate() + 1)
+    render(<PeriodPicker preset="day" anchor={tomorrow} onChange={() => {}} aheadDays={1} />)
+
+    expect(screen.getByRole('button', { name: 'Next period' })).toBeDisabled()
+  })
+
   it('offers no jump while the current period is already shown', () => {
     render(<PeriodPicker preset="day" anchor={new Date()} onChange={() => {}} />)
 

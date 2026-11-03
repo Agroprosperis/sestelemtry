@@ -614,11 +614,13 @@ paths:
         dynamic-programming optimizer (project_net accounting) that backs
         the monthly "факт vs оптимум" reserve.
 
-        This is a retrospective benchmark, not a forecast: the optimizer
-        runs on the day's ACTUAL PV, load and РДН prices, so it answers
-        "how should the battery have been run" rather than "what will
-        happen". Hours without a РДН price are not tradable and the
-        battery holds through them.
+        For today and past days this is a retrospective benchmark: the
+        optimizer runs on the day's ACTUAL PV, load and РДН prices, so it
+        answers "how should the battery have been run". For the next civil
+        day in tz it plans ahead on today's consumption profile, the PV
+        generation forecast and that day's РДН prices, and adds the
+        FORECAST_LOAD warning. Hours without a РДН price are not tradable
+        and the battery holds through them.
 
         recommended_ess_kw is signed like the telemetry metric
         active_ess_power_kw (positive = discharge, negative = charge) and,
