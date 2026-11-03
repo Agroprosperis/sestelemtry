@@ -89,6 +89,21 @@ describe('PvPlanSection', () => {
     expect(screen.getByLabelText('Нахил орієнтації 1')).toBeDisabled()
   })
 
+  // Only a station whose planes still describe its whole elevator (ДЕ
+  // since the split) carries the date; nobody else is shown the field.
+  it('shows the whole-elevator date only where it is set', async () => {
+    client.fetchPvStation.mockResolvedValue(response(station))
+    const { unmount } = render(<PvPlanSection organizationID="ab" canEdit ratedKw={null} />)
+    await screen.findByText(/План на сьогодні/)
+    expect(screen.queryByLabelText('План усього елеватора з')).toBeNull()
+    unmount()
+
+    client.fetchPvStation.mockResolvedValue(response({ ...station, organization_id: 'de', whole_elevator_from: '2026-09-24' }))
+    render(<PvPlanSection organizationID="de" canEdit ratedKw={null} />)
+    expect(await screen.findByLabelText('План усього елеватора з')).toHaveValue('2026-09-24')
+    expect(screen.getByText(/площини в цьому паспорті поки описують увесь елеватор/)).toBeInTheDocument()
+  })
+
   it('warns when the planes stray from the FusionSolar nameplate', async () => {
     client.fetchPvStation.mockResolvedValue(response(station))
     render(<PvPlanSection organizationID="ab" canEdit ratedKw={461.97} />)

@@ -158,7 +158,13 @@ export function PvPlanSection({ organizationID, canEdit, ratedKw }: Props) {
         disabled={disabled}
         onChange={(source) => update({ source })}
       />
-      <StationFields form={form} defaults={resp.defaults} disabled={disabled} onChange={update} />
+      <StationFields
+        form={form}
+        defaults={resp.defaults}
+        wholeElevator={saved.wholeElevatorFrom !== '' || form.wholeElevatorFrom !== ''}
+        disabled={disabled}
+        onChange={update}
+      />
       <OrientationTable
         rows={form.rows}
         pacLimitKw={form.pacLimitKw}

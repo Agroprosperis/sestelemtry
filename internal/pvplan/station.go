@@ -139,7 +139,7 @@ func (s Station) Validate() error {
 	}
 	if s.WholeElevatorFrom != "" {
 		if _, err := time.Parse("2006-01-02", s.WholeElevatorFrom); err != nil {
-			return invalid("дата «весь елеватор з» має бути у форматі РРРР-ММ-ДД")
+			return invalid("дата «План усього елеватора з» має бути у форматі РРРР-ММ-ДД")
 		}
 	}
 	seen := make(map[int]bool, len(s.Orientations))

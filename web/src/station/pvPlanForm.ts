@@ -172,7 +172,7 @@ export function parsePvPlanForm(organizationID: string, form: PvPlanForm): Parse
   }
   if (orientations.length > 0 && !(pac != null && pac > 0)) return fail('Ліміт інвертора має бути більшим за 0 кВт.')
   if (form.wholeElevatorFrom && !/^\d{4}-\d{2}-\d{2}$/.test(form.wholeElevatorFrom)) {
-    return fail('Дата «весь елеватор з» має бути у форматі РРРР-ММ-ДД.')
+    return fail('Дата «План усього елеватора з» має бути у форматі РРРР-ММ-ДД.')
   }
   orientations.sort((a, b) => a.idx - b.idx)
   const station: PvStation = {
@@ -202,7 +202,7 @@ const FIELD_LABELS: Record<string, string> = {
   longitude: 'Довгота',
   pac_limit_kw: 'Ліміт інвертора, кВт',
   gamma_pct_per_c: 'Темп. коефіцієнт, %/°C',
-  whole_elevator_from: 'Весь елеватор з',
+  whole_elevator_from: 'План усього елеватора з',
   tilt_deg: 'нахил, °',
   azimuth_deg: 'азимут, °',
   modules_count: 'модулів',
