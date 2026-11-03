@@ -712,11 +712,13 @@ type chatPvPlan struct {
 }
 
 func (h *Handlers) chatPvPlanTool(org string, loc *time.Location, actual bool, windowOK func(time.Duration) bool) aichat.Tool {
-	desc := "План генерації СЕС за київські доби від from до to включно — сума денних прогнозів того самого потоку, що малює план на графіку дня " +
-		"(кВт·год; період обрізається по сьогодні, а сьогоднішній план — на всю добу). days_covered менше за days_expected — для частини днів прогнозу немає. " +
+	desc := "План (прогноз) генерації СЕС за київські доби від from до to включно — сума денних прогнозів того самого джерела, що малює план на графіку дня " +
+		"(кВт·год, план кожного дня — на всю добу). Прогноз є до завтра включно: пізніші дні відкидаються, період цілком після завтра — помилка. " +
+		"days_covered менше за days_expected — для частини днів прогнозу немає. " +
 		"Якщо є whole_elevator_from, з цієї дати прогноз охоплює весь Дубовʼязівський елеватор, а не лише цей об'єкт."
 	if actual {
-		desc += " actual_pv_kwh — фактичний виробіток за лічильником (для сьогодні — з початку доби до зараз), plan_done_pct — виконання плану, коли прогноз є за кожен день."
+		desc += " actual_pv_kwh — фактичний виробіток за лічильником від from до зараз (для сьогодні — з початку доби), plan_done_pct — виконання плану, " +
+			"коли прогноз є за кожен день і період не заходить на завтра."
 	}
 	return aichat.Tool{
 		Name:        "pv_plan",
@@ -731,29 +733,33 @@ func (h *Handlers) chatPvPlanTool(org string, loc *time.Location, actual bool, w
 				return nil, aichat.Source{}, err
 			}
 			from, to := first, last.AddDate(0, 0, 1)
-			plan := h.pvPlanTotal(ctx, org, from, to, loc)
+			plan := h.pvPlanTotal(ctx, org, from, to, loc, pvPlanLastForecastDay(loc))
 			if !plan.Supported {
 				return nil, aichat.Source{}, errors.New("для цього об'єкта немає прогнозу генерації")
 			}
 			if plan.DaysExpected == 0 {
-				return nil, aichat.Source{}, errors.New("період ще не почався")
+				return nil, aichat.Source{}, errors.New("прогноз генерації є лише до завтра включно")
 			}
 			out := chatPvPlan{
 				From: plan.FromDay, To: plan.ToDay, PlannedKwh: plan.PlannedKwh,
 				DaysCovered: plan.DaysCovered, DaysExpected: plan.DaysExpected, WholeElevatorFrom: plan.WholeElevatorFrom,
 			}
+			now := time.Now()
 			end := to
-			if now := time.Now(); end.After(now) {
+			if end.After(now) {
 				end = now
 			}
-			if actual && windowOK(end.Sub(from)) {
+			// Tomorrow has no meter reading yet, and a plan that includes
+			// it can't be measured against today's so far.
+			measurable := out.To <= startOfCivilDay(now, loc).Format("2006-01-02")
+			if actual && from.Before(now) && windowOK(end.Sub(from)) {
 				resp, err := h.store.EnergySummary(ctx, org, []string{"accumulated_pv_energy_yield_kwh"}, from, end)
 				if err != nil {
 					h.log.Warn("api_chat_tool", "tool", "pv_plan", "organization_id", org, "err", err)
 				} else {
 					pv := max(resp.Totals["accumulated_pv_energy_yield_kwh"], 0)
 					out.ActualPvKwh = &pv
-					if plan.PlannedKwh > 0 && plan.DaysCovered == plan.DaysExpected {
+					if measurable && plan.PlannedKwh > 0 && plan.DaysCovered == plan.DaysExpected {
 						done := pv / plan.PlannedKwh * 100
 						out.PlanDonePct = &done
 					}

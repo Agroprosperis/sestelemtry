@@ -68,16 +68,23 @@ func (h *Handlers) pvPlanSummary(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "to must be after from", http.StatusBadRequest)
 		return
 	}
-	writeJSON(w, http.StatusOK, h.pvPlanTotal(r.Context(), orgID, from, to, loc))
+	writeJSON(w, http.StatusOK, h.pvPlanTotal(r.Context(), orgID, from, to, loc, startOfCivilDay(time.Now(), loc)))
+}
+
+// pvPlanLastForecastDay is the last civil day either source plans: the
+// model and the n8n flow both forecast today and tomorrow.
+func pvPlanLastForecastDay(loc *time.Location) time.Time {
+	return startOfCivilDay(time.Now(), loc).AddDate(0, 0, 1)
 }
 
 // pvPlanTotal sums the planned generation of the civil days [from, to)
-// touches, clamped to today, from the source the passport selects. The
-// summary route and the assistant's pv_plan tool both answer from it.
+// touches, up to lastDay, from the source the passport selects. The
+// summary route stops at today, since it sets the plan against actuals;
+// the assistant's pv_plan tool goes on to pvPlanLastForecastDay.
 //
 // The model's day totals are its day-ahead plans. The n8n totals are
 // cached in pv_plan_daily and filled from the flow on the way.
-func (h *Handlers) pvPlanTotal(ctx context.Context, orgID string, from, to time.Time, loc *time.Location) PvPlanSummaryResponse {
+func (h *Handlers) pvPlanTotal(ctx context.Context, orgID string, from, to time.Time, loc *time.Location, lastDay time.Time) PvPlanSummaryResponse {
 	resp := PvPlanSummaryResponse{OrganizationID: orgID}
 	st, err := h.pvPlanStation(ctx, orgID)
 	if err != nil {
@@ -101,12 +108,12 @@ func (h *Handlers) pvPlanTotal(ctx context.Context, orgID string, from, to time.
 		return resp
 	}
 	today := startOfCivilDay(time.Now(), loc)
-	if toDay.After(today) {
-		toDay = today
+	if toDay.After(lastDay) {
+		toDay = lastDay
 	}
 	if toDay.Before(fromDay) {
-		// The whole period is still in the future: no plan to report,
-		// and nothing about that is an error.
+		// The whole period lies past lastDay: no plan to report, and
+		// nothing about that is an error.
 		return resp
 	}
 	resp.FromDay = fromDay.Format("2006-01-02")

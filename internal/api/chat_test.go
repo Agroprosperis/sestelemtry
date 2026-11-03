@@ -398,6 +398,52 @@ func TestChatPvPlanComparesThePlanWithTheMeter(t *testing.T) {
 	}
 }
 
+// The assistant's plan reaches tomorrow, the last day either source
+// forecasts. Tomorrow has no meter reading, so nothing is measured
+// against its plan.
+func TestChatPvPlanForecastsTomorrow(t *testing.T) {
+	loc, err := time.LoadLocation(chatTZ)
+	if err != nil {
+		t.Skip("tzdata unavailable")
+	}
+	today := startOfCivilDay(time.Now(), loc)
+	tomorrow := today.AddDate(0, 0, 1)
+	store := &mockStore{
+		pvPlanDays: []PvPlanDayTotal{
+			{Day: today, PlannedKwh: 400, FetchedAt: time.Now()},
+			{Day: tomorrow, PlannedKwh: 650, FetchedAt: time.Now()},
+		},
+		summaryResp: EnergySummaryResponse{Totals: map[string]float64{"accumulated_pv_energy_yield_kwh": 120}},
+	}
+	h, _ := authTestHandlers(t, store)
+	req := principalRequest(&auth.Principal{UserID: 1, Grants: []auth.Grant{{Role: auth.RoleEngineer, OrganizationID: "ze"}}})
+	tool := chatTool(t, h.chatTools(req, "ze", loc), "pv_plan")
+	call := func(from, to time.Time) (chatPvPlan, error) {
+		t.Helper()
+		raw := json.RawMessage(`{"from":"` + from.Format("2006-01-02") + `","to":"` + to.Format("2006-01-02") + `"}`)
+		res, _, err := tool.Call(context.Background(), raw)
+		if err != nil {
+			return chatPvPlan{}, err
+		}
+		return res.(chatPvPlan), nil
+	}
+
+	got, err := call(tomorrow, tomorrow)
+	if err != nil || got.PlannedKwh != 650 || got.DaysCovered != 1 || got.ActualPvKwh != nil || got.PlanDonePct != nil {
+		t.Fatalf("tomorrow = %+v, %v; want its plan and no meter reading", got, err)
+	}
+	got, err = call(today, tomorrow.AddDate(0, 0, 3))
+	if err != nil || got.To != tomorrow.Format("2006-01-02") || got.PlannedKwh != 1050 || got.DaysExpected != 2 {
+		t.Fatalf("today onwards = %+v, %v; want today and tomorrow only", got, err)
+	}
+	if got.ActualPvKwh == nil || *got.ActualPvKwh != 120 || got.PlanDonePct != nil {
+		t.Errorf("today onwards: actual %v, done %v; want today's meter and no share of a plan that includes tomorrow", got.ActualPvKwh, got.PlanDonePct)
+	}
+	if _, err := call(tomorrow.AddDate(0, 0, 1), tomorrow.AddDate(0, 0, 2)); err == nil || !strings.Contains(err.Error(), "до завтра") {
+		t.Errorf("after tomorrow: err = %v", err)
+	}
+}
+
 func TestChatPassportAndPortfolio(t *testing.T) {
 	loc, err := time.LoadLocation(chatTZ)
 	if err != nil {
