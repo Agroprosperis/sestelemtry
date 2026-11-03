@@ -1,7 +1,9 @@
 import { useState } from 'react'
+import { useAccess } from '../auth/authContext'
 import { useOrganizationParam } from '../dashboard/hooks/useOrganizationParam'
 import { ModeTopBar } from '../shell/ModeTopBar'
 import type { PlantInventory, PlantInventoryChange, PlantInventoryHistory } from '../types'
+import { PvPlanSection } from './PvPlanSection'
 import { StationIcon } from './StationIcon'
 import './station.css'
 import {
@@ -205,7 +207,11 @@ function InventoryBody({
 }
 
 export function StationPage() {
-  const { organizationID, options, change: onOrganizationChange } = useOrganizationParam('service')
+  const access = useAccess()
+  const { organizationID, options, change: onOrganizationChange } = useOrganizationParam([
+    'service',
+    'technical.write',
+  ])
   const { data, loading, error } = usePlantInventory(organizationID)
   const {
     data: history,
@@ -247,6 +253,15 @@ export function StationPage() {
 
       {!error && !loading && !historyLoading && data != null ? (
         <InventoryBody inv={data} history={history} />
+      ) : null}
+
+      {organizationID ? (
+        <PvPlanSection
+          key={organizationID}
+          organizationID={organizationID}
+          canEdit={access.can('technical.write', organizationID)}
+          ratedKw={data?.pv_rated_kw ?? null}
+        />
       ) : null}
     </main>
   )

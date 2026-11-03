@@ -290,6 +290,29 @@ func LiveSampleBucketsInRange(
 	return out, nil
 }
 
+// TelemetryRange returns the earliest and latest telemetry sample
+// instants of an organization, in UTC. ok is false when it has none.
+func TelemetryRange(ctx context.Context, pool *pgxpool.Pool, organizationID string) (min, max time.Time, ok bool, err error) {
+	if pool == nil {
+		return time.Time{}, time.Time{}, false, fmt.Errorf("storage: nil pool")
+	}
+	if organizationID == "" {
+		return time.Time{}, time.Time{}, false, fmt.Errorf("storage: organization_id is required")
+	}
+	var minTS, maxTS *time.Time
+	if err := pool.QueryRow(ctx, `
+		SELECT min(time), max(time)
+		FROM telemetry_samples
+		WHERE organization_id = $1
+	`, organizationID).Scan(&minTS, &maxTS); err != nil {
+		return time.Time{}, time.Time{}, false, fmt.Errorf("storage: telemetry range: %w", err)
+	}
+	if minTS == nil || maxTS == nil {
+		return time.Time{}, time.Time{}, false, nil
+	}
+	return minTS.UTC(), maxTS.UTC(), true, nil
+}
+
 func toCopyRows(samples []Sample) ([][]any, error) {
 	rows := make([][]any, len(samples))
 	for i, s := range samples {

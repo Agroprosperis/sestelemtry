@@ -84,7 +84,14 @@ describe('fetchCustomExportData', () => {
         { delivery_date: '2026-05-07', hour: 2, zone: 2, price_uah_per_mwh: 2500 },
       ],
     })
-    vi.spyOn(api, 'fetchPvForecast').mockResolvedValue([])
+    vi.spyOn(api, 'fetchPvForecast').mockResolvedValue({
+      organization_id: 'pe',
+      date: '2026-05-07',
+      source: 'n8n',
+      supported: true,
+      planned_kwh: 0,
+      hours: [],
+    })
   })
 
   afterEach(() => {
@@ -309,7 +316,7 @@ describe('rawExportMetricKeys', () => {
       soc: true,
       power: true,
       device: true,
-      forecast: true, // ignored — n8n forecast has no raw rows
+      forecast: true, // ignored — the PV plan has no raw rows
     })
     expect(keys).toContain('soc_percent')
     expect(keys).toContain('accumulated_pv_energy_yield_kwh')

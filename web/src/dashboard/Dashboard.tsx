@@ -117,7 +117,9 @@ export function Dashboard() {
         { id: 'import', label: 'Імпорт архіву', onSelect: () => navigateView('import') },
         { id: 'export', label: 'Експорт даних', onSelect: () => setExportOpen(true) },
       ]
-    : []
+    : access.can('technical.write', organizationID)
+      ? [{ id: 'station', label: 'Паспорт станції', onSelect: () => navigateView('station') }]
+      : []
 
   return (
     <main className="dashboard-page">

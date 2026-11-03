@@ -39,9 +39,6 @@ type EdgeIngest struct {
 	// Europe/Kyiv).
 	PlannerZone     int
 	PlannerTimezone string
-
-	// pvPlans caches the n8n generation forecast per site-day.
-	pvPlans edgePvPlanCache
 }
 
 // SetEdgeIngest wires the edge endpoints; nil disables them (503).

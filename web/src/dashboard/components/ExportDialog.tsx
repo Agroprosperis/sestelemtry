@@ -10,11 +10,8 @@ import {
   type CustomExportBucket,
   type CustomExportColumns,
 } from '../customExport'
-import {
-  PV_FORECAST_WHOLE_ELEVATOR_LABEL,
-  elevatorCodeFor,
-  forecastIsWholeElevator,
-} from '../transforms/pvForecast'
+import { usePvForecast } from '../hooks/usePvForecast'
+import { PV_FORECAST_WHOLE_ELEVATOR_LABEL } from '../transforms/pvForecast'
 
 // saveBlob writes an in-memory Blob to disk under `filename` via an
 // off-DOM anchor. Used for the raw zip once it has fully downloaded
@@ -205,12 +202,15 @@ export function ExportDialog({ organizationID, initialAnchor, onClose }: Props) 
     return bucketChoice === 'auto' ? autoBucket(fromDate, toExclusive) : bucketChoice
   }, [bucketChoice, fromDate, toExclusive])
 
-  const hasElevator = elevatorCodeFor(organizationID) !== null
-  const forecastWholeElevator = forecastIsWholeElevator(organizationID, toStr)
+  // The forecast column needs a plan source for the station; the same
+  // answer says whether that day's plan is the whole elevator's.
+  const forecastInfo = usePvForecast({ organizationID, anchor: fromDate ?? initialAnchor })
+  const hasForecast = forecastInfo.supported
+  const forecastWholeElevator = forecastInfo.wholeElevator
   const isRaw = computedBucket === 'raw'
   // Raw mode only exposes columns that map to actual `telemetry_samples`
   // metrics (energy / soc / power). The DAM price comes from the
-  // market-data table and the PV forecast comes from n8n, so neither
+  // market-data table and the PV forecast from the plan tables, so neither
   // has raw rows to stream.
   const rawAllowedColumns = isRaw
     ? { ...columns, price: false, forecast: false }
@@ -226,12 +226,12 @@ export function ExportDialog({ organizationID, initialAnchor, onClose }: Props) 
     !!fromDate && !!toExclusive && fromDate.getTime() >= toExclusive.getTime()
   const todayMax = useMemo(() => toDateInputValue(new Date()), [])
   // Forecast only makes sense for a single-day, 5-minute export of an
-  // organization that has an elevator code mapping (pe / ze).
+  // organization that has a plan source.
   const isSingleDay =
     !!fromDate &&
     !!toExclusive &&
     toExclusive.getTime() - fromDate.getTime() === 24 * 60 * 60 * 1000
-  const forecastEnabled = !isRaw && computedBucket === '5 minutes' && isSingleDay && hasElevator
+  const forecastEnabled = !isRaw && computedBucket === '5 minutes' && isSingleDay && hasForecast
   const priceEnabled = !isRaw
 
   // Raw mode is rate-limited on the server (range <= 31 days). The

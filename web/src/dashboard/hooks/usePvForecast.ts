@@ -1,30 +1,38 @@
 import { useEffect, useState } from 'react'
 import { fetchPvForecast } from '../../api'
-import type { PvForecastPoint } from '../../types'
 import {
-  elevatorCodeFor,
   forecastDayFromAnchor,
-  type ElevatorCode,
+  pvForecastRows,
+  type PvForecastHourlyRow,
 } from '../transforms/pvForecast'
 
 const PV_FORECAST_TTL_MS = 5 * 60 * 1000
 
+type ForecastData = {
+  rows: PvForecastHourlyRow[]
+  supported: boolean
+  wholeElevator: boolean
+}
+
+const EMPTY: ForecastData = { rows: [], supported: false, wholeElevator: false }
+
 type CacheEntry = {
-  data: PvForecastPoint[]
+  data: ForecastData
   fetchedAt: number
 }
 
-// Module-level cache shared across all hook instances. Keyed by
-// `${elevator}:${forecast_day}` so navigating between today/yesterday/etc.
-// reuses recent results, and switching between organizations doesn't
-// invalidate the other org's cached forecast.
+// Module-level cache shared across all hook instances (the day chart and
+// the export dialog ask for the same day). Keyed by
+// `${organization}:${forecast_day}` so navigating between days reuses
+// recent results, and switching organizations doesn't drop the other
+// one's.
 const cache = new Map<string, CacheEntry>()
 
-function cacheKey(elevator: ElevatorCode, forecastDay: string): string {
-  return `${elevator}:${forecastDay}`
+function cacheKey(organizationID: string, forecastDay: string): string {
+  return `${organizationID}:${forecastDay}`
 }
 
-function readFreshCache(key: string, now: number): PvForecastPoint[] | null {
+function readFreshCache(key: string, now: number): ForecastData | null {
   const hit = cache.get(key)
   if (!hit) return null
   if (now - hit.fetchedAt > PV_FORECAST_TTL_MS) return null
@@ -35,25 +43,25 @@ function isAbortError(e: unknown): boolean {
   return e instanceof DOMException && e.name === 'AbortError'
 }
 
-export type UsePvForecastResult = {
-  data: PvForecastPoint[]
+export type UsePvForecastResult = ForecastData & {
   loading: boolean
   error: string | null
 }
 
 type FetchState = {
   // The key the most recent successful (or failed) fetch belongs to. We
-  // compare it with the current render's key to know whether `data` /
-  // `error` are stale from a previous (org, day) combo.
+  // compare it with the current render's key to know whether the data
+  // is stale from a previous (org, day) combo.
   key: string | null
-  data: PvForecastPoint[]
+  data: ForecastData
   error: string | null
 }
 
-// usePvForecast returns the raw n8n forecast points for the given org/day,
-// with a 5-minute in-memory cache and graceful fallback to an empty list.
-// Organizations without a forecast mapping (e.g. `demo-org`) short-circuit
-// without firing a request, mirroring the dashboard's "hide silently" UX.
+// usePvForecast returns the hourly plan of one organization-day, from
+// whichever source the station's passport selects, with a 5-minute
+// in-memory cache and graceful fallback to no plan. `supported` is false
+// for organizations with no plan source (demo-org), which hides the plan
+// line rather than drawing zeros.
 //
 // Implementation notes:
 //   - Render is pure: the cache and `Date.now()` are only touched inside
@@ -68,17 +76,16 @@ export function usePvForecast(input: {
 }): UsePvForecastResult {
   const { organizationID } = input
   const forecastDay = forecastDayFromAnchor(input.anchor)
-  const elevator = elevatorCodeFor(organizationID)
-  const key = elevator ? cacheKey(elevator, forecastDay) : null
+  const key = organizationID ? cacheKey(organizationID, forecastDay) : null
 
   const [state, setState] = useState<FetchState>({
     key: null,
-    data: [],
+    data: EMPTY,
     error: null,
   })
 
   useEffect(() => {
-    if (!elevator || !key) return
+    if (!organizationID || !key) return
 
     let cancelled = false
     const controller = new AbortController()
@@ -95,18 +102,23 @@ export function usePvForecast(input: {
 
     void (async () => {
       try {
-        const points = await fetchPvForecast(
-          { elevatorCode: elevator, forecastDay },
+        const resp = await fetchPvForecast(
+          { organizationID, date: forecastDay },
           controller.signal,
         )
         if (cancelled) return
-        cache.set(key, { data: points, fetchedAt: Date.now() })
-        setState({ key, data: points, error: null })
+        const data: ForecastData = {
+          rows: resp.supported ? pvForecastRows(resp.hours) : [],
+          supported: resp.supported,
+          wholeElevator: Boolean(resp.whole_elevator),
+        }
+        cache.set(key, { data, fetchedAt: Date.now() })
+        setState({ key, data, error: null })
       } catch (e) {
         if (cancelled || isAbortError(e)) return
         setState({
           key,
-          data: [],
+          data: EMPTY,
           error: e instanceof Error ? e.message : 'Failed to load PV forecast',
         })
       }
@@ -116,9 +128,9 @@ export function usePvForecast(input: {
       cancelled = true
       controller.abort()
     }
-  }, [elevator, forecastDay, key])
+  }, [organizationID, forecastDay, key])
 
-  if (!key) return { data: [], loading: false, error: null }
-  if (state.key !== key) return { data: [], loading: true, error: null }
-  return { data: state.data, loading: false, error: state.error }
+  if (!key) return { ...EMPTY, loading: false, error: null }
+  if (state.key !== key) return { ...EMPTY, loading: true, error: null }
+  return { ...state.data, loading: false, error: state.error }
 }

@@ -16,6 +16,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/nesh/sestelemetry/internal/alerts"
+	"github.com/nesh/sestelemetry/internal/pvplan"
 )
 
 type mockStore struct {
@@ -87,6 +88,11 @@ type mockStore struct {
 	pvPlanSavedOrg string
 	pvPlanSaveErr  error
 
+	pvStations   map[string]pvplan.Station
+	pvStationErr error
+	pvHours      map[string]map[int]float64 // org|YYYY-MM-DD|kind
+	pvModelDays  []PvPlanDayTotal
+
 	tariffsByOrg     map[string]OrgTariffs
 	tariffsGetErr    error
 	tariffsPutErr    error
@@ -115,6 +121,31 @@ type mockStore struct {
 	aiSettings *AISettings
 	aiKey      string
 	aiWrites   int
+
+	// pvSettings nil means nothing saved; pvKey "" means no key stored.
+	pvSettings       *pvplan.Settings
+	pvKey            string
+	pvSettingsWrites int
+}
+
+func (m *mockStore) PvPlanSettings(_ context.Context) (pvplan.Settings, bool, bool, error) {
+	if m.pvSettings == nil {
+		return pvplan.Settings{}, false, false, nil
+	}
+	return *m.pvSettings, m.pvKey != "", true, nil
+}
+
+func (m *mockStore) PvPlanOpenMeteoKey(_ context.Context) (string, error) {
+	return m.pvKey, nil
+}
+
+func (m *mockStore) SavePvPlanSettings(_ context.Context, settings pvplan.Settings, key *string) error {
+	m.pvSettings = &settings
+	if key != nil {
+		m.pvKey = *key
+	}
+	m.pvSettingsWrites++
+	return nil
 }
 
 func (m *mockStore) GetAISettings(_ context.Context) (AISettings, bool, bool, error) {
@@ -265,6 +296,29 @@ func (m *mockStore) PvPlanDays(_ context.Context, orgID string, fromDay, toDay t
 		return nil, m.pvPlanErr
 	}
 	return m.pvPlanDays, nil
+}
+
+func (m *mockStore) PvPlanStation(_ context.Context, orgID string) (pvplan.Station, bool, error) {
+	if m.pvStationErr != nil {
+		return pvplan.Station{}, false, m.pvStationErr
+	}
+	st, ok := m.pvStations[orgID]
+	return st, ok, nil
+}
+
+func (m *mockStore) PvPlanHours(_ context.Context, orgID string, day time.Time, kind pvplan.Kind) (map[int]float64, time.Time, error) {
+	hours := m.pvHours[orgID+"|"+day.Format("2006-01-02")+"|"+string(kind)]
+	if len(hours) == 0 {
+		return map[int]float64{}, time.Time{}, nil
+	}
+	return hours, time.Date(2026, 11, 2, 18, 0, 0, 0, time.UTC), nil
+}
+
+func (m *mockStore) PvPlanModelDays(_ context.Context, orgID string, fromDay, toDay time.Time) ([]PvPlanDayTotal, error) {
+	m.pvPlanOrg = orgID
+	m.pvPlanFromDay = fromDay
+	m.pvPlanToDay = toDay
+	return m.pvModelDays, nil
 }
 
 func (m *mockStore) SavePvPlanDays(_ context.Context, orgID string, days []PvPlanDayTotal) error {

@@ -20,12 +20,7 @@ import { endOfPeriod, rangeParams, startOfPeriod, type RangePreset } from '../ra
 import { energyBucketDeltaRows, type EnergyRow } from '../transforms/buckets'
 import { damChartRows, type DAMChartRow } from '../transforms/dam'
 import { powerChartRows, type PowerChartRow } from '../transforms/power'
-import {
-  aggregatePvForecastHourly,
-  forecastDayFromAnchor,
-  forecastIsWholeElevator,
-  type PvForecastHourlyRow,
-} from '../transforms/pvForecast'
+import { type PvForecastHourlyRow } from '../transforms/pvForecast'
 import { socChartRows, type SOCChartRow } from '../transforms/soc'
 import { flowsFromTotals, EMPTY_FLOWS, type EnergyFlows } from '../transforms/flows'
 import {
@@ -281,14 +276,14 @@ export function useDashboardData(input: {
     [organizationID],
   )
 
-  // Forecast lives outside the main /timeseries effect so a slow n8n call
-  // doesn't gate the rest of the day chart. For organizations without a
-  // forecast mapping (`demo-org`) the hook is a no-op and returns [].
+  // Forecast lives outside the main /timeseries effect so a slow plan
+  // source doesn't gate the rest of the day chart. For organizations with
+  // no plan source (`demo-org`) the rows are empty.
   const pvForecast = usePvForecast({ organizationID, anchor })
   const pvForecastSeries = useMemo<PvForecastHourlyRow[]>(() => {
     if (preset !== 'day') return []
-    return aggregatePvForecastHourly(pvForecast.data)
-  }, [preset, pvForecast.data])
+    return pvForecast.rows
+  }, [preset, pvForecast.rows])
   const pvDayForecastTotal = useMemo<number | null>(() => {
     if (preset !== 'day') return null
     if (pvForecastSeries.length === 0) return null
@@ -316,9 +311,7 @@ export function useDashboardData(input: {
     preset === 'day' ? pvForecast.loading : pvPlan?.scope !== planScope
   const pvForecastCoverage = preset === 'day' ? null : pvPlanRange.coverage
   const pvForecastWholeElevator =
-    preset === 'day'
-      ? forecastIsWholeElevator(organizationID, forecastDayFromAnchor(anchor))
-      : pvPlanRange.wholeElevator
+    preset === 'day' ? pvForecast.wholeElevator : pvPlanRange.wholeElevator
 
   const configRef = useRef(config)
   useEffect(() => {

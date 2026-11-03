@@ -214,7 +214,17 @@ func TestPvPlanSummaryCacheErrorReportsNoCoverage(t *testing.T) {
 	}
 }
 
-// DE's code forecasts the whole elevator, which `de` stopped being on
+// wholeElevatorStations is the Дубовʼязівський passport: its planes
+// describe the whole elevator from the day it became two sites.
+func wholeElevatorStations() map[string]pvplan.Station {
+	out := map[string]pvplan.Station{}
+	for _, org := range []string{"de", "de1"} {
+		out[org] = pvplan.Station{OrganizationID: org, Source: pvplan.SourceN8N, WholeElevatorFrom: "2026-09-24"}
+	}
+	return out
+}
+
+// DE's planes describe the whole elevator, which `de` stopped being on
 // 2026-09-24: a period reaching that day still gets the DE plan for
 // every day, flagged with the day it became the whole elevator's.
 func TestPvPlanSummaryFlagsWholeElevatorPastBoundary(t *testing.T) {
@@ -222,7 +232,7 @@ func TestPvPlanSummaryFlagsWholeElevatorPastBoundary(t *testing.T) {
 	for d := 20; d <= 26; d++ {
 		rows = append(rows, PvPlanDayTotal{Day: time.Date(2026, 9, d, 0, 0, 0, 0, time.UTC), PlannedKwh: 1000, FetchedAt: time.Now()})
 	}
-	store := &mockStore{pvPlanDays: rows}
+	store := &mockStore{pvPlanDays: rows, pvStations: wholeElevatorStations()}
 	h := NewHandlers(store, "*")
 
 	rec := httptest.NewRecorder()
@@ -242,7 +252,7 @@ func TestPvPlanSummaryFlagsWholeElevatorPastBoundary(t *testing.T) {
 }
 
 func TestPvPlanSummaryWholeElevatorOnlyFromBoundary(t *testing.T) {
-	h := NewHandlers(&mockStore{}, "*")
+	h := NewHandlers(&mockStore{pvStations: wholeElevatorStations()}, "*")
 
 	rec := httptest.NewRecorder()
 	h.pvPlanSummary(rec, pvPlanRequest("de",

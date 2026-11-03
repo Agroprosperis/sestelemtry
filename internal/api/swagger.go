@@ -545,12 +545,15 @@ paths:
         month and year views can compare plan against actual the way the
         day view already does from the hourly forecast it plots.
 
-        Per-day forecasts come from the n8n flow (one call per civil day)
-        and are cached in pv_plan_daily. A past day's forecast never
-        changes, so the cache is permanent for everything but today,
-        which is refreshed every 30 minutes. Days still missing when the
-        request arrives are fetched inline within a bounded budget; a
-        cold year therefore fills over the first few polls.
+        The station passport's "source" picks where the days come from,
+        and "source" in the response says which answered. On "model" they
+        are the in-house model's day-ahead plans (pv_plan_hourly). On
+        "n8n" they come from the n8n flow, one call per civil day, cached
+        in pv_plan_daily: a past day's forecast never changes, so that
+        cache is permanent for everything but today, which is refreshed
+        every 30 minutes. Days still missing when the request arrives are
+        fetched inline within a bounded budget; a cold year therefore
+        fills over the first few polls.
 
         The "to" edge is clamped to today because the flow only
         forecasts about two weeks ahead: a full-month plan against
@@ -604,6 +607,204 @@ paths:
               schema:
                 type: string
                 example: to must be after from
+  /api/v1/pv-forecast:
+    get:
+      summary: Hourly planned PV generation for one day
+      operationId: getPvForecast
+      description: |
+        The hourly plan the day chart and the CSV export plot, from the
+        source the station passport selects. On "model" it is the
+        day-ahead plan (frozen the evening before; the one plan-vs-actual
+        compares against). On "n8n" it is read from the flow through a
+        server-side cache (30 minutes for today and later, a day for past
+        days), so the browser never calls n8n itself.
+
+        "supported" is false when the selected source has nothing for the
+        station (no n8n code, or no enabled orientations). An empty
+        "hours" with "supported" true means no plan was computed for that
+        day. "whole_elevator" marks a day the station's planes describe
+        the whole elevator rather than the site.
+      parameters:
+        - name: organization_id
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: tz
+          in: query
+          required: false
+          schema:
+            type: string
+            default: UTC
+      responses:
+        "200":
+          description: The day's plan, hour by hour
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PvForecastResponse"
+        "400":
+          description: Invalid or missing query parameters
+  /api/v1/pv-orientations:
+    get:
+      summary: Station PV plan passport
+      operationId: getPvOrientations
+      description: |
+        The passport of the in-house PV plan model: the source switch
+        ("n8n" or "model"), station-level inputs (coordinates, inverter
+        AC limit, module temperature coefficient, the optional
+        "whole_elevator_from" day) and the orientations (tilt, azimuth,
+        module count and wattage). "station" is null when the station has
+        no passport yet. "today" compares today's plan of both sources,
+        "defaults" are the config.yaml coordinates used when the passport
+        leaves them empty, and "history_job" is the plan-history rebuild
+        status. Requires service or technical.write on the organization.
+      parameters:
+        - name: organization_id
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The passport
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PvStationResponse"
+    put:
+      summary: Save the station PV plan passport
+      operationId: putPvOrientations
+      description: |
+        Replaces the passport (station fields and every orientation) in
+        one transaction and journals the difference. Today's and
+        tomorrow's model plans are recomputed in the background; today's
+        frozen day-ahead plan is left as it was. Refuses "model" without
+        an inverter limit and an enabled orientation, and "n8n" for a
+        station the flow has no code for. Requires technical.write.
+      parameters:
+        - name: organization_id
+          in: query
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PvStation"
+      responses:
+        "200":
+          description: The saved passport
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PvStationResponse"
+        "400":
+          description: The passport can't be used (message in Ukrainian)
+  /api/v1/pv-orientations/history:
+    get:
+      summary: Journal of passport edits
+      operationId: getPvOrientationsHistory
+      parameters:
+        - name: organization_id
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Edits, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  organization_id:
+                    type: string
+                  entries:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        at:
+                          type: string
+                          format: date-time
+                        by:
+                          type: string
+                        changes:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              field:
+                                type: string
+                              orientation:
+                                type: integer
+                              from: {}
+                              to: {}
+  /api/v1/pv-plan/history:
+    get:
+      summary: Status of the plan-history rebuild
+      operationId: getPvPlanHistory
+      parameters:
+        - name: organization_id
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The latest rebuild since the API started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PvPlanHistoryStatus"
+    post:
+      summary: Rebuild the model's day-ahead plan for past days
+      operationId: postPvPlanHistory
+      description: |
+        Recomputes the model's day-ahead plan for past days from Open-Meteo
+        Previous Runs (the value forecast 24 hours ahead), in the
+        background, and returns at once. Without from/to it runs from the
+        station's first telemetry day to yesterday. One rebuild per
+        station at a time; asking again while one runs returns its status.
+        Every station with a passport is rebuilt once automatically after
+        the first start. Requires technical.write.
+      parameters:
+        - name: organization_id
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: from
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+      responses:
+        "202":
+          description: The rebuild's status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PvPlanHistoryStatus"
+        "400":
+          description: The station has no orientations to model
   /api/v1/uze-plan:
     get:
       summary: Recommended УЗЕ (BESS) dispatch for one day
@@ -1334,6 +1535,116 @@ paths:
               schema:
                 type: string
                 example: "API відповіло 401: invalid_api_key Incorrect API key provided"
+  /api/v1/pv-plan-settings:
+    get:
+      summary: Where the PV plan's upstreams are
+      operationId: getPvPlanSettings
+      description: |
+        Administrators of every organization only. Open-Meteo serves the
+        in-house model, the n8n webhook the stations whose passport is
+        still on the flow. An empty address stands for the one in
+        defaults. The Open-Meteo key is never returned, only whether one
+        is stored.
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Current settings
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PvPlanSettings"
+                  - type: object
+                    properties:
+                      api_key_configured:
+                        type: boolean
+                      saved:
+                        type: boolean
+                      defaults:
+                        $ref: "#/components/schemas/PvPlanSettings"
+        "403":
+          description: Not an administrator of every organization
+    put:
+      summary: Save where the PV plan's upstreams are
+      operationId: putPvPlanSettings
+      description: |
+        Takes effect without a restart. api_key omitted or null keeps the
+        stored Open-Meteo key; an empty string clears it. The stored key
+        only serves the Open-Meteo addresses it was saved with: changing
+        either takes the key again.
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/CSRFHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/PvPlanSettings"
+                - type: object
+                  properties:
+                    api_key:
+                      type: string
+                      nullable: true
+      responses:
+        "204":
+          description: Settings saved
+        "400":
+          description: An address is not an absolute http(s) URL without a query, or the key has to be typed again
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "адресу Open-Meteo змінено: введіть ключ ще раз, щоб він не пішов на іншу адресу"
+        "403":
+          description: Not an administrator of every organization
+  /api/v1/pv-plan-settings/test:
+    post:
+      summary: Ask every PV plan upstream once with the settings as typed
+      operationId: testPvPlanSettings
+      description: |
+        Nothing is saved. Asks the Open-Meteo forecast and previous-runs
+        addresses about one plane, and the n8n webhook about today of the
+        first served station the flow has a code for. Without api_key the
+        stored key is used, on the stored Open-Meteo addresses only.
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/CSRFHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/PvPlanSettings"
+                - type: object
+                  properties:
+                    api_key:
+                      type: string
+                      nullable: true
+      responses:
+        "200":
+          description: Every upstream's answer
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [forecast, previous_runs]
+                properties:
+                  forecast:
+                    $ref: "#/components/schemas/PvPlanUpstreamCheck"
+                  previous_runs:
+                    $ref: "#/components/schemas/PvPlanUpstreamCheck"
+                  n8n:
+                    $ref: "#/components/schemas/PvPlanUpstreamCheck"
+                  n8n_organization_id:
+                    type: string
+        "400":
+          description: Invalid settings, or the stored key asked to go to another address
 components:
   securitySchemes:
     sessionCookie:
@@ -1421,9 +1732,30 @@ components:
         follow_ups:
           type: boolean
           description: Offer the next questions under every answer (one more short model request per turn; on by default).
-        follow_ups:
+    PvPlanSettings:
+      type: object
+      properties:
+        forecast_url:
+          type: string
+          description: Open-Meteo live forecast; empty means https://api.open-meteo.com/v1/forecast.
+        previous_runs_url:
+          type: string
+          description: Open-Meteo previous runs (day-ahead history); empty means https://previous-runs-api.open-meteo.com/v1/forecast.
+        n8n_webhook_url:
+          type: string
+          description: The n8n forecast flow's webhook; empty means the flow the console was built against.
+    PvPlanUpstreamCheck:
+      type: object
+      required: [ok, hours]
+      properties:
+        ok:
           type: boolean
-          description: Offer the next questions under every answer (one more short model request per turn; on by default).
+        hours:
+          type: integer
+          description: Hours with data that came back.
+        error:
+          type: string
+          description: Why the upstream failed, for the administrator.
     User:
       type: object
       properties:
@@ -1845,7 +2177,167 @@ components:
             (de = Дубовʼязівський Т2 from 2026-09-24): the plan from that
             day on is the whole elevator's, not the site's.
           example: "2026-09-24"
+        source:
+          type: string
+          enum: [n8n, model]
+          description: Which source the station passport selects.
       required: [organization_id, supported, planned_kwh, days_covered, days_expected]
+    PvForecastResponse:
+      type: object
+      properties:
+        organization_id:
+          type: string
+        date:
+          type: string
+          format: date
+        source:
+          type: string
+          enum: [n8n, model]
+        supported:
+          type: boolean
+        planned_kwh:
+          type: number
+          format: double
+        hours:
+          type: array
+          items:
+            type: object
+            properties:
+              hour:
+                type: integer
+                minimum: 0
+                maximum: 23
+                description: Local hour start.
+              planned_kwh:
+                type: number
+                format: double
+                description: The hour's kWh, equal to its average kW.
+        whole_elevator:
+          type: boolean
+        computed_at:
+          type: string
+          format: date-time
+      required: [organization_id, date, source, supported, planned_kwh, hours]
+    PvOrientation:
+      type: object
+      properties:
+        idx:
+          type: integer
+          minimum: 1
+        tilt_deg:
+          type: number
+          minimum: 0
+          maximum: 90
+        azimuth_deg:
+          type: number
+          minimum: -180
+          maximum: 180
+          description: 0 = south, -90 = east, 90 = west, 180 = north (Open-Meteo).
+        modules_count:
+          type: integer
+          minimum: 1
+        module_power_w:
+          type: number
+        enabled:
+          type: boolean
+        note:
+          type: string
+      required: [idx, tilt_deg, azimuth_deg, modules_count, module_power_w, enabled]
+    PvStation:
+      type: object
+      properties:
+        organization_id:
+          type: string
+        source:
+          type: string
+          enum: [n8n, model]
+        latitude:
+          type: number
+          nullable: true
+          description: Null falls back to the organization's config.yaml location.
+        longitude:
+          type: number
+          nullable: true
+        pac_limit_kw:
+          type: number
+        gamma_pct_per_c:
+          type: number
+          maximum: 0
+        whole_elevator_from:
+          type: string
+          format: date
+        orientations:
+          type: array
+          items:
+            $ref: "#/components/schemas/PvOrientation"
+        updated_at:
+          type: string
+          format: date-time
+        updated_by:
+          type: string
+        history_backfilled_at:
+          type: string
+          format: date-time
+      required: [source, pac_limit_kw, gamma_pct_per_c, orientations]
+    PvPlanHistoryStatus:
+      type: object
+      properties:
+        running:
+          type: boolean
+        from:
+          type: string
+          format: date
+        to:
+          type: string
+          format: date
+        done:
+          type: integer
+          description: Archive requests finished.
+        total:
+          type: integer
+        days:
+          type: integer
+          description: Days written by a finished rebuild.
+        error:
+          type: string
+        started_at:
+          type: string
+          format: date-time
+        finished_at:
+          type: string
+          format: date-time
+    PvStationResponse:
+      type: object
+      properties:
+        organization_id:
+          type: string
+        station:
+          allOf:
+            - $ref: "#/components/schemas/PvStation"
+          nullable: true
+        defaults:
+          type: object
+          properties:
+            latitude:
+              type: number
+            longitude:
+              type: number
+        pdc_total_kwp:
+          type: number
+        n8n_available:
+          type: boolean
+        today:
+          type: object
+          properties:
+            date:
+              type: string
+              format: date
+            model_kwh:
+              type: number
+            n8n_kwh:
+              type: number
+        history_job:
+          $ref: "#/components/schemas/PvPlanHistoryStatus"
     UzePlanHour:
       type: object
       properties:

@@ -1,58 +1,19 @@
-import type { PvForecastPoint } from '../../types'
+import type { PvForecastResponse } from '../../api'
 
-// PvForecastHourlyRow describes one hour of forecast generation aggregated
-// across all panel orientations. `hour` is 0..23 and represents the hour
-// start in local Kyiv time (so `hour=0` covers 00:00–01:00, mirroring n8n's
-// `hour_ending=1`). `plannedKw` is the average AC power in kW for that hour
-// — equal to `planned_kwh` since each interval is exactly 1 hour, so it can
-// be plotted directly on the day chart's kW axis.
+// PvForecastHourlyRow describes one hour of the day's planned generation,
+// summed across the station's panel orientations. `hour` is 0..23 and is
+// the hour start in local Kyiv time (so `hour=0` covers 00:00–01:00).
+// `plannedKw` is the average AC power in kW for that hour — equal to the
+// hour's planned kWh since each interval is exactly 1 hour, so it can be
+// plotted directly on the day chart's kW axis.
 export type PvForecastHourlyRow = {
   hour: number
   plannedKw: number
 }
 
-export type ElevatorCode = 'JE' | 'RE' | 'PE' | 'AB' | 'KE' | 'DE' | 'SM'
-
-const ELEVATOR_CODES: Record<string, ElevatorCode> = {
-  ze: 'JE',
-  pe: 'RE',
-  pde: 'PE',
-  ab: 'AB',
-  ke: 'KE',
-  de: 'DE',
-  de1: 'DE',
-  sm: 'SM',
-}
-
-// WHOLE_ELEVATOR_FROM is the first local day (YYYY-MM-DD) a code
-// forecasts more than its site. DE forecasts the whole Дубовʼязівський
-// elevator; from 2026-09-24 it is two sites, `de` (Т2) and `de1` (Т1,
-// which starts that day; ems-spec de_two_sites.md). Until the flow has
-// per-site codes both show DE labelled as the whole elevator's
-// forecast. Mirrors internal/pvplan.
-const WHOLE_ELEVATOR_FROM: Record<string, string> = {
-  de: '2026-09-24',
-  de1: '2026-09-24',
-}
-
 export const PV_FORECAST_WHOLE_ELEVATOR_LABEL = 'весь елеватор'
 export const PV_FORECAST_WHOLE_ELEVATOR_NOTE =
   'Прогноз СЕС — на весь елеватор (Т1 і Т2 разом): окремого прогнозу для цього вводу ще немає, тож план завищений.'
-
-// elevatorCodeFor maps the dashboard's organization ID to the n8n flow's
-// elevator code. Elevators that we don't have a forecast for return null,
-// which signals callers to skip the network request entirely.
-export function elevatorCodeFor(organizationID: string): ElevatorCode | null {
-  return ELEVATOR_CODES[organizationID] ?? null
-}
-
-// forecastIsWholeElevator reports whether the forecast for a period
-// ending on `lastDay` (local YYYY-MM-DD, inclusive) includes days where
-// the code describes the whole elevator rather than the site.
-export function forecastIsWholeElevator(organizationID: string, lastDay: string): boolean {
-  const from = WHOLE_ELEVATOR_FROM[organizationID]
-  return from !== undefined && lastDay >= from
-}
 
 // pvForecastLabel is the forecast series name, marked when the
 // forecast is the whole elevator's.
@@ -70,45 +31,26 @@ function pad(n: number): string {
 }
 
 // forecastDayFromAnchor renders the anchor date as YYYY-MM-DD in the
-// browser's local TZ. For Ukrainian users this is Kyiv local, which matches
-// the n8n flow's `hour_ending` semantics. For users in other zones the day
-// boundary may be off by ±1, but that's the same tradeoff the rest of the
-// dashboard makes (see `toDateOnly` in `useDashboardData`).
+// browser's local TZ. For Ukrainian users this is Kyiv local, which is
+// the day the plan's hours are counted in. For users in other zones the
+// day boundary may be off by ±1, but that's the same tradeoff the rest
+// of the dashboard makes (see `toDateOnly` in `useDashboardData`).
 export function forecastDayFromAnchor(anchor: Date): string {
   return `${anchor.getFullYear()}-${pad(anchor.getMonth() + 1)}-${pad(anchor.getDate())}`
 }
 
-// aggregatePvForecastHourly sums planned_kwh across orientations for each
-// hour of the forecast day. Duplicate (hour_ending, orientation_idx) entries
-// from the upstream feed are deduplicated — the last record wins, mirroring
-// the previous PvForecastChart behavior. Returns a sparse list (only hours
-// that have at least one orientation contributing a finite, positive value).
-export function aggregatePvForecastHourly(
-  points: PvForecastPoint[],
+// pvForecastRows turns the API's hours into chart rows, ordered by
+// hour, dropping hours that are dark or not a usable number.
+export function pvForecastRows(
+  hours: PvForecastResponse['hours'] | null | undefined,
 ): PvForecastHourlyRow[] {
-  // hourEnding -> orientation_idx -> planned_kwh. The inner Map.set
-  // overwrites duplicate orientations within an hour bucket.
-  const byHour = new Map<number, Map<number, number>>()
-  for (const p of points) {
-    if (!p) continue
-    const hourEnding = Number(p.hour_ending)
-    if (!Number.isFinite(hourEnding) || hourEnding < 1 || hourEnding > 24) continue
-    const value = Number(p.planned_kwh)
-    if (!Number.isFinite(value)) continue
-    let inner = byHour.get(hourEnding)
-    if (!inner) {
-      inner = new Map<number, number>()
-      byHour.set(hourEnding, inner)
-    }
-    inner.set(Number(p.orientation_idx), value)
-  }
-
   const out: PvForecastHourlyRow[] = []
-  for (const [hourEnding, byOrientation] of byHour) {
-    let sum = 0
-    for (const v of byOrientation.values()) sum += v
-    if (sum <= 0) continue
-    out.push({ hour: hourEnding - 1, plannedKw: sum })
+  for (const h of hours ?? []) {
+    const hour = Number(h?.hour)
+    const kwh = Number(h?.planned_kwh)
+    if (!Number.isInteger(hour) || hour < 0 || hour > 23) continue
+    if (!Number.isFinite(kwh) || kwh <= 0) continue
+    out.push({ hour, plannedKw: kwh })
   }
   out.sort((a, b) => a.hour - b.hour)
   return out

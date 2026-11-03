@@ -78,6 +78,18 @@ export function UserMenu() {
               ШІ-асистент
             </button>
           )}
+          {me.global_admin && (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setOpen(false)
+                navigateView('pvplan')
+              }}
+            >
+              Прогноз СЕС
+            </button>
+          )}
           <button
             type="button"
             role="menuitem"

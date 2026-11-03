@@ -115,6 +115,11 @@ func (h *Handlers) routes() []route {
 		// preview just simulates a draft.
 		controlAct = onSite(auth.PermControlWrite)
 		anyAdmin   = need(onAnyOrg(auth.PermService))
+		// The station passport opens to whoever administers the
+		// organization or edits the technical inputs the planner uses
+		// (the PV plan's orientations are one of them).
+		passport  = onOrg(auth.PermService, auth.PermTechnicalWrite)
+		technical = onOrg(auth.PermTechnicalWrite)
 	)
 	return []route{
 		{"/healthz", h.healthz, publicRoute},
@@ -133,6 +138,10 @@ func (h *Handlers) routes() []route {
 		{"/api/v1/energy-summary", h.energySummary, need(dayWindow(day))},
 		{"/api/v1/energy-flow-hourly", h.energyFlowHourly, need(service)},
 		{"/api/v1/pv-plan-summary", h.pvPlanSummary, need(onOrg(auth.PermAnalyticsFull, auth.PermEconomicsRead))},
+		{"/api/v1/pv-forecast", h.pvForecast, need(day)},
+		{"/api/v1/pv-orientations", h.pvOrientations, need(passport).on(http.MethodPut, technical)},
+		{"/api/v1/pv-orientations/history", h.pvOrientationsHistory, need(passport)},
+		{"/api/v1/pv-plan/history", h.pvPlanHistoryJob, need(passport).on(http.MethodPost, technical)},
 		// DAM prices are public OREE market data shared by every
 		// organization; the day chart overlays them.
 		{"/api/v1/dam-prices", h.damPrices, signedIn},
@@ -142,8 +151,8 @@ func (h *Handlers) routes() []route {
 		{"/api/v1/fusionsolar/config", h.fusionSolarConfig, anyAdmin},
 		{"/api/v1/askoe/import", h.askoeImport, need(service)},
 		{"/api/v1/weather-forecast", h.weatherForecast, need(day)},
-		{"/api/v1/plant-inventory/history", h.plantInventoryHistory, need(service)},
-		{"/api/v1/plant-inventory", h.plantInventory, need(service)},
+		{"/api/v1/plant-inventory/history", h.plantInventoryHistory, need(passport)},
+		{"/api/v1/plant-inventory", h.plantInventory, need(passport)},
 		{"/api/v1/organization-tariffs", h.organizationTariffs, need(econRead).on(http.MethodPut, econEdit)},
 		{"/api/v1/organization-tariff-schedule", h.organizationTariffSchedule,
 			need(econRead).on(http.MethodPut, econEdit).on(http.MethodDelete, econEdit)},
@@ -153,6 +162,10 @@ func (h *Handlers) routes() []route {
 		// So do the assistant's key, model and limit.
 		{"/api/v1/ai-settings", h.aiSettings, globalOnly},
 		{"/api/v1/ai-settings/test", h.aiSettingsTest, globalOnly},
+		// And where every station's PV plan comes from: the Open-Meteo
+		// addresses and key, the n8n webhook.
+		{"/api/v1/pv-plan-settings", h.pvPlanSettings, globalOnly},
+		{"/api/v1/pv-plan-settings/test", h.pvPlanSettingsTest, globalOnly},
 		// Without organization_id the test goes to the default list,
 		// which only an admin of every organization may use.
 		{"/api/v1/alert-settings/test-email", h.alertSettingsTestEmail, need(service)},

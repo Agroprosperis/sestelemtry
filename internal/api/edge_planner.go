@@ -8,11 +8,9 @@ import (
 	"fmt"
 	"math"
 	"net/http"
-	"sync"
 	"time"
 
 	"github.com/nesh/sestelemetry/internal/economics"
-	"github.com/nesh/sestelemetry/internal/pvplan"
 )
 
 // Edge manifest plumbing behind the desk publisher (dispatch_handlers.go):
@@ -274,49 +272,17 @@ func (h *Handlers) damPricesForDates(ctx context.Context, zone int, dates []stri
 	return out, rows.Err()
 }
 
-// --- PV generation forecast (the same n8n source the dashboard uses) ---
+// --- PV generation plan (whichever source the station's passport selects) ---
 
-// The forecast flow itself (URL, site codes, row aggregation) lives in
-// internal/pvplan, shared with /api/v1/pv-plan-summary so the planner's
-// PV curve and the dashboard's plan-vs-actual card read the same
-// numbers for a given day.
-
-// edgePvPlanCache caches one site-day of the n8n forecast (the flow
-// recomputes it a few times a day; refetching on every 15-minute
-// rolling pass would hammer it for nothing).
-type edgePvPlanCache struct {
-	mu sync.Mutex
-	m  map[string]cachedPvPlan // key: site|YYYY-MM-DD
-}
-
-type cachedPvPlan struct {
-	byHour map[int]float64 // local hour start 0..23 → avg kW
-	at     time.Time
-}
-
-const pvPlanTTL = 30 * time.Minute
-
-// edgePvPlanForecast fetches the generation forecast for the local days
-// covering [start, end) and returns kW keyed by UTC hour start. ok is
-// false when the site has no elevator code or every fetch failed — the
-// caller falls back to the GTI estimate.
+// edgePvPlanForecast returns the generation plan for the local days
+// covering [start, end) as kW keyed by UTC hour start. ok is false when
+// no day has one — the caller falls back to the GTI estimate.
 func (h *Handlers) edgePvPlanForecast(ctx context.Context, siteID string, loc *time.Location, start, end time.Time) (map[time.Time]float64, bool) {
-	code, known := pvplan.ElevatorCodeFor(siteID)
-	if !known || h.pvPlan == nil {
-		return nil, false
-	}
 	out := map[time.Time]float64{}
 	got := false
 	for day := time.Date(start.In(loc).Year(), start.In(loc).Month(), start.In(loc).Day(), 0, 0, 0, 0, loc); day.Before(end); day = day.AddDate(0, 0, 1) {
-		if !pvplan.CodeCoversDay(siteID, day) {
-			continue
-		}
-		byHour, err := h.pvPlanForDay(ctx, siteID, code, day)
-		if err != nil {
-			h.edge.Log.Warn("edge_pv_forecast", "site_id", siteID, "day", day.Format("2006-01-02"), "err", err)
-			continue
-		}
-		if len(byHour) == 0 {
+		byHour, ok := h.pvPlanControlHours(ctx, siteID, day, loc)
+		if !ok {
 			continue
 		}
 		got = true
@@ -325,35 +291,6 @@ func (h *Handlers) edgePvPlanForecast(ctx context.Context, siteID string, loc *t
 		}
 	}
 	return out, got
-}
-
-func (h *Handlers) pvPlanForDay(ctx context.Context, siteID, code string, day time.Time) (map[int]float64, error) {
-	key := siteID + "|" + day.Format("2006-01-02")
-	cache := &h.edge.pvPlans
-	cache.mu.Lock()
-	if ent, ok := cache.m[key]; ok && time.Since(ent.at) < pvPlanTTL {
-		cache.mu.Unlock()
-		return ent.byHour, nil
-	}
-	cache.mu.Unlock()
-
-	// A tighter deadline than the client's own: the planner answers a
-	// live request and would rather fall back to the GTI estimate than
-	// hold the caller for a slow upstream.
-	reqCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
-	defer cancel()
-	byHour, err := h.pvPlan.DayHourly(reqCtx, code, day)
-	if err != nil {
-		return nil, err
-	}
-
-	cache.mu.Lock()
-	if cache.m == nil {
-		cache.m = map[string]cachedPvPlan{}
-	}
-	cache.m[key] = cachedPvPlan{byHour: byHour, at: time.Now()}
-	cache.mu.Unlock()
-	return byHour, nil
 }
 
 // edgeHourWeather is one hour of the stored Open-Meteo forecast used by

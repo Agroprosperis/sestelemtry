@@ -16,12 +16,29 @@ function initialOrganization(allowed: string[] | null): string {
   return allowed[0] ?? ''
 }
 
+// allowedOrganizations is the union of the objects the user holds any of
+// permissions on, in the order the first permission lists them; null
+// when the access isn't restricted.
+function allowedOrganizations(
+  organizations: (permission: Permission) => string[] | null,
+  permissions: Permission[],
+): string[] | null {
+  const out: string[] = []
+  for (const p of permissions) {
+    const ids = organizations(p)
+    if (ids === null) return null
+    for (const id of ids) if (!out.includes(id)) out.push(id)
+  }
+  return out
+}
+
 // useOrganizationParam owns the page's object, synced with
-// ?organization_id=. With a permission, the options are the objects the
-// signed-in user holds it on.
-export function useOrganizationParam(permission?: Permission) {
+// ?organization_id=. With permissions, the options are the objects the
+// signed-in user holds any of them on.
+export function useOrganizationParam(permission?: Permission | Permission[]) {
   const access = useAccess()
-  const allowed = permission ? access.organizations(permission) : null
+  const permissions = permission === undefined ? [] : Array.isArray(permission) ? permission : [permission]
+  const allowed = permissions.length > 0 ? allowedOrganizations(access.organizations, permissions) : null
   const allowedKey = allowed?.join(',') ?? null
   const restricted = allowed !== null
 

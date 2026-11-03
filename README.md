@@ -227,24 +227,60 @@ Month/year flows therefore require the economics daemon to be running.
 
 ### Plan vs actual (planned PV generation)
 
-The summary card compares actual generation against the n8n generation
-forecast on every preset. The day preset sums the hourly forecast it
-already plots. Month and year call `/api/v1/pv-plan-summary`
-(`internal/api/pvplan.go`), which sums per-day forecasts cached in
-`pv_plan_daily`: the flow answers one site-day per call, so a year is
-365 calls and a page view can't make them. A past day's forecast never
-changes, so its cache entry is permanent; today's is refreshed every 30
-minutes, and days the flow has no forecast for are cached as a miss and
-retried daily. Missing days are fetched inline within a bounded budget,
-which means a cold year fills over the first few polls.
+The summary card compares actual generation against a generation plan
+on every preset. Each station's plan comes from one of two sources,
+switched per station in the passport («Паспорт станції» → «Генерація
+СЕС», `technical.write`):
 
-The window's end is clamped to today — the flow forecasts about two
-weeks ahead, and counting the rest of the month would compare a
-full-month plan against elapsed-month actuals. `days_covered` below
-`days_expected` means part of the period predates the flow's own
-history, which the dashboard prints next to the plan instead of passing
-a partial plan off as the whole period. Set `PV_FORECAST_WEBHOOK_URL` to
-point the API at a different flow.
+- **`n8n`** — the Update SES Plan flow, as before. Every station starts
+  here, so deploying changes nothing until a station is switched.
+- **`model`** — the same model computed in-house (`internal/pvplan`):
+  Open-Meteo plane-of-array irradiance for each orientation of the
+  passport, a NOCT 45 °C cell-temperature correction, a 0.90 system
+  loss, then one clip per station to its nameplate and inverter limit.
+
+Whatever reads a plan — the day chart and CSV export
+(`/api/v1/pv-forecast`), the month/year card, economics and the
+assistant (`/api/v1/pv-plan-summary`), tomorrow's УЗЕ plan, the edge
+planner and dispatch — follows the station's source. The browser never
+calls n8n itself: the API reads the flow through a server-side cache.
+Each source keeps its own numbers (`pv_plan_daily` for n8n,
+`pv_plan_hourly` for the model), so switching back and forth loses
+nothing.
+
+The model runs for every station with a passport whatever its source,
+at startup and at 06:00 and 18:00 Kyiv, for today and tomorrow. It keeps
+two plans per hour: `day_ahead`, frozen at the last run before the day
+starts — what plan-vs-actual compares against — and `latest`, which
+control acts on. On first start each station's past plan is rebuilt from
+Open-Meteo Previous Runs (the value forecast 24 h ahead) from its first
+telemetry day; the passport's «Перерахувати історію плану» reruns it
+after an edit. The passports are seeded once from the n8n orientation
+table with its duplicate rows dropped (`internal/pvplan/orientations_seed.json`).
+
+On n8n, month and year sum per-day forecasts cached in `pv_plan_daily`:
+the flow answers one site-day per call, so a year is 365 calls and a
+page view can't make them. A past day's forecast never changes, so its
+cache entry is permanent; today's is refreshed every 30 minutes, and
+days the flow has no forecast for are cached as a miss and retried
+daily. Missing days are fetched inline within a bounded budget, which
+means a cold year fills over the first few polls.
+
+The window's end is clamped to today — the forecast horizon is short,
+and counting the rest of the month would compare a full-month plan
+against elapsed-month actuals. `days_covered` below `days_expected`
+means part of the period has no plan, which the dashboard prints next
+to the plan instead of passing a partial plan off as the whole period.
+
+Where both sources live is set on the «Прогноз СЕС» page (user menu,
+administrators of every organization; `/api/v1/pv-plan-settings`): the
+Open-Meteo forecast and previous-runs addresses, the Open-Meteo key,
+and the n8n webhook. Empty fields mean the public Open-Meteo API (free
+for non-commercial use only) and the flow the console was built
+against. The settings live in `pv_plan_settings`, the key in a column
+the API never returns, and a save takes effect without a restart; the
+page's connection test asks each upstream once before anything is
+saved.
 
 ### Topology auto-detection
 

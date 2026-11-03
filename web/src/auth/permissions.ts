@@ -47,20 +47,38 @@ export type AuthMe = {
   ai_chat?: boolean
 }
 
-export type AppView = 'dashboard' | 'economics' | 'control' | 'station' | 'import' | 'alerts' | 'users' | 'ai'
+export type AppView =
+  | 'dashboard'
+  | 'economics'
+  | 'control'
+  | 'station'
+  | 'import'
+  | 'alerts'
+  | 'users'
+  | 'ai'
+  | 'pvplan'
 
 // The first view a user may open is where they land.
-const VIEW_ORDER: AppView[] = ['dashboard', 'economics', 'control', 'station', 'import', 'alerts', 'users', 'ai']
+const VIEW_ORDER: AppView[] = ['dashboard', 'economics', 'control', 'station', 'import', 'alerts', 'users', 'ai', 'pvplan']
 
-// users and ai (the assistant's settings) serve every organization, so
-// only administrators of all of them open those.
-const VIEW_PERMISSION: Record<Exclude<AppView, 'users' | 'ai'>, Permission> = {
-  dashboard: 'analytics.day',
-  economics: 'economics.read',
-  control: 'control',
-  station: 'service',
-  import: 'service',
-  alerts: 'service',
+// users, ai (the assistant's settings) and pvplan (where the PV plan
+// comes from) serve every organization, so only administrators of all
+// of them open those. Any one listed permission opens a view.
+type GlobalView = 'users' | 'ai' | 'pvplan'
+
+const GLOBAL_VIEWS: readonly AppView[] = ['users', 'ai', 'pvplan'] satisfies GlobalView[]
+
+const isGlobalView = (view: AppView): view is GlobalView => GLOBAL_VIEWS.includes(view)
+
+export const VIEW_PERMISSIONS: Record<Exclude<AppView, GlobalView>, Permission[]> = {
+  dashboard: ['analytics.day'],
+  economics: ['economics.read'],
+  control: ['control'],
+  // The passport also holds the PV plan's orientations, which whoever
+  // edits the planner's technical inputs maintains.
+  station: ['service', 'technical.write'],
+  import: ['service'],
+  alerts: ['service'],
 }
 
 export type Access = {
@@ -105,7 +123,7 @@ export function accessFor(me: AuthMe): Access {
   const organizations = (permission: Permission) =>
     me.organizations.filter((o) => o.permissions.includes(permission)).map((o) => o.id)
   const canView = (view: AppView) =>
-    view === 'users' || view === 'ai' ? me.global_admin : organizations(VIEW_PERMISSION[view]).length > 0
+    isGlobalView(view) ? me.global_admin : VIEW_PERMISSIONS[view].some((p) => organizations(p).length > 0)
   return { restricted: true, globalAdmin: me.global_admin, can, organizations, canView }
 }
 

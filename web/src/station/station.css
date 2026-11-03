@@ -252,3 +252,297 @@
 .station-flags li {
   margin: 2px 0;
 }
+
+/* «Генерація СЕС»: the PV plan passport. */
+
+.pvplan-lead,
+.pvplan-hint {
+  margin: 0 0 12px;
+  font-size: 0.85rem;
+  line-height: 1.45;
+  color: var(--text-subtle);
+}
+
+.pvplan-card {
+  margin-bottom: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--bg-elevated);
+}
+
+.pvplan-card h3 {
+  margin: 0 0 10px;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.pvplan-source {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 0 0 10px;
+  padding: 0;
+  border: 0;
+}
+
+.pvplan-source legend {
+  margin-bottom: 8px;
+  padding: 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.pvplan-option {
+  display: flex;
+  flex: 1 1 220px;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.pvplan-option.is-on {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+}
+
+.pvplan-option span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pvplan-option small {
+  font-size: 0.8rem;
+  color: var(--text-subtle);
+}
+
+.pvplan-today,
+.pvplan-status {
+  margin: 0;
+  font-size: 0.88rem;
+  color: var(--text-secondary);
+}
+
+.pvplan-note {
+  margin: 8px 0 0;
+  font-size: 0.85rem;
+  color: var(--accent-text);
+}
+
+.pvplan-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 10px 14px;
+  margin-bottom: 10px;
+}
+
+.pvplan-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.8rem;
+  color: var(--text-label);
+}
+
+.pvplan input:not([type='checkbox']):not([type='radio']) {
+  width: 100%;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-page);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.88rem;
+}
+
+.pvplan input:disabled {
+  color: var(--text-secondary);
+}
+
+.pvplan-table-wrap {
+  overflow-x: auto;
+  margin-bottom: 10px;
+}
+
+.pvplan-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.pvplan-table th {
+  padding: 6px;
+  border-bottom: 1px solid var(--border);
+  font-weight: 600;
+  text-align: left;
+  color: var(--text-label);
+  white-space: nowrap;
+}
+
+.pvplan-table td {
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--border-hairline);
+}
+
+.pvplan-table tr.is-off td {
+  opacity: 0.55;
+}
+
+.pvplan-table .pvplan-idx {
+  width: 3.2em;
+}
+
+.pvplan-num {
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.pvplan-center {
+  text-align: center;
+}
+
+.pvplan-empty {
+  padding: 12px 6px;
+  color: var(--text-subtle);
+}
+
+.pvplan-remove {
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.pvplan-btn {
+  padding: 7px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.88rem;
+  cursor: pointer;
+}
+
+.pvplan-btn.primary {
+  border-color: var(--btn-primary-bg);
+  background: var(--btn-primary-bg);
+  color: var(--btn-primary-fg);
+}
+
+.pvplan-btn.primary:hover:not(:disabled) {
+  background: var(--btn-primary-hover);
+}
+
+.pvplan-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.pvplan-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+  margin: 12px 0 0;
+}
+
+.pvplan-summary div {
+  display: flex;
+  gap: 6px;
+  font-size: 0.88rem;
+}
+
+.pvplan-summary dt {
+  color: var(--text-subtle);
+}
+
+.pvplan-summary dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.pvplan-warn {
+  margin: 10px 0 0;
+  padding: 8px 10px;
+  border: 1px solid var(--warn-border);
+  border-radius: 8px;
+  background: var(--warn-bg);
+  color: var(--warn-text);
+  font-size: 0.85rem;
+}
+
+.pvplan-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 0 0 12px;
+}
+
+.pvplan-notice {
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--ok-border);
+  border-radius: 8px;
+  background: var(--ok-bg);
+  color: var(--ok-text);
+  font-size: 0.85rem;
+}
+
+.pvplan-notice.err,
+.pvplan-status.err {
+  border-color: var(--err-border);
+  background: var(--err-bg);
+  color: var(--err-text);
+}
+
+.pvplan-status {
+  margin-bottom: 10px;
+}
+
+.pvplan-status.err {
+  padding: 8px 10px;
+  border: 1px solid var(--err-border);
+  border-radius: 8px;
+}
+
+.pvplan-journal summary {
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.pvplan-journal > ul {
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pvplan-journal > ul > li {
+  padding: 8px 0;
+  border-top: 1px solid var(--border-hairline);
+  font-size: 0.85rem;
+}
+
+.pvplan-journal-head {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 4px;
+  color: var(--text-subtle);
+}
+
+.pvplan-journal-head time {
+  font-variant-numeric: tabular-nums;
+}
+
+.pvplan-journal li ul {
+  margin: 0;
+  padding-left: 1.1rem;
+}

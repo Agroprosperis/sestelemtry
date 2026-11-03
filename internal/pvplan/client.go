@@ -1,13 +1,13 @@
-// Package pvplan reads the n8n generation-forecast flow — the same
-// source the dashboard's day chart plots hour by hour — and rolls one
-// site-day of it up into a single planned-kWh figure.
+// Package pvplan is the planned PV generation of each station, from
+// either of two sources the station's passport switches between: the
+// n8n generation-forecast flow (this file), or the same model computed
+// here from Open-Meteo (model.go, planner.go).
 //
-// Period plan-vs-fact needs one number per civil day, not the hourly
-// shape, and a month or a year of those numbers is far more upstream
-// calls than a page view can afford. So the flow is queried one day at
-// a time and callers persist the result (see storage.PvPlanDaily): a
-// past day's forecast never changes, which makes the cache permanent
-// for everything but today.
+// The n8n flow answers one site-day per call, and a month or a year of
+// those is far more upstream calls than a page view can afford, so
+// callers persist its day totals (storage.PvPlanDaily): a past day's
+// forecast never changes, which makes that cache permanent for
+// everything but today.
 package pvplan
 
 import (
@@ -24,14 +24,15 @@ import (
 
 // DefaultWebhookURL is the n8n webhook serving the per-orientation
 // hourly generation forecast (elevator_code + forecast_day → rows of
-// {hour_ending, orientation_idx, planned_kwh}). Deployments override it
-// through PV_FORECAST_WEBHOOK_URL.
+// {hour_ending, orientation_idx, planned_kwh}). The «Прогноз СЕС»
+// settings page can point the console at another one.
 const DefaultWebhookURL = "https://granary.app.n8n.cloud/webhook/96bac28d-5020-48b3-8f23-0bc189029c00"
 
 // elevatorCodes maps organization ids to the n8n flow's elevator codes.
-// Mirrors web/src/dashboard/transforms/pvForecast.ts. An org missing
-// here (demo-org) has no forecast at all, which callers report as
-// "unsupported" rather than as a zero plan.
+// An org missing here has no n8n forecast at all, which callers report
+// as "unsupported" rather than as a zero plan. Whether a code describes
+// the whole elevator rather than the site is the passport's
+// whole_elevator_from, the same for both sources.
 var elevatorCodes = map[string]string{
 	"ze":  "JE",
 	"pe":  "RE",
@@ -43,35 +44,10 @@ var elevatorCodes = map[string]string{
 	"sm":  "SM",
 }
 
-// wholeElevatorFrom is the first civil day (YYYY-MM-DD, site time) a
-// code forecasts more than its site. DE forecasts the whole
-// Дубовʼязівський elevator; from 2026-09-24 it is two sites, `de` (Т2)
-// and `de1` (Т1, which starts that day; ems-spec de_two_sites.md).
-// Until the flow has per-site codes both show DE, flagged as the whole
-// elevator's forecast; control never plans on it.
-var wholeElevatorFrom = map[string]string{
-	"de":  "2026-09-24",
-	"de1": "2026-09-24",
-}
-
 // ElevatorCodeFor resolves an organization id to its elevator code.
 func ElevatorCodeFor(organizationID string) (string, bool) {
 	code, ok := elevatorCodes[organizationID]
 	return code, ok
-}
-
-// CodeCoversDay reports whether the organization's code forecasts
-// exactly the site on `day`, a civil day in the site's zone.
-func CodeCoversDay(organizationID string, day time.Time) bool {
-	from, bounded := wholeElevatorFrom[organizationID]
-	return !bounded || day.Format("2006-01-02") < from
-}
-
-// WholeElevatorFrom returns the first civil day (YYYY-MM-DD) from which
-// the organization's code forecasts the whole elevator rather than the
-// site, or "" when it always forecasts the site.
-func WholeElevatorFrom(organizationID string) string {
-	return wholeElevatorFrom[organizationID]
 }
 
 // Client fetches single site-days from the forecast flow.
@@ -117,14 +93,14 @@ func (c *Client) DayHourly(ctx context.Context, elevatorCode string, day time.Ti
 	}
 	defer res.Body.Close()
 	if res.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("pvplan: %s", res.Status)
+		return nil, fmt.Errorf("n8n відповів %s", res.Status)
 	}
 	// The flow returns a JSON array of rows, but answers a day it knows
 	// nothing about with an object ({} or a message). Decode loosely so
 	// that shape reads as "no forecast" instead of a decode failure.
 	var raw json.RawMessage
 	if err := json.NewDecoder(res.Body).Decode(&raw); err != nil {
-		return nil, fmt.Errorf("pvplan: decode: %w", err)
+		return nil, fmt.Errorf("n8n: незрозуміла відповідь: %w", err)
 	}
 	var rows []map[string]any
 	if err := json.Unmarshal(raw, &rows); err != nil {

@@ -159,9 +159,6 @@ func main() {
 	case result == api.BootstrapDefaultAdmin:
 		log.Warn("auth_bootstrap_default_admin", "login", "admin", "hint", "sign in as admin/admin now and set a new password")
 	}
-	// Per-day PV plan totals for the month/year plan-vs-actual card,
-	// read from the same n8n forecast flow the day chart plots.
-	svc.SetPvPlanClient(pvplan.NewClient(strings.TrimSpace(os.Getenv("PV_FORECAST_WEBHOOK_URL")), nil))
 
 	// EMS edge uplink: enabled only when per-site Bearer tokens exist
 	// (EDGE_SITE_TOKENS="ab=tokenA,ze=tokenB"). During the shadow phase
@@ -231,6 +228,34 @@ func main() {
 			log.Info("api_config_loaded", "path", cfgPath, "organizations", len(cfg.Organizations))
 		}
 	}
+
+	kyiv, err := time.LoadLocation("Europe/Kyiv")
+	if err != nil {
+		kyiv = time.UTC
+	}
+	// PV plan: the n8n flow for stations whose passport still selects
+	// it, and the in-house model computed from Open-Meteo at 06:00 and
+	// 18:00 for every served station whatever its source, so switching
+	// a station from n8n finds its plan and history already there. Both
+	// upstreams are where the «Прогноз СЕС» settings page says. Wired
+	// before the edge planner loop, which reads the plan.
+	pvStore := storage.NewPvPlanStore(pool)
+	pvUpstreams := pvplan.NewUpstreams(pvStore)
+	svc.SetPvPlanUpstreams(pvUpstreams)
+	pvPlanner := pvplan.NewPlanner(pvStore, pvUpstreams, kyiv, log)
+	if loadedCfg != nil {
+		ids := make([]string, 0, len(loadedCfg.Organizations))
+		coords := map[string]pvplan.Coordinates{}
+		for _, o := range loadedCfg.Organizations {
+			ids = append(ids, o.ID)
+			if o.Location != nil {
+				coords[o.ID] = pvplan.Coordinates{Latitude: o.Location.Latitude, Longitude: o.Location.Longitude}
+			}
+		}
+		pvPlanner.SetOrganizations(ids, coords)
+	}
+	svc.SetPvPlanner(pvPlanner)
+	go pvPlanner.Run(ctx)
 
 	// Forward planner (edge level A): republishes manifest-lite with
 	// plan.intervals for every edge site every 30 min. Tomorrow's DAM
@@ -314,10 +339,6 @@ func main() {
 		askoeHosts[id] = askoe.OrgHosts{Default: oh.Default, ByMetricKey: oh.ByMetricKey}
 	}
 	askoeImporter := askoe.NewImporter(pool, log, askoeHosts)
-	kyiv, err := time.LoadLocation("Europe/Kyiv")
-	if err != nil {
-		kyiv = time.UTC
-	}
 	svc.SetAskoeImporter(func(ctx context.Context, orgID string, files []askoe.WorkbookFile, onProgress func(done, total int, label string)) (any, error) {
 		res, err := askoeImporter.Import(ctx, orgID, files, onProgress)
 		if err == nil && res != nil && res.RowsWritten > 0 {

@@ -13,6 +13,7 @@ import { Dashboard } from './dashboard/Dashboard'
 import { EconomicsPage } from './economics/EconomicsPage'
 import { ImportPage } from './import/ImportPage'
 import { replaceView } from './shell/navigation'
+import { PvPlanSettingsPage } from './station/PvPlanSettingsPage'
 import { StationPage } from './station/StationPage'
 import { UsersPage } from './users/UsersPage'
 
@@ -34,6 +35,7 @@ function readView(): View {
   if (view === 'control') return 'control'
   if (view === 'users') return 'users'
   if (view === 'ai') return 'ai'
+  if (view === 'pvplan') return 'pvplan'
   // The standalone planner was replaced by the desk in the control
   // mode's «План УЗЕ» tab; old ?view=planner links (bookmarks,
   // dashboard header) land there. The URL is normalised so
@@ -143,6 +145,9 @@ function renderView(view: View) {
   }
   if (view === 'ai') {
     return <AISettingsPage />
+  }
+  if (view === 'pvplan') {
+    return <PvPlanSettingsPage />
   }
   return <Dashboard />
 }

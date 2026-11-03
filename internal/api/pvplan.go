@@ -3,54 +3,43 @@ package api
 import (
 	"context"
 	"net/http"
+	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/nesh/sestelemetry/internal/pvplan"
 )
 
-const (
-	// pvPlanTodayTTL is how long a cached plan for a day that is still
-	// running (or hasn't started) stays usable. The flow republishes the
-	// current day's forecast a few times a day as the weather model
-	// updates, so a short TTL keeps today honest without re-asking on
-	// every dashboard poll.
-	pvPlanTodayTTL = 30 * time.Minute
-	// pvPlanMissRetry is how long a recorded miss (upstream had no
-	// forecast for a finished day) is trusted before being retried. Past
-	// forecasts don't change, but the flow can backfill history, so we
-	// look again — once a day, not once a page view.
-	pvPlanMissRetry = 24 * time.Hour
-	// pvPlanFetchConcurrency bounds parallel upstream calls. Filling a
-	// year cold is ~365 of them; six at a time keeps that within a
-	// request while staying a polite neighbour to a shared n8n instance.
-	pvPlanFetchConcurrency = 6
-	// pvPlanFetchBudget caps the time spent filling the cache in one
-	// request. Whatever landed inside the budget is summed and reported
-	// with its coverage; the next poll continues where this one stopped,
-	// and since past days are cached permanently the cold cost is paid
-	// once per site.
-	pvPlanFetchBudget = 25 * time.Second
-	// pvPlanMaxFetchDays bounds the fill per request independently of
-	// the clock, so a pathological range can't queue thousands of calls.
-	pvPlanMaxFetchDays = 400
-)
+// Reading a station's PV plan, from whichever source its passport
+// selects. The n8n source lives in pvplan_n8n.go, the passport routes in
+// pvplan_passport.go.
+
+// pvPlanStation returns org's passport. A station without one is
+// planned by n8n, as every station was before passports existed. A
+// failed read is an error, not "no passport": guessing n8n would serve a
+// station switched to the model the flow's numbers, and would drop
+// Дубовʼязівський's whole-elevator day right where control reads it.
+func (h *Handlers) pvPlanStation(ctx context.Context, org string) (pvplan.Station, error) {
+	st, ok, err := h.store.PvPlanStation(ctx, org)
+	if err != nil {
+		return pvplan.Station{}, err
+	}
+	if !ok {
+		return pvplan.Station{OrganizationID: org, Source: pvplan.SourceN8N}, nil
+	}
+	return st, nil
+}
 
 // pvPlanSummary answers GET /api/v1/pv-plan-summary with the planned
 // generation for [from, to) in kWh, so the dashboard can show plan vs
 // actual on the month and year presets the same way the day preset
 // does from the hourly forecast it already plots.
 //
-// The period plan is the sum of per-day forecasts, cached in
-// pv_plan_daily. Days the cache is missing (or is stale on) are fetched
-// from the flow inline, within pvPlanFetchBudget, and written back.
-//
-// `to` is clamped to today: the flow's horizon is about two weeks, so
-// including the rest of the current month or year would compare a
-// full-period plan against elapsed-period actuals and read as a
-// collapse in performance. Today itself is counted whole, matching what
-// the day card does with a day still in progress.
+// `to` is clamped to today: the forecast horizon is short, so including
+// the rest of the current month or year would compare a full-period
+// plan against elapsed-period actuals and read as a collapse in
+// performance. Today itself is counted whole, matching what the day
+// card does with a day still in progress.
 func (h *Handlers) pvPlanSummary(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -83,16 +72,29 @@ func (h *Handlers) pvPlanSummary(w http.ResponseWriter, r *http.Request) {
 }
 
 // pvPlanTotal sums the planned generation of the civil days [from, to)
-// touches, clamped to today, filling the pv_plan_daily cache from the
-// flow on the way. The summary route and the assistant's pv_plan tool
-// both answer from it.
+// touches, clamped to today, from the source the passport selects. The
+// summary route and the assistant's pv_plan tool both answer from it.
+//
+// The model's day totals are its day-ahead plans. The n8n totals are
+// cached in pv_plan_daily and filled from the flow on the way.
 func (h *Handlers) pvPlanTotal(ctx context.Context, orgID string, from, to time.Time, loc *time.Location) PvPlanSummaryResponse {
 	resp := PvPlanSummaryResponse{OrganizationID: orgID}
-	code, supported := pvplan.ElevatorCodeFor(orgID)
-	if !supported {
+	st, err := h.pvPlanStation(ctx, orgID)
+	if err != nil {
+		h.log.Warn("api_pv_plan_summary_station", "organization_id", orgID, "err", err)
 		return resp
 	}
-	resp.Supported = true
+	resp.Source = string(st.Source)
+	code, n8nOK := pvplan.ElevatorCodeFor(orgID)
+	switch st.Source {
+	case pvplan.SourceModel:
+		resp.Supported = st.Modelled()
+	default:
+		resp.Supported = n8nOK
+	}
+	if !resp.Supported {
+		return resp
+	}
 
 	fromDay, toDay, _ := civilDaySpan(from, to, loc)
 	if fromDay.IsZero() {
@@ -110,38 +112,30 @@ func (h *Handlers) pvPlanTotal(ctx context.Context, orgID string, from, to time.
 	resp.FromDay = fromDay.Format("2006-01-02")
 	resp.ToDay = toDay.Format("2006-01-02")
 	resp.DaysExpected = int(civilDayIndex(toDay)-civilDayIndex(fromDay)) + 1
-	if !pvplan.CodeCoversDay(orgID, toDay) {
-		resp.WholeElevatorFrom = pvplan.WholeElevatorFrom(orgID)
+	if !st.CoversDay(resp.ToDay) {
+		resp.WholeElevatorFrom = st.WholeElevatorFrom
 	}
 
 	start := time.Now()
-	cached, err := h.store.PvPlanDays(ctx, orgID, fromDay, toDay)
-	if err != nil {
-		h.log.Warn("api_pv_plan_summary_cache",
-			"organization_id", orgID, "err", err,
-			"from_day", resp.FromDay, "to_day", resp.ToDay,
-		)
-		// A cache read failure says nothing about the period, so report
-		// zero coverage and let the client show a placeholder instead of
-		// a plan that happens to be missing most of its days.
-		return resp
-	}
-
-	plans, stale := pvPlanIndex(cached, today)
-	missing := pvPlanMissingDays(fromDay, toDay, plans, stale)
-	if len(missing) > 0 && h.pvPlan != nil {
-		fetched := h.fillPvPlanDays(ctx, orgID, code, missing)
-		if len(fetched) > 0 {
-			for _, d := range fetched {
-				plans[pvPlanKey(d.Day)] = d
-			}
-			if err := h.store.SavePvPlanDays(ctx, orgID, fetched); err != nil {
-				// The numbers are already good for this response; only
-				// the next request pays for the lost cache write.
-				h.log.Warn("api_pv_plan_summary_save",
-					"organization_id", orgID, "err", err, "days", len(fetched),
-				)
-			}
+	var (
+		plans   map[string]PvPlanDayTotal
+		fetched int
+	)
+	if st.Source == pvplan.SourceModel {
+		rows, err := h.store.PvPlanModelDays(ctx, orgID, fromDay, toDay)
+		if err != nil {
+			h.log.Warn("api_pv_plan_summary_model", "organization_id", orgID, "err", err)
+			return resp
+		}
+		plans = make(map[string]PvPlanDayTotal, len(rows))
+		for _, row := range rows {
+			plans[pvPlanKey(row.Day)] = row
+		}
+	} else {
+		var ok bool
+		plans, fetched, ok = h.n8nPlanDays(ctx, orgID, code, fromDay, toDay, today)
+		if !ok {
+			return resp
 		}
 	}
 
@@ -153,103 +147,145 @@ func (h *Handlers) pvPlanTotal(ctx context.Context, orgID string, from, to time.
 	}
 	h.log.Info("api_pv_plan_summary_ok",
 		"organization_id", orgID,
+		"source", resp.Source,
 		"from_day", resp.FromDay, "to_day", resp.ToDay,
 		"days_covered", resp.DaysCovered,
 		"days_expected", resp.DaysExpected,
-		"fetched_days", len(missing),
+		"fetched_days", fetched,
 		"duration_ms", time.Since(start).Milliseconds(),
 	)
 	return resp
+}
+
+// pvForecast answers GET /api/v1/pv-forecast?organization_id&date&tz
+// with the day's hourly plan for the day chart and the CSV export. The
+// browser no longer calls n8n itself: the n8n source is read here,
+// through the same cache control uses.
+func (h *Handlers) pvForecast(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	orgID := strings.TrimSpace(r.URL.Query().Get("organization_id"))
+	if orgID == "" {
+		http.Error(w, "organization_id is required", http.StatusBadRequest)
+		return
+	}
+	dateStr := strings.TrimSpace(r.URL.Query().Get("date"))
+	loc, err := loadLocation(strings.TrimSpace(r.URL.Query().Get("tz")))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	day, err := time.ParseInLocation("2006-01-02", dateStr, loc)
+	if err != nil {
+		http.Error(w, "date must be YYYY-MM-DD", http.StatusBadRequest)
+		return
+	}
+
+	st, err := h.pvPlanStation(r.Context(), orgID)
+	if err != nil {
+		h.log.Error("api_pv_forecast_station", "organization_id", orgID, "err", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+	resp := PvForecastResponse{
+		OrganizationID: orgID,
+		Date:           dateStr,
+		Source:         string(st.Source),
+		Hours:          []PvForecastHour{},
+		WholeElevator:  !st.CoversDay(dateStr),
+	}
+	var byHour map[int]float64
+	switch st.Source {
+	case pvplan.SourceModel:
+		resp.Supported = st.Modelled()
+		if resp.Supported {
+			hours, computed, err := h.store.PvPlanHours(r.Context(), orgID, civilDate(day), pvplan.DayAhead)
+			if err != nil {
+				h.log.Error("api_pv_forecast", "organization_id", orgID, "date", dateStr, "err", err)
+				http.Error(w, "internal server error", http.StatusInternalServerError)
+				return
+			}
+			byHour = hours
+			if !computed.IsZero() {
+				resp.ComputedAt = &computed
+			}
+		}
+	default:
+		code, ok := h.n8nCode(orgID)
+		resp.Supported = ok
+		if ok {
+			hours, err := h.n8nDayHours(r.Context(), orgID, code, day, loc)
+			if err != nil {
+				// A flow hiccup hides the plan line; it is not a failure
+				// of the day chart.
+				h.log.Warn("api_pv_forecast_n8n", "organization_id", orgID, "date", dateStr, "err", err)
+			}
+			byHour = hours
+		}
+	}
+	for hour, kwh := range byHour {
+		if kwh <= 0 {
+			continue
+		}
+		resp.Hours = append(resp.Hours, PvForecastHour{Hour: hour, PlannedKwh: kwh})
+		resp.PlannedKwh += kwh
+	}
+	sort.Slice(resp.Hours, func(i, j int) bool { return resp.Hours[i].Hour < resp.Hours[j].Hour })
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// civilDate is the calendar date of a site-local midnight as a UTC
+// midnight, the form date columns are queried with.
+func civilDate(day time.Time) time.Time {
+	y, m, d := day.Date()
+	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
 }
 
 func pvPlanKey(day time.Time) string {
 	return day.Format("2006-01-02")
 }
 
-// pvPlanIndex keys the cached rows by civil date and reports which of
-// them need re-asking: a day that hasn't finished yet (its forecast is
-// still being revised) and a recorded miss that has aged past its
-// retry window.
-func pvPlanIndex(cached []PvPlanDayTotal, today time.Time) (plans map[string]PvPlanDayTotal, stale map[string]bool) {
-	plans = make(map[string]PvPlanDayTotal, len(cached))
-	stale = make(map[string]bool, len(cached))
-	now := time.Now()
-	for _, row := range cached {
-		key := pvPlanKey(row.Day)
-		plans[key] = row
-		age := now.Sub(row.FetchedAt)
-		switch {
-		case !row.Day.Before(today) && age > pvPlanTodayTTL:
-			stale[key] = true
-		case row.PlannedKwh <= 0 && age > pvPlanMissRetry:
-			stale[key] = true
-		}
+// pvPlanControlHours is the plan control acts on for one civil day, by
+// local hour start: the model's freshest revision (its day-ahead plan
+// when no fresher one is stored), or the n8n day. ok is false when
+// there is none, or when the station's planes describe the whole
+// elevator that day — planning one site's battery on the whole
+// elevator's sun would overcharge it.
+func (h *Handlers) pvPlanControlHours(ctx context.Context, org string, day time.Time, loc *time.Location) (map[int]float64, bool) {
+	st, err := h.pvPlanStation(ctx, org)
+	if err != nil {
+		h.log.Warn("api_pv_plan_control_station", "organization_id", org, "err", err)
+		return nil, false
 	}
-	return plans, stale
-}
-
-// pvPlanMissingDays walks the civil days in [fromDay, toDay] and
-// returns those with no cached plan or a stale one, oldest first.
-func pvPlanMissingDays(fromDay, toDay time.Time, plans map[string]PvPlanDayTotal, stale map[string]bool) []time.Time {
-	var out []time.Time
-	for day := fromDay; !day.After(toDay); day = day.AddDate(0, 0, 1) {
-		key := pvPlanKey(day)
-		if _, ok := plans[key]; ok && !stale[key] {
-			continue
-		}
-		out = append(out, day)
-		if len(out) >= pvPlanMaxFetchDays {
-			break
-		}
+	if !st.CoversDay(day.Format("2006-01-02")) {
+		return nil, false
 	}
-	return out
-}
-
-// fillPvPlanDays fetches the given days from the forecast flow with
-// bounded concurrency and a wall-clock budget, returning what it got.
-// A day the flow has no forecast for comes back with PlannedKwh 0 so
-// the miss is cached and not re-asked on the next poll; a day whose
-// fetch errored is left out entirely, to be retried.
-func (h *Handlers) fillPvPlanDays(ctx context.Context, orgID, code string, days []time.Time) []PvPlanDayTotal {
-	ctx, cancel := context.WithTimeout(ctx, pvPlanFetchBudget)
-	defer cancel()
-
-	var (
-		mu   sync.Mutex
-		out  = make([]PvPlanDayTotal, 0, len(days))
-		wg   sync.WaitGroup
-		sem  = make(chan struct{}, pvPlanFetchConcurrency)
-		now  = time.Now()
-		errN int
-	)
-	for _, day := range days {
-		if ctx.Err() != nil {
-			break
+	if st.Source == pvplan.SourceModel {
+		if !st.Modelled() {
+			return nil, false
 		}
-		wg.Add(1)
-		sem <- struct{}{}
-		go func(day time.Time) {
-			defer wg.Done()
-			defer func() { <-sem }()
-			kwh, ok, err := h.pvPlan.DayTotal(ctx, code, day)
-			mu.Lock()
-			defer mu.Unlock()
+		for _, kind := range []pvplan.Kind{pvplan.Latest, pvplan.DayAhead} {
+			hours, _, err := h.store.PvPlanHours(ctx, org, civilDate(day), kind)
 			if err != nil {
-				errN++
-				return
+				h.log.Warn("api_pv_plan_control", "organization_id", org, "day", day.Format("2006-01-02"), "err", err)
+				return nil, false
 			}
-			if !ok {
-				kwh = 0
+			if len(hours) > 0 {
+				return hours, true
 			}
-			out = append(out, PvPlanDayTotal{Day: day, PlannedKwh: kwh, FetchedAt: now})
-		}(day)
+		}
+		return nil, false
 	}
-	wg.Wait()
-	if errN > 0 {
-		h.log.Warn("api_pv_plan_fetch_partial",
-			"organization_id", orgID,
-			"requested", len(days), "fetched", len(out), "failed", errN,
-		)
+	code, ok := h.n8nCode(org)
+	if !ok {
+		return nil, false
 	}
-	return out
+	hours, err := h.n8nDayHours(ctx, org, code, day, loc)
+	if err != nil {
+		h.log.Warn("api_pv_plan_control_n8n", "organization_id", org, "day", day.Format("2006-01-02"), "err", err)
+		return nil, false
+	}
+	return hours, len(hours) > 0
 }

@@ -94,7 +94,14 @@ beforeEach(() => {
     to: '2026-07-15',
     prices: [],
   })
-  vi.spyOn(api, 'fetchPvForecast').mockResolvedValue([])
+  vi.spyOn(api, 'fetchPvForecast').mockResolvedValue({
+    organization_id: 'ab',
+    date: '2026-07-15',
+    source: 'n8n',
+    supported: true,
+    planned_kwh: 0,
+    hours: [],
+  })
   vi.spyOn(api, 'fetchPvPlanSummary').mockResolvedValue({
     organization_id: 'ab',
     supported: false,
@@ -335,10 +342,17 @@ describe('useDashboardData period plan', () => {
     vi.spyOn(api, 'fetchEnergySummary').mockResolvedValue(
       summaryResponse(DAY_TOTALS, DAY_FLOWS, { source: 'allocator' }),
     )
-    vi.spyOn(api, 'fetchPvForecast').mockResolvedValue([
-      { hour_ending: 11, orientation_idx: 1, planned_kwh: 120 },
-      { hour_ending: 12, orientation_idx: 1, planned_kwh: 180 },
-    ] as never)
+    vi.spyOn(api, 'fetchPvForecast').mockResolvedValue({
+      organization_id: 'ab',
+      date: '2026-07-16',
+      source: 'model',
+      supported: true,
+      planned_kwh: 300,
+      hours: [
+        { hour: 10, planned_kwh: 120 },
+        { hour: 11, planned_kwh: 180 },
+      ],
+    })
     // usePvForecast caches per (site, day) for five minutes, so this
     // needs a day the earlier tests in this file haven't already
     // cached an empty forecast for.

@@ -1,4 +1,3 @@
-import type { ElevatorCode } from './dashboard/transforms/pvForecast'
 import {
   type WeatherForecastApiResponse,
   weatherFromApi,
@@ -12,7 +11,6 @@ import type {
   OrganizationsResponse,
   PlantInventory,
   PlantInventoryHistory,
-  PvForecastPoint,
   RegistersResponse,
   TimeseriesResponse,
 } from './types'
@@ -47,8 +45,8 @@ export const UNAUTHORIZED_EVENT = 'ses:unauthorized'
 // apiRequest is fetch for this dashboard's own API. The session cookie
 // goes along even when VITE_API_BASE_URL puts the API on another
 // origin, and state-changing requests carry the header the API demands
-// of them (a cross-site form can't set it). External services (n8n,
-// Open-Meteo) stay on plain fetch: the header would trigger a CORS
+// of them (a cross-site form can't set it). External services
+// (Open-Meteo) stay on plain fetch: the header would trigger a CORS
 // preflight they don't answer.
 export function apiRequest(input: string, init: RequestInit = {}): Promise<Response> {
   const method = (init.method ?? 'GET').toUpperCase()
@@ -289,16 +287,20 @@ export async function fetchEnergySummary(
   return res.json()
 }
 
+// PvPlanSource is where a station's plan comes from, switched per
+// station in its passport.
+export type PvPlanSource = 'n8n' | 'model'
+
 // PvPlanSummaryResponse mirrors `internal/api/types.go:
 // PvPlanSummaryResponse`: the planned generation for a period, summed
-// from the same per-day forecasts the day chart plots hour by hour.
+// from the same per-day plans the day chart plots hour by hour.
 //
-// `supported` is false for organizations the forecast flow has no site
-// code for (demo-org) — a plan of zero and no plan at all are
-// different claims, and only the latter should hide the comparison.
+// `supported` is false for organizations with no plan source (demo-org)
+// — a plan of zero and no plan at all are different claims, and only
+// the latter should hide the comparison.
 //
-// `days_covered` below `days_expected` means part of the period
-// predates the flow's own history, so the sum understates it.
+// `days_covered` below `days_expected` means part of the period has no
+// plan, so the sum understates it.
 //
 // `whole_elevator_from` is set when the plan from that day on is the
 // whole elevator's rather than the site's (de = Т2 from 2026-09-24).
@@ -310,7 +312,42 @@ export type PvPlanSummaryResponse = {
   days_expected: number
   from_day?: string
   to_day?: string
+  source?: PvPlanSource
   whole_elevator_from?: string
+}
+
+// PvForecastResponse mirrors `internal/api/types.go:PvForecastResponse`:
+// one day's hourly plan, from whichever source the station's passport
+// selects. `hour` is the local hour start; an hour's kWh is its
+// average kW.
+export type PvForecastResponse = {
+  organization_id: string
+  date: string
+  source: PvPlanSource
+  supported: boolean
+  planned_kwh: number
+  hours: { hour: number; planned_kwh: number }[]
+  whole_elevator?: boolean
+  computed_at?: string
+}
+
+// fetchPvForecast returns a day's hourly plan for the day chart and the
+// CSV export. `date` is a local YYYY-MM-DD; tz defaults to the
+// browser's zone.
+export async function fetchPvForecast(
+  input: { organizationID: string; date: string; tz?: string },
+  signal?: AbortSignal,
+): Promise<PvForecastResponse> {
+  const url = buildURL('/api/v1/pv-forecast', {
+    organization_id: input.organizationID,
+    date: input.date,
+    tz: input.tz || Intl.DateTimeFormat().resolvedOptions().timeZone || undefined,
+  })
+  const res = await apiFetch(url, { signal })
+  if (!res.ok) {
+    throw new Error(`pv-forecast request failed: ${res.status}`)
+  }
+  return res.json()
 }
 
 // fetchPvPlanSummary returns the period plan for month/year views. The
@@ -1528,13 +1565,6 @@ export async function runAskoeImport(
   }
 }
 
-const PV_FORECAST_WEBHOOK_URL =
-  'https://granary.app.n8n.cloud/webhook/96bac28d-5020-48b3-8f23-0bc189029c00'
-// Two retries on transient failures (5xx, network) with exponential backoff.
-// Total worst-case latency ~1s before giving up — short enough not to hold
-// up the chart, long enough to ride out a single node hiccup in n8n.
-const PV_FORECAST_RETRY_DELAYS_MS = [200, 600]
-
 function isAbortError(e: unknown): boolean {
   return e instanceof DOMException && e.name === 'AbortError'
 }
@@ -1558,52 +1588,10 @@ function delay(ms: number, signal?: AbortSignal): Promise<void> {
   })
 }
 
-export async function fetchPvForecast(
-  input: { elevatorCode: ElevatorCode; forecastDay: string },
-  signal?: AbortSignal,
-): Promise<PvForecastPoint[]> {
-  const url = new URL(PV_FORECAST_WEBHOOK_URL)
-  url.searchParams.set('elevator_code', input.elevatorCode)
-  url.searchParams.set('forecast_day', input.forecastDay)
-
-  let lastError: unknown = null
-  for (let attempt = 0; attempt <= PV_FORECAST_RETRY_DELAYS_MS.length; attempt++) {
-    if (signal?.aborted) {
-      throw new DOMException('Aborted', 'AbortError')
-    }
-    try {
-      const res = await fetch(url.toString(), { signal })
-      if (res.status >= 500 && res.status < 600) {
-        throw new Error(`pv-forecast request failed: ${res.status}`)
-      }
-      if (!res.ok) {
-        // Non-5xx errors (4xx, etc.) are not transient — bail immediately
-        // so a misconfigured elevator_code doesn't burn three attempts.
-        throw new Error(`pv-forecast request failed: ${res.status}`)
-      }
-      const body = (await res.json()) as unknown
-      if (!Array.isArray(body)) return []
-      return body as PvForecastPoint[]
-    } catch (e) {
-      if (isAbortError(e)) throw e
-      lastError = e
-      const isTransient =
-        e instanceof TypeError ||
-        (e instanceof Error && /pv-forecast request failed: 5\d\d/.test(e.message))
-      if (!isTransient) throw e
-      const nextDelay = PV_FORECAST_RETRY_DELAYS_MS[attempt]
-      if (nextDelay === undefined) break
-      await delay(nextDelay, signal)
-    }
-  }
-  throw lastError instanceof Error
-    ? lastError
-    : new Error('pv-forecast request failed')
-}
-
 const OPEN_METEO_FORECAST_URL = 'https://api.open-meteo.com/v1/forecast'
-// Same backoff schedule as the n8n forecast — Open-Meteo is third-party,
-// so a single transient hiccup shouldn't blank the weather card.
+// Two retries on transient failures (5xx, network) with backoff —
+// Open-Meteo is third-party, so a single transient hiccup shouldn't
+// blank the weather card.
 const OPEN_METEO_RETRY_DELAYS_MS = [200, 600]
 
 // fetchWeatherForecastFromAPI tries the backend's cached forecast
@@ -1634,7 +1622,8 @@ export async function fetchWeatherForecastFromAPI(
 // fetchOpenMeteoWeather calls the public Open-Meteo /v1/forecast endpoint
 // with the exact `daily=` / `hourly=` shape the dashboard PV pipeline uses
 // elsewhere, so caching CDNs see the same canonical URL. The browser hits
-// Open-Meteo directly (no backend proxy), mirroring fetchPvForecast.
+// Open-Meteo directly (no backend proxy) when the backend has no cached
+// forecast.
 export async function fetchOpenMeteoWeather(
   input: { latitude: number; longitude: number },
   signal?: AbortSignal,

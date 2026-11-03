@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/nesh/sestelemetry/internal/energyflow"
+	"github.com/nesh/sestelemetry/internal/pvplan"
 )
 
 var DefaultDashboardMetrics = []string{
@@ -265,11 +266,68 @@ type PvPlanSummaryResponse struct {
 	DaysExpected   int     `json:"days_expected"`
 	FromDay        string  `json:"from_day,omitempty"`
 	ToDay          string  `json:"to_day,omitempty"`
+	// Source is the passport's source the plan came from: n8n or model.
+	Source string `json:"source,omitempty"`
 	// WholeElevatorFrom is set when the period reaches the day from
-	// which the site's code forecasts the whole elevator rather than the
-	// site (de = Т2 from 2026-09-24): the plan from that day on is the
-	// whole elevator's.
+	// which the station's planes describe the whole elevator rather
+	// than the site (de = Т2 from 2026-09-24): the plan from that day on
+	// is the whole elevator's.
 	WholeElevatorFrom string `json:"whole_elevator_from,omitempty"`
+}
+
+// PvForecastHour is one hour of a day's planned generation; Hour is the
+// local hour start (0..23) and an hour's kWh equals its average kW.
+type PvForecastHour struct {
+	Hour       int     `json:"hour"`
+	PlannedKwh float64 `json:"planned_kwh"`
+}
+
+// PvForecastResponse is the body of GET /api/v1/pv-forecast: the
+// hourly plan the day chart plots, from whichever source the station's
+// passport selects. For the model it is the day-ahead plan, the same
+// one plan-vs-actual compares against.
+type PvForecastResponse struct {
+	OrganizationID string           `json:"organization_id"`
+	Date           string           `json:"date"`
+	Source         string           `json:"source"`
+	Supported      bool             `json:"supported"`
+	PlannedKwh     float64          `json:"planned_kwh"`
+	Hours          []PvForecastHour `json:"hours"`
+	WholeElevator  bool             `json:"whole_elevator,omitempty"`
+	ComputedAt     *time.Time       `json:"computed_at,omitempty"`
+}
+
+// PvPlanCoordinates is a station location.
+type PvPlanCoordinates struct {
+	Latitude  float64 `json:"latitude"`
+	Longitude float64 `json:"longitude"`
+}
+
+// PvPlanToday compares today's plan of both sources, so a station can
+// be checked before its passport is switched.
+type PvPlanToday struct {
+	Date     string   `json:"date"`
+	ModelKwh *float64 `json:"model_kwh,omitempty"`
+	N8NKwh   *float64 `json:"n8n_kwh,omitempty"`
+}
+
+// PvStationResponse is the body of GET/PUT /api/v1/pv-orientations.
+// Station is null for a station with no passport yet.
+type PvStationResponse struct {
+	OrganizationID string               `json:"organization_id"`
+	Station        *pvplan.Station      `json:"station"`
+	Defaults       *PvPlanCoordinates   `json:"defaults,omitempty"`
+	PdcTotalKwp    float64              `json:"pdc_total_kwp"`
+	N8NAvailable   bool                 `json:"n8n_available"`
+	Today          PvPlanToday          `json:"today"`
+	HistoryJob     pvplan.HistoryStatus `json:"history_job"`
+}
+
+// PvStationHistoryResponse is the body of GET
+// /api/v1/pv-orientations/history.
+type PvStationHistoryResponse struct {
+	OrganizationID string                `json:"organization_id"`
+	Entries        []pvplan.HistoryEntry `json:"entries"`
 }
 
 // LocationInfo is the geographic site of an organization, exposed via

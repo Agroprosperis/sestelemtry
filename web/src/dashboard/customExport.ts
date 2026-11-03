@@ -4,7 +4,7 @@ import {
   fetchTimeseries,
 } from '../api'
 import type { TimeseriesPoint } from '../types'
-import { aggregatePvForecastHourly, elevatorCodeFor } from './transforms/pvForecast'
+import { pvForecastRows } from './transforms/pvForecast'
 
 export type ExportTable = {
   headers: string[]
@@ -228,7 +228,7 @@ export async function fetchCustomExportData(input: CustomExportInput): Promise<E
 
   // Range covers a single calendar day exactly when from is local midnight
   // and to is exactly +24h. Forecast is fetched only for that case (the
-  // n8n flow returns one day at a time).
+  // plan is served one day at a time).
   const isSingleDay =
     bucket === '5 minutes' &&
     from.getHours() === 0 &&
@@ -242,7 +242,6 @@ export async function fetchCustomExportData(input: CustomExportInput): Promise<E
   const flowKeys = columns.flow ? [...FLOW_EXPORT_METRICS] : []
   const powerKeys = columns.power ? [...POWER_EXPORT_METRICS] : []
   const deviceKeys = columns.device ? [...DEVICE_EXPORT_METRICS] : []
-  const elevator = columns.forecast ? elevatorCodeFor(organizationID) : null
 
   const energyP = energyKeys.length
     ? fetchTimeseries(
@@ -347,15 +346,14 @@ export async function fetchCustomExportData(input: CustomExportInput): Promise<E
       })
     : Promise.resolve(null)
   const forecastP =
-    columns.forecast && elevator && isSingleDay
-      ? fetchPvForecast(
-          { elevatorCode: elevator, forecastDay: toDateOnly(from) },
-          signal,
-        ).catch((e) => {
-          if (isAbortError(e)) throw e
-          forecastFailed = true
-          return []
-        })
+    columns.forecast && isSingleDay
+      ? fetchPvForecast({ organizationID, date: toDateOnly(from), tz }, signal)
+          .then((resp) => (resp.supported ? pvForecastRows(resp.hours) : []))
+          .catch((e) => {
+            if (isAbortError(e)) throw e
+            forecastFailed = true
+            return []
+          })
       : Promise.resolve([])
 
   const [energy, flow, soc, power, device, dam, forecast] = await Promise.all([
@@ -421,8 +419,7 @@ export async function fetchCustomExportData(input: CustomExportInput): Promise<E
   // Forecast: hourly; only meaningful at 5-min bucket within a single day.
   const forecastByHourStart = new Map<number, number>()
   if (forecast.length > 0 && isSingleDay) {
-    const hourly = aggregatePvForecastHourly(forecast)
-    for (const r of hourly) {
+    for (const r of forecast) {
       const t = new Date(from)
       t.setHours(r.hour, 0, 0, 0)
       forecastByHourStart.set(t.getTime(), r.plannedKw)

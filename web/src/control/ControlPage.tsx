@@ -102,12 +102,15 @@ export function ControlPage() {
 
   // Cross-page navigation only; the desk and the journal live in the
   // tabs, so no menu entries for them.
-  const serviceMenu: TopBarMenuItem[] = access.can('service', organizationID)
-    ? [
-        { id: 'station', label: 'Паспорт станції', onSelect: () => navigateView('station') },
-        { id: 'alerts', label: 'Сповіщення', onSelect: () => navigateView('alerts') },
-      ]
-    : []
+  const canService = access.can('service', organizationID)
+  const serviceMenu: TopBarMenuItem[] = [
+    ...(canService || access.can('technical.write', organizationID)
+      ? [{ id: 'station', label: 'Паспорт станції', onSelect: () => navigateView('station') }]
+      : []),
+    ...(canService
+      ? [{ id: 'alerts', label: 'Сповіщення', onSelect: () => navigateView('alerts') }]
+      : []),
+  ]
 
   return (
     <main className="dashboard-page">

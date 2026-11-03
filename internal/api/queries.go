@@ -12,6 +12,7 @@ import (
 
 	"github.com/nesh/sestelemetry/internal/alerts"
 	"github.com/nesh/sestelemetry/internal/counters"
+	"github.com/nesh/sestelemetry/internal/pvplan"
 	"github.com/nesh/sestelemetry/internal/storage"
 )
 
@@ -57,10 +58,11 @@ const rawScanWorkMem = "64MB"
 type Store struct {
 	pool        *pgxpool.Pool
 	useDailyCAG bool
+	pvPlan      *storage.PvPlanStore
 }
 
 func NewStore(pool *pgxpool.Pool) *Store {
-	return &Store{pool: pool}
+	return &Store{pool: pool, pvPlan: storage.NewPvPlanStore(pool)}
 }
 
 // queryRawScan runs one raw-telemetry scan in a read-only transaction
@@ -944,22 +946,7 @@ func (s *Store) DAMPrices(ctx context.Context, zone int, from, to time.Time) (DA
 // wants the date span filled in automatically from the raw data that
 // feeds economics.
 func (s *Store) TelemetryDataRange(ctx context.Context, organizationID string) (min, max time.Time, ok bool, err error) {
-	if organizationID == "" {
-		return time.Time{}, time.Time{}, false, fmt.Errorf("storage: organization_id is required")
-	}
-	var minTS, maxTS *time.Time
-	row := s.pool.QueryRow(ctx, `
-		SELECT min(time), max(time)
-		FROM telemetry_samples
-		WHERE organization_id = $1
-	`, organizationID)
-	if err := row.Scan(&minTS, &maxTS); err != nil {
-		return time.Time{}, time.Time{}, false, err
-	}
-	if minTS == nil || maxTS == nil {
-		return time.Time{}, time.Time{}, false, nil
-	}
-	return minTS.UTC(), maxTS.UTC(), true, nil
+	return storage.TelemetryRange(ctx, s.pool, organizationID)
 }
 
 // Samples streams raw `telemetry_samples` rows in chronological order
@@ -1291,6 +1278,45 @@ func (s *Store) PvPlanDays(
 			PlannedKwh: r.PlannedKwh,
 			FetchedAt:  r.FetchedAt,
 		})
+	}
+	return out, nil
+}
+
+// PvPlanStation returns org's PV plan passport.
+func (s *Store) PvPlanStation(ctx context.Context, organizationID string) (pvplan.Station, bool, error) {
+	return s.pvPlan.Station(ctx, organizationID)
+}
+
+// PvPlanSettings returns where the PV plan's upstreams are.
+func (s *Store) PvPlanSettings(ctx context.Context) (pvplan.Settings, bool, bool, error) {
+	return s.pvPlan.Settings(ctx)
+}
+
+// PvPlanOpenMeteoKey returns the stored Open-Meteo key.
+func (s *Store) PvPlanOpenMeteoKey(ctx context.Context) (string, error) {
+	return s.pvPlan.OpenMeteoKey(ctx)
+}
+
+// SavePvPlanSettings replaces the PV plan's upstream settings.
+func (s *Store) SavePvPlanSettings(ctx context.Context, settings pvplan.Settings, key *string) error {
+	return s.pvPlan.SaveSettings(ctx, settings, key)
+}
+
+// PvPlanHours returns the model plan of one kind for a civil day.
+func (s *Store) PvPlanHours(ctx context.Context, organizationID string, day time.Time, kind pvplan.Kind) (map[int]float64, time.Time, error) {
+	return storage.PvPlanHours(ctx, s.pool, organizationID, day, kind)
+}
+
+// PvPlanModelDays returns the model's day-ahead day totals over the
+// inclusive civil-date span [fromDay, toDay].
+func (s *Store) PvPlanModelDays(ctx context.Context, organizationID string, fromDay, toDay time.Time) ([]PvPlanDayTotal, error) {
+	rows, err := storage.SumPvPlanHourlyDays(ctx, s.pool, organizationID, fromDay, toDay, pvplan.DayAhead)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]PvPlanDayTotal, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, PvPlanDayTotal{Day: r.Day, PlannedKwh: r.PlannedKwh, FetchedAt: r.FetchedAt})
 	}
 	return out, nil
 }

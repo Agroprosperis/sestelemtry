@@ -13,7 +13,6 @@ import (
 
 	"github.com/nesh/sestelemetry/internal/auth"
 	"github.com/nesh/sestelemetry/internal/economics"
-	"github.com/nesh/sestelemetry/internal/pvplan"
 )
 
 // demoOrgID is the synthetic demo organization shipped in the example
@@ -300,7 +299,7 @@ func (h *Handlers) uzePlan(w http.ResponseWriter, r *http.Request) {
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
 	var plan economics.DayPlan
 	if parsed.Equal(today.AddDate(0, 0, 1)) {
-		plan, err = h.economics.GetForecastDayPlan(r.Context(), orgID, dateStr, loc.String(), now, h.forecastPV(r.Context(), orgID, parsed))
+		plan, err = h.economics.GetForecastDayPlan(r.Context(), orgID, dateStr, loc.String(), now, h.forecastPV(r.Context(), orgID, parsed, loc))
 	} else {
 		plan, err = h.economics.GetDayPlan(r.Context(), orgID, dateStr, loc.String())
 	}
@@ -355,22 +354,13 @@ func (h *Handlers) uzePlan(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// forecastPV is tomorrow's generation forecast in kWh by hour start.
-// A missing client, an unknown site, or a code that forecasts the whole
-// elevator (not this site) yields nil: the plan then runs on consumption
-// and prices alone, and a fetch failure is logged rather than failing
-// the recommendation.
-func (h *Handlers) forecastPV(ctx context.Context, orgID string, day time.Time) map[int]float64 {
-	if h.pvPlan == nil || !pvplan.CodeCoversDay(orgID, day) {
-		return nil
-	}
-	code, ok := pvplan.ElevatorCodeFor(orgID)
+// forecastPV is tomorrow's generation plan in kWh by hour start, from
+// the source the station's passport selects. No plan, or planes that
+// describe the whole elevator rather than this site, yields nil: the
+// recommendation then runs on consumption and prices alone.
+func (h *Handlers) forecastPV(ctx context.Context, orgID string, day time.Time, loc *time.Location) map[int]float64 {
+	byHour, ok := h.pvPlanControlHours(ctx, orgID, day, loc)
 	if !ok {
-		return nil
-	}
-	byHour, err := h.pvPlan.DayHourly(ctx, code, day)
-	if err != nil {
-		h.log.Error("api_uze_plan_forecast_pv", "organization_id", orgID, "date", day.Format("2006-01-02"), "err", err)
 		return nil
 	}
 	return byHour

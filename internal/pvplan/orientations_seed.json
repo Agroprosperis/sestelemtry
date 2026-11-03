@@ -1,0 +1,118 @@
+[
+  {
+    "organization_id": "ab",
+    "latitude": 49.0406538,
+    "longitude": 27.7419296,
+    "source": "n8n",
+    "pac_limit_kw": 450,
+    "gamma_pct_per_c": -0.29,
+    "orientations": [
+      { "idx": 1, "tilt_deg": 30, "azimuth_deg": 0, "modules_count": 549, "module_power_w": 590, "enabled": true },
+      { "idx": 2, "tilt_deg": 3.6, "azimuth_deg": -92.5, "modules_count": 54, "module_power_w": 590, "enabled": true },
+      { "idx": 3, "tilt_deg": 3.6, "azimuth_deg": 87.5, "modules_count": 54, "module_power_w": 590, "enabled": true },
+      { "idx": 4, "tilt_deg": 17.5, "azimuth_deg": -3.9, "modules_count": 33, "module_power_w": 590, "enabled": true },
+      { "idx": 5, "tilt_deg": 5.7, "azimuth_deg": -3.9, "modules_count": 45, "module_power_w": 590, "enabled": true },
+      { "idx": 6, "tilt_deg": 16, "azimuth_deg": -114.2, "modules_count": 24, "module_power_w": 590, "enabled": true },
+      { "idx": 7, "tilt_deg": 16, "azimuth_deg": 106.4, "modules_count": 24, "module_power_w": 590, "enabled": true }
+    ]
+  },
+  {
+    "organization_id": "ke",
+    "latitude": 51.564077,
+    "longitude": 33.375058,
+    "source": "n8n",
+    "pac_limit_kw": 500,
+    "gamma_pct_per_c": -0.29,
+    "orientations": [
+      { "idx": 1, "tilt_deg": 30, "azimuth_deg": -40.3, "modules_count": 756, "module_power_w": 590, "enabled": true },
+      { "idx": 2, "tilt_deg": 30, "azimuth_deg": -7.5, "modules_count": 144, "module_power_w": 590, "enabled": true }
+    ]
+  },
+  {
+    "organization_id": "pe",
+    "latitude": 50.1393583,
+    "longitude": 25.2519324,
+    "source": "n8n",
+    "pac_limit_kw": 400,
+    "gamma_pct_per_c": -0.29,
+    "orientations": [
+      { "idx": 1, "tilt_deg": 30, "azimuth_deg": 7, "modules_count": 180, "module_power_w": 615, "enabled": true },
+      { "idx": 2, "tilt_deg": 15.8, "azimuth_deg": -105.7, "modules_count": 42, "module_power_w": 615, "enabled": true },
+      { "idx": 3, "tilt_deg": 15.8, "azimuth_deg": 110.4, "modules_count": 42, "module_power_w": 615, "enabled": true },
+      { "idx": 4, "tilt_deg": 15.8, "azimuth_deg": -69.7, "modules_count": 48, "module_power_w": 615, "enabled": true },
+      { "idx": 5, "tilt_deg": 15.8, "azimuth_deg": 74.4, "modules_count": 48, "module_power_w": 615, "enabled": true },
+      { "idx": 6, "tilt_deg": 30, "azimuth_deg": 0, "modules_count": 360, "module_power_w": 615, "enabled": true }
+    ]
+  },
+  {
+    "organization_id": "ze",
+    "latitude": 49.0191004,
+    "longitude": 28.1260144,
+    "source": "n8n",
+    "pac_limit_kw": 500,
+    "gamma_pct_per_c": -0.28,
+    "orientations": [
+      { "idx": 1, "tilt_deg": 30, "azimuth_deg": -7.5, "modules_count": 420, "module_power_w": 620, "enabled": true },
+      { "idx": 2, "tilt_deg": 4.1, "azimuth_deg": 86.5, "modules_count": 192, "module_power_w": 620, "enabled": true },
+      { "idx": 3, "tilt_deg": 4.1, "azimuth_deg": -93.5, "modules_count": 168, "module_power_w": 620, "enabled": true },
+      { "idx": 4, "tilt_deg": 3.5, "azimuth_deg": 173.8, "modules_count": 128, "module_power_w": 620, "enabled": true },
+      { "idx": 5, "tilt_deg": 3.5, "azimuth_deg": -6.2, "modules_count": 68, "module_power_w": 620, "enabled": true }
+    ]
+  },
+  {
+    "organization_id": "de",
+    "latitude": 51.15119965,
+    "longitude": 33.383904,
+    "source": "n8n",
+    "pac_limit_kw": 500,
+    "gamma_pct_per_c": -0.28,
+    "whole_elevator_from": "2026-09-24",
+    "orientations": [
+      { "idx": 1, "tilt_deg": 30, "azimuth_deg": -7.5, "modules_count": 420, "module_power_w": 620, "enabled": true },
+      { "idx": 2, "tilt_deg": 4.1, "azimuth_deg": 86.5, "modules_count": 192, "module_power_w": 620, "enabled": true },
+      { "idx": 3, "tilt_deg": 4.1, "azimuth_deg": -93.5, "modules_count": 168, "module_power_w": 620, "enabled": true },
+      { "idx": 4, "tilt_deg": 3.5, "azimuth_deg": 173.8, "modules_count": 128, "module_power_w": 620, "enabled": true },
+      { "idx": 5, "tilt_deg": 3.5, "azimuth_deg": -6.2, "modules_count": 68, "module_power_w": 620, "enabled": true }
+    ]
+  },
+  {
+    "organization_id": "de1",
+    "latitude": 51.15119965,
+    "longitude": 33.383904,
+    "source": "n8n",
+    "pac_limit_kw": 500,
+    "gamma_pct_per_c": -0.28,
+    "whole_elevator_from": "2026-09-24",
+    "orientations": [
+      { "idx": 1, "tilt_deg": 30, "azimuth_deg": -7.5, "modules_count": 420, "module_power_w": 620, "enabled": true },
+      { "idx": 2, "tilt_deg": 4.1, "azimuth_deg": 86.5, "modules_count": 192, "module_power_w": 620, "enabled": true },
+      { "idx": 3, "tilt_deg": 4.1, "azimuth_deg": -93.5, "modules_count": 168, "module_power_w": 620, "enabled": true },
+      { "idx": 4, "tilt_deg": 3.5, "azimuth_deg": 173.8, "modules_count": 128, "module_power_w": 620, "enabled": true },
+      { "idx": 5, "tilt_deg": 3.5, "azimuth_deg": -6.2, "modules_count": 68, "module_power_w": 620, "enabled": true }
+    ]
+  },
+  {
+    "organization_id": "sm",
+    "latitude": 49.066043,
+    "longitude": 29.363412,
+    "source": "n8n",
+    "pac_limit_kw": 400,
+    "gamma_pct_per_c": -0.28,
+    "orientations": [
+      { "idx": 1, "tilt_deg": 30, "azimuth_deg": -28.7, "modules_count": 400, "module_power_w": 620, "enabled": true },
+      { "idx": 2, "tilt_deg": 4.6, "azimuth_deg": 26.6, "modules_count": 224, "module_power_w": 620, "enabled": true },
+      { "idx": 3, "tilt_deg": 4.6, "azimuth_deg": -154.4, "modules_count": 196, "module_power_w": 620, "enabled": true }
+    ]
+  },
+  {
+    "organization_id": "pde",
+    "latitude": 49.9993363781658,
+    "longitude": 26.386386689961547,
+    "source": "n8n",
+    "pac_limit_kw": 250,
+    "gamma_pct_per_c": -0.28,
+    "orientations": [
+      { "idx": 1, "tilt_deg": 30, "azimuth_deg": -13.3, "modules_count": 504, "module_power_w": 620, "enabled": true }
+    ]
+  }
+]

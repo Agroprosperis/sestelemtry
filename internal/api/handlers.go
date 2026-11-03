@@ -76,11 +76,19 @@ type Handlers struct {
 	// manifest distribution). nil when no EDGE_SITE_TOKENS were
 	// configured — the handlers respond 503.
 	edge *EdgeIngest
-	// pvPlan fetches per-day PV plan totals from the n8n forecast flow
-	// for /api/v1/pv-plan-summary. nil serves the endpoint from the
-	// pv_plan_daily cache alone (no upstream fill), which is what tests
-	// and offline deployments get.
-	pvPlan *pvplan.Client
+	// pvPlan reads the n8n forecast flow for stations whose passport
+	// still says n8n. nil leaves those stations to what pv_plan_daily
+	// already holds (no upstream fill), which is what tests and offline
+	// deployments get.
+	pvPlan pvFlow
+	// pvN8N caches n8n site-days for the day chart and control.
+	pvN8N pvN8NCache
+	// pvUpstreams builds the n8n and Open-Meteo clients from the
+	// «Прогноз СЕС» settings; a save there makes it rebuild them.
+	pvUpstreams *pvplan.Upstreams
+	// pvPlanner owns the passports and the model's plans: edits,
+	// recomputes and history rebuilds. nil answers those routes 503.
+	pvPlanner *pvplan.Planner
 	// auth enforces sessions and the route table's permissions. nil
 	// serves every route openly (handler tests).
 	auth *Auth
@@ -90,10 +98,30 @@ type Handlers struct {
 	assistant *assistant
 }
 
-// SetPvPlanClient installs the forecast-flow client that fills the
-// per-day PV plan cache. Called from cmd/api/main.go at startup.
-func (h *Handlers) SetPvPlanClient(c *pvplan.Client) {
+// pvFlow reads the n8n forecast flow: a *pvplan.Client at a fixed
+// address, or the *pvplan.Upstreams that follows the saved one.
+type pvFlow interface {
+	DayHourly(ctx context.Context, elevatorCode string, day time.Time) (map[int]float64, error)
+	DayTotal(ctx context.Context, elevatorCode string, day time.Time) (kwh float64, ok bool, err error)
+}
+
+// SetPvPlanClient installs an n8n forecast-flow client at a fixed
+// address.
+func (h *Handlers) SetPvPlanClient(c pvFlow) {
 	h.pvPlan = c
+}
+
+// SetPvPlanUpstreams reads the n8n flow through u, at the address the
+// «Прогноз СЕС» page saved; a save there refreshes u. Called from
+// cmd/api/main.go at startup.
+func (h *Handlers) SetPvPlanUpstreams(u *pvplan.Upstreams) {
+	h.pvPlan = u
+	h.pvUpstreams = u
+}
+
+// SetPvPlanner installs the passport and model planner.
+func (h *Handlers) SetPvPlanner(p *pvplan.Planner) {
+	h.pvPlanner = p
 }
 
 // FusionSolarImporter synchronously pulls historical device data from
@@ -163,6 +191,12 @@ type storeReader interface {
 	// upstream call per day.
 	PvPlanDays(ctx context.Context, organizationID string, fromDay, toDay time.Time) ([]PvPlanDayTotal, error)
 	SavePvPlanDays(ctx context.Context, organizationID string, days []PvPlanDayTotal) error
+	// PvPlanStation returns the station passport, which says whether
+	// n8n or the model plans it. PvPlanHours and PvPlanModelDays read
+	// the model's plans (day totals are day-ahead).
+	PvPlanStation(ctx context.Context, organizationID string) (pvplan.Station, bool, error)
+	PvPlanHours(ctx context.Context, organizationID string, day time.Time, kind pvplan.Kind) (map[int]float64, time.Time, error)
+	PvPlanModelDays(ctx context.Context, organizationID string, fromDay, toDay time.Time) ([]PvPlanDayTotal, error)
 	// TelemetryDataRange reports the earliest/latest telemetry sample
 	// instants for an organization (UTC). ok is false when the org has
 	// no samples. Backs the recompute UI's full-period auto-detection.
@@ -216,6 +250,16 @@ type storeReader interface {
 	// UpsertAISettings replaces the assistant settings. A nil apiKey
 	// leaves the stored key untouched.
 	UpsertAISettings(ctx context.Context, settings AISettings, apiKey *string) error
+	// PvPlanSettings returns where the PV plan's upstreams are, whether
+	// an Open-Meteo key is stored, and whether anything has been saved.
+	// The key itself is never part of this result.
+	PvPlanSettings(ctx context.Context) (pvplan.Settings, bool, bool, error)
+	// PvPlanOpenMeteoKey returns the stored Open-Meteo key. Separate
+	// from PvPlanSettings so every use of the secret is greppable.
+	PvPlanOpenMeteoKey(ctx context.Context) (string, error)
+	// SavePvPlanSettings replaces the upstream settings. A nil key
+	// leaves the stored one untouched.
+	SavePvPlanSettings(ctx context.Context, settings pvplan.Settings, key *string) error
 	Ready(ctx context.Context) error
 }
 
