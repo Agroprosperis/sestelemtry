@@ -20,6 +20,7 @@ import (
 	"github.com/nesh/sestelemetry/internal/economics"
 	"github.com/nesh/sestelemetry/internal/energyflow"
 	"github.com/nesh/sestelemetry/internal/fusionsolar"
+	"github.com/nesh/sestelemetry/internal/fxrates"
 	"github.com/nesh/sestelemetry/internal/oree"
 	"github.com/nesh/sestelemetry/internal/pvplan"
 	"github.com/nesh/sestelemetry/internal/storage"
@@ -122,6 +123,12 @@ func main() {
 	// mirrored by 021_ai_chat.sql.
 	if err := storage.InitAIChatSchema(ctx, pool); err != nil {
 		log.Error("db_init_ai_chat", "err", err)
+		os.Exit(1)
+	}
+	// Daily exchange rates for the economics currency switch and the
+	// settings of their ERP source. Idempotent; mirrored by 024_fx_rates.sql.
+	if err := storage.InitFxRatesSchema(ctx, pool); err != nil {
+		log.Error("db_init_fx_rates", "err", err)
 		os.Exit(1)
 	}
 
@@ -256,6 +263,15 @@ func main() {
 	}
 	svc.SetPvPlanner(pvPlanner)
 	go pvPlanner.Run(ctx)
+
+	// Exchange rates: the ERP service set on the «Курси валют ERP» page,
+	// one rate per Kyiv civil day kept in fx_rates. The sync rereads the
+	// settings on every pass and a save there wakes it, so the account
+	// takes effect without a restart; until it is filled in the sync idles.
+	fxStore := storage.NewFxRatesStore(pool)
+	fxSync := fxrates.NewSyncer(fxStore, kyiv, log)
+	svc.SetFxRates(fxStore, fxSync)
+	go fxSync.Run(ctx)
 
 	// Forward planner (edge level A): republishes manifest-lite with
 	// plan.intervals for every edge site every 30 min. Tomorrow's DAM

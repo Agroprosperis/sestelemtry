@@ -4,6 +4,7 @@
 // crossing (summers climb fast, winters flatten — like the fact line).
 
 import type { EconomicsAnnualMonthRollup } from '../api'
+import { UAH_MONEY, type Money } from './currency'
 import { formatMonthShort } from './monthly/format'
 import { EPOCH_EFFECTIVE_FROM } from './orgTariffsClient'
 
@@ -34,19 +35,28 @@ export type MoneyAxis = {
 }
 
 // moneyAxis picks one unit so Y ticks stay short ("3,6"); the unit is
-// named once in the chart caption.
-export function moneyAxis(max: number): MoneyAxis {
+// named once in the chart caption. Dollars and euros run ~40× smaller
+// than hryvnias, so below 10 000 they keep plain units and thousands get
+// a decimal.
+export function moneyAxis(max: number, money: Money = UAH_MONEY): MoneyAxis {
   if (Math.abs(max) >= 1_000_000) {
-    return { unit: 'млн грн', word: 'млн', tick: (v) => axisDecimalFmt.format(v / 1_000_000) }
+    return { unit: `млн ${money.unit}`, word: 'млн', tick: (v) => axisDecimalFmt.format(v / 1_000_000) }
   }
-  return { unit: 'тис. грн', word: 'тис.', tick: (v) => axisIntegerFmt.format(v / 1_000) }
+  if (money.currency === 'UAH') {
+    return { unit: 'тис. грн', word: 'тис.', tick: (v) => axisIntegerFmt.format(v / 1_000) }
+  }
+  if (Math.abs(max) >= 10_000) {
+    return { unit: `тис. ${money.unit}`, word: 'тис.', tick: (v) => axisDecimalFmt.format(v / 1_000) }
+  }
+  return { unit: money.unit, word: '', tick: (v) => axisIntegerFmt.format(v) }
 }
 
 // axisTickLabel writes the multiplier into the tick itself ("450 тис."),
 // so a chart carrying two different scales says on each axis what that
 // axis counts in. Zero needs no unit.
 export function axisTickLabel(axis: MoneyAxis, v: number): string {
-  return v === 0 ? '0' : `${axis.tick(v)} ${axis.word}`
+  if (v === 0) return '0'
+  return axis.word ? `${axis.tick(v)} ${axis.word}` : axis.tick(v)
 }
 
 // NICE_STEPS is the ladder an axis step rounds up to, so gridlines land
@@ -73,6 +83,7 @@ export function moneyAxisPair(
   left: { min: number; max: number },
   right: { min: number; max: number },
   intervals = 5,
+  money: Money = UAH_MONEY,
 ): { left: ScaledAxis; right: ScaledAxis } {
   const top = (range: { min: number; max: number }) => {
     const step = niceStep(Math.max(range.max, 0) / intervals)
@@ -90,7 +101,7 @@ export function moneyAxisPair(
     const ticks: number[] = []
     const first = Math.ceil(lo / step)
     for (let i = first; i * step <= hi + step * 1e-9; i += 1) ticks.push(i * step)
-    return { ...moneyAxis(hi), domain: [lo, hi], ticks }
+    return { ...moneyAxis(hi, money), domain: [lo, hi], ticks }
   }
   return { left: build(l), right: build(r) }
 }
@@ -190,6 +201,30 @@ export function fundedCapexSteps(steps: CapexStep[]): CapexStep[] {
         s.capexUah > 0,
     )
     .sort((a, b) => a.effectiveFrom.localeCompare(b.effectiveFrom))
+}
+
+// capexStepsInCurrency converts the dated CAPEX into the currency the
+// page shows. Each version holds the TOTAL invested by its date, so each
+// stage's increment converts at the rate of its own date: money spent in
+// 2025 stays worth what it was worth then. The values keep the capexUah
+// name, the way the API keeps its _uah names, but are in that currency.
+// rateOn is UAH per unit on a YYYY-MM-DD day; null when any rate is
+// still missing.
+export function capexStepsInCurrency(
+  steps: CapexStep[],
+  rateOn: (day: string) => number | null,
+): CapexStep[] | null {
+  let standing = 0
+  let value = 0
+  const out: CapexStep[] = []
+  for (const s of fundedCapexSteps(steps)) {
+    const rate = rateOn(s.effectiveFrom)
+    if (rate === null || !(rate > 0)) return null
+    value += (s.capexUah - standing) / rate
+    standing = s.capexUah
+    out.push({ effectiveFrom: s.effectiveFrom, capexUah: value })
+  }
+  return out
 }
 
 // capexResolver turns the dated schedule into a per-month lookup.

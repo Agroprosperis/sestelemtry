@@ -96,6 +96,11 @@ type Handlers struct {
 	// «ШІ-асистент» page. nil (handler tests) or switched off there: the
 	// route answers 503 and /auth/me tells the dashboard to hide it.
 	assistant *assistant
+	// fx holds the daily exchange rates the economics routes convert by
+	// and the «Курси валют ERP» settings; fxSync fills it in the
+	// background. nil serves economics in UAH only.
+	fx     fxStore
+	fxSync fxSyncer
 }
 
 // pvFlow reads the n8n forecast flow: a *pvplan.Client at a fixed

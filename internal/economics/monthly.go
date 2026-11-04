@@ -17,6 +17,11 @@ type DailyRecord struct {
 	Totals     DailyTotals
 	IsFinal    bool
 	ComputedAt time.Time
+
+	// MoneyScale is the factor a currency view multiplied this day's UAH
+	// by (see InCurrency); 0 means the money is in UAH. UAH-tuned
+	// thresholds scale by it so they keep picking the same days.
+	MoneyScale float64
 }
 
 // HourlyRecord is the per-hour slice the monthly aggregator needs for the
@@ -67,6 +72,11 @@ type HourlyRecord struct {
 	// no raw sub-hourly signal was available (filter falls back to the
 	// hourly-sum check).
 	EssPeakIntervalKw float64
+
+	// MoneyScale is the factor a currency view multiplied this hour's UAH
+	// by (see InCurrency); 0 means the money is in UAH. The optimizer
+	// applies it to the UAH-denominated wear and price floor.
+	MoneyScale float64
 }
 
 // MonthDay is one day's contribution to the month — the full daily
@@ -571,6 +581,7 @@ func pvEssArbitrageGain(
 			tradable:    h.Rdn != nil,
 			importPrice: h.ImportPrice,
 			exportPrice: h.ExportPrice,
+			moneyScale:  h.MoneyScale,
 			// Merchant world: the whole yield is available to store
 			// (actualPvChargeKwh is the PV cap under modeFixedCharge) and
 			// actualGridChargeKwh stays 0 — no grid charging. No load
@@ -854,7 +865,7 @@ func aggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly
 		if perDay {
 			opt := computeOptimum(do, factEssNet, params)
 			totals.EssPvMissedKwh += opt.pvMissed
-			if opt.reserve >= cycleReserveThresholdUah {
+			if opt.reserve >= cycleReserveThresholdUah*moneyScaleOf(d.MoneyScale) {
 				if cyc, ok := buildCycle(key, do, factEssNet, params, ratings.CapacityKwh, ratings.PowerLimitKw, loc); ok {
 					uzeCycles = append(uzeCycles, cyc)
 				}

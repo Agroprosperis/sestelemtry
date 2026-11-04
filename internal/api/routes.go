@@ -166,6 +166,12 @@ func (h *Handlers) routes() []route {
 		// addresses and key, the n8n webhook.
 		{"/api/v1/pv-plan-settings", h.pvPlanSettings, globalOnly},
 		{"/api/v1/pv-plan-settings/test", h.pvPlanSettingsTest, globalOnly},
+		// And the ERP account the exchange rates come from.
+		{"/api/v1/fx-settings", h.fxSettings, globalOnly},
+		{"/api/v1/fx-settings/test", h.fxSettingsTest, globalOnly},
+		// The daily rates themselves: the economics page converts CAPEX
+		// by them.
+		{"/api/v1/fx-rates", h.fxRates, need(onAnyOrg(auth.PermEconomicsRead))},
 		// Without organization_id the test goes to the default list,
 		// which only an admin of every organization may use.
 		{"/api/v1/alert-settings/test-email", h.alertSettingsTestEmail, need(service)},

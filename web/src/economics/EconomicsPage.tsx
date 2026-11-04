@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { refreshDAMPrices } from '../api'
+import { refreshDAMPrices, type FxWindow } from '../api'
 import { useAccess } from '../auth/authContext'
+import { energyFloorFor } from '../dashboard/config'
 import { useOrganizationParam } from '../dashboard/hooks/useOrganizationParam'
 import { ModeTopBar, type TopBarMenuItem } from '../shell/ModeTopBar'
+import { navigateView } from '../shell/navigation'
 import { dailyTotals } from './compute'
+import { makeMoney, MoneyContext, parseCurrency, rateNote, type Currency } from './currency'
 import { EconomicsDamPricesModal } from './components/EconomicsDamPricesModal'
 import { EconomicsTariffsModal } from './components/EconomicsTariffsModal'
 import { EconomicsHeader, type EconomicsRange } from './components/EconomicsHeader'
@@ -20,9 +23,11 @@ import './economics.css'
 import { useEconomicsData } from './useEconomicsData'
 import { useEconomicsMonthlyData } from './useEconomicsMonthlyData'
 import { useEconomicsAnnualData } from './useEconomicsAnnualData'
+import { useEconomicsPortfolioData } from './useEconomicsPortfolioData'
 import { usePvPlanSummary } from './usePvPlanSummary'
 import { useCapexSchedule } from './useCapexSchedule'
-import { capexResolver } from './payback'
+import { useFxRatesOn } from './useFxRatesOn'
+import { capexResolver, capexStepsInCurrency, fundedCapexSteps } from './payback'
 import { useOrgTariffs } from './useOrgTariffs'
 
 // DamRefreshState is the small UI state machine that drives the
@@ -153,11 +158,29 @@ function readWindowFromUrl(): { from: string; to: string } {
   return { from: '', to: '' }
 }
 
-function updateUrl(date: string, range: EconomicsRange, windowFrom: string, windowTo: string) {
+// readCurrencyFromUrl picks the currency money is shown in; without
+// `?currency` it is UAH.
+function readCurrencyFromUrl(): Currency {
+  if (typeof window === 'undefined') return 'UAH'
+  return parseCurrency(new URLSearchParams(window.location.search).get('currency'))
+}
+
+// localDay renders a local-midnight Date (ORGANIZATION_OPERATION_START)
+// as YYYY-MM-DD without a trip through UTC.
+function localDay(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+function updateUrl(date: string, range: EconomicsRange, windowFrom: string, windowTo: string, currency: Currency) {
   if (typeof window === 'undefined') return
   const url = new URL(window.location.href)
   url.searchParams.set('view', 'economics')
   url.searchParams.set('anchor', date)
+  if (currency === 'UAH') {
+    url.searchParams.delete('currency')
+  } else {
+    url.searchParams.set('currency', currency)
+  }
   if (range === 'month' || range === 'year' || range === 'payback' || range === 'portfolio') {
     url.searchParams.set('range', range)
   } else {
@@ -176,9 +199,11 @@ function updateUrl(date: string, range: EconomicsRange, windowFrom: string, wind
 
 export function EconomicsPage() {
   const { organizationID, options, change: onOrganizationChange } = useOrganizationParam('economics.read')
-  const canEdit = useAccess().can('economics.write', organizationID)
+  const access = useAccess()
+  const canEdit = access.can('economics.write', organizationID)
   const [date, setDate] = useState<string>(readDateFromUrl)
   const [range, setRange] = useState<EconomicsRange>(readRangeFromUrl)
+  const [currency, setCurrency] = useState<Currency>(readCurrencyFromUrl)
   const initialWindow = readWindowFromUrl()
   const [windowFrom, setWindowFrom] = useState<string>(initialWindow.from)
   const [windowTo, setWindowTo] = useState<string>(initialWindow.to)
@@ -198,8 +223,8 @@ export function EconomicsPage() {
   // persisted per-org on the backend and intentionally don't show up
   // in the URL.
   useEffect(() => {
-    updateUrl(date, range, windowFrom, windowTo)
-  }, [date, range, windowFrom, windowTo])
+    updateUrl(date, range, windowFrom, windowTo, currency)
+  }, [date, range, windowFrom, windowTo, currency])
 
   // refreshKey bumps every time a successful POST to
   // /api/v1/dam-prices/refresh comes back, forcing useEconomicsData
@@ -233,6 +258,7 @@ export function EconomicsPage() {
   const data = useEconomicsData({
     organizationID: range === 'day' ? organizationID : '',
     date: range === 'day' ? date : '',
+    currency,
     tariffs,
     refreshKey,
   })
@@ -244,6 +270,7 @@ export function EconomicsPage() {
   const monthly = useEconomicsMonthlyData({
     organizationID: range === 'month' ? organizationID : '',
     month: range === 'month' ? month : '',
+    currency,
     refreshKey,
   })
 
@@ -256,6 +283,7 @@ export function EconomicsPage() {
     period: range === 'year' && !useWindow ? period : '',
     from: useWindow ? windowFrom : '',
     to: useWindow ? windowTo : '',
+    currency,
     refreshKey,
   })
 
@@ -266,6 +294,7 @@ export function EconomicsPage() {
   const monthlyPrior = useEconomicsMonthlyData({
     organizationID: range === 'month' ? organizationID : '',
     month: range === 'month' ? addMonths(month, -1) : '',
+    currency,
     refreshKey,
   })
 
@@ -275,6 +304,7 @@ export function EconomicsPage() {
     period: range === 'year' && !useWindow ? String(Number(period) - 1) : '',
     from: range === 'year' && useWindow ? addMonths(windowFrom, -windowLen) : '',
     to: range === 'year' && useWindow ? addMonths(windowFrom, -1) : '',
+    currency,
     refreshKey,
   })
 
@@ -319,6 +349,18 @@ export function EconomicsPage() {
     period: '',
     from: range === 'payback' ? PAYBACK_WINDOW_FROM : '',
     to: range === 'payback' ? today().slice(0, 7) : '',
+    currency,
+    refreshKey,
+  })
+
+  const portfolio = useEconomicsPortfolioData({
+    active: range === 'portfolio',
+    scope: portfolioScope,
+    month,
+    period,
+    from: windowFrom || `${period}-01`,
+    to: windowTo || `${period}-12`,
+    currency,
     refreshKey,
   })
 
@@ -327,11 +369,27 @@ export function EconomicsPage() {
   // cumulative EBITDA against the CAPEX standing in each month, and the
   // month/year top section divides the annualised EBITDA by the capital
   // standing at the end of its period (ROCE card).
-  const capexSteps = useCapexSchedule(
-    range === 'payback' || range === 'month' || range === 'year' ? organizationID : '',
-    refreshKey,
-  )
-  const capexAt = useMemo(() => capexResolver(capexSteps, tariffs.capexUah), [capexSteps, tariffs.capexUah])
+  const capexNeeded = range === 'payback' || range === 'month' || range === 'year'
+  const capexSteps = useCapexSchedule(capexNeeded ? organizationID : '', refreshKey)
+  // In another currency each stage converts at the rate of its own date,
+  // and a flat CAPEX from the tariff form at the rate of the day the site
+  // went live.
+  const operationStart = localDay(energyFloorFor(organizationID))
+  const capexDays = useMemo(() => {
+    const funded = fundedCapexSteps(capexSteps)
+    return funded.length > 0 ? funded.map((s) => s.effectiveFrom) : [operationStart]
+  }, [capexSteps, operationStart])
+  const capexRates = useFxRatesOn(capexNeeded ? currency : 'UAH', capexDays, refreshKey)
+  const capexLoading = capexNeeded && currency !== 'UAH' && !capexRates.ready
+  const capex = useMemo(() => {
+    if (currency === 'UAH') return { steps: capexSteps, flat: tariffs.capexUah }
+    const flatRate = capexRates.rateOn(operationStart)
+    return {
+      steps: capexStepsInCurrency(capexSteps, capexRates.rateOn) ?? [],
+      flat: flatRate ? tariffs.capexUah / flatRate : NaN,
+    }
+  }, [currency, capexSteps, tariffs.capexUah, capexRates, operationStart])
+  const capexAt = useMemo(() => capexResolver(capex.steps, capex.flat), [capex])
 
   // jumpToMonth switches the page to the month view of the given YYYY-MM
   // (drill-down from an annual trend bar / table row). We keep the day
@@ -373,6 +431,19 @@ export function EconomicsPage() {
     [onOrganizationChange, portfolioScope, month],
   )
 
+  // The rate behind the visible money: the day's own on the day view,
+  // the period mean elsewhere. It scales what the page still holds in
+  // UAH (tariff components, colour thresholds) and feeds the switch hint.
+  let fxWindow: FxWindow | null = null
+  if (range === 'month' && !monthly.loading) fxWindow = monthly.month
+  if (range === 'year' && !annual.loading) fxWindow = annual.year
+  if (range === 'payback' && !payback.loading) fxWindow = payback.year
+  if (range === 'portfolio' && !portfolio.loading) fxWindow = portfolio.portfolio
+  const fxRate = range === 'day' ? (data.loading ? null : data.fxRate) : (fxWindow?.fx_rate_avg ?? null)
+  const carriedDays = range === 'day' ? (data.fxCarried ? 1 : 0) : (fxWindow?.fx_days_carried ?? 0)
+  const money = useMemo(() => makeMoney(currency, fxRate ?? 1), [currency, fxRate])
+  const currencyNote = fxRate ? rateNote(money, { day: range === 'day', carriedDays }) : null
+
   // The economics-specific admin actions live in the shell's «Сервіс»
   // menu (the DAM buttons left the header toolbar).
   const serviceMenu: TopBarMenuItem[] = [
@@ -384,199 +455,205 @@ export function EconomicsPage() {
           { id: 'recompute', label: 'Перерахунок економіки', onSelect: () => setRecomputeOpen(true) },
         ]
       : []),
+    ...(access.globalAdmin ? [{ id: 'fx', label: 'Курси валют ERP', onSelect: () => navigateView('fx') }] : []),
   ]
 
   return (
-    <main className="economics-page">
-      <ModeTopBar
-        mode="economics"
-        organizationID={organizationID}
-        options={options}
-        onOrganizationChange={onOrganizationChange}
-        menu={serviceMenu}
-      />
-
-      {/* The menu closes on click, so the refresh lifecycle needs its
-          own strip: progress while the POST runs, the upstream message
-          when it fails. */}
-      {damRefreshState === 'loading' && (
-        <div className="economics-dam-status" role="status">
-          Оновлюємо ціни РДН з OREE…
-        </div>
-      )}
-      {damRefreshState === 'error' && (
-        <div className="economics-dam-status economics-dam-status-error" role="alert">
-          Не вдалося оновити ціни РДН{damRefreshError ? `: ${damRefreshError}` : ''}
-        </div>
-      )}
-
-      <EconomicsHeader
-        range={range}
-        onRangeChange={setRange}
-        portfolioScope={portfolioScope}
-        windowFrom={windowFrom || (range === 'year' || range === 'portfolio' ? `${period}-01` : '')}
-        windowTo={windowTo || (range === 'year' || range === 'portfolio' ? `${period}-12` : '')}
-        onWindowChange={(nextFrom, nextTo) => {
-          setWindowFrom(nextFrom)
-          setWindowTo(nextTo)
-        }}
-        date={date}
-        onDateChange={setDate}
-        asOf={asOf}
-      />
-
-      {tariffsOpen && (
-        <EconomicsTariffsModal
+    <MoneyContext.Provider value={money}>
+      <main className="economics-page">
+        <ModeTopBar
+          mode="economics"
           organizationID={organizationID}
+          options={options}
+          onOrganizationChange={onOrganizationChange}
+          menu={serviceMenu}
+        />
+
+        {/* The menu closes on click, so the refresh lifecycle needs its
+            own strip: progress while the POST runs, the upstream message
+            when it fails. */}
+        {damRefreshState === 'loading' && (
+          <div className="economics-dam-status" role="status">
+            Оновлюємо ціни РДН з OREE…
+          </div>
+        )}
+        {damRefreshState === 'error' && (
+          <div className="economics-dam-status economics-dam-status-error" role="alert">
+            Не вдалося оновити ціни РДН{damRefreshError ? `: ${damRefreshError}` : ''}
+          </div>
+        )}
+
+        <EconomicsHeader
+          range={range}
+          onRangeChange={setRange}
+          portfolioScope={portfolioScope}
+          windowFrom={windowFrom || (range === 'year' || range === 'portfolio' ? `${period}-01` : '')}
+          windowTo={windowTo || (range === 'year' || range === 'portfolio' ? `${period}-12` : '')}
+          onWindowChange={(nextFrom, nextTo) => {
+            setWindowFrom(nextFrom)
+            setWindowTo(nextTo)
+          }}
           date={date}
-          tariffs={tariffs}
-          onTariffsChange={setTariffs}
-          tariffsStatus={tariffsStatus}
-          tariffsError={tariffsError}
-          readOnly={!canEdit}
-          onClose={closeTariffs}
+          onDateChange={setDate}
+          asOf={asOf}
+          currency={currency}
+          onCurrencyChange={setCurrency}
+          rateNote={currencyNote}
         />
-      )}
 
-      {recomputeOpen && (
-        <EconomicsRecomputeModal
-          onClose={() => setRecomputeOpen(false)}
-          organizationOptions={options}
-          initialOrganizationID={organizationID}
-          onDone={() => setRefreshKey((k) => k + 1)}
-        />
-      )}
+        {tariffsOpen && (
+          <EconomicsTariffsModal
+            organizationID={organizationID}
+            date={date}
+            tariffs={tariffs}
+            onTariffsChange={setTariffs}
+            tariffsStatus={tariffsStatus}
+            tariffsError={tariffsError}
+            readOnly={!canEdit}
+            onClose={closeTariffs}
+          />
+        )}
 
-      {damImportOpen && (
-        <EconomicsDamPricesModal
-          onClose={() => setDamImportOpen(false)}
-          onDone={() => setRefreshKey((k) => k + 1)}
-        />
-      )}
+        {recomputeOpen && (
+          <EconomicsRecomputeModal
+            onClose={() => setRecomputeOpen(false)}
+            organizationOptions={options}
+            initialOrganizationID={organizationID}
+            onDone={() => setRefreshKey((k) => k + 1)}
+          />
+        )}
 
-      {range === 'portfolio' ? (
-        <EconomicsPortfolioView
-          month={month}
-          period={period}
-          from={windowFrom || `${period}-01`}
-          to={windowTo || `${period}-12`}
-          scope={portfolioScope}
-          onScopeChange={setPortfolioScope}
-          onDiagnoseBess={diagnoseBessFromPortfolio}
-          refreshKey={refreshKey}
-        />
-      ) : range === 'payback' ? (
-        <>
-          {payback.error && (
-            <section className="economics-banner economics-banner-error" role="alert">
-              Не вдалося завантажити дані: {payback.error}
-            </section>
-          )}
-          {payback.loading ? (
-            <p className="economics-loading">Завантаження…</p>
-          ) : payback.year ? (
-            <EconomicsPaybackView
-              data={payback.year}
-              capexUah={tariffs.capexUah}
-              capexSteps={capexSteps}
-              plannedPaybackMonths={tariffs.plannedPaybackMonths}
-            />
-          ) : (
-            <p className="economics-loading">Немає даних.</p>
-          )}
-        </>
-      ) : range === 'year' ? (
-        <>
-          {annual.error && (
-            <section className="economics-banner economics-banner-error" role="alert">
-              Не вдалося завантажити дані: {annual.error}
-            </section>
-          )}
-          {annual.loading ? (
-            <p className="economics-loading">Завантаження…</p>
-          ) : annual.year ? (
-            <EconomicsAnnualView
-              data={annual.year}
-              organizationID={organizationID}
-              onSelectMonth={jumpToMonth}
-              prior={
-                annualPrior.year && annualPrior.year.totals.hours_with_data > 0
-                  ? annualPrior.year.totals
-                  : null
-              }
-              pvPlan={pvPlanYear}
-              capexUah={capexAt(yearToMonth)}
-            />
-          ) : (
-            <p className="economics-loading">Немає даних за рік.</p>
-          )}
-        </>
-      ) : range === 'month' ? (
-        <>
-          {monthly.error && (
-            <section className="economics-banner economics-banner-error" role="alert">
-              Не вдалося завантажити дані: {monthly.error}
-            </section>
-          )}
-          {monthly.loading ? (
-            <p className="economics-loading">Завантаження…</p>
-          ) : monthly.month ? (
-            <EconomicsMonthlyView
-              data={monthly.month}
-              organizationID={organizationID}
-              prior={
-                monthlyPrior.month && monthlyPrior.month.totals.hours_with_data > 0
-                  ? monthlyPrior.month.totals
-                  : null
-              }
-              pvPlan={pvPlanMonth}
-              capexUah={capexAt(month)}
-            />
-          ) : (
-            <p className="economics-loading">Немає даних за місяць.</p>
-          )}
-        </>
-      ) : (
-        <>
-          {data.error && (
-            <section className="economics-banner economics-banner-error" role="alert">
-              Не вдалося завантажити дані: {data.error}
-            </section>
-          )}
+        {damImportOpen && (
+          <EconomicsDamPricesModal
+            onClose={() => setDamImportOpen(false)}
+            onDone={() => setRefreshKey((k) => k + 1)}
+          />
+        )}
 
-          {!data.error && data.hoursMissingPrice > 0 && (
-            <section className="economics-banner" role="status">
-              Ціни РДН частково відсутні: {data.hoursMissingPrice} год без ціни.
-              Розрахунок ефекту виконано лише для годин з відомою ціною.
-            </section>
-          )}
+        {range === 'portfolio' ? (
+          <EconomicsPortfolioView
+            data={portfolio}
+            month={month}
+            period={period}
+            from={windowFrom || `${period}-01`}
+            to={windowTo || `${period}-12`}
+            scope={portfolioScope}
+            onScopeChange={setPortfolioScope}
+            onDiagnoseBess={diagnoseBessFromPortfolio}
+          />
+        ) : range === 'payback' ? (
+          <>
+            {payback.error && (
+              <section className="economics-banner economics-banner-error" role="alert">
+                Не вдалося завантажити дані: {payback.error}
+              </section>
+            )}
+            {payback.loading || capexLoading ? (
+              <p className="economics-loading">Завантаження…</p>
+            ) : payback.year ? (
+              <EconomicsPaybackView
+                data={payback.year}
+                capexUah={capex.flat}
+                capexSteps={capex.steps}
+                plannedPaybackMonths={tariffs.plannedPaybackMonths}
+              />
+            ) : (
+              <p className="economics-loading">Немає даних.</p>
+            )}
+          </>
+        ) : range === 'year' ? (
+          <>
+            {annual.error && (
+              <section className="economics-banner economics-banner-error" role="alert">
+                Не вдалося завантажити дані: {annual.error}
+              </section>
+            )}
+            {annual.loading || capexLoading ? (
+              <p className="economics-loading">Завантаження…</p>
+            ) : annual.year ? (
+              <EconomicsAnnualView
+                data={annual.year}
+                organizationID={organizationID}
+                onSelectMonth={jumpToMonth}
+                prior={
+                  annualPrior.year && annualPrior.year.totals.hours_with_data > 0
+                    ? annualPrior.year.totals
+                    : null
+                }
+                pvPlan={pvPlanYear}
+                capexUah={capexAt(yearToMonth)}
+              />
+            ) : (
+              <p className="economics-loading">Немає даних за рік.</p>
+            )}
+          </>
+        ) : range === 'month' ? (
+          <>
+            {monthly.error && (
+              <section className="economics-banner economics-banner-error" role="alert">
+                Не вдалося завантажити дані: {monthly.error}
+              </section>
+            )}
+            {monthly.loading || capexLoading ? (
+              <p className="economics-loading">Завантаження…</p>
+            ) : monthly.month ? (
+              <EconomicsMonthlyView
+                data={monthly.month}
+                organizationID={organizationID}
+                prior={
+                  monthlyPrior.month && monthlyPrior.month.totals.hours_with_data > 0
+                    ? monthlyPrior.month.totals
+                    : null
+                }
+                pvPlan={pvPlanMonth}
+                capexUah={capexAt(month)}
+              />
+            ) : (
+              <p className="economics-loading">Немає даних за місяць.</p>
+            )}
+          </>
+        ) : (
+          <>
+            {data.error && (
+              <section className="economics-banner economics-banner-error" role="alert">
+                Не вдалося завантажити дані: {data.error}
+              </section>
+            )}
 
-          {!data.error && data.skipDiagnostics && (
-            <section className="economics-banner" role="status">
-              Алокатор повідомив про неповні дані: {data.skipDiagnostics}
-            </section>
-          )}
+            {!data.error && data.hoursMissingPrice > 0 && (
+              <section className="economics-banner" role="status">
+                Ціни РДН частково відсутні: {data.hoursMissingPrice} год без ціни.
+                Розрахунок ефекту виконано лише для годин з відомою ціною.
+              </section>
+            )}
 
-          {!data.error && !data.loading && data.reconciled && (
-            <section className="economics-banner economics-banner-ok" role="status">
-              <span className="economics-reconciled-badge">Звірено з FusionSolar</span>
-              Денні підсумки масштабовано під канонічні KPI станції.
-              {data.qualityFlags.length > 0 && (
-                <> Розбіжності: {data.qualityFlags.join(', ')}.</>
-              )}
-            </section>
-          )}
+            {!data.error && data.skipDiagnostics && (
+              <section className="economics-banner" role="status">
+                Алокатор повідомив про неповні дані: {data.skipDiagnostics}
+              </section>
+            )}
 
-          {data.loading ? (
-            <p className="economics-loading">Завантаження…</p>
-          ) : (
-            <>
-              <EconomicsDayTop totals={totals} rows={data.rows} tariffs={tariffs} pvPlan={pvPlanDay} />
-              <EconomicsTable rows={data.rows} organizationID={organizationID} date={date} />
-            </>
-          )}
-        </>
-      )}
-    </main>
+            {!data.error && !data.loading && data.reconciled && (
+              <section className="economics-banner economics-banner-ok" role="status">
+                <span className="economics-reconciled-badge">Звірено з FusionSolar</span>
+                Денні підсумки масштабовано під канонічні KPI станції.
+                {data.qualityFlags.length > 0 && (
+                  <> Розбіжності: {data.qualityFlags.join(', ')}.</>
+                )}
+              </section>
+            )}
+
+            {data.loading ? (
+              <p className="economics-loading">Завантаження…</p>
+            ) : (
+              <>
+                <EconomicsDayTop totals={totals} rows={data.rows} tariffs={tariffs} pvPlan={pvPlanDay} />
+                <EconomicsTable rows={data.rows} organizationID={organizationID} date={date} />
+              </>
+            )}
+          </>
+        )}
+      </main>
+    </MoneyContext.Provider>
   )
 }

@@ -114,4 +114,30 @@ describe('useEconomicsData', () => {
     expect(result.current.loading).toBe(false)
     expect(mockedFetch).not.toHaveBeenCalled()
   })
+
+  // Switching currency is a new request, and the day's rate comes back
+  // with it for the tariff components the page still holds in UAH.
+  it('asks for the currency and keeps the day rate', async () => {
+    mockedFetch.mockResolvedValue({
+      organization_id: 'org1',
+      date: '2026-04-01',
+      tz: 'Europe/Kyiv',
+      is_final: true,
+      hours_missing_price: 0,
+      hours: Array.from({ length: 24 }, () => null),
+      currency: 'USD',
+      fx_rate: 41.5,
+      fx_carried: true,
+    })
+    const { result, rerender } = renderHook(
+      ({ currency }: { currency: 'UAH' | 'USD' }) => useEconomicsData({ organizationID: 'org1', date: '2026-04-01', currency }),
+      { initialProps: { currency: 'UAH' } },
+    )
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    rerender({ currency: 'USD' })
+    await waitFor(() => expect(result.current.fxRate).toBe(41.5))
+    expect(result.current.fxCarried).toBe(true)
+    expect(mockedFetch).toHaveBeenCalledTimes(2)
+    expect(mockedFetch.mock.calls[1][0]).toMatchObject({ currency: 'USD' })
+  })
 })

@@ -1,7 +1,8 @@
 import type { ReactNode } from 'react'
 import type { EconomicsMonthlyTotals } from '../../api'
 import { PV_FORECAST_WHOLE_ELEVATOR_NOTE, pvPlanCaption } from '../../dashboard/transforms/pvForecast'
-import { formatMwh, formatPercent, formatPrice, formatUah } from '../monthly/format'
+import { useMoney } from '../currency'
+import { formatMwh, formatPercent } from '../monthly/format'
 import { PERIOD_WORDS, reserveSplit, uahShort, type PeriodScope } from '../monthly/rollup'
 import { KpiIcon as Icon } from './kpiIcons'
 import { KPI_ICONS as ICONS } from './kpiIconPaths'
@@ -187,6 +188,7 @@ export function EconomicsTopSection({
   capexUah,
   annualizeMonths = 1,
 }: Props) {
+  const money = useMoney()
   const w = PERIOD_WORDS[scope]
   const prevNote =
     scope === 'month' ? 'до попереднього місяця' : scope === 'year' ? 'до попереднього року' : 'до попереднього періоду'
@@ -256,10 +258,12 @@ export function EconomicsTopSection({
             icon={ICONS.database}
             label="Базова вартість (без проєкту)"
             tip="Усе споживання об'єкта, оцінене повною ціною імпорту кожної години: скільки коштувала б енергія, якби СЕС та УЗЕ не було."
-            value={formatUah(baseline)}
+            value={money.format(baseline)}
           >
             <span>100% споживання з мережі · {formatMwh(totals.load_kwh)}</span>
-            <span>{formatPrice(baselineUnit)} грн/кВт·год</span>
+            <span>
+              {money.formatPrice(baselineUnit)} {money.priceUnit}
+            </span>
           </Card>
 
           <Card
@@ -267,7 +271,7 @@ export function EconomicsTopSection({
             icon={ICONS.briefcase}
             label="Фактична вартість"
             tip="Фактичні витрати на енергію: імпорт мінус дохід від експорту плюс знос УЗЕ."
-            value={formatUah(totals.actual_cost_uah)}
+            value={money.format(totals.actual_cost_uah)}
             badge={
               <DeltaBadge
                 value={Number.isFinite(effectShare) ? -effectShare : null}
@@ -278,8 +282,8 @@ export function EconomicsTopSection({
             }
           >
             <span>
-              {formatPrice(actualUnit)} грн/кВт·год{' '}
-              {Number.isFinite(baselineUnit) ? `(без проєкту ${formatPrice(baselineUnit)})` : ''}
+              {money.formatPrice(actualUnit)} {money.priceUnit}{' '}
+              {Number.isFinite(baselineUnit) ? `(без проєкту ${money.formatPrice(baselineUnit)})` : ''}
             </span>
           </Card>
 
@@ -288,7 +292,7 @@ export function EconomicsTopSection({
             icon={ICONS.trendUp}
             label="Економічний ефект"
             tip="Базова вартість мінус фактична: наскільки дешевше обійшлася енергія завдяки СЕС та УЗЕ."
-            value={formatUah(totals.effect_uah)}
+            value={money.format(totals.effect_uah)}
             badge={
               <DeltaBadge
                 value={Number.isFinite(effectShare) ? effectShare : null}
@@ -306,7 +310,7 @@ export function EconomicsTopSection({
             icon={ICONS.sun}
             label="Ефект СЕС"
             tip="Частина ефекту без УЗЕ: власне споживання СЕС замість імпорту та експорт у мережу."
-            value={formatUah(pvEffect)}
+            value={money.format(pvEffect)}
             badge={
               Number.isFinite(pvEffectShare) ? (
                 <span className="eco-share">{formatPercent(pvEffectShare)} від загального ефекту</span>
@@ -321,7 +325,7 @@ export function EconomicsTopSection({
             icon={ICONS.battery}
             label="Ефект УЗЕ"
             tip="Чистий ефект УЗЕ: розряд у споживання та мережу мінус вартість заряду і знос."
-            value={formatUah(totals.ess_net_uah)}
+            value={money.format(totals.ess_net_uah)}
             badge={
               Number.isFinite(essEffectShare) ? (
                 <span className="eco-share">{formatPercent(essEffectShare)} від загального ефекту</span>
@@ -342,7 +346,7 @@ export function EconomicsTopSection({
             value={formatPercent(roce)}
           >
             {hasCapex ? (
-              <span>Інвестований капітал: {uahShort(capexUah as number)}</span>
+              <span>Інвестований капітал: {uahShort(capexUah as number, money)}</span>
             ) : (
               <span>CAPEX не вказано в тарифах</span>
             )}
@@ -368,15 +372,15 @@ export function EconomicsTopSection({
           >
             <span className="eco-fact-line">
               <span>Факт:</span>
-              <b>{formatUah(totals.effect_uah)}</b>
+              <b>{money.format(totals.effect_uah)}</b>
             </span>
             <span className="eco-fact-line">
               <span>Потенціал:</span>
-              <b>{formatUah(potential)}</b>
+              <b>{money.format(potential)}</b>
             </span>
             <span className="eco-fact-line">
               <span>Резерв:</span>
-              <b>{formatUah(reserve)}</b>
+              <b>{money.format(reserve)}</b>
             </span>
           </Card>
         </div>
@@ -434,7 +438,9 @@ export function EconomicsTopSection({
             value={formatMwh(totals.grid_import_kwh)}
             badge={<DeltaBadge value={importDelta} polarity="down-good" unit="pct" note={prevNote} />}
           >
-            <span>Середня ціна: {formatPrice(importPrice)} грн/кВт·год</span>
+            <span>
+              Середня ціна: {money.formatPrice(importPrice)} {money.priceUnit}
+            </span>
           </Card>
 
           <Card
@@ -444,8 +450,10 @@ export function EconomicsTopSection({
             value={formatMwh(totals.grid_export_kwh)}
             badge={<DeltaBadge value={exportDelta} polarity="up-good" unit="pct" note={prevNote} />}
           >
-            <span>Дохід: {formatUah(exportRevenue)}</span>
-            <span>Середня ціна: {formatPrice(exportPrice)} грн/кВт·год</span>
+            <span>Дохід: {money.format(exportRevenue)}</span>
+            <span>
+              Середня ціна: {money.formatPrice(exportPrice)} {money.priceUnit}
+            </span>
           </Card>
 
           <Card

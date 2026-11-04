@@ -1,10 +1,13 @@
-import { useLayoutEffect, useRef, useState } from 'react'
+import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { ReactElement } from 'react'
 import { formatOrganizationLabel } from '../../dashboard/config'
 import type { HourEconomicsRow } from '../compute'
+import { UAH_MONEY, useMoney, type Money } from '../currency'
 import { dayPivotSheet, exportFileName, type HourMetric } from '../exportSheets'
+import { fetchUahDayRows } from '../useEconomicsData'
 import { downloadXlsx, type XlsxFormat } from '../xlsx'
+import { ExportButton } from './ExportButton'
 
 type Props = {
   rows: Array<HourEconomicsRow | null>
@@ -32,28 +35,15 @@ const numberFmt = new Intl.NumberFormat('uk-UA', {
   maximumFractionDigits: 1,
 })
 
-const uahFmt = new Intl.NumberFormat('uk-UA', {
-  style: 'decimal',
-  useGrouping: true,
-  minimumFractionDigits: 0,
-  maximumFractionDigits: 0,
-})
-
-const priceFmt = new Intl.NumberFormat('uk-UA', {
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-})
-
 function formatNumber(v: number | null | undefined): string {
   if (v === null || v === undefined) return '—'
   if (!Number.isFinite(v)) return '—'
   return numberFmt.format(v)
 }
 
-function formatPrice(v: number | null | undefined): string {
+function formatPrice(v: number | null | undefined, money: Money): string {
   if (v === null || v === undefined) return '—'
-  if (!Number.isFinite(v) || v === 0) return '—'
-  return priceFmt.format(v)
+  return money.formatPrice(v)
 }
 
 // formatPriceAllowZero is the cost-basis variant of formatPrice
@@ -61,16 +51,14 @@ function formatPrice(v: number | null | undefined): string {
 // PV-only-charged battery has avg = 0 грн/кВт·год while still
 // holding kWh, and showing "—" there would make the operator
 // think we lost the data; the explicit zero is the honest answer.
-function formatPriceAllowZero(v: number | null | undefined): string {
+function formatPriceAllowZero(v: number | null | undefined, money: Money): string {
   if (v === null || v === undefined) return '—'
-  if (!Number.isFinite(v)) return '—'
-  return priceFmt.format(v)
+  return money.formatPriceAllowZero(v)
 }
 
-function formatUah(v: number | null | undefined): string {
+function formatUah(v: number | null | undefined, money: Money): string {
   if (v === null || v === undefined) return '—'
-  if (!Number.isFinite(v)) return '—'
-  return uahFmt.format(v)
+  return money.formatNumber(v)
 }
 
 // MetricRow describes one row in the transposed table. `kind` drives
@@ -101,17 +89,18 @@ type MetricRow = {
   cellClass?: (value: number | null) => string | undefined
 }
 
-// rdnTierClass maps an RDN price (UAH/kWh) onto one of four pale
-// background classes. Thresholds step in 4 UAH/kWh increments so
-// the bands cover the full UA market range an operator might see
-// on any given day: <4 cheap, 4–8 moderate, 8–12 elevated, ≥12
-// peak. Returns undefined for null/zero so the empty-cell renderer
-// keeps the muted "—" treatment instead of being painted "cheap".
-function rdnTierClass(value: number | null): string | undefined {
+// rdnTierClass maps an RDN price onto one of four pale background
+// classes. Thresholds step in 4 UAH/kWh increments (converted at the
+// day's rate in another currency) so the bands cover the full UA market
+// range an operator might see on any given day: <4 cheap, 4–8 moderate,
+// 8–12 elevated, ≥12 peak. Returns undefined for null/zero so the
+// empty-cell renderer keeps the muted "—" treatment instead of being
+// painted "cheap".
+function rdnTierClass(value: number | null, money: Money): string | undefined {
   if (value === null || !Number.isFinite(value) || value === 0) return undefined
-  if (value < 4) return 'rdn-tier-cool'
-  if (value < 8) return 'rdn-tier-warm'
-  if (value < 12) return 'rdn-tier-hot'
+  if (value < money.fromUah(4)) return 'rdn-tier-cool'
+  if (value < money.fromUah(8)) return 'rdn-tier-warm'
+  if (value < money.fromUah(12)) return 'rdn-tier-hot'
   return 'rdn-tier-peak'
 }
 
@@ -157,253 +146,244 @@ function sumOver(
   return any ? acc : null
 }
 
-const METRIC_GROUPS: Array<{ id: string; label: string; rows: MetricRow[] }> = [
-  {
-    id: 'prices',
-    label: 'Ціни',
-    rows: [
-      {
-        id: 'rdn',
-        label: 'РДН',
-        unit: 'грн/кВт·год',
-        kind: 'price',
-        pickHourValue: (row) => row?.rdnUahPerKwh ?? null,
-        total: () => null,
-        cellClass: rdnTierClass,
-      },
-      {
-        id: 'import_price',
-        label: 'Ціна імпорту',
-        unit: 'грн/кВт·год',
-        kind: 'price',
-        pickHourValue: pickWhenPriced((r) => r.economics.importPriceUahPerKwh),
-        total: () => null,
-      },
-      {
-        id: 'export_price',
-        label: 'Ціна експорту',
-        unit: 'грн/кВт·год',
-        kind: 'price',
-        pickHourValue: pickWhenPriced((r) => r.economics.exportPriceUahPerKwh),
-        total: () => null,
-      },
-      {
-        // Імпорт/Експорт всього sit directly under the price rows
-        // so the operator can read "ціна × обсяг" left-to-right
-        // without bouncing between groups. Energy unit (кВт·год)
-        // contrasts with the грн/кВт·год above, the visual jump is
-        // intentional.
-        id: 'grid_import',
-        label: 'Імпорт всього',
-        unit: 'кВт·год',
-        kind: 'energy',
-        pickHourValue: (row) => row?.flow.gridImport ?? null,
-        total: (rows) => sumOver(rows, (r) => r?.flow.gridImport ?? null),
-      },
-      {
-        id: 'grid_export',
-        label: 'Експорт всього',
-        unit: 'кВт·год',
-        kind: 'energy',
-        pickHourValue: (row) => row?.flow.gridExport ?? null,
-        total: (rows) => sumOver(rows, (r) => r?.flow.gridExport ?? null),
-      },
-    ],
-  },
-  {
-    // Consumption-side breakdown: total load served by each source.
-    // The Σ row is just `load`; the three breakdown rows must add
-    // up to it (modulo the same numerical rounding the dashboard
-    // applies elsewhere).
-    id: 'consumption',
-    label: 'Споживання',
-    rows: [
-      {
-        id: 'load',
-        label: 'Споживання (всього)',
-        unit: 'кВт·год',
-        kind: 'energy',
-        summary: true,
-        pickHourValue: (row) => row?.economics.load ?? null,
-        total: (rows) => sumOver(rows, (r) => r?.economics.load ?? null),
-      },
-      {
-        id: 'pv_to_load',
-        label: 'СЕС → Споживання',
-        unit: 'кВт·год',
-        kind: 'energy',
-        pickHourValue: (row) => row?.economics.pvToLoad ?? null,
-        total: (rows) => sumOver(rows, (r) => r?.economics.pvToLoad ?? null),
-      },
-      {
-        id: 'grid_to_load',
-        label: 'Мережа → Споживання',
-        unit: 'кВт·год',
-        kind: 'energy',
-        pickHourValue: (row) => row?.economics.gridToLoad ?? null,
-        total: (rows) => sumOver(rows, (r) => r?.economics.gridToLoad ?? null),
-      },
-      {
-        id: 'ess_to_load',
-        label: 'УЗЕ → Споживання',
-        unit: 'кВт·год',
-        kind: 'energy',
-        pickHourValue: (row) => row?.flow.essToLoad ?? null,
-        total: (rows) => sumOver(rows, (r) => r?.flow.essToLoad ?? null),
-      },
-    ],
-  },
-  {
-    // PV-side breakdown: total generation routed to each sink.
-    // `pv` is the SmartLogger accumulator delta; the three
-    // PV→{load,ess,grid} rows must sum to it.
-    id: 'pv',
-    label: 'Виробіток СЕС',
-    rows: [
-      {
-        id: 'pv_total',
-        label: 'СЕС (виробіток)',
-        unit: 'кВт·год',
-        kind: 'energy',
-        summary: true,
-        pickHourValue: (row) => row?.flow.pv ?? null,
-        total: (rows) => sumOver(rows, (r) => r?.flow.pv ?? null),
-      },
-      {
-        id: 'pv_to_load_pv',
-        label: 'СЕС → Споживання',
-        unit: 'кВт·год',
-        kind: 'energy',
-        pickHourValue: (row) => row?.economics.pvToLoad ?? null,
-        total: (rows) => sumOver(rows, (r) => r?.economics.pvToLoad ?? null),
-      },
-      {
-        id: 'pv_to_grid',
-        label: 'СЕС → Мережа',
-        unit: 'кВт·год',
-        kind: 'energy',
-        pickHourValue: (row) => row?.economics.pvToGrid ?? null,
-        total: (rows) => sumOver(rows, (r) => r?.economics.pvToGrid ?? null),
-      },
-      {
-        id: 'pv_to_ess',
-        label: 'СЕС → УЗЕ',
-        unit: 'кВт·год',
-        kind: 'energy',
-        pickHourValue: (row) => row?.flow.pvToEss ?? null,
-        total: (rows) => sumOver(rows, (r) => r?.flow.pvToEss ?? null),
-      },
-    ],
-  },
-  {
-    // УЗЕ-flows block. Sequenced as charge-from-grid → discharge-to-
-    // load → discharge-to-grid → залишок so the rows read top-down
-    // as "що зайшло в УЗЕ → що вийшло → що залишилось". УЗЕ →
-    // Споживання is intentionally duplicated here (it also lives in
-    // the consumption breakdown above) so the operator can scan the
-    // whole УЗЕ life-cycle without jumping between sections.
-    id: 'ess_grid',
-    label: 'УЗЕ',
-    rows: [
-      {
-        id: 'grid_to_ess',
-        label: 'Мережа → УЗЕ',
-        unit: 'кВт·год',
-        kind: 'energy',
-        pickHourValue: (row) => row?.flow.gridToEss ?? null,
-        total: (rows) => sumOver(rows, (r) => r?.flow.gridToEss ?? null),
-      },
-      {
-        // Duplicate of the consumption-group row with the same
-        // semantics. Different React key ('ess_to_load_dup') so
-        // both rows can coexist without a key collision.
-        id: 'ess_to_load_dup',
-        label: 'УЗЕ → Споживання',
-        unit: 'кВт·год',
-        kind: 'energy',
-        pickHourValue: (row) => row?.flow.essToLoad ?? null,
-        total: (rows) => sumOver(rows, (r) => r?.flow.essToLoad ?? null),
-      },
-      {
-        id: 'ess_to_grid',
-        label: 'УЗЕ → Мережа',
-        unit: 'кВт·год',
-        kind: 'energy',
-        pickHourValue: (row) => row?.flow.essToGrid ?? null,
-        total: (rows) => sumOver(rows, (r) => r?.flow.essToGrid ?? null),
-      },
-      {
-        // Залишок УЗЕ = SOC at the start of the hour · ємність.
-        // Pre-computed in useEconomicsData (where tariffs live)
-        // because the row config has no access to tariffs at render
-        // time. The Σ column intentionally returns null: summing
-        // residual battery levels across hours is meaningless (each
-        // hour's value is an instantaneous snapshot, not a flow), so
-        // we render an em-dash instead of a fake total.
-        id: 'ess_remaining',
-        label: 'Залишок УЗЕ',
-        unit: 'кВт·год',
-        kind: 'energy',
-        pickHourValue: (row) => row?.essRemainingKwhStart ?? null,
-        total: () => null,
-      },
-      {
-        // Собівартість УЗЕ — поточна WAC цінність енергії в батареї
-        // на початок години. Сума за добу не має сенсу (це знімок,
-        // як і Залишок), тому Σ = null. Використовує
-        // 'price_with_zero', бо години після PV-зарядки мають
-        // avg = 0 грн/кВт·год при ненульовому кВт·год — em-dash
-        // тут вводив би оператора в оману.
-        id: 'ess_cost_basis',
-        label: 'Собівартість УЗЕ',
-        unit: 'грн/кВт·год',
-        kind: 'price_with_zero',
-        pickHourValue: (row) => row?.essAvgCostUahPerKwhStart ?? null,
-        total: () => null,
-      },
-      {
-        // Списано з УЗЕ — UAH знятого з cost-basis на покриття
-        // розрядів цієї години (УЗЕ→Споживання + УЗЕ→Мережа) за
-        // середньою ціною на початок години. Σ за добу — це
-        // загальна "вартість того, що вийшло з батареї".
-        id: 'ess_withdrawn_cost',
-        label: 'Списано з УЗЕ',
-        unit: 'грн',
-        kind: 'uah',
-        pickHourValue: (row) => row?.essWithdrawnCostUah ?? null,
-        total: (rows) => sumOver(rows, (r) => r?.essWithdrawnCostUah ?? null),
-      },
-    ],
-  },
-  {
-    // Revenue / expense per channel — the per-hour version of the
-    // EBITDA panel above the chart. Each row is `flowₕ · priceₕ`
-    // (matching `dailyTotals` revenue/expense fields exactly), so
-    // the Σ column reproduces the panel's amounts to the гривня.
-    // `Дохід всього` is a summary row (sum of the four below);
-    // Витрати has only one breakdown line, so no separate summary.
-    id: 'revenue',
-    label: 'Дохід та витрати',
-    rows: [
-      {
-        id: 'revenue_total',
-        label: 'Дохід всього',
-        unit: 'грн',
-        kind: 'uah',
-        summary: true,
-        pickHourValue: (row) => {
-          if (!row || row.rdnUahPerKwh === null) return null
-          const imp = row.economics.importPriceUahPerKwh
-          const exp = row.economics.exportPriceUahPerKwh
-          return (
-            row.economics.pvToGrid * exp +
-            row.economics.pvToLoad * imp +
-            row.flow.essToGrid * exp +
-            row.flow.essToLoad * imp
-          )
+// metricGroups lays out the pivot's rows with the money units of the
+// currency on screen.
+function metricGroups(money: Money): Array<{ id: string; label: string; rows: MetricRow[] }> {
+  return [
+    {
+      id: 'prices',
+      label: 'Ціни',
+      rows: [
+        {
+          id: 'rdn',
+          label: 'РДН',
+          unit: money.priceUnit,
+          kind: 'price',
+          pickHourValue: (row) => row?.rdnUahPerKwh ?? null,
+          total: () => null,
+          cellClass: (value) => rdnTierClass(value, money),
         },
-        total: (rows) =>
-          sumOver(rows, (row) => {
+        {
+          id: 'import_price',
+          label: 'Ціна імпорту',
+          unit: money.priceUnit,
+          kind: 'price',
+          pickHourValue: pickWhenPriced((r) => r.economics.importPriceUahPerKwh),
+          total: () => null,
+        },
+        {
+          id: 'export_price',
+          label: 'Ціна експорту',
+          unit: money.priceUnit,
+          kind: 'price',
+          pickHourValue: pickWhenPriced((r) => r.economics.exportPriceUahPerKwh),
+          total: () => null,
+        },
+        {
+          // Імпорт/Експорт всього sit directly under the price rows
+          // so the operator can read "ціна × обсяг" left-to-right
+          // without bouncing between groups. Energy unit (кВт·год)
+          // contrasts with the грн/кВт·год above, the visual jump is
+          // intentional.
+          id: 'grid_import',
+          label: 'Імпорт всього',
+          unit: 'кВт·год',
+          kind: 'energy',
+          pickHourValue: (row) => row?.flow.gridImport ?? null,
+          total: (rows) => sumOver(rows, (r) => r?.flow.gridImport ?? null),
+        },
+        {
+          id: 'grid_export',
+          label: 'Експорт всього',
+          unit: 'кВт·год',
+          kind: 'energy',
+          pickHourValue: (row) => row?.flow.gridExport ?? null,
+          total: (rows) => sumOver(rows, (r) => r?.flow.gridExport ?? null),
+        },
+      ],
+    },
+    {
+      // Consumption-side breakdown: total load served by each source.
+      // The Σ row is just `load`; the three breakdown rows must add
+      // up to it (modulo the same numerical rounding the dashboard
+      // applies elsewhere).
+      id: 'consumption',
+      label: 'Споживання',
+      rows: [
+        {
+          id: 'load',
+          label: 'Споживання (всього)',
+          unit: 'кВт·год',
+          kind: 'energy',
+          summary: true,
+          pickHourValue: (row) => row?.economics.load ?? null,
+          total: (rows) => sumOver(rows, (r) => r?.economics.load ?? null),
+        },
+        {
+          id: 'pv_to_load',
+          label: 'СЕС → Споживання',
+          unit: 'кВт·год',
+          kind: 'energy',
+          pickHourValue: (row) => row?.economics.pvToLoad ?? null,
+          total: (rows) => sumOver(rows, (r) => r?.economics.pvToLoad ?? null),
+        },
+        {
+          id: 'grid_to_load',
+          label: 'Мережа → Споживання',
+          unit: 'кВт·год',
+          kind: 'energy',
+          pickHourValue: (row) => row?.economics.gridToLoad ?? null,
+          total: (rows) => sumOver(rows, (r) => r?.economics.gridToLoad ?? null),
+        },
+        {
+          id: 'ess_to_load',
+          label: 'УЗЕ → Споживання',
+          unit: 'кВт·год',
+          kind: 'energy',
+          pickHourValue: (row) => row?.flow.essToLoad ?? null,
+          total: (rows) => sumOver(rows, (r) => r?.flow.essToLoad ?? null),
+        },
+      ],
+    },
+    {
+      // PV-side breakdown: total generation routed to each sink.
+      // `pv` is the SmartLogger accumulator delta; the three
+      // PV→{load,ess,grid} rows must sum to it.
+      id: 'pv',
+      label: 'Виробіток СЕС',
+      rows: [
+        {
+          id: 'pv_total',
+          label: 'СЕС (виробіток)',
+          unit: 'кВт·год',
+          kind: 'energy',
+          summary: true,
+          pickHourValue: (row) => row?.flow.pv ?? null,
+          total: (rows) => sumOver(rows, (r) => r?.flow.pv ?? null),
+        },
+        {
+          id: 'pv_to_load_pv',
+          label: 'СЕС → Споживання',
+          unit: 'кВт·год',
+          kind: 'energy',
+          pickHourValue: (row) => row?.economics.pvToLoad ?? null,
+          total: (rows) => sumOver(rows, (r) => r?.economics.pvToLoad ?? null),
+        },
+        {
+          id: 'pv_to_grid',
+          label: 'СЕС → Мережа',
+          unit: 'кВт·год',
+          kind: 'energy',
+          pickHourValue: (row) => row?.economics.pvToGrid ?? null,
+          total: (rows) => sumOver(rows, (r) => r?.economics.pvToGrid ?? null),
+        },
+        {
+          id: 'pv_to_ess',
+          label: 'СЕС → УЗЕ',
+          unit: 'кВт·год',
+          kind: 'energy',
+          pickHourValue: (row) => row?.flow.pvToEss ?? null,
+          total: (rows) => sumOver(rows, (r) => r?.flow.pvToEss ?? null),
+        },
+      ],
+    },
+    {
+      // УЗЕ-flows block. Sequenced as charge-from-grid → discharge-to-
+      // load → discharge-to-grid → залишок so the rows read top-down
+      // as "що зайшло в УЗЕ → що вийшло → що залишилось". УЗЕ →
+      // Споживання is intentionally duplicated here (it also lives in
+      // the consumption breakdown above) so the operator can scan the
+      // whole УЗЕ life-cycle without jumping between sections.
+      id: 'ess_grid',
+      label: 'УЗЕ',
+      rows: [
+        {
+          id: 'grid_to_ess',
+          label: 'Мережа → УЗЕ',
+          unit: 'кВт·год',
+          kind: 'energy',
+          pickHourValue: (row) => row?.flow.gridToEss ?? null,
+          total: (rows) => sumOver(rows, (r) => r?.flow.gridToEss ?? null),
+        },
+        {
+          // Duplicate of the consumption-group row with the same
+          // semantics. Different React key ('ess_to_load_dup') so
+          // both rows can coexist without a key collision.
+          id: 'ess_to_load_dup',
+          label: 'УЗЕ → Споживання',
+          unit: 'кВт·год',
+          kind: 'energy',
+          pickHourValue: (row) => row?.flow.essToLoad ?? null,
+          total: (rows) => sumOver(rows, (r) => r?.flow.essToLoad ?? null),
+        },
+        {
+          id: 'ess_to_grid',
+          label: 'УЗЕ → Мережа',
+          unit: 'кВт·год',
+          kind: 'energy',
+          pickHourValue: (row) => row?.flow.essToGrid ?? null,
+          total: (rows) => sumOver(rows, (r) => r?.flow.essToGrid ?? null),
+        },
+        {
+          // Залишок УЗЕ = SOC at the start of the hour · ємність.
+          // Pre-computed in useEconomicsData (where tariffs live)
+          // because the row config has no access to tariffs at render
+          // time. The Σ column intentionally returns null: summing
+          // residual battery levels across hours is meaningless (each
+          // hour's value is an instantaneous snapshot, not a flow), so
+          // we render an em-dash instead of a fake total.
+          id: 'ess_remaining',
+          label: 'Залишок УЗЕ',
+          unit: 'кВт·год',
+          kind: 'energy',
+          pickHourValue: (row) => row?.essRemainingKwhStart ?? null,
+          total: () => null,
+        },
+        {
+          // Собівартість УЗЕ — поточна WAC цінність енергії в батареї
+          // на початок години. Сума за добу не має сенсу (це знімок,
+          // як і Залишок), тому Σ = null. Використовує
+          // 'price_with_zero', бо години після PV-зарядки мають
+          // avg = 0 грн/кВт·год при ненульовому кВт·год — em-dash
+          // тут вводив би оператора в оману.
+          id: 'ess_cost_basis',
+          label: 'Собівартість УЗЕ',
+          unit: money.priceUnit,
+          kind: 'price_with_zero',
+          pickHourValue: (row) => row?.essAvgCostUahPerKwhStart ?? null,
+          total: () => null,
+        },
+        {
+          // Списано з УЗЕ — UAH знятого з cost-basis на покриття
+          // розрядів цієї години (УЗЕ→Споживання + УЗЕ→Мережа) за
+          // середньою ціною на початок години. Σ за добу — це
+          // загальна "вартість того, що вийшло з батареї".
+          id: 'ess_withdrawn_cost',
+          label: 'Списано з УЗЕ',
+          unit: money.unit,
+          kind: 'uah',
+          pickHourValue: (row) => row?.essWithdrawnCostUah ?? null,
+          total: (rows) => sumOver(rows, (r) => r?.essWithdrawnCostUah ?? null),
+        },
+      ],
+    },
+    {
+      // Revenue / expense per channel — the per-hour version of the
+      // EBITDA panel above the chart. Each row is `flowₕ · priceₕ`
+      // (matching `dailyTotals` revenue/expense fields exactly), so
+      // the Σ column reproduces the panel's amounts to the гривня.
+      // `Дохід всього` is a summary row (sum of the four below);
+      // Витрати has only one breakdown line, so no separate summary.
+      id: 'revenue',
+      label: 'Дохід та витрати',
+      rows: [
+        {
+          id: 'revenue_total',
+          label: 'Дохід всього',
+          unit: money.unit,
+          kind: 'uah',
+          summary: true,
+          pickHourValue: (row) => {
             if (!row || row.rdnUahPerKwh === null) return null
             const imp = row.economics.importPriceUahPerKwh
             const exp = row.economics.exportPriceUahPerKwh
@@ -413,131 +393,130 @@ const METRIC_GROUPS: Array<{ id: string; label: string; rows: MetricRow[] }> = [
               row.flow.essToGrid * exp +
               row.flow.essToLoad * imp
             )
-          }),
-      },
-      {
-        id: 'revenue_pv_export',
-        label: 'Дохід: СЕС → мережа',
-        unit: 'грн',
-        kind: 'uah',
-        pickHourValue: pickRevenue(
-          (r) => r.economics.pvToGrid,
-          (r) => r.economics.exportPriceUahPerKwh,
-        ),
-        total: (rows) =>
-          sumOver(
-            rows,
-            pickRevenue((r) => r.economics.pvToGrid, (r) => r.economics.exportPriceUahPerKwh),
-          ),
-      },
-      {
-        id: 'revenue_pv_self',
-        label: 'Дохід: СЕС → споживання',
-        unit: 'грн',
-        kind: 'uah',
-        pickHourValue: pickRevenue(
-          (r) => r.economics.pvToLoad,
-          (r) => r.economics.importPriceUahPerKwh,
-        ),
-        total: (rows) =>
-          sumOver(
-            rows,
-            pickRevenue((r) => r.economics.pvToLoad, (r) => r.economics.importPriceUahPerKwh),
-          ),
-      },
-      {
-        id: 'revenue_ess_export',
-        label: 'Дохід: УЗЕ → мережа',
-        unit: 'грн',
-        kind: 'uah',
-        pickHourValue: pickRevenue(
-          (r) => r.flow.essToGrid,
-          (r) => r.economics.exportPriceUahPerKwh,
-        ),
-        total: (rows) =>
-          sumOver(
-            rows,
-            pickRevenue((r) => r.flow.essToGrid, (r) => r.economics.exportPriceUahPerKwh),
-          ),
-      },
-      {
-        id: 'revenue_ess_self',
-        label: 'Дохід: УЗЕ → споживання',
-        unit: 'грн',
-        kind: 'uah',
-        pickHourValue: pickRevenue(
-          (r) => r.flow.essToLoad,
-          (r) => r.economics.importPriceUahPerKwh,
-        ),
-        total: (rows) =>
-          sumOver(
-            rows,
-            pickRevenue((r) => r.flow.essToLoad, (r) => r.economics.importPriceUahPerKwh),
-          ),
-      },
-      {
-        // Витрати summary mirrors the Дохід всього row above so the
-        // panel and the table read the same way (heading row +
-        // breakdown beneath). Today there's only one expense leg
-        // (gridToEss · importPrice), but the summary slot is kept so
-        // adding e.g. degradation cost later doesn't require
-        // restructuring the table.
-        id: 'expense_total',
-        label: 'Витрати всього',
-        unit: 'грн',
-        kind: 'uah',
-        summary: true,
-        pickHourValue: pickRevenue(
-          (r) => r.flow.gridToEss,
-          (r) => r.economics.importPriceUahPerKwh,
-        ),
-        total: (rows) =>
-          sumOver(
-            rows,
-            pickRevenue((r) => r.flow.gridToEss, (r) => r.economics.importPriceUahPerKwh),
-          ),
-      },
-      {
-        id: 'expense_grid_charge',
-        label: 'Витрати: Заряд УЗЕ із мережі',
-        unit: 'грн',
-        kind: 'uah',
-        pickHourValue: pickRevenue(
-          (r) => r.flow.gridToEss,
-          (r) => r.economics.importPriceUahPerKwh,
-        ),
-        total: (rows) =>
-          sumOver(
-            rows,
-            pickRevenue((r) => r.flow.gridToEss, (r) => r.economics.importPriceUahPerKwh),
-          ),
-      },
-      {
-        // EBITDA = Дохід − Витрати per hour. Equals the Економіка
-        // block's `Ефект` when `degradationUahPerKwh = 0`; the
-        // difference otherwise is the УЗЕ-degradation cost the
-        // Економіка block subtracts. We render with sign coloring so
-        // negative-EBITDA hours (rare, charge cost > all four
-        // revenue legs) stand out in red.
-        id: 'ebitda',
-        label: 'EBITDA',
-        unit: 'грн',
-        kind: 'uah_signed',
-        summary: true,
-        pickHourValue: (row) => {
-          if (!row || row.rdnUahPerKwh === null) return null
-          const imp = row.economics.importPriceUahPerKwh
-          const exp = row.economics.exportPriceUahPerKwh
-          const revenue =
-            row.economics.pvToGrid * exp +
-            row.economics.pvToLoad * imp +
-            row.flow.essToGrid * exp +
-            row.flow.essToLoad * imp
-          const expense = row.flow.gridToEss * imp
-          return revenue - expense
+          },
+          total: (rows) =>
+            sumOver(rows, (row) => {
+              if (!row || row.rdnUahPerKwh === null) return null
+              const imp = row.economics.importPriceUahPerKwh
+              const exp = row.economics.exportPriceUahPerKwh
+              return (
+                row.economics.pvToGrid * exp +
+                row.economics.pvToLoad * imp +
+                row.flow.essToGrid * exp +
+                row.flow.essToLoad * imp
+              )
+            }),
         },
-        total: (rows) =>
-          sumOver(rows, (row) => {
+        {
+          id: 'revenue_pv_export',
+          label: 'Дохід: СЕС → мережа',
+          unit: money.unit,
+          kind: 'uah',
+          pickHourValue: pickRevenue(
+            (r) => r.economics.pvToGrid,
+            (r) => r.economics.exportPriceUahPerKwh,
+          ),
+          total: (rows) =>
+            sumOver(
+              rows,
+              pickRevenue((r) => r.economics.pvToGrid, (r) => r.economics.exportPriceUahPerKwh),
+            ),
+        },
+        {
+          id: 'revenue_pv_self',
+          label: 'Дохід: СЕС → споживання',
+          unit: money.unit,
+          kind: 'uah',
+          pickHourValue: pickRevenue(
+            (r) => r.economics.pvToLoad,
+            (r) => r.economics.importPriceUahPerKwh,
+          ),
+          total: (rows) =>
+            sumOver(
+              rows,
+              pickRevenue((r) => r.economics.pvToLoad, (r) => r.economics.importPriceUahPerKwh),
+            ),
+        },
+        {
+          id: 'revenue_ess_export',
+          label: 'Дохід: УЗЕ → мережа',
+          unit: money.unit,
+          kind: 'uah',
+          pickHourValue: pickRevenue(
+            (r) => r.flow.essToGrid,
+            (r) => r.economics.exportPriceUahPerKwh,
+          ),
+          total: (rows) =>
+            sumOver(
+              rows,
+              pickRevenue((r) => r.flow.essToGrid, (r) => r.economics.exportPriceUahPerKwh),
+            ),
+        },
+        {
+          id: 'revenue_ess_self',
+          label: 'Дохід: УЗЕ → споживання',
+          unit: money.unit,
+          kind: 'uah',
+          pickHourValue: pickRevenue(
+            (r) => r.flow.essToLoad,
+            (r) => r.economics.importPriceUahPerKwh,
+          ),
+          total: (rows) =>
+            sumOver(
+              rows,
+              pickRevenue((r) => r.flow.essToLoad, (r) => r.economics.importPriceUahPerKwh),
+            ),
+        },
+        {
+          // Витрати summary mirrors the Дохід всього row above so the
+          // panel and the table read the same way (heading row +
+          // breakdown beneath). Today there's only one expense leg
+          // (gridToEss · importPrice), but the summary slot is kept so
+          // adding e.g. degradation cost later doesn't require
+          // restructuring the table.
+          id: 'expense_total',
+          label: 'Витрати всього',
+          unit: money.unit,
+          kind: 'uah',
+          summary: true,
+          pickHourValue: pickRevenue(
+            (r) => r.flow.gridToEss,
+            (r) => r.economics.importPriceUahPerKwh,
+          ),
+          total: (rows) =>
+            sumOver(
+              rows,
+              pickRevenue((r) => r.flow.gridToEss, (r) => r.economics.importPriceUahPerKwh),
+            ),
+        },
+        {
+          id: 'expense_grid_charge',
+          label: 'Витрати: Заряд УЗЕ із мережі',
+          unit: money.unit,
+          kind: 'uah',
+          pickHourValue: pickRevenue(
+            (r) => r.flow.gridToEss,
+            (r) => r.economics.importPriceUahPerKwh,
+          ),
+          total: (rows) =>
+            sumOver(
+              rows,
+              pickRevenue((r) => r.flow.gridToEss, (r) => r.economics.importPriceUahPerKwh),
+            ),
+        },
+        {
+          // EBITDA = Дохід − Витрати per hour. Equals the Економіка
+          // block's `Ефект` when `degradationUahPerKwh = 0`; the
+          // difference otherwise is the УЗЕ-degradation cost the
+          // Економіка block subtracts. We render with sign coloring so
+          // negative-EBITDA hours (rare, charge cost > all four
+          // revenue legs) stand out in red.
+          id: 'ebitda',
+          label: 'EBITDA',
+          unit: money.unit,
+          kind: 'uah_signed',
+          summary: true,
+          pickHourValue: (row) => {
             if (!row || row.rdnUahPerKwh === null) return null
             const imp = row.economics.importPriceUahPerKwh
             const exp = row.economics.exportPriceUahPerKwh
@@ -548,42 +527,57 @@ const METRIC_GROUPS: Array<{ id: string; label: string; rows: MetricRow[] }> = [
               row.flow.essToLoad * imp
             const expense = row.flow.gridToEss * imp
             return revenue - expense
-          }),
-      },
-    ],
-  },
-  {
-    // Економіка carries the УЗЕ cash view. Базова / Фактична / Ефект
-    // були прибрані, бо їх повна розкладка вже видима у групі "Дохід
-    // та витрати" вище. Перший рядок цього блоку позначений як summary
-    // щоб у місці переходу від EBITDA до економіки виник чіткий
-    // візуальний роздільник.
-    id: 'economics',
-    label: 'Економіка',
-    rows: [
-      {
-        // Реалізований ефект УЗЕ — cash, який батарея заробила
-        // саме цієї години після зведення з її ж собівартістю.
-        // Дорівнює `revenue_ess_export + revenue_ess_self −
-        // Списано з УЗЕ − degradation`. Це "чистий cash flow ESS"
-        // на противагу spot-варіанту `essNet` (який порівнював
-        // розряд з ціною заряду тієї ж години). Більше підходить
-        // для оцінки реальної економічної віддачі батареї.
-        id: 'ess_realized',
-        label: 'Реалізований ефект УЗЕ',
-        unit: 'грн',
-        kind: 'uah_signed',
-        summary: true,
-        pickHourValue: (row) => row?.essRealizedProfitUah ?? null,
-        total: (rows) => sumOver(rows, (r) => r?.essRealizedProfitUah ?? null),
-      },
-    ],
-  },
-]
+          },
+          total: (rows) =>
+            sumOver(rows, (row) => {
+              if (!row || row.rdnUahPerKwh === null) return null
+              const imp = row.economics.importPriceUahPerKwh
+              const exp = row.economics.exportPriceUahPerKwh
+              const revenue =
+                row.economics.pvToGrid * exp +
+                row.economics.pvToLoad * imp +
+                row.flow.essToGrid * exp +
+                row.flow.essToLoad * imp
+              const expense = row.flow.gridToEss * imp
+              return revenue - expense
+            }),
+        },
+      ],
+    },
+    {
+      // Економіка carries the УЗЕ cash view. Базова / Фактична / Ефект
+      // були прибрані, бо їх повна розкладка вже видима у групі "Дохід
+      // та витрати" вище. Перший рядок цього блоку позначений як summary
+      // щоб у місці переходу від EBITDA до економіки виник чіткий
+      // візуальний роздільник.
+      id: 'economics',
+      label: 'Економіка',
+      rows: [
+        {
+          // Реалізований ефект УЗЕ — cash, який батарея заробила
+          // саме цієї години після зведення з її ж собівартістю.
+          // Дорівнює `revenue_ess_export + revenue_ess_self −
+          // Списано з УЗЕ − degradation`. Це "чистий cash flow ESS"
+          // на противагу spot-варіанту `essNet` (який порівнював
+          // розряд з ціною заряду тієї ж години). Більше підходить
+          // для оцінки реальної економічної віддачі батареї.
+          id: 'ess_realized',
+          label: 'Реалізований ефект УЗЕ',
+          unit: money.unit,
+          kind: 'uah_signed',
+          summary: true,
+          pickHourValue: (row) => row?.essRealizedProfitUah ?? null,
+          total: (rows) => sumOver(rows, (r) => r?.essRealizedProfitUah ?? null),
+        },
+      ],
+    },
+  ]
+}
 
 function renderCell(
   value: number | null,
   kind: MetricKind,
+  money: Money,
   extraClass?: string,
 ): ReactElement {
   if (value === null) return <td className="cell-empty">—</td>
@@ -591,19 +585,19 @@ function renderCell(
   let className: string | undefined
   switch (kind) {
     case 'price':
-      formatted = formatPrice(value)
+      formatted = formatPrice(value, money)
       break
     case 'price_with_zero':
-      formatted = formatPriceAllowZero(value)
+      formatted = formatPriceAllowZero(value, money)
       break
     case 'energy':
       formatted = formatNumber(value)
       break
     case 'uah':
-      formatted = formatUah(value)
+      formatted = formatUah(value, money)
       break
     case 'uah_signed':
-      formatted = formatUah(value)
+      formatted = formatUah(value, money)
       className = value >= 0 ? 'cell-positive' : 'cell-negative'
       break
   }
@@ -625,8 +619,9 @@ const XLSX_FORMAT: Record<MetricKind, XlsxFormat> = {
   uah_signed: 'money',
 }
 
+// exportDay writes the pivot in UAH; rows must be the UAH day.
 function exportDay(rows: Array<HourEconomicsRow | null>, organizationID: string, date: string) {
-  const metrics: HourMetric[] = METRIC_GROUPS.flatMap((group) => group.rows).map((metric) => ({
+  const metrics: HourMetric[] = metricGroups(UAH_MONEY).flatMap((group) => group.rows).map((metric) => ({
     label: metric.label,
     unit: metric.unit,
     format: XLSX_FORMAT[metric.kind],
@@ -636,17 +631,6 @@ function exportDay(rows: Array<HourEconomicsRow | null>, organizationID: string,
   downloadXlsx(exportFileName(date, organizationID), dayPivotSheet(metrics, date, organizationID))
 }
 
-const stripUahFmt = new Intl.NumberFormat('uk-UA', {
-  style: 'decimal',
-  useGrouping: true,
-  minimumFractionDigits: 0,
-  maximumFractionDigits: 0,
-})
-
-function formatStripUah(v: number): string {
-  if (!Number.isFinite(v)) return '—'
-  return `${stripUahFmt.format(Math.round(v))} грн`
-}
 
 // hourEssNet extracts the per-hour spot ESS effect, mirroring the
 // "Чистий ефект УЗЕ" chart (null when the hour had no price so the
@@ -670,14 +654,14 @@ type EssNetTerm = { label: string; detail: string; uah: number }
 // the export price it earned, and both charge legs cost what they cost —
 // grid charge at the import price, PV charge at the export revenue given
 // up to store it instead.
-function essNetTerms(row: HourEconomicsRow): EssNetTerm[] {
+function essNetTerms(row: HourEconomicsRow, money: Money): EssNetTerm[] {
   const { flow, economics: e } = row
   const terms: EssNetTerm[] = []
   const add = (kwh: number, price: number, sign: 1 | -1, label: string) => {
     if (!(kwh > 0)) return
     terms.push({
       label,
-      detail: `${formatNumber(kwh)} кВт·год × ${priceFmt.format(price)} грн`,
+      detail: `${formatNumber(kwh)} кВт·год × ${money.formatPriceAllowZero(price)} ${money.unit}`,
       uah: sign * kwh * price,
     })
   }
@@ -691,7 +675,7 @@ function essNetTerms(row: HourEconomicsRow): EssNetTerm[] {
   // degradation in force on that day rather than whatever the form
   // currently holds.
   const wear = e.essNet - terms.reduce((acc, t) => acc + t.uah, 0)
-  if (Math.abs(wear) >= 0.5) {
+  if (Math.abs(wear) >= money.fromUah(0.5)) {
     terms.push({
       label: 'Знос УЗЕ',
       detail: `${formatNumber(flow.essDischarged)} кВт·год розряду`,
@@ -712,6 +696,8 @@ function EssEffectStrip({
   rows: Array<HourEconomicsRow | null>
   cols: HourColumns | null
 }): ReactElement | null {
+  const money = useMoney()
+  const formatStripUah = money.format
   const [hover, setHover] = useState<{ index: number; x: number; y: number } | null>(null)
   if (!cols) {
     // First render has no measurements yet; reserve nothing and let the
@@ -729,10 +715,10 @@ function EssEffectStrip({
   const template = `${cols.metric}px ${cols.sigma}px ${cols.hours.map((w) => `${w}px`).join(' ')}`
   const hoverValue = hover ? values[hover.index] : null
   const hoverRow = hover ? rows[hover.index] : null
-  const hoverTerms = hoverRow && hoverValue !== null ? essNetTerms(hoverRow) : []
+  const hoverTerms = hoverRow && hoverValue !== null ? essNetTerms(hoverRow, money) : []
   return (
     <div className="economics-ess-strip" style={{ gridTemplateColumns: template }}>
-      <div className="economics-ess-strip-label">Чистий ефект УЗЕ, грн/год</div>
+      <div className="economics-ess-strip-label">Чистий ефект УЗЕ, {money.unit}/год</div>
       <div className="economics-ess-strip-total" style={{ left: `${cols.metric}px` }}>
         {formatStripUah(total)}
       </div>
@@ -816,6 +802,8 @@ type HourColumns = {
 }
 
 export function EconomicsTable({ rows, organizationID, date }: Props) {
+  const money = useMoney()
+  const groups = useMemo(() => metricGroups(money), [money])
   const orgLabel = formatOrganizationLabel(organizationID)
   const dateLabel = formatLocalDate(date)
   const tableRef = useRef<HTMLTableElement>(null)
@@ -859,13 +847,11 @@ export function EconomicsTable({ rows, organizationID, date }: Props) {
           Погодинна деталізація
           <span className="economics-table-context"> · {orgLabel} · {dateLabel}</span>
         </h3>
-        <button
-          type="button"
-          className="economics-export-btn"
-          onClick={() => exportDay(rows, organizationID, date)}
-        >
-          Вивантажити в Excel
-        </button>
+        <ExportButton
+          run={async (uahOnScreen) =>
+            exportDay(uahOnScreen ? rows : await fetchUahDayRows(organizationID, date), organizationID, date)
+          }
+        />
       </div>
       <div className="economics-table-scroll">
         <EssEffectStrip rows={rows} cols={cols} />
@@ -891,7 +877,7 @@ export function EconomicsTable({ rows, organizationID, date }: Props) {
             </tr>
           </thead>
           <tbody>
-            {METRIC_GROUPS.flatMap((group) => group.rows).map((metric) => {
+            {groups.flatMap((group) => group.rows).map((metric) => {
               const totalValue = metric.total(rows)
               const rowClass = metric.summary ? 'economics-table-summary-row' : undefined
               return (
@@ -904,7 +890,7 @@ export function EconomicsTable({ rows, organizationID, date }: Props) {
                     {totalValue === null ? (
                       <span className="cell-empty">—</span>
                     ) : (
-                      renderTotal(totalValue, metric.kind)
+                      renderTotal(totalValue, metric.kind, money)
                     )}
                   </td>
                   {rows.map((row, hourIdx) => {
@@ -914,6 +900,7 @@ export function EconomicsTable({ rows, organizationID, date }: Props) {
                         key={hourIdx}
                         value={value}
                         kind={metric.kind}
+                        money={money}
                         extraClass={metric.cellClass?.(value)}
                       />
                     )
@@ -931,32 +918,34 @@ export function EconomicsTable({ rows, organizationID, date }: Props) {
 function FragmentCell({
   value,
   kind,
+  money,
   extraClass,
 }: {
   value: number | null
   kind: MetricKind
+  money: Money
   extraClass?: string
 }) {
-  return renderCell(value, kind, extraClass)
+  return renderCell(value, kind, money, extraClass)
 }
 
-function renderTotal(value: number, kind: MetricKind): ReactElement {
+function renderTotal(value: number, kind: MetricKind, money: Money): ReactElement {
   switch (kind) {
     case 'price':
       // Sum of prices is meaningless; the row's `total` returns null
       // for price metrics so this branch is never reached, but we
       // handle it defensively.
-      return <span>{formatPrice(value)}</span>
+      return <span>{formatPrice(value, money)}</span>
     case 'price_with_zero':
-      return <span>{formatPriceAllowZero(value)}</span>
+      return <span>{formatPriceAllowZero(value, money)}</span>
     case 'energy':
       return <span>{formatNumber(value)}</span>
     case 'uah':
-      return <span>{formatUah(value)}</span>
+      return <span>{formatUah(value, money)}</span>
     case 'uah_signed':
       return (
         <span className={value >= 0 ? 'cell-positive' : 'cell-negative'}>
-          {formatUah(value)}
+          {formatUah(value, money)}
         </span>
       )
   }

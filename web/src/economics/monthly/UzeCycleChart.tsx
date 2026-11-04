@@ -2,6 +2,7 @@ import { useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { EconomicsUzeCycle, EconomicsUzeCycleChart } from '../../api'
 import { useChartChrome } from '../../theme/useChartChrome'
+import { useMoney, type Money } from '../currency'
 
 // Колірна палітра серій (порт client_js/uze_cycle_chart.js).
 const C = {
@@ -18,9 +19,9 @@ const C = {
 
 type SeriesKey = 's-load' | 's-exp' | 's-sun' | 's-grid' | 's-socopt' | 's-socfact' | 's-fact' | 's-rdn'
 
-function fmtUah(n: number): string {
+function fmtMoney(n: number, cur: Money): string {
   const s = n < 0 ? '−' : ''
-  return s + Math.abs(Math.round(n)).toLocaleString('uk-UA') + ' ₴'
+  return `${s}${cur.formatNumber(Math.abs(n))} ${cur.symbol}`
 }
 const fmtN = (n: number) => Math.round(n).toLocaleString('uk-UA')
 
@@ -37,6 +38,7 @@ type Tip = { head: string; rows: TipRow[] }
 // toggles series. SOC lines start hidden, matching the original embed.
 function CycleChartSvg({ chart }: { chart: EconomicsUzeCycleChart }) {
   const chrome = useChartChrome()
+  const cur = useMoney()
   const canvasRef = useRef<HTMLDivElement>(null)
   const [hover, setHover] = useState<number | null>(null)
   const [pos, setPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
@@ -77,7 +79,7 @@ function CycleChartSvg({ chart }: { chart: EconomicsUzeCycleChart }) {
 
     let maxUp = 1
     let maxDn = 1
-    let rdnMax = 1
+    let rdnMax = cur.fromUah(1)
     for (let i = 0; i < n; i++) {
       maxUp = Math.max(maxUp, oL[i] + oG[i], Math.max(0, fEss[i]))
       maxDn = Math.max(maxDn, oCp[i] + oCg[i], Math.max(0, -fEss[i]))
@@ -107,16 +109,18 @@ function CycleChartSvg({ chart }: { chart: EconomicsUzeCycleChart }) {
     for (let i = 0; i < n; i++) {
       const dis = oL[i] + oG[i]
       const chg = oCp[i] + oCg[i]
-      const rows: TipRow[] = [{ label: 'Ціна РДН', value: `${rdn[i].toFixed(2)} ₴` }]
+      const rows: TipRow[] = [{ label: 'Ціна РДН', value: `${cur.formatPriceAllowZero(rdn[i])} ${cur.symbol}` }]
       if (dis > 0.5) {
         rows.push({ label: 'На споживання', value: `${fmtN(oL[i])} кВт·год`, swatch: C.disLoad })
         rows.push({ label: 'На експорт', value: `${fmtN(oG[i])} кВт·год`, swatch: C.disGrid })
-        rows.push({ label: 'Дохід розряду', value: fmtUah(disUah(i)), total: true })
+        rows.push({ label: 'Дохід розряду', value: fmtMoney(disUah(i), cur), total: true })
       }
       if (chg > 0.5) {
         if (oCp[i] > 0.5) rows.push({ label: 'Заряд від сонця', value: `${fmtN(oCp[i])} кВт·год`, swatch: C.chgPv })
         if (oCg[i] > 0.5) rows.push({ label: 'Заряд від мережі', value: `${fmtN(oCg[i])} кВт·год`, swatch: C.chgGrid })
-        if (gridCostUah[i] > 0.5) rows.push({ label: 'Вартість заряду з мережі', value: fmtUah(-gridCostUah[i]), total: true })
+        if (gridCostUah[i] > cur.fromUah(0.5)) {
+          rows.push({ label: 'Вартість заряду з мережі', value: fmtMoney(-gridCostUah[i], cur), total: true })
+        }
       }
       if (socO[i] != null) rows.push({ label: 'SOC оптимум', value: `${Math.round(socO[i] as number)}%` })
       if (socF[i] != null) rows.push({ label: 'SOC факт', value: `${Math.round(socF[i] as number)}%` })
@@ -144,7 +148,7 @@ function CycleChartSvg({ chart }: { chart: EconomicsUzeCycleChart }) {
       tips, linePts, socLine, optS, factS, reserve, captured, pwr, cap,
       socOptStart: o.soc_start, socFactStart: f.soc_start,
     }
-  }, [chart])
+  }, [chart, cur])
 
   const m = model
   if (!m.n) return null
@@ -177,7 +181,7 @@ function CycleChartSvg({ chart }: { chart: EconomicsUzeCycleChart }) {
     rdnCols.push(<rect key={`r${i}`} x={x.toFixed(1)} y={y.toFixed(1)} width={(m.slot - 2).toFixed(1)} height={h.toFixed(1)} fill={C.rdn} fillOpacity={0.13} />)
     rdnCols.push(
       <text key={`rt${i}`} x={m.cx(i).toFixed(1)} y={(m.iy1 + 16).toFixed(1)} textAnchor="middle" fontSize={9} fill="#1d4ed8" opacity={0.8}>
-        {m.rdn[i].toFixed(1)}
+        {cur.currency === 'UAH' ? m.rdn[i].toFixed(1) : m.rdn[i].toFixed(2)}
       </text>,
     )
   }
@@ -214,10 +218,10 @@ function CycleChartSvg({ chart }: { chart: EconomicsUzeCycleChart }) {
       gGrid.push(<rect key={i} x={x.toFixed(1)} y={(m.zeroY + accd).toFixed(1)} width={m.bw.toFixed(1)} height={hh.toFixed(1)} fill={C.chgGrid} rx={1} />)
     }
     const dis = m.oL[i] + m.oG[i]
-    if (dis > 3 && m.disUah(i) >= 5) {
+    if (dis > 3 && m.disUah(i) >= cur.fromUah(5)) {
       money.push(
         <text key={i} x={c.toFixed(1)} y={(m.zeroY - acc - 4).toFixed(1)} textAnchor="middle" fontSize={10.5} fontWeight={700} fill={C.money}>
-          {fmtN(m.disUah(i))}
+          {cur.formatNumber(m.disUah(i))}
         </text>,
       )
     }
@@ -287,18 +291,18 @@ function CycleChartSvg({ chart }: { chart: EconomicsUzeCycleChart }) {
     <div className="uze-layout">
       <div className="uze-left">
         <div className="uze-waterfall">
-          <div className="uze-wf-title">Звідки {fmtUah(optS?.effect || 0)} оптимуму (собівартість врахована)</div>
-          <div className="uze-wf-row pos"><span>Експорт УЗЕ → мережу</span><strong>{fmtUah(optS?.export_val || 0)}</strong></div>
-          <div className="uze-wf-row pos"><span>УЗЕ → споживання</span><strong>{fmtUah(optS?.load_val || 0)}</strong></div>
-          <div className="uze-wf-row neg"><span>Собівартість сонця (втрачений денний експорт)</span><strong>{fmtUah(-(optS?.charge_pv_cost || 0))}</strong></div>
-          {optS?.grid_cost ? <div className="uze-wf-row neg"><span>Заряд з мережі</span><strong>{fmtUah(-(optS.grid_cost || 0))}</strong></div> : null}
-          <div className="uze-wf-row neg"><span>Знос батареї</span><strong>{fmtUah(-(optS?.degradation || 0))}</strong></div>
-          <div className="uze-wf-row total"><span>Чистий оптимум</span><strong>{fmtUah(optS?.effect || 0)}</strong></div>
+          <div className="uze-wf-title">Звідки {fmtMoney(optS?.effect || 0, cur)} оптимуму (собівартість врахована)</div>
+          <div className="uze-wf-row pos"><span>Експорт УЗЕ → мережу</span><strong>{fmtMoney(optS?.export_val || 0, cur)}</strong></div>
+          <div className="uze-wf-row pos"><span>УЗЕ → споживання</span><strong>{fmtMoney(optS?.load_val || 0, cur)}</strong></div>
+          <div className="uze-wf-row neg"><span>Собівартість сонця (втрачений денний експорт)</span><strong>{fmtMoney(-(optS?.charge_pv_cost || 0), cur)}</strong></div>
+          {optS?.grid_cost ? <div className="uze-wf-row neg"><span>Заряд з мережі</span><strong>{fmtMoney(-(optS.grid_cost || 0), cur)}</strong></div> : null}
+          <div className="uze-wf-row neg"><span>Знос батареї</span><strong>{fmtMoney(-(optS?.degradation || 0), cur)}</strong></div>
+          <div className="uze-wf-row total"><span>Чистий оптимум</span><strong>{fmtMoney(optS?.effect || 0, cur)}</strong></div>
         </div>
         <div className="uze-compare-box">
-          <div><span className="lbl">Факт</span><strong className="fact">{fmtUah(factS?.effect || 0)}</strong></div>
-          <div><span className="lbl">Оптимум</span><strong className="opt">{fmtUah(optS?.effect || 0)}</strong></div>
-          <div><span className="lbl">Резерв</span><strong className="bad">{fmtUah(m.reserve)}</strong></div>
+          <div><span className="lbl">Факт</span><strong className="fact">{fmtMoney(factS?.effect || 0, cur)}</strong></div>
+          <div><span className="lbl">Оптимум</span><strong className="opt">{fmtMoney(optS?.effect || 0, cur)}</strong></div>
+          <div><span className="lbl">Резерв</span><strong className="bad">{fmtMoney(m.reserve, cur)}</strong></div>
           <div><span className="lbl">Захоплено</span><strong>{m.captured}%</strong></div>
         </div>
         <p className="uze-chart-foot">
@@ -387,6 +391,7 @@ function CycleChartSvg({ chart }: { chart: EconomicsUzeCycleChart }) {
 // that reveals the list of significant cycles, each a per-day row that
 // lazily renders its chart when expanded.
 export function UzeCyclesAccordion({ cycles }: { cycles: EconomicsUzeCycle[] }) {
+  const cur = useMoney()
   const [groupOpen, setGroupOpen] = useState(false)
   const [open, setOpen] = useState<number | null>(null)
   if (!cycles.length) return null
@@ -396,7 +401,7 @@ export function UzeCyclesAccordion({ cycles }: { cycles: EconomicsUzeCycle[] }) 
   const maxReserve = Math.max(...reserves)
   const meta = groupOpen
     ? `${n} циклів · натисніть, щоб згорнути`
-    : `резерв від ${fmtUah(minReserve)} до ${fmtUah(maxReserve)} · натисніть, щоб розгорнути`
+    : `резерв від ${fmtMoney(minReserve, cur)} до ${fmtMoney(maxReserve, cur)} · натисніть, щоб розгорнути`
   return (
     <div className={`uze-acc-group${groupOpen ? ' open' : ''}`}>
       <button
@@ -426,9 +431,9 @@ export function UzeCyclesAccordion({ cycles }: { cycles: EconomicsUzeCycle[] }) 
                   <span className="uze-acc-caret">{isOpen ? '▾' : '▸'}</span>
                   <span className="uze-acc-label">{cyc.label}</span>
                   <span className="uze-acc-metrics">
-                    <span>опт {fmtUah(cyc.opt_effect_uah)}</span>
-                    <span className="good">факт {fmtUah(cyc.actual_effect_uah)}</span>
-                    <span className="bad">резерв {fmtUah(cyc.reserve_uah)}</span>
+                    <span>опт {fmtMoney(cyc.opt_effect_uah, cur)}</span>
+                    <span className="good">факт {fmtMoney(cyc.actual_effect_uah, cur)}</span>
+                    <span className="bad">резерв {fmtMoney(cyc.reserve_uah, cur)}</span>
                   </span>
                 </button>
                 {isOpen ? (

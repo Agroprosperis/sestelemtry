@@ -644,19 +644,41 @@ export type EconomicsDailyResponse = {
   // computed_at (RFC3339) is when the day was last computed: for a day
   // still running, the moment its numbers are current as of.
   computed_at?: string
+  // currency is what every *_uah field is in (UAH unless asked for);
+  // fx_rate is the day's UAH per unit it was converted at, fx_carried
+  // marks a day that borrowed the nearest rate for lack of its own.
+  currency?: string
+  fx_rate?: number
+  fx_carried?: boolean
+}
+
+// FxWindow is how a period response reports its currency: the fields
+// keep their _uah names, every amount is in `currency`. fx_rate_avg is
+// the mean UAH per unit over the period's days, fx_days_carried counts
+// the days that borrowed the nearest rate.
+export type FxWindow = {
+  currency?: string
+  fx_rate_avg?: number
+  fx_days_carried?: number
+}
+
+// currencyParam leaves UAH (the stored currency) out of the URL.
+function currencyParam(currency?: string): string | undefined {
+  return currency && currency !== 'UAH' ? currency : undefined
 }
 
 // fetchEconomicsDaily reads the server-computed economics for one day.
 // The backend serves a final day from cache and recomputes non-final
 // (today/recent) days on read, so the dashboard always reads the table.
 export async function fetchEconomicsDaily(
-  input: { organizationID: string; date: string; tz?: string },
+  input: { organizationID: string; date: string; tz?: string; currency?: string },
   signal?: AbortSignal,
 ): Promise<EconomicsDailyResponse> {
   const url = buildURL('/api/v1/economics/daily', {
     organization_id: input.organizationID,
     date: input.date,
     tz: input.tz || undefined,
+    currency: currencyParam(input.currency),
   })
   const res = await apiFetch(url, { signal })
   if (!res.ok) {
@@ -1016,7 +1038,7 @@ export type EconomicsUzeCycleChart = {
   }
 }
 
-export type EconomicsMonthlyResponse = {
+export type EconomicsMonthlyResponse = FxWindow & {
   organization_id: string
   month: string
   tz: string
@@ -1033,13 +1055,14 @@ export type EconomicsMonthlyResponse = {
 // backend serves final days from cache and recomputes the open tail
 // (today) on read, so a request always returns a consistent month.
 export async function fetchEconomicsMonthly(
-  input: { organizationID: string; month: string; tz?: string },
+  input: { organizationID: string; month: string; tz?: string; currency?: string },
   signal?: AbortSignal,
 ): Promise<EconomicsMonthlyResponse> {
   const url = buildURL('/api/v1/economics/monthly', {
     organization_id: input.organizationID,
     month: input.month,
     tz: input.tz || undefined,
+    currency: currencyParam(input.currency),
   })
   const res = await apiFetch(url, { signal })
   if (!res.ok) {
@@ -1076,7 +1099,7 @@ export type EconomicsAnnualMonthMargin = {
   hours: Array<EconomicsMonthlyMarginHour | null>
 }
 
-export type EconomicsAnnualResponse = {
+export type EconomicsAnnualResponse = FxWindow & {
   organization_id: string
   period: string
   // First/last month of the served window (YYYY-MM).
@@ -1104,7 +1127,7 @@ export type EconomicsAnnualResponse = {
 // month window. The backend reads whatever the recompute daemon
 // persisted, so a request always returns a consistent period.
 export async function fetchEconomicsAnnual(
-  input: { organizationID: string; period?: string; from?: string; to?: string; tz?: string },
+  input: { organizationID: string; period?: string; from?: string; to?: string; tz?: string; currency?: string },
   signal?: AbortSignal,
 ): Promise<EconomicsAnnualResponse> {
   const url = buildURL('/api/v1/economics/annual', {
@@ -1113,6 +1136,7 @@ export async function fetchEconomicsAnnual(
     from: input.from || undefined,
     to: input.to || undefined,
     tz: input.tz || undefined,
+    currency: currencyParam(input.currency),
   })
   const res = await apiFetch(url, { signal })
   if (!res.ok) {
@@ -1166,7 +1190,7 @@ export type EconomicsPortfolioTrendMonth = {
   ebitda_uah: number
 }
 
-export type EconomicsPortfolioResponse = {
+export type EconomicsPortfolioResponse = FxWindow & {
   scope: 'month' | 'year'
   label: string
   tz: string
@@ -1180,7 +1204,7 @@ export type EconomicsPortfolioResponse = {
 // (YYYY-MM) for a month, `period` (YYYY) for a calendar year, or
 // `from`/`to` (both YYYY-MM) for a sliding window.
 export async function fetchEconomicsPortfolio(
-  input: { month?: string; period?: string; from?: string; to?: string; tz?: string },
+  input: { month?: string; period?: string; from?: string; to?: string; tz?: string; currency?: string },
   signal?: AbortSignal,
 ): Promise<EconomicsPortfolioResponse> {
   const url = buildURL('/api/v1/economics/portfolio', {
@@ -1189,12 +1213,37 @@ export async function fetchEconomicsPortfolio(
     from: input.from || undefined,
     to: input.to || undefined,
     tz: input.tz || undefined,
+    currency: currencyParam(input.currency),
   })
   const res = await apiFetch(url, { signal })
   if (!res.ok) {
     const body = await res.text().catch(() => '')
     const suffix = body ? ` — ${body.trim()}` : ''
     throw new Error(`economics/portfolio request failed: ${res.status}${suffix}`)
+  }
+  return res.json()
+}
+
+// FxRatesResponse mirrors internal/api.FxRatesResponse: one rate per
+// civil day (UAH per unit); carried marks a day that borrowed the
+// nearest stored rate. Days after today are left out.
+export type FxRatesResponse = {
+  currency: string
+  days: Array<{ date: string; uah_per_unit: number; carried?: boolean }>
+}
+
+// fetchFxRates reads the daily rates of one currency (YYYY-MM-DD bounds,
+// inclusive). The economics page converts dated CAPEX by them.
+export async function fetchFxRates(
+  input: { currency: string; from: string; to: string },
+  signal?: AbortSignal,
+): Promise<FxRatesResponse> {
+  const url = buildURL('/api/v1/fx-rates', { currency: input.currency, from: input.from, to: input.to })
+  const res = await apiFetch(url, { signal })
+  if (!res.ok) {
+    const body = await res.text().catch(() => '')
+    const suffix = body ? ` — ${body.trim()}` : ''
+    throw new Error(`fx-rates request failed: ${res.status}${suffix}`)
   }
   return res.json()
 }

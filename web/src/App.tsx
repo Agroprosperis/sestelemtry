@@ -11,6 +11,7 @@ import { ChatProvider } from './chat/ChatProvider'
 import { ControlPage } from './control/ControlPage'
 import { Dashboard } from './dashboard/Dashboard'
 import { EconomicsPage } from './economics/EconomicsPage'
+import { FxSettingsPage } from './economics/FxSettingsPage'
 import { ImportPage } from './import/ImportPage'
 import { replaceView } from './shell/navigation'
 import { PvPlanSettingsPage } from './station/PvPlanSettingsPage'
@@ -36,6 +37,7 @@ function readView(): View {
   if (view === 'users') return 'users'
   if (view === 'ai') return 'ai'
   if (view === 'pvplan') return 'pvplan'
+  if (view === 'fx') return 'fx'
   // The standalone planner was replaced by the desk in the control
   // mode's «План УЗЕ» tab; old ?view=planner links (bookmarks,
   // dashboard header) land there. The URL is normalised so
@@ -148,6 +150,9 @@ function renderView(view: View) {
   }
   if (view === 'pvplan') {
     return <PvPlanSettingsPage />
+  }
+  if (view === 'fx') {
+    return <FxSettingsPage />
   }
   return <Dashboard />
 }

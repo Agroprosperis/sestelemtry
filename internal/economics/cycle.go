@@ -34,7 +34,7 @@ func (do *dayOpt) addHour(hour int, h HourlyRecord, bad bool) {
 	do.hasRaw[hour] = true
 	if bad {
 		do.badHour[hour] = true
-		oh := optimumHour{}
+		oh := optimumHour{moneyScale: h.MoneyScale}
 		if h.Rdn != nil {
 			oh.tradable = true
 			oh.importPrice = h.ImportPrice
@@ -51,6 +51,7 @@ func (do *dayOpt) addHour(hour int, h HourlyRecord, bad bool) {
 			displaceableKwh:     h.GridToLoad + h.EssToLoad,
 			actualPvChargeKwh:   h.PVToEss,
 			actualGridChargeKwh: h.GridToEss,
+			moneyScale:          h.MoneyScale,
 		}
 		if h.Rdn != nil {
 			oh.tradable = true
@@ -173,7 +174,7 @@ func buildCycle(key string, do *dayOpt, fact float64, p optimumParams, capacityK
 		sum.LoadVal += opt.LoadUah[i]
 		sum.GridCost += opt.GridCostUah[i]
 		sum.ChargePvCost += s.chgPvKwh * pvChargePriceFor(oh)
-		sum.Degradation += dischargeAC * p.degradationUahPerKwh
+		sum.Degradation += dischargeAC * p.degradationUahPerKwh * oh.money()
 		sum.ChargePvKwh += s.chgPvKwh
 		sum.ChargeGridKwh += s.chgGridKwh
 		sum.DischargeKwh += dischargeAC
@@ -342,7 +343,7 @@ func optimizeDaySchedule(hours []optimumHour, startResidualKwh float64, p optimu
 				}
 				dl := math.Min(h.displaceableKwh, dischargeAC)
 				dg := dischargeAC - dl
-				v := f[s] + dl*h.importPrice + dg*h.exportPrice - dischargeAC*p.degradationUahPerKwh
+				v := f[s] + dl*h.importPrice + dg*h.exportPrice - dischargeAC*p.degradationUahPerKwh*h.money()
 				if v > nf[ns] {
 					nf[ns] = v
 					par[ns] = action{prev: s, dl: dl, dg: dg}

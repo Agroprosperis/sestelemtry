@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { fetchEconomicsDaily, type EconomicsHourApi } from '../api'
 import type { HourEconomicsRow } from './compute'
+import type { Currency } from './currency'
 import type { Tariffs } from './tariffs'
 
 // localKyivTz is the canonical timezone for the economics page: the
@@ -31,12 +32,18 @@ export type EconomicsData = {
   // is when the server last computed it, null while nothing has loaded.
   isFinal: boolean
   computedAt: string | null
+  // fxRate is the day's UAH per unit the money was converted at (null in
+  // UAH); fxCarried marks a day that borrowed the nearest rate.
+  fxRate: number | null
+  fxCarried: boolean
 }
 
 type Input = {
   organizationID: string
   // YYYY-MM-DD calendar day in LOCAL_TZ.
   date: string
+  // currency the money comes back in; UAH when omitted.
+  currency?: Currency
   // tariffs is retained for caller compatibility but no longer drives
   // computation — the server resolves the date-versioned tariff
   // schedule and computes economics itself.
@@ -60,11 +67,14 @@ const EMPTY_DAY: DayValues = {
   qualityFlags: [],
   isFinal: false,
   computedAt: null,
+  fxRate: null,
+  fxCarried: false,
 }
 
 export function useEconomicsData(input: Input): EconomicsData {
   const active = Boolean(input.organizationID && input.date)
-  const key = JSON.stringify([input.organizationID, input.date, input.refreshKey ?? 0])
+  const currency = input.currency ?? 'UAH'
+  const key = JSON.stringify([input.organizationID, input.date, currency, input.refreshKey ?? 0])
   // The last answer and the request it settled; while the current key
   // has no answer it is loading and the previous day stays on screen.
   const [answer, setAnswer] = useState<{ key: string; day: DayValues; error: string | null } | null>(null)
@@ -79,7 +89,7 @@ export function useEconomicsData(input: Input): EconomicsData {
     const signal = AbortSignal.any([controller.signal, timeout])
 
     fetchEconomicsDaily(
-      { organizationID: input.organizationID, date: input.date, tz: LOCAL_TZ },
+      { organizationID: input.organizationID, date: input.date, tz: LOCAL_TZ, currency },
       signal,
     )
       .then((resp) => {
@@ -93,6 +103,8 @@ export function useEconomicsData(input: Input): EconomicsData {
             qualityFlags: resp.quality_flags ?? [],
             isFinal: resp.is_final,
             computedAt: resp.computed_at ?? null,
+            fxRate: resp.fx_rate && resp.fx_rate > 0 ? resp.fx_rate : null,
+            fxCarried: resp.fx_carried ?? false,
           },
           error: null,
         })
@@ -112,13 +124,20 @@ export function useEconomicsData(input: Input): EconomicsData {
       })
 
     return () => controller.abort()
-  }, [active, key, input.organizationID, input.date])
+  }, [active, key, input.organizationID, input.date, currency])
 
   return useMemo(() => {
     if (!active) return { ...EMPTY_DAY, loading: false, error: null }
     const loading = answer?.key !== key
     return { ...(answer?.day ?? EMPTY_DAY), loading, error: loading ? null : (answer?.error ?? null) }
   }, [active, answer, key])
+}
+
+// fetchUahDayRows reads one day in UAH whatever the page shows: the Excel
+// export stays in the stored currency.
+export async function fetchUahDayRows(organizationID: string, date: string): Promise<Array<HourEconomicsRow | null>> {
+  const resp = await fetchEconomicsDaily({ organizationID, date, tz: LOCAL_TZ })
+  return resp.hours.map((h) => (h ? mapHourRow(h) : null))
 }
 
 // mapHourRow converts the flat snake_case wire shape into the nested

@@ -1,5 +1,8 @@
 import { PeriodPicker } from '../../dashboard/components/PeriodPicker'
+import { CURRENCIES, CURRENCY_SYMBOL, type Currency } from '../currency'
 import { EconomicsPeriodPicker } from './EconomicsPeriodPicker'
+
+const CURRENCY_NAME: Record<Currency, string> = { UAH: 'Гривні', USD: 'Долари США', EUR: 'Євро' }
 
 // parseDateString and formatDateString translate between the
 // "YYYY-MM-DD" string the economics page already keeps in state
@@ -44,6 +47,11 @@ type Props = {
   // asOf is the «Дані станом на …» line (see economicsAsOfLabel). Null
   // hides it (no data yet, or a view that has no compute stamp).
   asOf?: string | null
+  // currency is what the page shows money in; rateNote (see rateNote in
+  // ../currency) is the switch's hint about the rate behind the figures.
+  currency?: Currency
+  onCurrencyChange?: (next: Currency) => void
+  rateNote?: string | null
 }
 
 export function EconomicsHeader({
@@ -56,6 +64,9 @@ export function EconomicsHeader({
   date,
   onDateChange,
   asOf = null,
+  currency = 'UAH',
+  onCurrencyChange,
+  rateNote = null,
 }: Props) {
   return (
     <header className="economics-header">
@@ -113,6 +124,27 @@ export function EconomicsHeader({
             todaySide="end"
           />
         )}
+        {onCurrencyChange ? (
+          <div
+            className="economics-range-switch economics-currency-switch"
+            role="group"
+            aria-label="Валюта"
+            title={rateNote ?? undefined}
+          >
+            {CURRENCIES.map((c) => (
+              <button
+                key={c}
+                type="button"
+                className={currency === c ? 'active' : ''}
+                aria-pressed={currency === c}
+                aria-label={CURRENCY_NAME[c]}
+                onClick={() => onCurrencyChange(c)}
+              >
+                {CURRENCY_SYMBOL[c]}
+              </button>
+            ))}
+          </div>
+        ) : null}
       </div>
       {asOf && (
         <p className="economics-as-of" role="status">

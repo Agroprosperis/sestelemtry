@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { fetchEconomicsPortfolio, type EconomicsPortfolioResponse } from '../api'
+import type { Currency } from './currency'
 
 // LOCAL_TZ is the canonical timezone for the economics page: month/year
 // boundaries are always Europe/Kyiv regardless of the operator's zone.
@@ -21,6 +22,8 @@ type Input = {
   period: string
   from: string
   to: string
+  // currency the money comes back in; UAH when omitted.
+  currency?: Currency
   refreshKey?: number
 }
 
@@ -33,6 +36,7 @@ export function useEconomicsPortfolioData(input: Input): EconomicsPortfolioData 
     loading: true,
     error: null,
   }))
+  const currency = input.currency ?? 'UAH'
 
   useEffect(() => {
     const sel =
@@ -59,6 +63,7 @@ export function useEconomicsPortfolioData(input: Input): EconomicsPortfolioData 
         from: input.scope === 'period' ? input.from : undefined,
         to: input.scope === 'period' ? input.to : undefined,
         tz: LOCAL_TZ,
+        currency,
       },
       controller.signal,
     )
@@ -77,7 +82,7 @@ export function useEconomicsPortfolioData(input: Input): EconomicsPortfolioData 
       })
 
     return () => controller.abort()
-  }, [input.active, input.scope, input.month, input.period, input.from, input.to, input.refreshKey])
+  }, [input.active, input.scope, input.month, input.period, input.from, input.to, input.refreshKey, currency])
 
   return data
 }

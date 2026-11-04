@@ -1,10 +1,11 @@
 import { useMemo } from 'react'
-import type {
-  EconomicsAnnualMonthMargin,
-  EconomicsAnnualMonthRollup,
-  EconomicsAnnualQuarter,
-  EconomicsAnnualResponse,
-  EconomicsMonthlyTotals,
+import {
+  fetchEconomicsAnnual,
+  type EconomicsAnnualMonthMargin,
+  type EconomicsAnnualMonthRollup,
+  type EconomicsAnnualQuarter,
+  type EconomicsAnnualResponse,
+  type EconomicsMonthlyTotals,
 } from '../../api'
 import { ExplainButton } from '../../chat/ExplainButton'
 import { formatOrganizationLabel } from '../../dashboard/config'
@@ -18,9 +19,12 @@ import {
 } from '../monthly/EconomicsMonthlyView'
 import { EconomicsTopSection, type EconomicsPvPlan } from '../components/EconomicsTopSection'
 import { EconomicsOverviewRow } from '../components/EconomicsOverviewRow'
+import { ExportButton } from '../components/ExportButton'
+import { useMoney, type Money } from '../currency'
 import {
   buildAiPanel,
   HEATMAP_METRIC_TIP,
+  heatLegend,
   HOURS,
   heatCellTip,
   heatTier,
@@ -41,9 +45,6 @@ import {
   formatMwh,
   formatPercentNumber,
   formatPeriodTitle,
-  formatPrice,
-  formatUah,
-  formatUahNumber,
   formatYearTitle,
 } from '../monthly/format'
 
@@ -113,6 +114,8 @@ export function EconomicsAnnualView({ data, organizationID, onSelectMonth, prior
         months={withData}
         totals={t}
         organizationID={organizationID}
+        from={data.from}
+        to={data.to}
         exportSlug={exportSlug}
         periodLabel={periodTitle}
         onSelectMonth={onSelectMonth}
@@ -127,6 +130,7 @@ const Q_ROMAN = ['I', 'II', 'III', 'IV']
 const Q_COLORS = ['#2f6fed', '#12b76a', '#f59e0b', '#7c3aed']
 
 function QuarterCards({ quarters }: { quarters: EconomicsAnnualQuarter[] }) {
+  const money = useMoney()
   return (
     <section className="economics-quarter-grid" aria-label="Квартальні підсумки">
       {quarters.map((q) => {
@@ -138,9 +142,9 @@ function QuarterCards({ quarters }: { quarters: EconomicsAnnualQuarter[] }) {
             style={{ borderTop: `3px solid ${Q_COLORS[i]}` }}
           >
             <div className="economics-quarter-label">{Q_ROMAN[i]} кв. {q.year}</div>
-            <div className={`economics-quarter-value ${signClass(q.ebitda_uah)}`}>{formatUah(q.ebitda_uah)}</div>
+            <div className={`economics-quarter-value ${signClass(q.ebitda_uah)}`}>{money.format(q.ebitda_uah)}</div>
             <div className="economics-quarter-note">EBITDA · {formatMwh(q.pv_kwh)} СЕС</div>
-            <div className="economics-quarter-sub">ефект {formatUah(q.effect_uah)}</div>
+            <div className="economics-quarter-sub">ефект {money.format(q.effect_uah)}</div>
           </article>
         )
       })}
@@ -155,6 +159,7 @@ const HEATMAP_TIP =
   'тому великі дні важать більше за малі. Наведіть — покаже розрахунок.'
 
 export function MonthHourHeatmap({ margins }: { margins: EconomicsAnnualMonthMargin[] }) {
+  const money = useMoney()
   return (
     <section className="economics-card economics-month-section" aria-label="Маржинальність УЗЕ по місяцях">
       <div className="economics-month-section-head">
@@ -162,7 +167,7 @@ export function MonthHourHeatmap({ margins }: { margins: EconomicsAnnualMonthMar
           Heatmap: маржинальність УЗЕ (місяць × година)
           <OptimumInfo tip={HEATMAP_TIP} />
         </h3>
-        <span className="economics-month-muted">грн/кВт·год розряду</span>
+        <span className="economics-month-muted">{money.priceUnit} розряду</span>
       </div>
       <div className="economics-heatmap-scroll">
         <table className="economics-heatmap">
@@ -183,17 +188,18 @@ export function MonthHourHeatmap({ margins }: { margins: EconomicsAnnualMonthMar
                   return (
                     <td
                       key={h}
-                      className={heatTier(c === null ? null : c.margin_uah_per_kwh)}
+                      className={heatTier(c === null ? null : c.margin_uah_per_kwh, money)}
                       title={
                         c === null
                           ? undefined
                           : heatCellTip(
                               `${formatMonthTitle(row.month)}, ${String(h).padStart(2, '0')}:00 за всі дні`,
                               c,
+                              money,
                             )
                       }
                     >
-                      {c === null ? '' : Math.round(c.margin_uah_per_kwh)}
+                      {c === null ? '' : money.formatCompactPrice(c.margin_uah_per_kwh)}
                     </td>
                   )
                 })}
@@ -205,8 +211,8 @@ export function MonthHourHeatmap({ margins }: { margins: EconomicsAnnualMonthMar
       <p className="economics-month-explain">
         Клітинка — скільки заробила ця година доби за весь місяць на кожній відданій кВт·год: виручка мінус
         собівартість саме тієї енергії, що була в батареї, мінус знос, поділено на сумарний розряд години.
-        Наведіть на клітинку, щоб побачити цей розрахунок у гривнях. Порожньо там, де УЗЕ не розряджався.
-        Колір: сірий 0–1, світло-зелений 2–5, зелений 6–11, темно-зелений понад 12 грн/кВт·год.
+        Наведіть на клітинку, щоб побачити цей розрахунок {money.inWords}. Порожньо там, де УЗЕ не розряджався.
+        Колір: {heatLegend(money)}.
       </p>
     </section>
   )
@@ -236,6 +242,7 @@ function AnnualAiAnalysis({
   scope: PeriodScope
 }) {
   const chrome = useChartChrome()
+  const money = useMoney()
   const heading = `${formatOrganizationLabel(organizationID)} · ${periodTitle}`
   const panel = useMemo(
     () =>
@@ -244,8 +251,9 @@ function AnnualAiAnalysis({
         scope,
         periodLabel: periodTitle,
         monthsCount: months.length,
+        money,
       }),
-    [totals, heading, periodTitle, scope, months.length],
+    [totals, heading, periodTitle, scope, months.length, money],
   )
 
   // Per-month elevator-schedule reserve (PV exported vs grid-served load),
@@ -303,7 +311,7 @@ function AnnualAiAnalysis({
                   <div className="economics-ai-days">
                     {scheduleMonths.map((x) => (
                       <span key={x.month}>
-                        {formatMonthShort(x.month)} · {uahShort(x.reserve)}
+                        {formatMonthShort(x.month)} · {uahShort(x.reserve, money)}
                       </span>
                     ))}
                   </div>
@@ -353,9 +361,9 @@ function AnnualAiAnalysis({
                             <span className="fact" style={{ width: `${factShare * 100}%` }} />
                             <span className="missed" style={{ width: `${(1 - factShare) * 100}%` }} />
                           </div>
-                          <span>{formatUah(o.ess_optimum_uah)}</span>
-                          <span className="good">{formatUah(o.ess_fact_uah)}</span>
-                          <span className="amber">{formatUah(o.ess_reserve_uah)}</span>
+                          <span>{money.format(o.ess_optimum_uah)}</span>
+                          <span className="good">{money.format(o.ess_fact_uah)}</span>
+                          <span className="amber">{money.format(o.ess_reserve_uah)}</span>
                         </div>
                       )
                     })}
@@ -381,23 +389,25 @@ function AnnualAiAnalysis({
 // As in the monthly daily table, the unit lives on a second header line
 // rather than in every cell — spelling out "кВт·год"/"грн" per row costs
 // more width than the numbers and pushed the last column off screen.
-const COLUMNS: { label: string; unit?: string }[] = [
-  { label: 'Місяць' },
-  // Same pair and order as the monthly daily table: the all-in cost of
-  // one consumed kWh first, the market component beside it for context.
-  { label: 'Факт. ціна', unit: 'грн/кВт·год' },
-  { label: 'РДН сер.', unit: 'грн/кВт·год' },
-  { label: 'СЕС', unit: 'кВт·год' },
-  { label: 'Споживання', unit: 'кВт·год' },
-  { label: 'Імпорт', unit: 'кВт·год' },
-  { label: 'Експорт', unit: 'кВт·год' },
-  { label: 'Самоспож.', unit: '%' },
-  { label: 'УЗЕ цикли', unit: 'екв.' },
-  // EBITDA closes the row the way it closes the monthly waterfall. The
-  // project effect it used to sit beside stays in the quarter cards and
-  // the finance breakdown above.
-  { label: 'EBITDA', unit: 'грн' },
-]
+function columns(money: Money): { label: string; unit?: string }[] {
+  return [
+    { label: 'Місяць' },
+    // Same pair and order as the monthly daily table: the all-in cost of
+    // one consumed kWh first, the market component beside it for context.
+    { label: 'Факт. ціна', unit: money.priceUnit },
+    { label: 'РДН сер.', unit: money.priceUnit },
+    { label: 'СЕС', unit: 'кВт·год' },
+    { label: 'Споживання', unit: 'кВт·год' },
+    { label: 'Імпорт', unit: 'кВт·год' },
+    { label: 'Експорт', unit: 'кВт·год' },
+    { label: 'Самоспож.', unit: '%' },
+    { label: 'УЗЕ цикли', unit: 'екв.' },
+    // EBITDA closes the row the way it closes the monthly waterfall. The
+    // project effect it used to sit beside stays in the quarter cards and
+    // the finance breakdown above.
+    { label: 'EBITDA', unit: money.unit },
+  ]
+}
 
 // A month's equivalent cycles are its discharge divided by the pack that
 // was installed that month. Adding them up spans packs of different size
@@ -410,6 +420,8 @@ function AnnualMonthlyTable({
   months,
   totals,
   organizationID,
+  from,
+  to,
   exportSlug,
   periodLabel,
   onSelectMonth,
@@ -417,10 +429,14 @@ function AnnualMonthlyTable({
   months: EconomicsAnnualMonthRollup[]
   totals: EconomicsMonthlyTotals
   organizationID: string
+  // from/to (YYYY-MM) bound the window, for the UAH re-read on export.
+  from: string
+  to: string
   exportSlug: string
   periodLabel: string
   onSelectMonth: (month: string) => void
 }) {
+  const money = useMoney()
   const pvSelf = totals.pv_to_load_kwh + totals.pv_to_ess_kwh
   const selfShare = totals.pv_kwh > 0 ? pvSelf / totals.pv_kwh : 0
   return (
@@ -430,24 +446,25 @@ function AnnualMonthlyTable({
           Помісячна деталізація року
           <span className="economics-table-context"> · {formatOrganizationLabel(organizationID)}</span>
         </h3>
-        <button
-          type="button"
-          className="economics-export-btn"
-          onClick={() =>
+        <ExportButton
+          run={async (uahOnScreen) => {
+            let uah = { months, totals }
+            if (!uahOnScreen) {
+              const year = await fetchEconomicsAnnual({ organizationID, from, to, tz: 'Europe/Kyiv' })
+              uah = { months: year.months.filter((m) => m.totals.hours_with_data > 0), totals: year.totals }
+            }
             downloadXlsx(
               exportFileName(exportSlug, organizationID),
-              annualDetailSheet(months, totals, periodLabel, organizationID),
+              annualDetailSheet(uah.months, uah.totals, periodLabel, organizationID),
             )
-          }
-        >
-          Вивантажити в Excel
-        </button>
+          }}
+        />
       </div>
       <div className="economics-table-scroll">
         <table className="economics-table economics-month-table">
           <thead>
             <tr>
-              {COLUMNS.map((c) => (
+              {columns(money).map((c) => (
                 <th key={c.label}>
                   {c.label}
                   {c.unit ? <small>{c.unit}</small> : null}
@@ -478,22 +495,22 @@ function AnnualMonthlyTable({
                       </span>
                     )}
                   </td>
-                  <td>{formatPrice(unitCostUahPerKwh(o.import_cost_uah, o.load_kwh))}</td>
-                  <td>{formatPrice(o.rdn_avg_uah_per_kwh)}</td>
+                  <td>{money.formatPrice(unitCostUahPerKwh(o.import_cost_uah, o.load_kwh))}</td>
+                  <td>{money.formatPrice(o.rdn_avg_uah_per_kwh)}</td>
                   <td>{formatKwhNumber(o.pv_kwh)}</td>
                   <td>{formatKwhNumber(o.load_kwh)}</td>
                   <td>{formatKwhNumber(o.grid_import_kwh)}</td>
                   <td>{formatKwhNumber(o.grid_export_kwh)}</td>
                   <td>{formatPercentNumber(o.pv_kwh > 0 ? (o.pv_to_load_kwh + o.pv_to_ess_kwh) / o.pv_kwh : 0)}</td>
                   <td>{formatCycles(o.equivalent_cycles)}</td>
-                  <td className={signClass(o.ebitda_uah)}>{formatUahNumber(o.ebitda_uah)}</td>
+                  <td className={signClass(o.ebitda_uah)}>{money.formatNumber(o.ebitda_uah)}</td>
                 </tr>
               )
             })}
             <tr className="economics-table-summary-row">
               <td className="economics-month-table-left">Разом</td>
-              <td>{formatPrice(unitCostUahPerKwh(totals.import_cost_uah, totals.load_kwh))}</td>
-              <td>{formatPrice(totals.rdn_avg_uah_per_kwh)}</td>
+              <td>{money.formatPrice(unitCostUahPerKwh(totals.import_cost_uah, totals.load_kwh))}</td>
+              <td>{money.formatPrice(totals.rdn_avg_uah_per_kwh)}</td>
               <td>{formatKwhNumber(totals.pv_kwh)}</td>
               <td>{formatKwhNumber(totals.load_kwh)}</td>
               <td>{formatKwhNumber(totals.grid_import_kwh)}</td>
@@ -502,7 +519,7 @@ function AnnualMonthlyTable({
               <td className="cell-empty" title={CYCLES_TOTAL_TIP}>
                 —
               </td>
-              <td className={signClass(totals.ebitda_uah)}>{formatUahNumber(totals.ebitda_uah)}</td>
+              <td className={signClass(totals.ebitda_uah)}>{money.formatNumber(totals.ebitda_uah)}</td>
             </tr>
           </tbody>
         </table>

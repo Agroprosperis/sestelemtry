@@ -1645,6 +1645,217 @@ paths:
                     type: string
         "400":
           description: Invalid settings, or the stored key asked to go to another address
+  /api/v1/fx-rates:
+    get:
+      summary: Daily exchange rates, UAH per unit
+      operationId: getFxRates
+      description: |
+        One rate per Kyiv civil day: the ERP «apbank» rate at 12:00 of
+        that date, today's refreshed hourly until then. A day without a
+        rate of its own borrows the latest earlier one (else the earliest
+        later one) and is marked carried. Days after today are left out.
+        The economics page converts CAPEX by these; the economics routes
+        themselves take ?currency=.
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: currency
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [USD, EUR]
+        - name: from
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          required: true
+          description: At most 5 years after from.
+          schema:
+            type: string
+            format: date
+      responses:
+        "200":
+          description: Rates by day
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [currency, days]
+                properties:
+                  currency:
+                    type: string
+                    example: USD
+                  days:
+                    type: array
+                    items:
+                      type: object
+                      required: [date, uah_per_unit]
+                      properties:
+                        date:
+                          type: string
+                          format: date
+                        uah_per_unit:
+                          type: number
+                          example: 41.52
+                        carried:
+                          type: boolean
+        "400":
+          description: Unknown currency or a bad range
+        "503":
+          description: No rate of this currency is stored yet
+  /api/v1/fx-settings:
+    get:
+      summary: Where the exchange rates come from
+      operationId: getFxSettings
+      description: |
+        Administrators of every organization only. An empty url stands
+        for default_url. The password is never returned, only whether one
+        is stored. coverage tells how far each currency's rates reach,
+        sync how the background sync last went.
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Current settings and the state of the rates
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/FxSettings"
+                  - type: object
+                    properties:
+                      password_configured:
+                        type: boolean
+                      saved:
+                        type: boolean
+                      default_url:
+                        type: string
+                      first_day:
+                        type: string
+                        format: date
+                        description: The earliest day the sync keeps rates for
+                      coverage:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            currency:
+                              type: string
+                            first_day:
+                              type: string
+                            last_day:
+                              type: string
+                            days:
+                              type: integer
+                            missing_days:
+                              type: integer
+                            last_fetched:
+                              type: string
+                      sync:
+                        type: object
+                        properties:
+                          configured:
+                            type: boolean
+                          last_attempt:
+                            type: string
+                            format: date-time
+                          last_success:
+                            type: string
+                            format: date-time
+                          last_error:
+                            type: string
+        "403":
+          description: Not an administrator of every organization
+        "503":
+          description: Exchange rates not configured in this process
+    put:
+      summary: Save where the exchange rates come from
+      operationId: putFxSettings
+      description: |
+        Takes effect without a restart and wakes the sync. password
+        omitted or null keeps the stored one; an empty string clears it.
+        The stored password only goes to the address it was saved with:
+        changing the address takes the password again.
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/CSRFHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/FxSettings"
+                - type: object
+                  properties:
+                    password:
+                      type: string
+                      nullable: true
+      responses:
+        "204":
+          description: Settings saved
+        "400":
+          description: The address is not an absolute http(s) URL without a query, or the password has to be typed again
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "адресу сервісу змінено: введіть пароль ще раз, щоб він не пішов на іншу адресу"
+        "403":
+          description: Not an administrator of every organization
+  /api/v1/fx-settings/test:
+    post:
+      summary: Ask the ERP rates service for today's rates with the settings as typed
+      operationId: testFxSettings
+      description: |
+        Nothing is saved. Without password the stored one is used, at the
+        stored address only.
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/CSRFHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/FxSettings"
+                - type: object
+                  properties:
+                    password:
+                      type: string
+                      nullable: true
+      responses:
+        "200":
+          description: The service's answer; ok is false with error in plain words when it failed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, at]
+                properties:
+                  ok:
+                    type: boolean
+                  at:
+                    type: string
+                    format: date-time
+                  rates:
+                    type: object
+                    additionalProperties:
+                      type: number
+                    example: {USD: 41.52, EUR: 48.1}
+                  error:
+                    type: string
+                    example: Невірний логін або пароль
+        "400":
+          description: Invalid settings, no login or password, or the stored password asked to go to another address
 components:
   securitySchemes:
     sessionCookie:
@@ -1756,6 +1967,15 @@ components:
         error:
           type: string
           description: Why the upstream failed, for the administrator.
+    FxSettings:
+      type: object
+      properties:
+        url:
+          type: string
+          description: The ERP «apbank» rates service, without a query; empty means https://web1c.agroprosperis.com/APGroup/hs/ExchangeRates/apbank.
+        username:
+          type: string
+          description: The ERP account (HTTP Basic).
     User:
       type: object
       properties:

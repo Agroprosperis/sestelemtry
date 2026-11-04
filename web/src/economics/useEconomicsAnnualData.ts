@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { fetchEconomicsAnnual, type EconomicsAnnualResponse } from '../api'
+import type { Currency } from './currency'
 
 // LOCAL_TZ is the canonical timezone for the economics page: the year
 // boundary and DAM hour numbering are always Europe/Kyiv, regardless of
@@ -19,6 +20,8 @@ type Input = {
   // Optional sliding window (both YYYY-MM); when set they override period.
   from?: string
   to?: string
+  // currency the money comes back in; UAH when omitted.
+  currency?: Currency
   // refreshKey re-fires the fetch without changing inputs (e.g. after a
   // DAM-price refresh or a recompute). `undefined` → 0.
   refreshKey?: number
@@ -31,7 +34,8 @@ type Input = {
 export function useEconomicsAnnualData(input: Input): EconomicsAnnualData {
   const useWindow = Boolean(input.from && input.to)
   const active = Boolean(input.organizationID && (input.period || useWindow))
-  const key = JSON.stringify([input.organizationID, input.period, input.from, input.to, input.refreshKey ?? 0])
+  const currency = input.currency ?? 'UAH'
+  const key = JSON.stringify([input.organizationID, input.period, input.from, input.to, currency, input.refreshKey ?? 0])
   // The last answer and the request it settled; while the current key
   // has no answer it is loading and the previous year stays on screen.
   const [answer, setAnswer] = useState<{ key: string; year: EconomicsAnnualResponse | null; error: string | null } | null>(
@@ -49,6 +53,7 @@ export function useEconomicsAnnualData(input: Input): EconomicsAnnualData {
         from: useWindow ? input.from : undefined,
         to: useWindow ? input.to : undefined,
         tz: LOCAL_TZ,
+        currency,
       },
       controller.signal,
     )
@@ -67,7 +72,7 @@ export function useEconomicsAnnualData(input: Input): EconomicsAnnualData {
       })
 
     return () => controller.abort()
-  }, [active, key, input.organizationID, input.period, input.from, input.to, useWindow])
+  }, [active, key, input.organizationID, input.period, input.from, input.to, useWindow, currency])
 
   return useMemo(() => {
     if (!active) return { year: null, loading: false, error: null }

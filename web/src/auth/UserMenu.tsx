@@ -90,6 +90,18 @@ export function UserMenu() {
               Прогноз СЕС
             </button>
           )}
+          {me.global_admin && (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setOpen(false)
+                navigateView('fx')
+              }}
+            >
+              Курси валют ERP
+            </button>
+          )}
           <button
             type="button"
             role="menuitem"

@@ -149,6 +149,23 @@ type optimumHour struct {
 
 	actualPvChargeKwh   float64 // realised pv_to_ess (cap for the no-extra-PV runs)
 	actualGridChargeKwh float64 // realised grid_to_ess (cap for the fixed-charge run)
+
+	// moneyScale is the hour's currency factor (HourlyRecord.MoneyScale):
+	// the prices above are already converted, the wear rate and the
+	// free-PV floor are UAH and need it. 0 means UAH.
+	moneyScale float64
+}
+
+// money is the factor that turns this hour's UAH amounts into the
+// currency its prices are in.
+func (h optimumHour) money() float64 { return moneyScaleOf(h.moneyScale) }
+
+// moneyScaleOf treats an unset scale as UAH.
+func moneyScaleOf(v float64) float64 {
+	if v <= 0 {
+		return 1
+	}
+	return v
 }
 
 // chargeMode selects which charging the optimizer may use. The ladder of
@@ -183,7 +200,7 @@ func (h optimumHour) chargeCaps(mode chargeMode) (pvCap, gridCap float64) {
 // 0.1 UAH/kWh snap to free, so storing PV when the market is ~worthless is
 // not penalised (§3.1).
 func pvChargePriceFor(h optimumHour) float64 {
-	if h.exportPrice < 0.1 {
+	if h.exportPrice < 0.1*h.money() {
 		return 0
 	}
 	return h.exportPrice
@@ -288,7 +305,7 @@ func (m *hourMoves) price(h optimumHour, g socGrid, p optimumParams, mode charge
 		if !ok {
 			break
 		}
-		m.dischargeGain = append(m.dischargeGain, dl*h.importPrice+dg*h.exportPrice-dischargeAC*p.degradationUahPerKwh)
+		m.dischargeGain = append(m.dischargeGain, dl*h.importPrice+dg*h.exportPrice-dischargeAC*p.degradationUahPerKwh*h.money())
 	}
 }
 

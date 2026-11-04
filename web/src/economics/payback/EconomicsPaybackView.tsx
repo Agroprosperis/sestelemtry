@@ -14,14 +14,13 @@ import {
 } from 'recharts'
 import type { EconomicsAnnualResponse } from '../../api'
 import { useChartChrome } from '../../theme/useChartChrome'
+import { useMoney, type Money } from '../currency'
 import { OptimumInfo } from '../monthly/EconomicsMonthlyView'
 import {
   formatMonthTitle,
   formatMonthShort,
   formatMwh,
   formatPercent,
-  formatPrice,
-  formatUah,
 } from '../monthly/format'
 import {
   addMonths,
@@ -46,7 +45,8 @@ type Props = {
   // capexUah is the flat value from the tariff form; capexSteps is the
   // dated CAPEX from the tariff schedule and wins whenever it is filled
   // in, so a project built in stages is measured against what was
-  // invested by each month rather than against its final cost.
+  // invested by each month rather than against its final cost. Both are
+  // in the currency the page shows.
   capexUah: number
   capexSteps: CapexStep[]
   // plannedPaybackMonths is the business-plan payback period (months);
@@ -215,6 +215,7 @@ type CapexPaybackTooltipProps = {
 
 function CapexPaybackTooltip({ active, payload, staged }: CapexPaybackTooltipProps) {
   const chrome = useChartChrome()
+  const money = useMoney()
   if (!active || !payload?.length) return null
   const row = payload[0].payload
   const cum = row.factCum ?? row.forecastCum
@@ -234,20 +235,20 @@ function CapexPaybackTooltip({ active, payload, staged }: CapexPaybackTooltipPro
       <div className="economics-trend-tip-row">
         <i style={{ background: isForecast ? '#60a5fa' : '#2f6fed' }} />
         <span>{isForecast ? 'Прогноз накопичено' : 'Накопичено'}</span>
-        <b>{cum === null ? '—' : formatUah(cum)}</b>
+        <b>{cum === null ? '—' : money.format(cum)}</b>
       </div>
       {row.monthEbitda !== null ? (
         <div className="economics-trend-tip-row">
           <i style={{ background: '#12b76a' }} />
           <span>EBITDA за місяць</span>
-          <b>{formatUah(row.monthEbitda)}</b>
+          <b>{money.format(row.monthEbitda)}</b>
         </div>
       ) : null}
       {staged ? (
         <div className="economics-trend-tip-row">
           <i style={{ background: chrome.muted }} />
           <span>CAPEX на цей місяць</span>
-          <b>{formatUah(row.capex)}</b>
+          <b>{money.format(row.capex)}</b>
         </div>
       ) : null}
       {row.kind === 'prior' ? (
@@ -281,6 +282,7 @@ type EffectTooltipProps = {
 }
 
 function EffectTooltip({ active, payload }: EffectTooltipProps) {
+  const money = useMoney()
   if (!active || !payload?.length) return null
   const row = payload[0].payload
   return (
@@ -290,35 +292,35 @@ function EffectTooltip({ active, payload }: EffectTooltipProps) {
         <div className="economics-trend-tip-row">
           <i style={{ background: '#60a5fa' }} />
           <span>EBITDA (факт)</span>
-          <b>{formatUah(row.periodFact)}</b>
+          <b>{money.format(row.periodFact)}</b>
         </div>
       ) : null}
       {row.periodForecast !== null ? (
         <div className="economics-trend-tip-row">
           <i style={{ background: '#c4b5fd' }} />
           <span>EBITDA (прогноз)</span>
-          <b>{formatUah(row.periodForecast)}</b>
+          <b>{money.format(row.periodForecast)}</b>
         </div>
       ) : null}
       <div className="economics-trend-tip-row">
         <i style={{ background: '#2f6fed' }} />
         <span>Накопичено</span>
-        <b>{formatUah(row.cum)}</b>
+        <b>{money.format(row.cum)}</b>
       </div>
     </div>
   )
 }
 
 // uahShortHrn is the design's compact money label ("18,50 млн грн").
-function uahShortHrn(v: number): string {
+function uahShortHrn(v: number, money: Money): string {
   const a = Math.abs(v)
   if (a >= 1_000_000) {
-    return `${(v / 1_000_000).toLocaleString('uk-UA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} млн грн`
+    return `${(v / 1_000_000).toLocaleString('uk-UA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} млн ${money.unit}`
   }
   if (a >= 1000) {
-    return `${Math.round(v / 1000).toLocaleString('uk-UA')} тис. грн`
+    return `${Math.round(v / 1000).toLocaleString('uk-UA')} тис. ${money.unit}`
   }
-  return formatUah(v)
+  return money.format(v)
 }
 
 // investmentStagesNote is the KPI caption for a staged CAPEX ("3 етапи
@@ -335,6 +337,8 @@ const Q_ROMAN = ['I', 'II', 'III', 'IV']
 
 export function EconomicsPaybackView({ data, capexUah, capexSteps, plannedPaybackMonths }: Props) {
   const chrome = useChartChrome()
+  const money = useMoney()
+  const short = (v: number) => uahShortHrn(v, money)
   const [grain, setGrain] = useState<EffectGrain>('month')
 
   const model = useMemo(
@@ -384,7 +388,7 @@ export function EconomicsPaybackView({ data, capexUah, capexSteps, plannedPaybac
 
   const { ticks: timeTicks, format: tickLabel } = paybackAxis(tMax, firstMonthKey, timeOffset)
   const yMax = Math.max(capexMax, allTimeEbitda, ...paybackRows.map((r) => r.forecastCum ?? r.factCum ?? 0), 0)
-  const axis = moneyAxis(yMax)
+  const axis = moneyAxis(yMax, money)
   // Main-chart Y ticks carry the unit right in the label ("15 млн"),
   // like the final design.
   const mainTick = (v: number) => axisTickLabel(axis, v)
@@ -492,6 +496,8 @@ export function EconomicsPaybackView({ data, capexUah, capexSteps, plannedPaybac
   const { left: effectAxis, right: cumAxis } = moneyAxisPair(
     { min: Math.min(0, ...periodValues), max: Math.max(0, ...periodValues) },
     { min: Math.min(0, ...cumValues), max: Math.max(0, ...cumValues) },
+    5,
+    money,
   )
 
   const paybackDurationLabel = paidOff ? 'окуплено' : paybackLabel(paybackYears)
@@ -534,14 +540,14 @@ export function EconomicsPaybackView({ data, capexUah, capexSteps, plannedPaybac
           icon="bars"
           tone="blue"
           label="CAPEX проєкту"
-          value={formatUah(capexNow)}
+          value={money.format(capexNow)}
           note={staged ? investmentStagesNote(capexStages) : 'разові інвестиції'}
         />
         <KpiCard
           icon="wallet"
           tone="green"
           label="Повернуто інвестицій"
-          value={formatUah(allTimeEbitda)}
+          value={money.format(allTimeEbitda)}
           note="накопичений EBITDA"
           valueClass={allTimeEbitda >= 0 ? 'good' : ''}
         />
@@ -549,7 +555,7 @@ export function EconomicsPaybackView({ data, capexUah, capexSteps, plannedPaybac
           icon="pie"
           tone="orange"
           label="Залишилось повернути"
-          value={paidOff ? '0 грн' : formatUah(remaining)}
+          value={money.format(paidOff ? 0 : remaining)}
           note={paidOff ? 'капекс окуплено' : 'ще потрібно повернути'}
         />
         <KpiCard
@@ -570,14 +576,14 @@ export function EconomicsPaybackView({ data, capexUah, capexSteps, plannedPaybac
                 <Icon name="coin" />
               </span>
               <span className="economics-payback-progress-caption">
-                Повернуто <b>{uahShortHrn(allTimeEbitda)}</b> із <b>{uahShortHrn(capexNow)}</b>
+                Повернуто <b>{short(allTimeEbitda)}</b> із <b>{short(capexNow)}</b>
               </span>
               <div className="economics-capex-bar economics-payback-bar">
                 <span className="economics-capex-bar-fill" style={{ width: `${coveredShare * 100}%` }} />
               </div>
               <span className="economics-payback-progress-pct">{formatPercent(coveredShare)}</span>
               <span className="economics-payback-progress-rest">
-                {paidOff ? 'Капекс окуплено' : `Залишилось повернути ${uahShortHrn(remaining)}`}
+                {paidOff ? 'Капекс окуплено' : `Залишилось повернути ${short(remaining)}`}
               </span>
             </div>
           </section>
@@ -600,7 +606,7 @@ export function EconomicsPaybackView({ data, capexUah, capexSteps, plannedPaybac
                 <span><i style={{ background: '#60a5fa' }} />Прогноз накопиченого EBITDA</span>
                 <span>
                   <i style={{ background: chrome.muted }} />
-                  CAPEX ({uahShortHrn(capexNow)}
+                  CAPEX ({short(capexNow)}
                   {staged ? ', етапами' : ''})
                 </span>
                 <span><i style={{ background: '#7c3aed' }} />Точка окупності (прогноз)</span>
@@ -643,7 +649,7 @@ export function EconomicsPaybackView({ data, capexUah, capexSteps, plannedPaybac
                   y={capexNow}
                   stroke={chrome.muted}
                   strokeWidth={1.4}
-                  label={{ value: `CAPEX ${uahShortHrn(capexNow)}`, position: 'insideTopLeft', fontSize: 11, fill: chrome.label }}
+                  label={{ value: `CAPEX ${short(capexNow)}`, position: 'insideTopLeft', fontSize: 11, fill: chrome.label }}
                 />
               )}
               {todayT !== null && todayT > 0 ? (
@@ -700,7 +706,7 @@ export function EconomicsPaybackView({ data, capexUah, capexSteps, plannedPaybac
                   fill="#2f6fed"
                   stroke={chrome.onAccent}
                   strokeWidth={1.5}
-                  label={{ value: `Повернуто ${uahShortHrn(allTimeEbitda)}`, position: 'top', fontSize: 11, fill: '#2f6fed', dy: -6 }}
+                  label={{ value: `Повернуто ${short(allTimeEbitda)}`, position: 'top', fontSize: 11, fill: '#2f6fed', dy: -6 }}
                 />
               ) : null}
               {paybackT !== null ? (
@@ -735,7 +741,7 @@ export function EconomicsPaybackView({ data, capexUah, capexSteps, plannedPaybac
                 icon="clock"
                 tone="blue"
                 label="Накопичений EBITDA до періоду"
-                value={formatUah(prior)}
+                value={money.format(prior)}
                 note={`до початку помісячних даних (${model.priorMonths} міс.)`}
               />
             ) : null}
@@ -754,7 +760,7 @@ export function EconomicsPaybackView({ data, capexUah, capexSteps, plannedPaybac
               icon="coin"
               tone="orange"
               label="Середньомісячний EBITDA (факт)"
-              value={Number.isFinite(avgMonthlyFact) ? formatUah(avgMonthlyFact) : '—'}
+              value={Number.isFinite(avgMonthlyFact) ? money.format(avgMonthlyFact) : '—'}
               note="за фактичний період"
             />
           </div>
@@ -766,7 +772,7 @@ export function EconomicsPaybackView({ data, capexUah, capexSteps, plannedPaybac
               Щомісячний економічний ефект
               {/* Two scales with two different multipliers, so the unit
                   lives on each axis; the caption only names the currency. */}
-              <span className="economics-capex-chart-unit">грн</span>
+              <span className="economics-capex-chart-unit">{money.unit}</span>
               <OptimumInfo tip="Стовпці — EBITDA за період (ліва шкала): сині — факт, фіолетові — сезонний прогноз до кінця поточного року. Лінія — накопичений EBITDA від початку експлуатації (права шкала), факт + прогноз. Мінусовий стовпець — місяць, у якому витрати на купівлю електроенергії перевищили ефект (типово взимку, коли СЕС майже не виробляє)." />
             </span>
             <div className="economics-payback-effect-tools">
@@ -873,16 +879,16 @@ export function EconomicsPaybackView({ data, capexUah, capexSteps, plannedPaybac
               icon="tag"
               tone="orange"
               label="Середній тариф (екв.)"
-              value={`${formatPrice(data.totals.avg_import_price_uah_per_kwh)} грн/кВт·год`}
+              value={`${money.formatPrice(data.totals.avg_import_price_uah_per_kwh)} ${money.priceUnit}`}
             />
             <SideRow
               icon="wallet"
               tone="violet"
               label="Витрати на придбання електроенергії з мережі"
-              value={formatUah(data.totals.expense_total_uah)}
+              value={money.format(data.totals.expense_total_uah)}
               note="заряд УЗЕ з мережі за період"
             />
-            <SideRow icon="percent" tone="green" label="Чистий ефект (EBITDA)" value={formatUah(allTimeEbitda)} />
+            <SideRow icon="percent" tone="green" label="Чистий ефект (EBITDA)" value={money.format(allTimeEbitda)} />
           </aside>
 
           {SHOW_PLAN_CARDS ? (

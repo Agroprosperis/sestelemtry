@@ -410,6 +410,34 @@ backfills after tariff/DAM edits); FusionSolar reconciliation still requires
 the manual archive import. The daemon supports a one-shot `-once` flag (single
 finalize + today pass, then exit) for cron or testing.
 
+## Economics in USD / EUR
+
+The ₴ / $ / € switch in the economics header (`?currency=USD|EUR`) shows
+money in dollars or euros. Economics stay computed and stored in UAH; with
+`currency=` the `economics/daily`, `monthly`, `annual` and `portfolio`
+routes convert every stored day at that day's own rate on the way out, so a
+month, a year, the payback and the portfolio are sums of converted days.
+CAPEX converts each stage's increment at the rate of its tariff version's
+date. Tariffs, the CAPEX form, the Excel exports, the УЗЕ plan on «Система»
+and the AI assistant stay in UAH.
+
+The rate of a day is the ERP «apbank» service's rate at 12:00 Kyiv time on
+that date; today's is refreshed hourly until then. A background sync in the
+API keeps one rate per day and currency in `fx_rates` from 2024-08-01 on
+(`migrations/024_fx_rates.sql`, also created on startup) and fills missing
+past days once; a day without a rate of its own borrows the nearest one.
+Request paths only read the table. `GET /api/v1/fx-rates?currency=&from=&to=`
+serves the rates by day.
+
+An administrator of every organization sets the service on the **Курси
+валют ERP** page (`?view=fx`, in the user menu and the economics «Сервіс»
+menu; `/api/v1/fx-settings`): the address (empty means the APGroup base),
+the login and the password. **Перевірити зʼєднання** asks for today's rates
+with the settings as typed. A save takes effect without a restart and wakes
+the sync; the first backfill takes about five minutes. As with the AI key,
+the password sits in its own column, is never returned by the API and only
+goes to the address it was saved with.
+
 ## Connectivity alerts by email
 
 `alert-watchdog` emails operators when a site stops reporting. Every

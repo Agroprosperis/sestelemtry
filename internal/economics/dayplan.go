@@ -363,7 +363,7 @@ func buildDayPlan(key string, do *dayOpt, p optimumParams, capacityKwh, powerLim
 		discharge := opt.ToLoadKwh[i] + opt.ToGridKwh[i]
 		charge := opt.ChgPvKwh[i] + opt.ChgGridKwh[i]
 		effect := opt.LoadUah[i] + opt.ExportUah[i] - opt.GridCostUah[i] -
-			opt.ChgPvKwh[i]*pvChargePriceFor(oh) - discharge*p.degradationUahPerKwh
+			opt.ChgPvKwh[i]*pvChargePriceFor(oh) - discharge*p.degradationUahPerKwh*oh.money()
 
 		action, code, text := classifyHour(dispatchStep{
 			toLoadKwh:  opt.ToLoadKwh[i],

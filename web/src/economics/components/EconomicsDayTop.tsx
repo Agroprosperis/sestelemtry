@@ -1,5 +1,6 @@
 import { Line, LineChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import type { DailyTotals, HourEconomicsRow } from '../compute'
+import { useMoney } from '../currency'
 import type { Tariffs } from '../tariffs'
 import { useChartChrome } from '../../theme/useChartChrome'
 import { PV_FORECAST_WHOLE_ELEVATOR_NOTE, pvPlanCaption } from '../../dashboard/transforms/pvForecast'
@@ -16,18 +17,11 @@ type Props = {
   pvPlan?: EconomicsPvPlan | null
 }
 
-// --- Formatting (day scale: кВт·год with one decimal, грн integer) ---------
+// --- Formatting (day scale: кВт·год with one decimal; money via useMoney) ---
 
-const uahFmt = new Intl.NumberFormat('uk-UA', { maximumFractionDigits: 0 })
 const kwhFmt = new Intl.NumberFormat('uk-UA', { minimumFractionDigits: 1, maximumFractionDigits: 1 })
-const priceFmt = new Intl.NumberFormat('uk-UA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const pctFmt = new Intl.NumberFormat('uk-UA', { style: 'percent', minimumFractionDigits: 1, maximumFractionDigits: 1 })
 const cyclesFmt = new Intl.NumberFormat('uk-UA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-
-function uah(v: number): string {
-  if (!Number.isFinite(v)) return '—'
-  return `${uahFmt.format(Math.round(v))} грн`
-}
 
 function kwh(v: number): string {
   if (!Number.isFinite(v)) return '—'
@@ -42,11 +36,6 @@ function kw(v: number): string {
 function pct(v: number): string {
   if (!Number.isFinite(v)) return '—'
   return pctFmt.format(v)
-}
-
-function price(v: number): string {
-  if (!Number.isFinite(v)) return '—'
-  return priceFmt.format(v)
 }
 
 // FactLine is one "label: value" row of a card's financial breakdown;
@@ -66,8 +55,6 @@ const COLOR_IMPORT = '#2f6fed'
 const COLOR_ESS = '#7c3aed'
 const COLOR_TOTAL = '#f59e0b'
 
-const chartUahFmt = new Intl.NumberFormat('uk-UA', { maximumFractionDigits: 0 })
-
 type HourTooltipProps = {
   active?: boolean
   label?: string | number
@@ -75,6 +62,7 @@ type HourTooltipProps = {
 }
 
 function HourTooltip({ active, payload, label }: HourTooltipProps) {
+  const money = useMoney()
   if (!active || !payload?.length) return null
   return (
     <div className="economics-trend-tip">
@@ -83,7 +71,7 @@ function HourTooltip({ active, payload, label }: HourTooltipProps) {
         <div className="economics-trend-tip-row" key={p.name}>
           <i style={{ background: p.color }} />
           <span>{p.name}</span>
-          <b>{chartUahFmt.format(Number(p.value))}</b>
+          <b>{money.formatNumber(Number(p.value))}</b>
         </div>
       ))}
     </div>
@@ -96,13 +84,20 @@ function HourTooltip({ active, payload, label }: HourTooltipProps) {
 // chart / «Робота УЗЕ» row. The detailed hourly table stays below.
 export function EconomicsDayTop({ totals: t, rows, tariffs, pvPlan = null }: Props) {
   const chrome = useChartChrome()
+  const money = useMoney()
+  const uah = money.format
+  const price = money.formatPriceAllowZero
+  // Hourly chart points keep cents outside UAH, where a whole unit is
+  // forty hryvnias.
+  const point = (v: number) => (money.currency === 'UAH' ? Math.round(v) : Math.round(v * 100) / 100)
 
   // Tariff components per kWh, VAT'd the same way hourEconomics builds
   // the import price stack, so every breakdown line below sums exactly
-  // to the headline it belongs to.
+  // to the headline it belongs to. The tariffs are UAH; the day's money
+  // is in its own rate's currency.
   const vat = tariffs.includeVat ? 1 + tariffs.vatRate : 1
-  const transPerKwh = tariffs.transmissionUahPerKwh * vat
-  const distPerKwh = tariffs.distributionUahPerKwh * vat
+  const transPerKwh = money.fromUah(tariffs.transmissionUahPerKwh * vat)
+  const distPerKwh = money.fromUah(tariffs.distributionUahPerKwh * vat)
   const netPerKwh = transPerKwh + distPerKwh
 
   // Базова вартість: load × full import stack. The network legs are
@@ -117,7 +112,7 @@ export function EconomicsDayTop({ totals: t, rows, tariffs, pvPlan = null }: Pro
   const importNetwork = t.gridImport * netPerKwh
   const importEnergy = importCost - importNetwork
   const exportRevenue = t.revenuePvExport + t.revenueEssExport
-  const wear = t.essDischarged * tariffs.degradationUahPerKwh
+  const wear = t.essDischarged * money.fromUah(tariffs.degradationUahPerKwh)
 
   // Економічний ефект = базова − фактична, розкладена на ті самі
   // складові: зекономлена енергія, зекономлена мережа, дохід від
@@ -175,9 +170,9 @@ export function EconomicsDayTop({ totals: t, rows, tariffs, pvPlan = null }: Pro
       r.economics.pvToGrid * r.economics.exportPriceUahPerKwh
     return {
       label,
-      'Ефект СЕС': Math.round(pvEff),
-      'Ефект УЗЕ': Math.round(r.economics.essNet),
-      'Сукупний ефект': Math.round(r.economics.effect),
+      'Ефект СЕС': point(pvEff),
+      'Ефект УЗЕ': point(r.economics.essNet),
+      'Сукупний ефект': point(r.economics.effect),
     }
   })
 
@@ -211,8 +206,8 @@ export function EconomicsDayTop({ totals: t, rows, tariffs, pvPlan = null }: Pro
     {
       label: 'Сер. маржа розряду',
       value: price(dischargeMargin),
-      unit: 'грн/кВт·год',
-      sub: `${uahFmt.format(Math.round(t.essNet))} грн / ${kwhFmt.format(t.essDischarged)} кВт·год`,
+      unit: money.priceUnit,
+      sub: `${uah(t.essNet)} / ${kwhFmt.format(t.essDischarged)} кВт·год`,
       tone: 'sky',
       icon: ICONS.chart,
       tip: 'Чистий ефект УЗЕ, поділений на відданий розряд: скільки заробила кожна віддана кВт·год.',
@@ -289,7 +284,7 @@ export function EconomicsDayTop({ totals: t, rows, tariffs, pvPlan = null }: Pro
             label="Сер. ціна імпорту"
             tip="Повна ціна імпорту (РДН + передача, розподіл, надбавка, ПДВ), зважена за обсягом імпорту кожної години доби."
             value={price(t.avgImportPriceUahPerKwh)}
-            unit="грн/кВт·год"
+            unit={money.priceUnit}
           />
           <Card
             tone="blue"
@@ -297,7 +292,7 @@ export function EconomicsDayTop({ totals: t, rows, tariffs, pvPlan = null }: Pro
             label="Сер. ціна експорту"
             tip="Ціна експорту (РДН мінус знижка), зважена за обсягом експорту кожної години доби."
             value={price(t.avgExportPriceUahPerKwh)}
-            unit="грн/кВт·год"
+            unit={money.priceUnit}
           />
         </div>
       </div>
@@ -363,7 +358,7 @@ export function EconomicsDayTop({ totals: t, rows, tariffs, pvPlan = null }: Pro
         >
           <div className="eco-overview-head">
             <h3 className="eco-overview-title">Погодинний економічний ефект</h3>
-            <span className="economics-month-muted">грн/год</span>
+            <span className="economics-month-muted">{money.unit}/год</span>
           </div>
           <div className="eco-profile-chart">
             <ResponsiveContainer width="100%" height={190}>

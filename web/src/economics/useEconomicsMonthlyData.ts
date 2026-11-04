@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { fetchEconomicsMonthly, type EconomicsMonthlyResponse } from '../api'
+import type { Currency } from './currency'
 
 // LOCAL_TZ is the canonical timezone for the economics page: the month
 // boundary and DAM hour numbering are always Europe/Kyiv, regardless of
@@ -16,6 +17,8 @@ type Input = {
   organizationID: string
   // YYYY-MM month in LOCAL_TZ.
   month: string
+  // currency the money comes back in; UAH when omitted.
+  currency?: Currency
   // refreshKey re-fires the fetch without changing inputs (e.g. after a
   // DAM-price refresh or a recompute). `undefined` → 0.
   refreshKey?: number
@@ -27,7 +30,8 @@ type Input = {
 // reflects a consistent month.
 export function useEconomicsMonthlyData(input: Input): EconomicsMonthlyData {
   const active = Boolean(input.organizationID && input.month)
-  const key = JSON.stringify([input.organizationID, input.month, input.refreshKey ?? 0])
+  const currency = input.currency ?? 'UAH'
+  const key = JSON.stringify([input.organizationID, input.month, currency, input.refreshKey ?? 0])
   // The last answer and the request it settled; while the current key
   // has no answer it is loading and the previous month stays on screen.
   const [answer, setAnswer] = useState<{ key: string; month: EconomicsMonthlyResponse | null; error: string | null } | null>(
@@ -39,7 +43,7 @@ export function useEconomicsMonthlyData(input: Input): EconomicsMonthlyData {
     const controller = new AbortController()
 
     fetchEconomicsMonthly(
-      { organizationID: input.organizationID, month: input.month, tz: LOCAL_TZ },
+      { organizationID: input.organizationID, month: input.month, tz: LOCAL_TZ, currency },
       controller.signal,
     )
       .then((resp) => {
@@ -57,7 +61,7 @@ export function useEconomicsMonthlyData(input: Input): EconomicsMonthlyData {
       })
 
     return () => controller.abort()
-  }, [active, key, input.organizationID, input.month])
+  }, [active, key, input.organizationID, input.month, currency])
 
   return useMemo(() => {
     if (!active) return { month: null, loading: false, error: null }

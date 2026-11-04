@@ -3,7 +3,8 @@
 // Refresh keeps working (a component module must export only
 // components) and so both views share one source of truth.
 import type { EconomicsMonthlyMarginHour, EconomicsMonthlyTotals } from '../../api'
-import { formatKwh, formatKwhNumber, formatMwh, formatPercent, formatPrice, formatUah } from './format'
+import { UAH_MONEY, type Money } from '../currency'
+import { formatKwh, formatKwhNumber, formatMwh, formatPercent } from './format'
 
 // signClass tints a currency cell green/red by sign so a loss-making
 // period (negative EBITDA / effect) is never shown in the "good" colour.
@@ -70,6 +71,7 @@ export function buildNarrative(
   totals: EconomicsMonthlyTotals,
   heading: string,
   periodNoun = 'місяць',
+  money: Money = UAH_MONEY,
 ): Narrative {
   const profitable = totals.effect_uah >= 0
   const exportHeavy = totals.grid_export_kwh > totals.load_kwh
@@ -78,7 +80,7 @@ export function buildNarrative(
 
   let title: string
   if (!profitable) {
-    title = `${heading}: ${periodNoun} збитковий — ефект ${formatUah(totals.effect_uah)}.`
+    title = `${heading}: ${periodNoun} збитковий — ефект ${money.format(totals.effect_uah)}.`
   } else if (exportHeavy) {
     title = `${heading}: ${periodNoun} прибутковий, але більшість СЕС пішла в експорт, а не в економію об'єкта.`
   } else {
@@ -88,15 +90,15 @@ export function buildNarrative(
   const howItWent =
     `СЕС виробила ${formatMwh(totals.pv_kwh)}, об'єкт спожив ${formatMwh(totals.load_kwh)}. ` +
     `Імпорт ${formatMwh(totals.grid_import_kwh)}, експорт ${formatMwh(totals.grid_export_kwh)}. ` +
-    `Ефект проєкту: ${formatUah(totals.effect_uah)}.`
+    `Ефект проєкту: ${money.format(totals.effect_uah)}.`
 
   const captureTxt =
     totals.ess_optimum_uah > 0 ? `захоплено ${formatPercent(totals.ess_captured_share)}` : 'оцінка за фактом'
-  let mainReserve = `Підтверджений резерв УЗЕ ${formatUah(totals.ess_reserve_uah)} (${captureTxt}). Головна причина — ${RESERVE_CAUSE_TEXT[cause]}.`
+  let mainReserve = `Підтверджений резерв УЗЕ ${money.format(totals.ess_reserve_uah)} (${captureTxt}). Головна причина — ${RESERVE_CAUSE_TEXT[cause]}.`
   if (exportHeavy) {
     mainReserve +=
-      ` Об'єкт масово експортує денну СЕС (${formatMwh(totals.grid_export_kwh)}) по ~${formatPrice(totals.avg_export_price_uah_per_kwh)} грн/кВт·год ` +
-      `при імпорті ~${formatPrice(totals.avg_import_price_uah_per_kwh)} — перенесення споживання в денні години дає різницю ~${formatPrice(priceGap)} грн/кВт·год.`
+      ` Об'єкт масово експортує денну СЕС (${formatMwh(totals.grid_export_kwh)}) по ~${money.formatPrice(totals.avg_export_price_uah_per_kwh)} ${money.priceUnit} ` +
+      `при імпорті ~${money.formatPrice(totals.avg_import_price_uah_per_kwh)} — перенесення споживання в денні години дає різницю ~${money.formatPrice(priceGap)} ${money.priceUnit}.`
   }
 
   const improveParts: string[] = []
@@ -114,15 +116,15 @@ export function buildNarrative(
 
 // uahShort renders a compact "N тис. ₴" / "N млн ₴" amount for the AI
 // impact chips; small amounts fall back to the full formatter.
-export function uahShort(v: number): string {
+export function uahShort(v: number, money: Money = UAH_MONEY): string {
   const a = Math.abs(v)
   if (a >= 1_000_000) {
-    return `${(v / 1_000_000).toLocaleString('uk-UA', { maximumFractionDigits: 1 })} млн ₴`
+    return `${(v / 1_000_000).toLocaleString('uk-UA', { maximumFractionDigits: 1 })} млн ${money.symbol}`
   }
   if (a >= 1000) {
-    return `${Math.round(v / 1000).toLocaleString('uk-UA')} тис. ₴`
+    return `${Math.round(v / 1000).toLocaleString('uk-UA')} тис. ${money.symbol}`
   }
-  return formatUah(v)
+  return money.format(v)
 }
 
 // AI panel model — the deterministic management narrative shared by the
@@ -173,8 +175,11 @@ export function buildAiPanel(
     periodLabel: string
     weakest?: { label: string; sub: string } | null
     monthsCount?: number
+    money?: Money
   },
 ): AiPanel {
+  const money = opts.money ?? UAH_MONEY
+  const short = (v: number) => uahShort(v, money)
   const r = reserveSplit(totals)
   const consumption = totals.pv_to_load_kwh + totals.ess_to_load_kwh + totals.grid_to_load_kwh
   const captured = totals.ess_optimum_uah > 0 ? totals.ess_captured_share : 0
@@ -185,21 +190,21 @@ export function buildAiPanel(
   // the "найбільший резерв" badge on its card.
   const mainIsEss = r.ess >= r.elevator
   const mainLabel = `${mainIsEss ? 'Резерв таймінгу УЗЕ' : 'Резерв графіка'} · основний`
-  const mainValue = uahShort(mainIsEss ? r.ess : r.elevator)
+  const mainValue = short(mainIsEss ? r.ess : r.elevator)
   const secLabel = mainIsEss ? 'Резерв графіка' : 'Резерв таймінгу УЗЕ'
-  const secValue = uahShort(mainIsEss ? r.elevator : r.ess)
+  const secValue = short(mainIsEss ? r.elevator : r.ess)
   const planStatus = mainIsEss ? 'резерв графіка' : 'найбільший резерв'
   const essStatus = mainIsEss ? 'найбільший резерв' : 'режим УЗЕ'
 
   if (opts.scope !== 'month') {
     const months = opts.monthsCount ?? 0
     const mainReserveText = mainIsEss
-      ? `Головний важіль — таймінг УЗЕ: ${uahShort(r.ess)} за період${
+      ? `Головний важіль — таймінг УЗЕ: ${short(r.ess)} за період${
           totals.ess_optimum_uah > 0 ? ` (захоплено ${formatPercent(captured)} оптимуму)` : ''
         }. Помісячна деталізація нижче.`
-      : `Головний важіль — перенесення гнучких робіт на денні години: ${uahShort(r.elevator)} за період. Помісячна деталізація нижче.`
+      : `Головний важіль — перенесення гнучких робіт на денні години: ${short(r.elevator)} за період. Помісячна деталізація нижче.`
     return {
-      summaryLine: `${opts.heading}: за ${months} міс. телеметрії СЕС ${formatMwh(totals.pv_kwh)}, ефект проєкту ${formatUah(totals.effect_uah)}.`,
+      summaryLine: `${opts.heading}: за ${months} міс. телеметрії СЕС ${formatMwh(totals.pv_kwh)}, ефект проєкту ${money.format(totals.effect_uah)}.`,
       briefRows: [
         {
           kind: 'summary',
@@ -219,14 +224,14 @@ export function buildAiPanel(
         { label: 'Період аналізу', value: opts.periodLabel },
         { label: mainLabel, value: mainValue, amber: true },
         { label: secLabel, value: secValue },
-        { label: 'Сумарний резерв', value: uahShort(r.total) },
+        { label: 'Сумарний резерв', value: short(r.total) },
       ],
       cards: [
         {
           variant: 'plan',
           status: planStatus,
           title: 'Графік робіт елеватора',
-          impact: uahShort(r.elevator),
+          impact: short(r.elevator),
           action: `За період експортовано ${formatMwh(totals.grid_export_kwh)} і куплено ${formatMwh(totals.grid_import_kwh)} — велика частина СЕС пішла в мережу замість денного навантаження.`,
           chips: [`експорт ${formatMwh(totals.grid_export_kwh)}`, `імпорт ${formatMwh(totals.grid_import_kwh)}`],
         },
@@ -234,12 +239,12 @@ export function buildAiPanel(
           variant: 'warn',
           status: essStatus,
           title: 'Таймінг батареї',
-          impact: uahShort(r.ess),
+          impact: short(r.ess),
           action:
             totals.ess_optimum_uah > 0
               ? `УЗЕ захопила ${formatPercent(captured)} доступного оптимуму. Основні втрати — на переходах між датами, коли розряд потрапляв у нижчі години РДН.`
               : 'Недостатньо активності УЗЕ за період для оцінки оптимуму.',
-          chips: [`резерв ${uahShort(r.ess)}`, `розряд ${formatMwh(totals.ess_discharged_kwh)}`],
+          chips: [`резерв ${short(r.ess)}`, `розряд ${formatMwh(totals.ess_discharged_kwh)}`],
         },
       ],
       reserves: r,
@@ -248,18 +253,18 @@ export function buildAiPanel(
 
   // Month scope.
   const reserveText = mainIsEss
-    ? `Головний резерв — таймінг УЗЕ ${uahShort(r.ess)}: розряд не завжди потрапляв у найдорожчі години.`
-    : `Високий експорт СЕС при низькому денному навантаженні — перенесення гнучких робіт дає до ${uahShort(r.elevator)} за місяць.`
+    ? `Головний резерв — таймінг УЗЕ ${short(r.ess)}: розряд не завжди потрапляв у найдорожчі години.`
+    : `Високий експорт СЕС при низькому денному навантаженні — перенесення гнучких робіт дає до ${short(r.elevator)} за місяць.`
   const actionText = mainIsEss
-    ? `Пріоритет — зміщувати розряд УЗЕ ближче до вечірнього піку (${uahShort(r.ess)}). Резерв графіка робіт — ${uahShort(r.elevator)}.`
-    : `Пріоритет — графік елеватора в сонячні години (${uahShort(r.elevator)}). Резерв таймінгу УЗЕ — ${uahShort(r.ess)}.`
+    ? `Пріоритет — зміщувати розряд УЗЕ ближче до вечірнього піку (${short(r.ess)}). Резерв графіка робіт — ${short(r.elevator)}.`
+    : `Пріоритет — графік елеватора в сонячні години (${short(r.elevator)}). Резерв таймінгу УЗЕ — ${short(r.ess)}.`
 
   const cards: AiCard[] = [
     {
       variant: 'plan',
       status: planStatus,
       title: 'Графік робіт елеватора',
-      impact: `до ${uahShort(r.elevator)}`,
+      impact: `до ${short(r.elevator)}`,
       action: `За місяць експортовано ${formatMwh(totals.grid_export_kwh)} при імпорті ${formatMwh(totals.grid_import_kwh)} — велика частина СЕС пішла в мережу.`,
       chips: [
         `експорт ${formatMwh(totals.grid_export_kwh)}`,
@@ -271,10 +276,10 @@ export function buildAiPanel(
       variant: 'warn',
       status: essStatus,
       title: 'Добовий план батареї',
-      impact: `≈${uahShort(r.ess)}`,
+      impact: `≈${short(r.ess)}`,
       action:
         'Резерв таймінгу розряду — ковзне планування на 24–36 годин, а не окремими календарними днями.',
-      chips: [`резерв ≈${uahShort(r.ess)}`, `розряд ${formatMwh(totals.ess_discharged_kwh)}`],
+      chips: [`резерв ≈${short(r.ess)}`, `розряд ${formatMwh(totals.ess_discharged_kwh)}`],
     },
   ]
   if (opts.weakest) {
@@ -289,7 +294,7 @@ export function buildAiPanel(
   }
 
   return {
-    summaryLine: `${opts.heading}: СЕС ${formatMwh(totals.pv_kwh)}, ефект ${formatUah(totals.effect_uah)}, експорт ${formatMwh(totals.grid_export_kwh)}.`,
+    summaryLine: `${opts.heading}: СЕС ${formatMwh(totals.pv_kwh)}, ефект ${money.format(totals.effect_uah)}, експорт ${formatMwh(totals.grid_export_kwh)}.`,
     briefRows: [
       {
         kind: 'summary',
@@ -304,22 +309,32 @@ export function buildAiPanel(
       { label: 'Період аналізу', value: opts.periodLabel },
       { label: mainLabel, value: mainValue, amber: true },
       { label: secLabel, value: secValue },
-      { label: 'Разом до дій', value: uahShort(r.total) },
+      { label: 'Разом до дій', value: short(r.total) },
     ],
     cards,
     reserves: r,
   }
 }
 
-// heatTier maps an ESS discharge margin (UAH/kWh) to its heatmap colour
-// tier; null / non-finite values render an empty cell.
-export function heatTier(v: number | null): string {
+// heatTier maps an ESS discharge margin (per kWh, in money's currency) to
+// its heatmap colour tier; null / non-finite values render an empty cell.
+// The bands are tuned in UAH and move with the period's rate.
+export function heatTier(v: number | null, money: Money = UAH_MONEY): string {
   if (v === null || !Number.isFinite(v)) return 'economics-hm-empty'
-  if (v < 2) return 'economics-hm0'
-  if (v < 6) return 'economics-hm1'
-  if (v < 12) return 'economics-hm2'
-  if (v < 18) return 'economics-hm3'
+  if (v < money.fromUah(2)) return 'economics-hm0'
+  if (v < money.fromUah(6)) return 'economics-hm1'
+  if (v < money.fromUah(12)) return 'economics-hm2'
+  if (v < money.fromUah(18)) return 'economics-hm3'
   return 'economics-hm4'
+}
+
+// heatLegend names heatTier's colour bands for the text under a heatmap.
+export function heatLegend(money: Money = UAH_MONEY): string {
+  if (money.currency === 'UAH') {
+    return 'сірий 0–1, світло-зелений 2–5, зелений 6–11, темно-зелений понад 12 грн/кВт·год'
+  }
+  const at = (uah: number) => money.formatPrice(money.fromUah(uah))
+  return `сірий до ${at(2)}, світло-зелений ${at(2)}–${at(6)}, зелений ${at(6)}–${at(12)}, темно-зелений понад ${at(12)} ${money.priceUnit}`
 }
 
 export const HOURS = Array.from({ length: 24 }, (_, h) => h)
@@ -415,13 +430,13 @@ export function dayQualityTip(flags?: string[]): string | null {
 // heatCellTip spells out a cell's arithmetic under `title` (a day+hour
 // for the monthly grid, a month+hour for the annual one), so a number
 // that looks surprising can be checked without leaving the page.
-export function heatCellTip(title: string, c: EconomicsMonthlyMarginHour): string {
+export function heatCellTip(title: string, c: EconomicsMonthlyMarginHour, money: Money = UAH_MONEY): string {
   return (
     `${title} — розряд ${formatKwh(c.discharged_kwh)}\n` +
-    `Виручка ${formatUah(c.revenue_uah)} (віддане в мережу за ціною експорту, у споживання — за ціною імпорту)\n` +
-    `− собівартість збереженої енергії ${formatUah(c.cost_uah)}\n` +
-    `− знос ${formatUah(c.wear_uah)}\n` +
-    `= ${formatUah(c.revenue_uah - c.cost_uah - c.wear_uah)} на ${formatKwh(c.discharged_kwh)} → ` +
-    `${formatPrice(c.margin_uah_per_kwh)} грн/кВт·год`
+    `Виручка ${money.format(c.revenue_uah)} (віддане в мережу за ціною експорту, у споживання — за ціною імпорту)\n` +
+    `− собівартість збереженої енергії ${money.format(c.cost_uah)}\n` +
+    `− знос ${money.format(c.wear_uah)}\n` +
+    `= ${money.format(c.revenue_uah - c.cost_uah - c.wear_uah)} на ${formatKwh(c.discharged_kwh)} → ` +
+    `${money.formatPrice(c.margin_uah_per_kwh)} ${money.priceUnit}`
   )
 }

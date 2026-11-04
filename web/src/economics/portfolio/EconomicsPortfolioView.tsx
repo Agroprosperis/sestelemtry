@@ -2,13 +2,16 @@ import type { ReactNode } from 'react'
 import type { EconomicsPortfolioResponse, EconomicsPortfolioSite, EconomicsPortfolioTrendMonth } from '../../api'
 import { formatOrganizationLabel } from '../../dashboard/config'
 import { OptimumInfo } from '../monthly/EconomicsMonthlyView'
-import { formatMonthTitle, formatMwh, formatMwhNumber, formatPercent, formatPeriodTitle, formatUah, formatYearTitle } from '../monthly/format'
-import { useEconomicsPortfolioData } from '../useEconomicsPortfolioData'
+import { useMoney } from '../currency'
+import { formatMonthTitle, formatMwh, formatMwhNumber, formatPercent, formatPeriodTitle, formatYearTitle } from '../monthly/format'
+import type { EconomicsPortfolioData } from '../useEconomicsPortfolioData'
 import { portfolioRoce, ROCE_TIP, siteRoce } from './roce'
 
 export type PortfolioScope = 'month' | 'year' | 'period'
 
 type Props = {
+  // data is the page's portfolio fetch (it also owns the currency).
+  data: EconomicsPortfolioData
   // YYYY-MM derived from the page anchor (used when scope=month).
   month: string
   // YYYY derived from the page anchor (used when scope=year).
@@ -23,7 +26,6 @@ type Props = {
   // onDiagnoseBess navigates to the flagged object's economics so the
   // operator can inspect the УЗЕ days the anomaly filter excluded.
   onDiagnoseBess?: (site: EconomicsPortfolioSite) => void
-  refreshKey?: number
 }
 
 // compareTotal is the stacked-bar length: earned EBITDA + both reserves.
@@ -42,6 +44,7 @@ const OPTIMUM_TIP =
 // optimum reserve (project_net), with ⚠ flags for objects whose УЗЕ
 // telemetry had anomalous days excluded (§2).
 export function EconomicsPortfolioView({
+  data,
   month,
   period,
   from,
@@ -49,17 +52,8 @@ export function EconomicsPortfolioView({
   scope,
   onScopeChange,
   onDiagnoseBess,
-  refreshKey,
 }: Props) {
-  const { portfolio, loading, error } = useEconomicsPortfolioData({
-    active: true,
-    scope,
-    month,
-    period,
-    from,
-    to,
-    refreshKey,
-  })
+  const { portfolio, loading, error } = data
 
   const label =
     scope === 'month'
@@ -182,6 +176,7 @@ function PortfolioBody({
   portfolio: EconomicsPortfolioResponse
   onDiagnoseBess?: (site: EconomicsPortfolioSite) => void
 }) {
+  const money = useMoney()
   const sites = portfolio.sites
   const totals = portfolio.totals
   const withData = sites.filter((s) => s.has_data)
@@ -192,27 +187,27 @@ function PortfolioBody({
       <div className="economics-portfolio-cards">
         <SummaryCard
           label="EBITDA"
-          value={formatUah(totals.ebitda_uah)}
+          value={money.format(totals.ebitda_uah)}
           sub="за період, всі об'єкти"
           info="EBITDA = дохід та економія від СЕС і УЗЕ мінус операційні витрати за період, підсумовані по всіх об'єктах."
         />
         <SummaryCard
           label="Резерв графіка робіт"
-          value={formatUah(totals.schedule_reserve_uah)}
+          value={money.format(totals.schedule_reserve_uah)}
           sub="перенесення гнучких робіт у день"
           info="Скільки ще можна зекономити, перенісши гнучкі роботи на денні години з дешевшою електроенергією та власним виробітком СЕС."
           amber
         />
         <SummaryCard
           label="Оптимум УЗЕ (резерв)"
-          value={formatUah(totals.bess_reserve_uah)}
+          value={money.format(totals.bess_reserve_uah)}
           sub="недобрана вигода УЗЕ проти оптимального графіка"
           info={OPTIMUM_TIP}
           amber
         />
         <SummaryCard
           label="Разом з резервами"
-          value={formatUah(totals.ebitda_uah + totals.action_reserve_uah)}
+          value={money.format(totals.ebitda_uah + totals.action_reserve_uah)}
           sub="EBITDA + резерв графіка + УЗЕ"
           info="Потенційний результат періоду: фактична EBITDA плюс обидва резерви, якби їх забрали повністю."
           good
@@ -261,7 +256,7 @@ function PortfolioBody({
                   <div className="economics-portfolio-fill bess" style={{ width: `${bW}%` }} />
                 </div>
               </div>
-              <span className="economics-portfolio-value">{formatUah(s.ebitda_uah)}</span>
+              <span className="economics-portfolio-value">{money.format(s.ebitda_uah)}</span>
             </div>
           )
         })}
@@ -302,10 +297,10 @@ function PortfolioBody({
                   {s.has_data ? (
                     <>
                       <td>{formatPercent(siteRoce(s))}</td>
-                      <td>{formatUah(s.ebitda_uah)}</td>
-                      <td>{formatUah(s.schedule_reserve_uah)}</td>
-                      <td>{formatUah(s.bess_reserve_uah)}</td>
-                      <td>{formatUah(s.action_reserve_uah)}</td>
+                      <td>{money.format(s.ebitda_uah)}</td>
+                      <td>{money.format(s.schedule_reserve_uah)}</td>
+                      <td>{money.format(s.bess_reserve_uah)}</td>
+                      <td>{money.format(s.action_reserve_uah)}</td>
                       <td>{formatMwh(s.pv_kwh)}</td>
                       <td>{formatPercent(captured)}</td>
                     </>
@@ -318,10 +313,10 @@ function PortfolioBody({
             <tr className="economics-table-summary-row">
               <td className="economics-month-table-left">Портфель</td>
               <td>{formatPercent(portfolioRoce(sites))}</td>
-              <td>{formatUah(totals.ebitda_uah)}</td>
-              <td>{formatUah(totals.schedule_reserve_uah)}</td>
-              <td>{formatUah(totals.bess_reserve_uah)}</td>
-              <td>{formatUah(totals.action_reserve_uah)}</td>
+              <td>{money.format(totals.ebitda_uah)}</td>
+              <td>{money.format(totals.schedule_reserve_uah)}</td>
+              <td>{money.format(totals.bess_reserve_uah)}</td>
+              <td>{money.format(totals.action_reserve_uah)}</td>
               <td>{formatMwh(totals.pv_kwh)}</td>
               <td>—</td>
             </tr>
@@ -350,6 +345,7 @@ const TREND_SERIES = [
 // grouped mini-bar column per month, scaled to the axis max across all
 // series, with a native tooltip carrying the MWh figures + project effect.
 function PortfolioTrend({ months }: { months: EconomicsPortfolioTrendMonth[] }) {
+  const money = useMoney()
   const axisMax = Math.max(
     ...months.flatMap((m) => [m.pv_kwh, m.grid_import_kwh, m.grid_export_kwh, m.load_kwh]),
     1,
@@ -372,7 +368,7 @@ function PortfolioTrend({ months }: { months: EconomicsPortfolioTrendMonth[] }) 
         {months.map((m) => {
           const tip = `${m.month}\nСЕС ${formatMwhNumber(m.pv_kwh)} · спож. ${formatMwhNumber(m.load_kwh)} · імпорт ${formatMwhNumber(
             m.grid_import_kwh,
-          )} · експорт ${formatMwhNumber(m.grid_export_kwh)}\nEBITDA ${formatUah(m.ebitda_uah)}`
+          )} · експорт ${formatMwhNumber(m.grid_export_kwh)}\nEBITDA ${money.format(m.ebitda_uah)}`
           return (
             <div className="economics-portfolio-trend-col" key={m.month} title={tip}>
               <div className="economics-portfolio-trend-bars">

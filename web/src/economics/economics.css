@@ -1816,6 +1816,18 @@
   color: var(--accent-text);
 }
 
+/* ₴ / $ / € sits at the right end of the header row; narrow buttons keep
+   the row within its 44 px height. */
+.economics-currency-switch {
+  margin-left: auto;
+}
+
+.economics-currency-switch button {
+  min-width: 36px;
+  padding: 8px 10px;
+  font-size: 14px;
+}
+
 .economics-card {
   background: var(--bg-elevated);
   border: 1px solid var(--border);

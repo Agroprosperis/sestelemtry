@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math"
 	"net/http"
 	"sort"
 	"strings"
@@ -79,6 +78,29 @@ type EconomicsDailyResponse struct {
 	// ComputedAt is when the day was last computed (RFC3339, UTC): for a
 	// day still running, the moment its numbers are current as of.
 	ComputedAt string `json:"computed_at,omitempty"`
+
+	// Currency is what every *_uah field above is in: UAH unless the
+	// request asked for ?currency=. FxRate is the day's UAH per unit it
+	// was converted at; FxCarried marks a day that borrowed the nearest
+	// rate for lack of its own.
+	Currency  string  `json:"currency"`
+	FxRate    float64 `json:"fx_rate,omitempty"`
+	FxCarried bool    `json:"fx_carried,omitempty"`
+}
+
+// fxWindowJSON is how a period response reports its currency: the
+// fields keep their historical _uah names, every amount is in Currency.
+// FxRateAvg is the mean UAH per unit over the period's days, and
+// FxDaysCarried counts the days that borrowed the nearest rate.
+type fxWindowJSON struct {
+	Currency      string  `json:"currency"`
+	FxRateAvg     float64 `json:"fx_rate_avg,omitempty"`
+	FxDaysCarried int     `json:"fx_days_carried,omitempty"`
+}
+
+func fxWindowFor(view fxView, from, to time.Time) fxWindowJSON {
+	avg, carried := view.window(from, to)
+	return fxWindowJSON{Currency: view.code(), FxRateAvg: avg, FxDaysCarried: carried}
 }
 
 // computedAtJSON renders an economics ComputedAt for the wire; zero (no
@@ -130,8 +152,10 @@ func economicsHourToJSON(r *economics.HourRow) *EconomicsHour {
 
 // economicsDaily serves precomputed economics for one day, read-through
 // (final days from cache, otherwise recomputed and persisted on read).
+// With ?currency= the stored UAH day is converted at that day's rate on
+// the way out; what is computed and persisted stays UAH.
 //
-//	GET /api/v1/economics/daily?organization_id=&date=YYYY-MM-DD&tz=
+//	GET /api/v1/economics/daily?organization_id=&date=YYYY-MM-DD&tz=&currency=
 func (h *Handlers) economicsDaily(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -157,8 +181,19 @@ func (h *Handlers) economicsDaily(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	if _, err := time.ParseInLocation("2006-01-02", dateStr, loc); err != nil {
+	dayStart, err := time.ParseInLocation("2006-01-02", dateStr, loc)
+	if err != nil {
 		http.Error(w, "date must be YYYY-MM-DD", http.StatusBadRequest)
+		return
+	}
+	currency, err := parseCurrency(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	view, err := h.fxViewFor(r.Context(), currency, loc)
+	if err != nil {
+		h.writeFxViewError(w, "api_economics_daily", err)
 		return
 	}
 
@@ -179,12 +214,18 @@ func (h *Handlers) economicsDaily(w http.ResponseWriter, r *http.Request) {
 		Date:           dateStr,
 		Tz:             loc.String(),
 		IsFinal:        day.IsFinal,
-		Hours:          make([]*EconomicsHour, len(day.Rows)),
 		Reconciled:     day.Totals.Reconciled,
 		QualityFlags:   day.Totals.QualityFlags,
 		Reconciliation: day.Totals.Reconciliation,
 		ComputedAt:     computedAtJSON(computedAt),
+		Currency:       view.code(),
 	}
+	if !view.uah() {
+		rate, carried := view.rate(dayStart)
+		day = economics.ScaleDay(day, 1/rate)
+		resp.FxRate, resp.FxCarried = rate, carried
+	}
+	resp.Hours = make([]*EconomicsHour, len(day.Rows))
 	for i, row := range day.Rows {
 		resp.Hours[i] = economicsHourToJSON(row)
 		if row != nil && row.Rdn == nil {
@@ -710,6 +751,7 @@ type EconomicsMonthlyResponse struct {
 	// ComputedAt is when the month's newest day was last computed
 	// (RFC3339, UTC); empty without data.
 	ComputedAt string `json:"computed_at,omitempty"`
+	fxWindowJSON
 }
 
 // marginCellsToJSON maps a row of heatmap cells. Both grids — the
@@ -847,7 +889,7 @@ func monthlyDayToJSON(d economics.MonthDay) EconomicsMonthlyDay {
 // economicsMonthly serves a month rollup of the per-day economics,
 // read-through (final days from cache, the open tail recomputed on read).
 //
-//	GET /api/v1/economics/monthly?organization_id=&month=YYYY-MM&tz=
+//	GET /api/v1/economics/monthly?organization_id=&month=YYYY-MM&tz=&currency=
 func (h *Handlers) economicsMonthly(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -873,12 +915,23 @@ func (h *Handlers) economicsMonthly(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	if _, err := time.ParseInLocation("2006-01", monthStr, loc); err != nil {
+	monthStart, err := time.ParseInLocation("2006-01", monthStr, loc)
+	if err != nil {
 		http.Error(w, "month must be YYYY-MM", http.StatusBadRequest)
 		return
 	}
+	currency, err := parseCurrency(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	view, err := h.fxViewFor(r.Context(), currency, loc)
+	if err != nil {
+		h.writeFxViewError(w, "api_economics_monthly", err)
+		return
+	}
 
-	month, err := h.economics.GetMonth(r.Context(), orgID, monthStr, loc.String())
+	month, err := h.economicsIn(view).GetMonth(r.Context(), orgID, monthStr, loc.String())
 	if err != nil {
 		h.log.Error("api_economics_monthly", "organization_id", orgID, "month", monthStr, "tz", loc.String(), "err", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
@@ -895,6 +948,7 @@ func (h *Handlers) economicsMonthly(w http.ResponseWriter, r *http.Request) {
 		HourlyMargin:   make([]EconomicsMonthlyDayMargin, 0, len(month.HourlyMargin)),
 		UzeCycles:      make([]EconomicsUzeCycle, 0, len(month.Cycles)),
 		ComputedAt:     computedAtJSON(month.ComputedAt),
+		fxWindowJSON:   fxWindowFor(view, monthStart, monthStart.AddDate(0, 1, -1)),
 	}
 	for _, d := range month.Days {
 		resp.Days = append(resp.Days, monthlyDayToJSON(d))
@@ -955,13 +1009,28 @@ type EconomicsAnnualResponse struct {
 	// ComputedAt is when the window's newest day was last computed
 	// (RFC3339, UTC); empty without data.
 	ComputedAt string `json:"computed_at,omitempty"`
+	fxWindowJSON
+}
+
+// monthsWindow is the civil-day span of a from..to month window (both
+// YYYY-MM); ok is false when either bound does not parse.
+func monthsWindow(from, to string, loc *time.Location) (time.Time, time.Time, bool) {
+	first, err := time.ParseInLocation("2006-01", from, loc)
+	if err != nil {
+		return time.Time{}, time.Time{}, false
+	}
+	last, err := time.ParseInLocation("2006-01", to, loc)
+	if err != nil {
+		return time.Time{}, time.Time{}, false
+	}
+	return first, last.AddDate(0, 1, -1), true
 }
 
 // economicsAnnual serves a calendar-year rollup of the per-month
 // economics, read-through (the economics-recompute daemon keeps the
 // underlying daily/hourly records warm; this path never recomputes).
 //
-//	GET /api/v1/economics/annual?organization_id=&period=YYYY&tz=
+//	GET /api/v1/economics/annual?organization_id=&period=YYYY&tz=&currency=
 func (h *Handlers) economicsAnnual(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -988,6 +1057,11 @@ func (h *Handlers) economicsAnnual(w http.ResponseWriter, r *http.Request) {
 	fromStr := strings.TrimSpace(r.URL.Query().Get("from"))
 	toStr := strings.TrimSpace(r.URL.Query().Get("to"))
 	periodStr := strings.TrimSpace(r.URL.Query().Get("period"))
+	currency, err := parseCurrency(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 
 	var year economics.StoredYear
 	if fromStr != "" || toStr != "" {
@@ -999,7 +1073,6 @@ func (h *Handlers) economicsAnnual(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "to must be YYYY-MM", http.StatusBadRequest)
 			return
 		}
-		year, err = h.economics.GetPeriod(r.Context(), orgID, fromStr, toStr, loc.String())
 	} else {
 		if periodStr == "" {
 			http.Error(w, "period is required (YYYY)", http.StatusBadRequest)
@@ -1009,7 +1082,17 @@ func (h *Handlers) economicsAnnual(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "period must be YYYY", http.StatusBadRequest)
 			return
 		}
-		year, err = h.economics.GetYear(r.Context(), orgID, periodStr, loc.String())
+	}
+	view, err := h.fxViewFor(r.Context(), currency, loc)
+	if err != nil {
+		h.writeFxViewError(w, "api_economics_annual", err)
+		return
+	}
+	svc := h.economicsIn(view)
+	if fromStr != "" || toStr != "" {
+		year, err = svc.GetPeriod(r.Context(), orgID, fromStr, toStr, loc.String())
+	} else {
+		year, err = svc.GetYear(r.Context(), orgID, periodStr, loc.String())
 	}
 	if err != nil {
 		h.log.Error("api_economics_annual", "organization_id", orgID, "period", periodStr, "from", fromStr, "to", toStr, "tz", loc.String(), "err", err)
@@ -1031,6 +1114,10 @@ func (h *Handlers) economicsAnnual(w http.ResponseWriter, r *http.Request) {
 		Quarters:            make([]EconomicsAnnualQuarter, 0, len(year.Quarters)),
 		MonthlyMargin:       make([]EconomicsAnnualMonthMargin, 0, len(year.MonthlyMargin)),
 		ComputedAt:          computedAtJSON(year.ComputedAt),
+		fxWindowJSON:        fxWindowJSON{Currency: view.code()},
+	}
+	if first, last, ok := monthsWindow(year.From, year.To, loc); ok {
+		resp.fxWindowJSON = fxWindowFor(view, first, last)
 	}
 	for _, m := range year.Months {
 		resp.Months = append(resp.Months, EconomicsAnnualMonthRollup{
@@ -1112,6 +1199,7 @@ type EconomicsPortfolioResponse struct {
 	Sites          []EconomicsPortfolioSite       `json:"sites"`
 	Totals         EconomicsPortfolioSite         `json:"totals"`
 	Trend          []EconomicsPortfolioTrendMonth `json:"trend"`
+	fxWindowJSON
 }
 
 // scheduleReserveUah is the work-schedule (elevator) reserve: shifting
@@ -1191,6 +1279,21 @@ const epochEffectiveFrom = "1970-01-01"
 // when no version carries CAPEX. The 1970 catch-all is a copy of the
 // form, not a dated stage. versions are ascending by effective date.
 func resolveCapexUah(versions []TariffScheduleVersion, formCapexUah float64, lastMonth string) float64 {
+	return resolveCapex(versions, formCapexUah, lastMonth, nil, nil)
+}
+
+// resolveCapex is resolveCapexUah in a display currency. Each version
+// carries the cumulative investment, so each step's increment is
+// converted at the rate of the version's effective date (the day it was
+// invested), and the form's flat value at the rate of formDay. A nil
+// scaleOn keeps UAH.
+func resolveCapex(versions []TariffScheduleVersion, formCapexUah float64, lastMonth string, scaleOn func(day string) float64, formDay func() string) float64 {
+	scale := func(day string) float64 {
+		if scaleOn == nil {
+			return 1
+		}
+		return scaleOn(day)
+	}
 	var funded []TariffScheduleVersion
 	for _, v := range versions {
 		if v.EffectiveFrom != epochEffectiveFrom && len(v.EffectiveFrom) == len("2006-01-02") && v.Tariffs.CapexUah > 0 {
@@ -1198,23 +1301,30 @@ func resolveCapexUah(versions []TariffScheduleVersion, formCapexUah float64, las
 		}
 	}
 	if len(funded) == 0 {
-		return math.Max(formCapexUah, 0)
+		if formCapexUah <= 0 {
+			return 0
+		}
+		if scaleOn == nil || formDay == nil {
+			return formCapexUah
+		}
+		return formCapexUah * scale(formDay())
 	}
 	monthEnd := lastMonth + "-31"
-	value := funded[0].Tariffs.CapexUah
-	for _, v := range funded {
-		if v.EffectiveFrom > monthEnd {
+	var standing, value float64
+	for i, v := range funded {
+		if i > 0 && v.EffectiveFrom > monthEnd {
 			break
 		}
-		value = v.Tariffs.CapexUah
+		value += (v.Tariffs.CapexUah - standing) * scale(v.EffectiveFrom)
+		standing = v.Tariffs.CapexUah
 	}
 	return value
 }
 
-// portfolioCapexUah reads an object's tariffs for resolveCapexUah. A
-// failed read leaves the object without ROCE rather than failing the
-// whole rollup.
-func (h *Handlers) portfolioCapexUah(ctx context.Context, orgID, lastMonth string) float64 {
+// portfolioCapex reads an object's tariffs for resolveCapex. A failed
+// read leaves the object without ROCE rather than failing the whole
+// rollup.
+func (h *Handlers) portfolioCapex(ctx context.Context, orgID, lastMonth string, view fxView) float64 {
 	versions, err := h.store.GetTariffScheduleVersions(ctx, orgID)
 	if err != nil {
 		h.log.Warn("api_economics_portfolio_capex", "organization_id", orgID, "err", err)
@@ -1224,16 +1334,33 @@ func (h *Handlers) portfolioCapexUah(ctx context.Context, orgID, lastMonth strin
 	if t, ok, err := h.store.GetOrgTariffs(ctx, orgID); err == nil && ok {
 		form = t.CapexUah
 	}
-	return resolveCapexUah(versions, form, lastMonth)
+	if view.uah() {
+		return resolveCapex(versions, form, lastMonth, nil, nil)
+	}
+	scaleOn := func(day string) float64 {
+		d, err := time.ParseInLocation("2006-01-02", day, view.loc)
+		if err != nil {
+			return view.scale(time.Now())
+		}
+		return view.scale(d)
+	}
+	formDay := func() string {
+		first, ok, err := h.economics.FirstDay(ctx, orgID)
+		if err != nil || !ok {
+			return time.Now().In(view.loc).Format("2006-01-02")
+		}
+		return first.Format("2006-01-02")
+	}
+	return resolveCapex(versions, form, lastMonth, scaleOn, formDay)
 }
 
 // economicsPortfolio serves a portfolio (all-objects) rollup for a month
 // or a year/window: per-object project effect + work-schedule and УЗЕ
 // reserves (project_net) + УЗЕ data-quality flags, plus a portfolio total.
 //
-//	GET /api/v1/economics/portfolio?month=YYYY-MM&tz=
-//	GET /api/v1/economics/portfolio?period=YYYY&tz=
-//	GET /api/v1/economics/portfolio?from=YYYY-MM&to=YYYY-MM&tz=
+//	GET /api/v1/economics/portfolio?month=YYYY-MM&tz=&currency=
+//	GET /api/v1/economics/portfolio?period=YYYY&tz=&currency=
+//	GET /api/v1/economics/portfolio?from=YYYY-MM&to=YYYY-MM&tz=&currency=
 func (h *Handlers) economicsPortfolio(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -1285,9 +1412,37 @@ func (h *Handlers) economicsPortfolio(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	currency, err := parseCurrency(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	view, err := h.fxViewFor(r.Context(), currency, loc)
+	if err != nil {
+		h.writeFxViewError(w, "api_economics_portfolio", err)
+		return
+	}
+
 	q := portfolioQuery{Scope: scope, Label: label, Month: monthStr, Period: periodStr, From: fromStr, To: toStr}
 	visible := func(org string) bool { return h.visibleTo(r, org, auth.PermEconomicsRead) }
-	writeJSON(w, http.StatusOK, h.portfolioRollup(r.Context(), q, loc, visible))
+	resp := h.portfolioRollupIn(r.Context(), q, loc, visible, view)
+	resp.fxWindowJSON = fxWindowJSON{Currency: view.code()}
+	if first, last, ok := q.window(loc); ok {
+		resp.fxWindowJSON = fxWindowFor(view, first, last)
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// window is the civil-day span of the portfolio period.
+func (q portfolioQuery) window(loc *time.Location) (time.Time, time.Time, bool) {
+	switch {
+	case q.Scope == "month":
+		return monthsWindow(q.Month, q.Month, loc)
+	case q.From != "" || q.To != "":
+		return monthsWindow(q.From, q.To, loc)
+	default:
+		return monthsWindow(q.Period+"-01", q.Period+"-12", loc)
+	}
 }
 
 // portfolioQuery is one portfolio period: a month (Scope "month"), a
@@ -1301,6 +1456,14 @@ type portfolioQuery struct {
 // accepts. The economics route and the assistant's portfolio tool both
 // answer from it.
 func (h *Handlers) portfolioRollup(ctx context.Context, q portfolioQuery, loc *time.Location, visible func(org string) bool) EconomicsPortfolioResponse {
+	return h.portfolioRollupIn(ctx, q, loc, visible, fxView{currency: "UAH", loc: loc})
+}
+
+// portfolioRollupIn is portfolioRollup in the view's currency: each
+// object's days at their own rates, its CAPEX at the rates of its
+// versions' dates.
+func (h *Handlers) portfolioRollupIn(ctx context.Context, q portfolioQuery, loc *time.Location, visible func(org string) bool, view fxView) EconomicsPortfolioResponse {
+	svc := h.economicsIn(view)
 	scope, monthStr, periodStr, fromStr, toStr := q.Scope, q.Month, q.Period, q.From, q.To
 	resp := EconomicsPortfolioResponse{
 		Scope: scope,
@@ -1344,9 +1507,9 @@ func (h *Handlers) portfolioRollup(ctx context.Context, q portfolioQuery, loc *t
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			capex := h.portfolioCapexUah(ctx, org.ID, lastMonth)
+			capex := h.portfolioCapex(ctx, org.ID, lastMonth, view)
 			if scope == "month" {
-				t, err := h.economics.GetMonthTotals(ctx, org.ID, monthStr, loc.String())
+				t, err := svc.GetMonthTotals(ctx, org.ID, monthStr, loc.String())
 				if err != nil {
 					h.log.Warn("api_economics_portfolio_org", "organization_id", org.ID, "month", monthStr, "err", err)
 					return
@@ -1357,9 +1520,9 @@ func (h *Handlers) portfolioRollup(ctx context.Context, q portfolioQuery, loc *t
 			var y economics.StoredYear
 			var err error
 			if fromStr != "" || toStr != "" {
-				y, err = h.economics.GetPeriod(ctx, org.ID, fromStr, toStr, loc.String())
+				y, err = svc.GetPeriod(ctx, org.ID, fromStr, toStr, loc.String())
 			} else {
-				y, err = h.economics.GetYear(ctx, org.ID, periodStr, loc.String())
+				y, err = svc.GetYear(ctx, org.ID, periodStr, loc.String())
 			}
 			if err != nil {
 				h.log.Warn("api_economics_portfolio_org", "organization_id", org.ID, "period", periodStr, "err", err)
