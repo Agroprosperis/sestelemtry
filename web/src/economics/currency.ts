@@ -96,15 +96,31 @@ export function useMoney(): Money {
   return useContext(MoneyContext)
 }
 
+// RateOpts says which rate the visible figures were converted at: the
+// day's own (day) or the period's, today's before 12:00 that may still
+// move (provisional), and how many days had to borrow the nearest rate.
+export type RateOpts = { day?: boolean; carriedDays?: number; provisional?: boolean }
+
+function rateText(money: Money): string {
+  return `${rateFmt.format(money.rate)} грн за 1 ${money.symbol}`
+}
+
+// rateLabel is the rate written beside the currency switch, null in UAH;
+// rateNote is its longer hint.
+export function rateLabel(money: Money, opts: RateOpts = {}): { caption: string; value: string } | null {
+  if (money.currency === 'UAH') return null
+  let caption = 'Середньозважений курс'
+  if (opts.day) {
+    caption = (opts.carriedDays ?? 0) > 0 ? 'Найближчий курс' : opts.provisional ? 'Поточний курс' : 'Курс доби'
+  }
+  return { caption, value: rateText(money) }
+}
+
 // rateNote is the currency switch's hint: which rate the visible
 // figures were converted at, and how many days had to borrow one.
-// provisional marks today's rate before 12:00, which may still move.
-export function rateNote(
-  money: Money,
-  opts: { day?: boolean; carriedDays?: number; provisional?: boolean } = {},
-): string | null {
+export function rateNote(money: Money, opts: RateOpts = {}): string | null {
   if (money.currency === 'UAH') return null
-  const rate = `${rateFmt.format(money.rate)} грн за 1 ${money.symbol}`
+  const rate = rateText(money)
   let head = `Середньозважений курс за період (за EBITDA діб): ${rate} (АП Банк, на 12:00)`
   if (opts.day) {
     head = opts.provisional

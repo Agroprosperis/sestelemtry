@@ -6,7 +6,7 @@ import { useOrganizationParam } from '../dashboard/hooks/useOrganizationParam'
 import { ModeTopBar, type TopBarMenuItem } from '../shell/ModeTopBar'
 import { navigateView } from '../shell/navigation'
 import { dailyTotals } from './compute'
-import { makeMoney, MoneyContext, parseCurrency, rateNote, type Currency } from './currency'
+import { makeMoney, MoneyContext, parseCurrency, rateLabel, rateNote, type Currency } from './currency'
 import { EconomicsDamPricesModal } from './components/EconomicsDamPricesModal'
 import { EconomicsTariffsModal } from './components/EconomicsTariffsModal'
 import { EconomicsHeader, type EconomicsRange } from './components/EconomicsHeader'
@@ -443,8 +443,9 @@ export function EconomicsPage() {
   const fxRate = range === 'day' ? (data.loading ? null : data.fxRate) : (fxWindow?.fx_rate_avg ?? null)
   const carriedDays = range === 'day' ? (data.fxCarried ? 1 : 0) : (fxWindow?.fx_days_carried ?? 0)
   const money = useMemo(() => makeMoney(currency, fxRate ?? 1), [currency, fxRate])
-  const provisional = range === 'day' && data.fxProvisional
-  const currencyNote = fxRate ? rateNote(money, { day: range === 'day', carriedDays, provisional }) : null
+  const rateOpts = { day: range === 'day', carriedDays, provisional: range === 'day' && data.fxProvisional }
+  const currencyRate = fxRate ? rateLabel(money, rateOpts) : null
+  const currencyNote = fxRate ? rateNote(money, rateOpts) : null
 
   // The economics-specific admin actions live in the shell's «Сервіс»
   // menu (the DAM buttons left the header toolbar).
@@ -500,6 +501,7 @@ export function EconomicsPage() {
           asOf={asOf}
           currency={currency}
           onCurrencyChange={setCurrency}
+          rate={currencyRate}
           rateNote={currencyNote}
         />
 

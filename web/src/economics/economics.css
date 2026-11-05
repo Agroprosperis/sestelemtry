@@ -1828,6 +1828,29 @@
   font-size: 14px;
 }
 
+/* The rate behind the figures, just left of the switch that picked the
+   currency; its title is the longer hint. */
+.economics-rate {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-subtle);
+  white-space: nowrap;
+  cursor: help;
+}
+
+.economics-rate b {
+  color: var(--text);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.economics-rate + .economics-currency-switch {
+  margin-left: 0;
+}
+
 .economics-card {
   background: var(--bg-elevated);
   border: 1px solid var(--border);

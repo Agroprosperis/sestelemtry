@@ -4,7 +4,7 @@ import type { EconomicsMonthlyDayMargin } from '../../api'
 import { EconomicsDayTop } from '../components/EconomicsDayTop'
 import { EconomicsHeader } from '../components/EconomicsHeader'
 import { dailyTotals, type HourEconomicsRow } from '../compute'
-import { makeMoney, MoneyContext, parseCurrency, rateNote, UAH_MONEY } from '../currency'
+import { makeMoney, MoneyContext, parseCurrency, rateLabel, rateNote, UAH_MONEY } from '../currency'
 import { MonthlyHeatmap } from '../monthly/EconomicsMonthlyView'
 import { heatLegend, heatTier } from '../monthly/rollup'
 import { axisTickLabel, capexResolver, capexStepsInCurrency, moneyAxis } from '../payback'
@@ -53,6 +53,14 @@ describe('makeMoney', () => {
     )
     expect(rateNote(usd)).toContain('Середньозважений курс за період (за EBITDA діб): 41,50 грн за 1 $')
     expect(rateNote(usd, { carriedDays: 3 })).toContain('3 дн. без власного курсу')
+  })
+
+  it('labels the rate written beside the switch', () => {
+    expect(rateLabel(UAH_MONEY)).toBeNull()
+    expect(rateLabel(usd, { day: true })).toEqual({ caption: 'Курс доби', value: '41,50 грн за 1 $' })
+    expect(rateLabel(usd, { day: true, provisional: true })?.caption).toBe('Поточний курс')
+    expect(rateLabel(usd, { day: true, carriedDays: 1 })?.caption).toBe('Найближчий курс')
+    expect(rateLabel(usd, { carriedDays: 3 })?.caption).toBe('Середньозважений курс')
   })
 })
 
@@ -142,6 +150,27 @@ describe('EconomicsHeader currency switch', () => {
     expect(screen.getByRole('button', { name: 'Гривні' })).toHaveAttribute('aria-pressed', 'true')
     fireEvent.click(screen.getByRole('button', { name: 'Долари США' }))
     expect(onCurrencyChange).toHaveBeenCalledWith('USD')
+  })
+
+  it('writes the rate beside the switch, with the hint on it', () => {
+    render(
+      <EconomicsHeader
+        range="day"
+        onRangeChange={() => {}}
+        windowFrom=""
+        windowTo=""
+        onWindowChange={() => {}}
+        date="2026-11-05"
+        onDateChange={() => {}}
+        currency="USD"
+        onCurrencyChange={() => {}}
+        rate={rateLabel(usd, { day: true })}
+        rateNote={rateNote(usd, { day: true })}
+      />,
+    )
+    const value = screen.getByText('41,50 грн за 1 $')
+    expect(value.parentElement?.textContent).toBe('Курс доби41,50 грн за 1 $')
+    expect(value.parentElement).toHaveAttribute('title', expect.stringContaining('АП Банк, на 12:00'))
   })
 })
 

@@ -47,10 +47,12 @@ type Props = {
   // asOf is the «Дані станом на …» line (see economicsAsOfLabel). Null
   // hides it (no data yet, or a view that has no compute stamp).
   asOf?: string | null
-  // currency is what the page shows money in; rateNote (see rateNote in
-  // ../currency) is the switch's hint about the rate behind the figures.
+  // currency is what the page shows money in; rate (see rateLabel in
+  // ../currency) is the rate behind the figures, written beside the
+  // switch, and rateNote its hint.
   currency?: Currency
   onCurrencyChange?: (next: Currency) => void
+  rate?: { caption: string; value: string } | null
   rateNote?: string | null
 }
 
@@ -66,6 +68,7 @@ export function EconomicsHeader({
   asOf = null,
   currency = 'UAH',
   onCurrencyChange,
+  rate = null,
   rateNote = null,
 }: Props) {
   return (
@@ -124,6 +127,12 @@ export function EconomicsHeader({
             todaySide="end"
           />
         )}
+        {onCurrencyChange && rate ? (
+          <span className="economics-rate" title={rateNote ?? undefined}>
+            {rate.caption}
+            <b>{rate.value}</b>
+          </span>
+        ) : null}
         {onCurrencyChange ? (
           <div
             className="economics-range-switch economics-currency-switch"
