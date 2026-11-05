@@ -434,7 +434,7 @@ An administrator of every organization sets the service on the **Курси
 menu; `/api/v1/fx-settings`): the address (empty means the APGroup base),
 the login and the password. **Перевірити зʼєднання** asks for today's rates
 with the settings as typed. A save takes effect without a restart and wakes
-the sync; the first backfill takes about five minutes. As with the AI key,
+the sync; the first backfill takes about two minutes. As with the AI key,
 the password sits in its own column, is never returned by the API and only
 goes to the address it was saved with.
 

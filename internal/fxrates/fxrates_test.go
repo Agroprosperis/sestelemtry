@@ -2,6 +2,7 @@ package fxrates
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"net/http"
@@ -45,6 +46,18 @@ func TestClientReadsRatesWithBasicAuth(t *testing.T) {
 	// The form the live service was checked with.
 	if want := "date=2026-10-30T12:00:00&currencies=USD,EUR"; gotQuery != want {
 		t.Errorf("query = %q, want %q", gotQuery, want)
+	}
+}
+
+// The ERP's web server renegotiates TLS in the middle of a request; the
+// default client must go along with it, which Go only does on HTTP/1.1.
+func TestDefaultClientAcceptsRenegotiation(t *testing.T) {
+	tr, ok := defaultHTTPClient().Transport.(*http.Transport)
+	if !ok || tr.TLSClientConfig == nil || tr.TLSClientConfig.Renegotiation != tls.RenegotiateFreelyAsClient {
+		t.Fatal("the default client refuses TLS renegotiation")
+	}
+	if tr.ForceAttemptHTTP2 || tr.TLSNextProto == nil || len(tr.TLSNextProto) != 0 {
+		t.Error("the default client may switch to HTTP/2, where renegotiation does not exist")
 	}
 }
 

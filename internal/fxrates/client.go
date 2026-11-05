@@ -6,6 +6,7 @@ package fxrates
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -95,12 +96,24 @@ type Client struct {
 }
 
 // NewClient builds a client for the given settings. A nil httpClient
-// gets a 15 s timeout.
+// gets defaultHTTPClient.
 func NewClient(s Settings, password string, httpClient *http.Client) *Client {
 	if httpClient == nil {
-		httpClient = &http.Client{Timeout: 15 * time.Second}
+		httpClient = defaultHTTPClient()
 	}
 	return &Client{endpoint: s.Endpoint(), username: s.Username, password: password, http: httpClient}
+}
+
+// defaultHTTPClient talks to the ERP's web server, which renegotiates TLS
+// in the middle of a request (the way IIS looks for a client
+// certificate). Go refuses that unless told otherwise; renegotiation only
+// exists on HTTP/1.1, so HTTP/2 stays off.
+func defaultHTTPClient() *http.Client {
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	tr.TLSClientConfig = &tls.Config{Renegotiation: tls.RenegotiateFreelyAsClient}
+	tr.ForceAttemptHTTP2 = false
+	tr.TLSNextProto = map[string]func(string, *tls.Conn) http.RoundTripper{}
+	return &http.Client{Timeout: 15 * time.Second, Transport: tr}
 }
 
 type ratesResponse struct {
