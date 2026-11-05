@@ -3,6 +3,7 @@ package economics
 import (
 	"context"
 	"errors"
+	"math"
 	"time"
 )
 
@@ -154,6 +155,86 @@ func (s *Service) FirstDay(ctx context.Context, orgID string) (time.Time, bool, 
 		}
 	}
 	return time.Time{}, false, nil
+}
+
+// EbitdaWeights is the EBITDA of a span of stored days in UAH and as a
+// currency view converted it, day by day: the sums the span's rate is
+// read from. The portfolio adds its objects' weights up with Add.
+type EbitdaWeights struct {
+	uah, converted       float64
+	absUah, absConverted float64
+	minScale, maxScale   float64
+	days                 int
+}
+
+// EbitdaWeights weighs the stored days in [from, to] at the factors the
+// view's rollups convert them by. It reads the daily records only, never
+// the hours. A UAH service converts nothing and has no weights.
+func (s *Service) EbitdaWeights(ctx context.Context, orgID string, from, to time.Time) (EbitdaWeights, error) {
+	cb, ok := s.backend.(*currencyBackend)
+	if !ok {
+		return EbitdaWeights{}, nil
+	}
+	days, err := cb.inner.LoadDailyRange(ctx, orgID, from, to)
+	if err != nil {
+		return EbitdaWeights{}, err
+	}
+	var w EbitdaWeights
+	for _, d := range days {
+		w.add(d.Totals.Ebitda, cb.factor(dayInstant(d.Day)))
+	}
+	return w, nil
+}
+
+func (w *EbitdaWeights) add(uah, scale float64) {
+	if uah == 0 {
+		return
+	}
+	w.Add(EbitdaWeights{
+		uah: uah, converted: uah * scale,
+		absUah: math.Abs(uah), absConverted: math.Abs(uah) * scale,
+		minScale: scale, maxScale: scale, days: 1,
+	})
+}
+
+// Add folds o into w.
+func (w *EbitdaWeights) Add(o EbitdaWeights) {
+	if o.days == 0 {
+		return
+	}
+	if w.days == 0 {
+		*w = o
+		return
+	}
+	w.uah += o.uah
+	w.converted += o.converted
+	w.absUah += o.absUah
+	w.absConverted += o.absConverted
+	w.minScale = min(w.minScale, o.minScale)
+	w.maxScale = max(w.maxScale, o.maxScale)
+	w.days += o.days
+}
+
+// rateSlack lets a rate equal to an end of the days' range through
+// despite rounding.
+const rateSlack = 1e-9
+
+// Rate is the UAH per unit the weighed EBITDA came out at: Σ UAH over Σ
+// converted, so the UAH EBITDA divided by it is the converted one. Days
+// of both signs can push that ratio outside the days' own rates; then
+// each day weighs by the size of its EBITDA instead, which always lands
+// between them. ok is false without any EBITDA to weigh.
+func (w EbitdaWeights) Rate() (float64, bool) {
+	if w.days == 0 || w.absConverted <= 0 {
+		return 0, false
+	}
+	lo, hi := 1/w.maxScale, 1/w.minScale
+	if w.converted != 0 {
+		if r := w.uah / w.converted; r >= lo*(1-rateSlack) && r <= hi*(1+rateSlack) {
+			return r, true
+		}
+	}
+	return w.absUah / w.absConverted, true
 }
 
 // ScaleDay multiplies every amount of money and every price of one stored

@@ -646,16 +646,20 @@ export type EconomicsDailyResponse = {
   computed_at?: string
   // currency is what every *_uah field is in (UAH unless asked for);
   // fx_rate is the day's UAH per unit it was converted at, fx_carried
-  // marks a day that borrowed the nearest rate for lack of its own.
+  // marks a day that borrowed the nearest rate for lack of its own,
+  // fx_provisional today's own rate before 12:00, which the server still
+  // replaces with the current one.
   currency?: string
   fx_rate?: number
   fx_carried?: boolean
+  fx_provisional?: boolean
 }
 
 // FxWindow is how a period response reports its currency: the fields
 // keep their _uah names, every amount is in `currency`. fx_rate_avg is
-// the mean UAH per unit over the period's days, fx_days_carried counts
-// the days that borrowed the nearest rate.
+// the UAH per unit the period's EBITDA came out at, each day's rate
+// weighted by that day's EBITDA; fx_days_carried counts the days that
+// borrowed the nearest rate.
 export type FxWindow = {
   currency?: string
   fx_rate_avg?: number

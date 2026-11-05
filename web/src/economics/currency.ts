@@ -36,9 +36,10 @@ export type Money = {
   // inWords ends "…цей розрахунок у гривнях" in the currency's name.
   inWords: string
   // rate is UAH per unit the amounts on screen were converted at: the
-  // day's own rate on the day view, the period's mean elsewhere; 1 in
-  // UAH. fromUah converts by it what the page still holds in UAH — the
-  // tariffs and the colour thresholds tuned in hryvnias.
+  // day's own rate on the day view, elsewhere the period's rates weighted
+  // by each day's EBITDA; 1 in UAH. fromUah converts by it what the page
+  // still holds in UAH — the tariffs and the colour thresholds tuned in
+  // hryvnias.
   rate: number
   fromUah: (uah: number) => number
   // format / formatNumber write an amount with / without its unit. UAH
@@ -97,12 +98,20 @@ export function useMoney(): Money {
 
 // rateNote is the currency switch's hint: which rate the visible
 // figures were converted at, and how many days had to borrow one.
-export function rateNote(money: Money, opts: { day?: boolean; carriedDays?: number } = {}): string | null {
+// provisional marks today's rate before 12:00, which may still move.
+export function rateNote(
+  money: Money,
+  opts: { day?: boolean; carriedDays?: number; provisional?: boolean } = {},
+): string | null {
   if (money.currency === 'UAH') return null
-  const head = opts.day
-    ? `Курс доби: ${rateFmt.format(money.rate)} грн за 1 ${money.symbol}`
-    : `Середній курс за період: ${rateFmt.format(money.rate)} грн за 1 ${money.symbol}`
-  const parts = [`${head} (АП Банк, на 12:00). Кожна доба перерахована за своїм курсом.`]
+  const rate = `${rateFmt.format(money.rate)} грн за 1 ${money.symbol}`
+  let head = `Середньозважений курс за період (за EBITDA діб): ${rate} (АП Банк, на 12:00)`
+  if (opts.day) {
+    head = opts.provisional
+      ? `Поточний курс ERP: ${rate} (АП Банк, остаточний — о 12:00)`
+      : `Курс доби: ${rate} (АП Банк, на 12:00)`
+  }
+  const parts = [`${head}. Кожна доба перерахована за своїм курсом.`]
   const carried = opts.carriedDays ?? 0
   if (opts.day && carried > 0) parts.push('Власного курсу на цю дату ще немає — взято найближчий.')
   if (!opts.day && carried > 0) parts.push(`${carried} дн. без власного курсу — взято найближчий.`)

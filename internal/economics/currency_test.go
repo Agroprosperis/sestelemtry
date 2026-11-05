@@ -58,6 +58,70 @@ func TestInCurrencyConvertsEachDayAtItsOwnRate(t *testing.T) {
 	}
 }
 
+// A span's rate is its EBITDA in UAH over its EBITDA converted, so the UAH
+// EBITDA divided by it is what the converted month shows.
+func TestEbitdaWeightsRateMatchesTheConvertedMonth(t *testing.T) {
+	fb := &fakeBackend{saved: map[string]StoredDay{
+		"2026-06-01": savedDay("2026-06-01", 1000),
+		"2026-06-02": savedDay("2026-06-02", 2000),
+		"2026-06-03": savedDay("2026-06-03", 0),
+	}}
+	ctx := context.Background()
+	from, to := mustDate("2026-06-01"), mustDate("2026-06-30")
+	view := NewService(fb).InCurrency(perDayScale(map[string]float64{
+		"2026-06-01": 1.0 / 40, "2026-06-02": 1.0 / 50, "2026-06-03": 1.0 / 99,
+	}))
+	w, err := view.EbitdaWeights(ctx, "org", from, to)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rate, ok := w.Rate()
+	if !ok || !sameMoney(rate, 3000.0/65) {
+		t.Fatalf("rate = %v (ok %v), want 3000/65", rate, ok)
+	}
+	month, err := view.GetMonthTotals(ctx, "org", "2026-06", "UTC")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sameMoney(3000/rate, month.Ebitda) {
+		t.Errorf("UAH EBITDA over the rate = %v, the month shows %v", 3000/rate, month.Ebitda)
+	}
+
+	if w, err := NewService(fb).EbitdaWeights(ctx, "org", from, to); err != nil || w != (EbitdaWeights{}) {
+		t.Errorf("a UAH service weighed %+v (err %v)", w, err)
+	}
+}
+
+// Days of both signs would put Σ UAH / Σ converted outside the days' own
+// rates (here 100 / 7 ≈ 14.3); each day then weighs by its EBITDA's size.
+// Days of one sign, negative ones included, keep the exact ratio.
+func TestEbitdaWeightsRateStaysWithinTheDaysRates(t *testing.T) {
+	weigh := func(days ...[2]float64) EbitdaWeights {
+		var w EbitdaWeights
+		for _, d := range days {
+			w.add(d[0], 1/d[1])
+		}
+		return w
+	}
+	if r, ok := weigh([2]float64{1000, 40}, [2]float64{-900, 50}).Rate(); !ok || !sameMoney(r, 1900.0/43) {
+		t.Errorf("mixed signs: rate %v (ok %v), want 1900/43", r, ok)
+	}
+	if r, _ := weigh([2]float64{-1000, 40}, [2]float64{-2000, 50}).Rate(); !sameMoney(r, 3000.0/65) {
+		t.Errorf("negative days: rate %v, want 3000/65", r)
+	}
+	if _, ok := weigh([2]float64{0, 40}).Rate(); ok {
+		t.Error("a span without EBITDA has a rate")
+	}
+
+	// The portfolio adds objects up before it reads the rate.
+	total := weigh([2]float64{1000, 40})
+	total.Add(EbitdaWeights{})
+	total.Add(weigh([2]float64{2000, 50}))
+	if r, _ := total.Rate(); !sameMoney(r, 3000.0/65) {
+		t.Errorf("two objects: rate %v, want 3000/65", r)
+	}
+}
+
 // The opening balance before a year follows the same rule as the year.
 func TestInCurrencyOpensTheYearAtEachDaysRate(t *testing.T) {
 	fb := &fakeBackend{saved: map[string]StoredDay{

@@ -33,9 +33,11 @@ export type EconomicsData = {
   isFinal: boolean
   computedAt: string | null
   // fxRate is the day's UAH per unit the money was converted at (null in
-  // UAH); fxCarried marks a day that borrowed the nearest rate.
+  // UAH); fxCarried marks a day that borrowed the nearest rate,
+  // fxProvisional today's rate before 12:00, which may still move.
   fxRate: number | null
   fxCarried: boolean
+  fxProvisional: boolean
 }
 
 type Input = {
@@ -69,6 +71,7 @@ const EMPTY_DAY: DayValues = {
   computedAt: null,
   fxRate: null,
   fxCarried: false,
+  fxProvisional: false,
 }
 
 export function useEconomicsData(input: Input): EconomicsData {
@@ -105,6 +108,7 @@ export function useEconomicsData(input: Input): EconomicsData {
             computedAt: resp.computed_at ?? null,
             fxRate: resp.fx_rate && resp.fx_rate > 0 ? resp.fx_rate : null,
             fxCarried: resp.fx_carried ?? false,
+            fxProvisional: resp.fx_provisional ?? false,
           },
           error: null,
         })

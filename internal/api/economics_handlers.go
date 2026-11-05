@@ -82,24 +82,31 @@ type EconomicsDailyResponse struct {
 	// Currency is what every *_uah field above is in: UAH unless the
 	// request asked for ?currency=. FxRate is the day's UAH per unit it
 	// was converted at; FxCarried marks a day that borrowed the nearest
-	// rate for lack of its own.
-	Currency  string  `json:"currency"`
-	FxRate    float64 `json:"fx_rate,omitempty"`
-	FxCarried bool    `json:"fx_carried,omitempty"`
+	// rate for lack of its own, FxProvisional today's own rate before the
+	// rate hour, which the sync still replaces with the current one.
+	Currency      string  `json:"currency"`
+	FxRate        float64 `json:"fx_rate,omitempty"`
+	FxCarried     bool    `json:"fx_carried,omitempty"`
+	FxProvisional bool    `json:"fx_provisional,omitempty"`
 }
 
 // fxWindowJSON is how a period response reports its currency: the
 // fields keep their historical _uah names, every amount is in Currency.
-// FxRateAvg is the mean UAH per unit over the period's days, and
-// FxDaysCarried counts the days that borrowed the nearest rate.
+// FxRateAvg is the UAH per unit the period's EBITDA came out at, each
+// day's rate weighted by that day's EBITDA (the plain mean of the days'
+// rates while there is no EBITDA). FxDaysCarried counts the days that
+// borrowed the nearest rate.
 type fxWindowJSON struct {
 	Currency      string  `json:"currency"`
 	FxRateAvg     float64 `json:"fx_rate_avg,omitempty"`
 	FxDaysCarried int     `json:"fx_days_carried,omitempty"`
 }
 
-func fxWindowFor(view fxView, from, to time.Time) fxWindowJSON {
+func fxWindowFor(view fxView, from, to time.Time, weights economics.EbitdaWeights) fxWindowJSON {
 	avg, carried := view.window(from, to)
+	if rate, ok := weights.Rate(); ok {
+		avg = rate
+	}
 	return fxWindowJSON{Currency: view.code(), FxRateAvg: avg, FxDaysCarried: carried}
 }
 
@@ -224,6 +231,7 @@ func (h *Handlers) economicsDaily(w http.ResponseWriter, r *http.Request) {
 		rate, carried := view.rate(dayStart)
 		day = economics.ScaleDay(day, 1/rate)
 		resp.FxRate, resp.FxCarried = rate, carried
+		resp.FxProvisional = !carried && fxProvisional(dayStart, time.Now(), loc)
 	}
 	resp.Hours = make([]*EconomicsHour, len(day.Rows))
 	for i, row := range day.Rows {
@@ -931,11 +939,17 @@ func (h *Handlers) economicsMonthly(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	month, err := h.economicsIn(view).GetMonth(r.Context(), orgID, monthStr, loc.String())
+	svc := h.economicsIn(view)
+	month, err := svc.GetMonth(r.Context(), orgID, monthStr, loc.String())
 	if err != nil {
 		h.log.Error("api_economics_monthly", "organization_id", orgID, "month", monthStr, "tz", loc.String(), "err", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
+	}
+	monthEnd := monthStart.AddDate(0, 1, -1)
+	weights, err := svc.EbitdaWeights(r.Context(), orgID, monthStart, monthEnd)
+	if err != nil {
+		h.log.Warn("api_economics_monthly_fx", "organization_id", orgID, "month", monthStr, "err", err)
 	}
 
 	resp := EconomicsMonthlyResponse{
@@ -948,7 +962,7 @@ func (h *Handlers) economicsMonthly(w http.ResponseWriter, r *http.Request) {
 		HourlyMargin:   make([]EconomicsMonthlyDayMargin, 0, len(month.HourlyMargin)),
 		UzeCycles:      make([]EconomicsUzeCycle, 0, len(month.Cycles)),
 		ComputedAt:     computedAtJSON(month.ComputedAt),
-		fxWindowJSON:   fxWindowFor(view, monthStart, monthStart.AddDate(0, 1, -1)),
+		fxWindowJSON:   fxWindowFor(view, monthStart, monthEnd, weights),
 	}
 	for _, d := range month.Days {
 		resp.Days = append(resp.Days, monthlyDayToJSON(d))
@@ -1117,7 +1131,11 @@ func (h *Handlers) economicsAnnual(w http.ResponseWriter, r *http.Request) {
 		fxWindowJSON:        fxWindowJSON{Currency: view.code()},
 	}
 	if first, last, ok := monthsWindow(year.From, year.To, loc); ok {
-		resp.fxWindowJSON = fxWindowFor(view, first, last)
+		weights, werr := svc.EbitdaWeights(r.Context(), orgID, first, last)
+		if werr != nil {
+			h.log.Warn("api_economics_annual_fx", "organization_id", orgID, "from", year.From, "to", year.To, "err", werr)
+		}
+		resp.fxWindowJSON = fxWindowFor(view, first, last, weights)
 	}
 	for _, m := range year.Months {
 		resp.Months = append(resp.Months, EconomicsAnnualMonthRollup{
@@ -1425,10 +1443,10 @@ func (h *Handlers) economicsPortfolio(w http.ResponseWriter, r *http.Request) {
 
 	q := portfolioQuery{Scope: scope, Label: label, Month: monthStr, Period: periodStr, From: fromStr, To: toStr}
 	visible := func(org string) bool { return h.visibleTo(r, org, auth.PermEconomicsRead) }
-	resp := h.portfolioRollupIn(r.Context(), q, loc, visible, view)
+	resp, weights := h.portfolioRollupIn(r.Context(), q, loc, visible, view)
 	resp.fxWindowJSON = fxWindowJSON{Currency: view.code()}
 	if first, last, ok := q.window(loc); ok {
-		resp.fxWindowJSON = fxWindowFor(view, first, last)
+		resp.fxWindowJSON = fxWindowFor(view, first, last, weights)
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -1456,13 +1474,15 @@ type portfolioQuery struct {
 // accepts. The economics route and the assistant's portfolio tool both
 // answer from it.
 func (h *Handlers) portfolioRollup(ctx context.Context, q portfolioQuery, loc *time.Location, visible func(org string) bool) EconomicsPortfolioResponse {
-	return h.portfolioRollupIn(ctx, q, loc, visible, fxView{currency: "UAH", loc: loc})
+	resp, _ := h.portfolioRollupIn(ctx, q, loc, visible, fxView{currency: "UAH", loc: loc})
+	return resp
 }
 
 // portfolioRollupIn is portfolioRollup in the view's currency: each
 // object's days at their own rates, its CAPEX at the rates of its
-// versions' dates.
-func (h *Handlers) portfolioRollupIn(ctx context.Context, q portfolioQuery, loc *time.Location, visible func(org string) bool, view fxView) EconomicsPortfolioResponse {
+// versions' dates. It also returns the weights of the objects' EBITDA,
+// which the portfolio's rate is read from.
+func (h *Handlers) portfolioRollupIn(ctx context.Context, q portfolioQuery, loc *time.Location, visible func(org string) bool, view fxView) (EconomicsPortfolioResponse, economics.EbitdaWeights) {
 	svc := h.economicsIn(view)
 	scope, monthStr, periodStr, fromStr, toStr := q.Scope, q.Month, q.Period, q.From, q.To
 	resp := EconomicsPortfolioResponse{
@@ -1489,6 +1509,7 @@ func (h *Handlers) portfolioRollupIn(ctx context.Context, q portfolioQuery, loc 
 		hasData bool
 		year    economics.StoredYear
 		capex   float64
+		weights economics.EbitdaWeights
 	}
 	// ROCE divides by the capital standing at the end of the period.
 	lastMonth := periodStr + "-12"
@@ -1514,7 +1535,8 @@ func (h *Handlers) portfolioRollupIn(ctx context.Context, q portfolioQuery, loc 
 					h.log.Warn("api_economics_portfolio_org", "organization_id", org.ID, "month", monthStr, "err", err)
 					return
 				}
-				rollups[i] = siteRollup{totals: t, hasData: t.DaysWithData > 0, capex: capex}
+				weights := h.portfolioWeights(ctx, svc, org.ID, monthStr, monthStr, loc)
+				rollups[i] = siteRollup{totals: t, hasData: t.DaysWithData > 0, capex: capex, weights: weights}
 				return
 			}
 			var y economics.StoredYear
@@ -1528,12 +1550,14 @@ func (h *Handlers) portfolioRollupIn(ctx context.Context, q portfolioQuery, loc 
 				h.log.Warn("api_economics_portfolio_org", "organization_id", org.ID, "period", periodStr, "err", err)
 				return
 			}
-			rollups[i] = siteRollup{totals: y.Totals, hasData: y.MonthsWithData > 0, year: y, capex: capex}
+			weights := h.portfolioWeights(ctx, svc, org.ID, y.From, y.To, loc)
+			rollups[i] = siteRollup{totals: y.Totals, hasData: y.MonthsWithData > 0, year: y, capex: capex, weights: weights}
 		}()
 	}
 	wg.Wait()
 
 	var totals economics.MonthlyTotals
+	var weights economics.EbitdaWeights
 	var maxMonthsWithData int
 	var totalCapex float64
 	trendAcc := make(map[string]*EconomicsPortfolioTrendMonth)
@@ -1572,6 +1596,7 @@ func (h *Handlers) portfolioRollupIn(ctx context.Context, q portfolioQuery, loc 
 		}
 		resp.Sites = append(resp.Sites, site)
 		if hasData {
+			weights.Add(rollups[i].weights)
 			totals.Effect += t.Effect
 			totals.Ebitda += t.Ebitda
 			totals.EssNet += t.EssNet
@@ -1640,7 +1665,22 @@ func (h *Handlers) portfolioRollupIn(ctx context.Context, q portfolioQuery, loc 
 	for _, ym := range trendOrder {
 		resp.Trend = append(resp.Trend, *trendAcc[ym])
 	}
-	return resp
+	return resp, weights
+}
+
+// portfolioWeights weighs an object's EBITDA over the months [from, to]
+// for the portfolio's rate. A failed read leaves the object out of the
+// rate rather than failing the whole rollup.
+func (h *Handlers) portfolioWeights(ctx context.Context, svc *economics.Service, orgID, from, to string, loc *time.Location) economics.EbitdaWeights {
+	first, last, ok := monthsWindow(from, to, loc)
+	if !ok {
+		return economics.EbitdaWeights{}
+	}
+	weights, err := svc.EbitdaWeights(ctx, orgID, first, last)
+	if err != nil {
+		h.log.Warn("api_economics_portfolio_fx", "organization_id", orgID, "from", from, "to", to, "err", err)
+	}
+	return weights
 }
 
 // maxRecomputeRange caps the recompute span. Unlike the on-read

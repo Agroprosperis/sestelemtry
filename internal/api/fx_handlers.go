@@ -93,6 +93,14 @@ func (v fxView) scale(t time.Time) float64 {
 	return 1 / r
 }
 
+// fxProvisional reports whether the rate of the civil day containing day
+// may still move: the day is today in loc and its rate hour has not come,
+// so the sync keeps replacing the rate with the current one.
+func fxProvisional(day, now time.Time, loc *time.Location) bool {
+	n := now.In(loc)
+	return day.In(loc).Format("2006-01-02") == n.Format("2006-01-02") && n.Hour() < fxrates.RateHour
+}
+
 // window is the mean rate and the count of borrowed days over [from, to].
 func (v fxView) window(from, to time.Time) (float64, int) {
 	if v.uah() {

@@ -432,8 +432,9 @@ export function EconomicsPage() {
   )
 
   // The rate behind the visible money: the day's own on the day view,
-  // the period mean elsewhere. It scales what the page still holds in
-  // UAH (tariff components, colour thresholds) and feeds the switch hint.
+  // elsewhere the period's rates weighted by each day's EBITDA. It scales
+  // what the page still holds in UAH (tariff components, colour
+  // thresholds) and feeds the switch hint.
   let fxWindow: FxWindow | null = null
   if (range === 'month' && !monthly.loading) fxWindow = monthly.month
   if (range === 'year' && !annual.loading) fxWindow = annual.year
@@ -442,7 +443,8 @@ export function EconomicsPage() {
   const fxRate = range === 'day' ? (data.loading ? null : data.fxRate) : (fxWindow?.fx_rate_avg ?? null)
   const carriedDays = range === 'day' ? (data.fxCarried ? 1 : 0) : (fxWindow?.fx_days_carried ?? 0)
   const money = useMemo(() => makeMoney(currency, fxRate ?? 1), [currency, fxRate])
-  const currencyNote = fxRate ? rateNote(money, { day: range === 'day', carriedDays }) : null
+  const provisional = range === 'day' && data.fxProvisional
+  const currencyNote = fxRate ? rateNote(money, { day: range === 'day', carriedDays, provisional }) : null
 
   // The economics-specific admin actions live in the shell's «Сервіс»
   // menu (the DAM buttons left the header toolbar).

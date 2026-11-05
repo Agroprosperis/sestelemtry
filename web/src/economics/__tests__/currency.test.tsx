@@ -47,7 +47,11 @@ describe('makeMoney', () => {
 
   it('names the rate behind the figures', () => {
     expect(rateNote(UAH_MONEY)).toBeNull()
-    expect(rateNote(usd, { day: true })).toContain('Курс доби: 41,50 грн за 1 $')
+    expect(rateNote(usd, { day: true })).toContain('Курс доби: 41,50 грн за 1 $ (АП Банк, на 12:00)')
+    expect(rateNote(usd, { day: true, provisional: true })).toContain(
+      'Поточний курс ERP: 41,50 грн за 1 $ (АП Банк, остаточний — о 12:00)',
+    )
+    expect(rateNote(usd)).toContain('Середньозважений курс за період (за EBITDA діб): 41,50 грн за 1 $')
     expect(rateNote(usd, { carriedDays: 3 })).toContain('3 дн. без власного курсу')
   })
 })
