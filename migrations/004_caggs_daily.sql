@@ -53,4 +53,6 @@ SELECT add_continuous_aggregate_policy(
 CREATE INDEX IF NOT EXISTS telemetry_samples_daily_org_metric_day
     ON telemetry_samples_daily (organization_id, metric_key, day DESC);
 
-CALL refresh_continuous_aggregate('telemetry_samples_daily', NULL, NULL);
+-- Whole days only: refreshing today's bucket would freeze it at this
+-- instant and take it out of real-time aggregation until midnight.
+CALL refresh_continuous_aggregate('telemetry_samples_daily', NULL, date_trunc('day', now(), 'Europe/Kyiv'));

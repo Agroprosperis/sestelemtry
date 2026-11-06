@@ -120,11 +120,18 @@ func InitContinuousAggregates(ctx context.Context, pool *pgxpool.Pool) error {
 		return fmt.Errorf("storage: create cagg index: %w", err)
 	}
 
-	// Trigger the initial backfill (no-op on subsequent calls). NULL
-	// bounds let the policy walk the entire range; it blocks the
-	// collector startup briefly on the very first deploy / migration
-	// 003 → 004 upgrade.
-	if _, err := pool.Exec(ctx, `CALL refresh_continuous_aggregate($1, NULL, NULL)`, DailyCAGGView); err != nil {
+	// Backfill whatever the policy hasn't materialized yet — whole days
+	// only. Refreshing up to +infinity would also materialize today's
+	// bucket as it stands at startup and move the watermark past it:
+	// real-time aggregation then no longer covers today, the policy
+	// (which refreshes whole days only) leaves the bucket alone, and
+	// every read of today's totals stays at the startup values until
+	// after midnight. It blocks the collector startup briefly on the
+	// very first deploy / migration 003 → 004 upgrade.
+	if _, err := pool.Exec(ctx,
+		`CALL refresh_continuous_aggregate($1, NULL, date_trunc('day', now(), '`+caggDayBucketTZ+`'))`,
+		DailyCAGGView,
+	); err != nil {
 		return fmt.Errorf("storage: refresh cagg: %w", err)
 	}
 
