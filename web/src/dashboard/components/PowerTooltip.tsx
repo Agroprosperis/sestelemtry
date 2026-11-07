@@ -200,7 +200,7 @@ export function PowerTooltip({ active, label, payload }: Props) {
             className="energy-tooltip-dot"
             style={{ backgroundColor: aiLoadEntry?.color ?? '#d97706' }}
           />
-          <span className="energy-tooltip-name">ШІ: зсув навантаження</span>
+          <span className="energy-tooltip-name">Сценарій: робота в дешеві години</span>
           <span className="energy-tooltip-value">
             {formatChartNumber(Math.abs(aiLoadValue))} кВт
           </span>

@@ -176,7 +176,7 @@ describe('PowerTooltip AI recommendation', () => {
         ]}
       />,
     )
-    expect(screen.getByText('ШІ: зсув навантаження')).toBeInTheDocument()
+    expect(screen.getByText('Сценарій: робота в дешеві години')).toBeInTheDocument()
     expect(screen.getByText(/^65[.,]5\s*кВт$/)).toBeInTheDocument()
   })
 
@@ -188,6 +188,6 @@ describe('PowerTooltip AI recommendation', () => {
         payload={buildPayload({ active_ess_power_kw: 3.5, load_power_kw: -100 })}
       />,
     )
-    expect(screen.queryByText(/^ШІ:/)).toBeNull()
+    expect(screen.queryByText(/^(ШІ|Сценарій):/)).toBeNull()
   })
 })

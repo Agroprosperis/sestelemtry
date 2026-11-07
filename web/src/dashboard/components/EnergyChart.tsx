@@ -86,7 +86,7 @@ const AI_REASON_KEY = 'ai_reason_text'
 // apart from the УЗЕ plan, on the same day's flows, so the two never add
 // up to one balance of the plant.
 const AI_LOAD_KEY = 'ai_load_kw'
-const AI_LOAD_LABEL = 'Зсув навантаження ШІ (без УЗЕ)'
+const AI_LOAD_LABEL = 'Робота в дешеві години (сценарій)'
 
 // Day preset uses 5-minute buckets (288 per day); show every 12th tick so
 // labels land on the hour and the axis stays readable.
