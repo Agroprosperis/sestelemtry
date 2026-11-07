@@ -5,9 +5,12 @@ const BUCKETS_PER_HOUR = 12
 
 // AiPlanBucket is the recommendation projected onto one chart bucket.
 // `essKw` is present on every bucket of the hour so the line renders as a
-// step; `socPct` only on the hour's last bucket, because the plan's SOC is
-// the state at the END of the hour — the same hour-boundary convention the
-// monthly cycle chart uses.
+// step. The plan holds that one power for the whole hour, so the SOC moves
+// in a straight line from where the hour starts (the previous hour's end,
+// or the plan's start of day) to the end-of-hour state the plan reports:
+// `socPct` follows that line bucket by bucket, and the slope of each hour
+// is the hour's power. When the start is unknown only the closing bucket
+// carries the end-of-hour state.
 export type AiPlanBucket = {
   essKw: number
   socPct: number | null
@@ -29,25 +32,37 @@ export function aiPlanBuckets(plan: UzePlanResponse | null): Map<number, AiPlanB
   const out = new Map<number, AiPlanBucket>()
   if (!plan || !plan.available || !plan.hours?.length) return out
 
+  const socEnd = new Map<number, number>()
+  for (const hour of plan.hours) {
+    const h = Number(hour?.hour)
+    const soc = Number(hour?.soc_pct)
+    if (Number.isFinite(h) && h >= 0 && h <= 23 && Number.isFinite(soc)) socEnd.set(h, soc)
+  }
+  // soc_start_pct 0 means no start of day (a manifest plan carries none):
+  // the modelled band never goes below 10 %.
+  const dayStart = Number(plan.soc_start_pct)
+  const socStartOf = (h: number): number | null =>
+    h > 0 ? (socEnd.get(h - 1) ?? null) : Number.isFinite(dayStart) && dayStart > 0 ? dayStart : null
+
   for (const hour of plan.hours) {
     const h = Number(hour?.hour)
     if (!Number.isFinite(h) || h < 0 || h > 23) continue
     const essKw = Number(hour.recommended_ess_kw)
     if (!Number.isFinite(essKw)) continue
-    const socRaw = Number(hour.soc_pct)
-    const soc = Number.isFinite(socRaw) ? socRaw : null
+    const end = socEnd.get(h) ?? null
+    const start = end == null ? null : socStartOf(h)
     const loadRaw = Number(hour.recommended_load_kw)
     const load = hour.recommended_load_kw != null && Number.isFinite(loadRaw) ? loadRaw : null
     const effectRaw = Number(hour.effect_uah)
 
     const base = h * BUCKETS_PER_HOUR
     for (let i = 0; i < BUCKETS_PER_HOUR; i++) {
+      let socPct: number | null = null
+      if (end != null && start != null) socPct = start + ((end - start) * i) / BUCKETS_PER_HOUR
+      else if (end != null && i === BUCKETS_PER_HOUR - 1) socPct = end
       out.set(base + i, {
         essKw,
-        // SOC lands on the closing bucket only: anchoring it mid-hour
-        // would draw the battery arriving at its end-of-hour state
-        // before it had moved the energy to get there.
-        socPct: i === BUCKETS_PER_HOUR - 1 ? soc : null,
+        socPct,
         loadKw: load,
         action: hour.action,
         reasonText: hour.reason_text ?? '',

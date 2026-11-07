@@ -176,7 +176,7 @@ describe('PowerTooltip AI recommendation', () => {
         ]}
       />,
     )
-    expect(screen.getByText('ШІ: споживання')).toBeInTheDocument()
+    expect(screen.getByText('ШІ: зсув навантаження')).toBeInTheDocument()
     expect(screen.getByText(/^65[.,]5\s*кВт$/)).toBeInTheDocument()
   })
 

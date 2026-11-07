@@ -112,6 +112,31 @@ func TestBuildDayPlanArbitrage(t *testing.T) {
 	}
 }
 
+// TestBuildDayPlanSocFollowsThePower: each hour's SOC step is that hour's
+// planned energy through the round trip — charge × √rte stored, discharge
+// ÷ √rte drawn — on the 10–90 % band (capacity = 80 pp), so the chart's
+// SOC line and power steps can be checked against each other by hand.
+func TestBuildDayPlanSocFollowsThePower(t *testing.T) {
+	loc := time.UTC
+	plan := planFor(t, arbitrageDay(loc, true), loc)
+	eta := math.Sqrt(planParams.rte)
+
+	start := plan.SocStartPct
+	var moved float64
+	for _, h := range plan.Hours {
+		stored := (h.PvToEssKwh+h.GridToEssKwh)*eta - (h.EssToLoadKwh+h.EssToGridKwh)/eta
+		want := start + stored/planParams.capacityKwh*80
+		if math.Abs(h.SocPct-want) > 1e-6 {
+			t.Errorf("hour %d: SOC %.4f%%, want %.4f%% from %.2f kW", h.Hour, h.SocPct, want, h.RecommendedEssKw)
+		}
+		moved += math.Abs(h.RecommendedEssKw)
+		start = h.SocPct
+	}
+	if moved == 0 {
+		t.Fatal("the plan moved no energy, nothing was checked")
+	}
+}
+
 // TestBuildDayPlanEffectMatchesOptimizeDay: the per-hour effects the
 // tooltip shows must add up to the same optimum the monthly reserve is
 // computed from, or the daily and monthly pages would disagree.

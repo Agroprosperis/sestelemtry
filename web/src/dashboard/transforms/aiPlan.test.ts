@@ -60,8 +60,23 @@ describe('aiPlanBuckets', () => {
     expect(buckets.get(36)).toBeUndefined()
   })
 
-  it('places SOC on the hour boundary only', () => {
-    const buckets = aiPlanBuckets(plan([hour({ hour: 0, soc_pct: 88 })]))
+  // One power for the whole hour moves the SOC in a straight line: from the
+  // start of day (10 %) to 88 % through hour 0, then flat through a hold.
+  it('ramps SOC evenly through the hour from its start to its end', () => {
+    const buckets = aiPlanBuckets(
+      plan([hour({ hour: 0, recommended_ess_kw: -78, soc_pct: 88 }), hour({ hour: 1, soc_pct: 88 })]),
+    )
+
+    expect(buckets.get(0)?.socPct).toBe(10)
+    expect(buckets.get(6)?.socPct).toBe(49)
+    expect(buckets.get(11)?.socPct).toBeCloseTo(81.5)
+    for (let i = 12; i < 24; i++) {
+      expect(buckets.get(i)?.socPct).toBe(88)
+    }
+  })
+
+  it('keeps the end-of-hour SOC on the closing bucket when the start is unknown', () => {
+    const buckets = aiPlanBuckets(plan([hour({ hour: 0, soc_pct: 88 })], { soc_start_pct: 0 }))
 
     for (let i = 0; i < 11; i++) {
       expect(buckets.get(i)?.socPct).toBeNull()

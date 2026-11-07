@@ -95,8 +95,8 @@ export function PowerTooltip({ active, label, payload }: Props) {
       : aiEssValue < -IDLE_KW
         ? 'ШІ: заряд УЗЕ'
         : 'ШІ: утримувати'
-  // SOC lands on the hour's closing bucket only (it's the end-of-hour
-  // state), same as the PV forecast above.
+  // The planned SOC ramps through each hour; a bucket without it (an hour
+  // whose start is unknown) shows no row.
   const aiSocEntry = byKey.get(AI_SOC_KEY)
   const aiSocValue = Number(aiSocEntry?.value)
   const showAiSoc = Number.isFinite(aiSocValue)
@@ -200,7 +200,7 @@ export function PowerTooltip({ active, label, payload }: Props) {
             className="energy-tooltip-dot"
             style={{ backgroundColor: aiLoadEntry?.color ?? '#d97706' }}
           />
-          <span className="energy-tooltip-name">ШІ: споживання</span>
+          <span className="energy-tooltip-name">ШІ: зсув навантаження</span>
           <span className="energy-tooltip-value">
             {formatChartNumber(Math.abs(aiLoadValue))} кВт
           </span>

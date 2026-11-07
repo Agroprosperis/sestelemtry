@@ -82,9 +82,11 @@ const AI_SOC_KEY = 'ai_soc_pct'
 const AI_SOC_LABEL = 'SOC за планом ШІ'
 const AI_REASON_KEY = 'ai_reason_text'
 // The recommended elevator consumption, negated like load_power_kw so the
-// planned load sits next to the actual load sink below zero.
+// planned load sits next to the actual load sink below zero. It is solved
+// apart from the УЗЕ plan, on the same day's flows, so the two never add
+// up to one balance of the plant.
 const AI_LOAD_KEY = 'ai_load_kw'
-const AI_LOAD_LABEL = 'Споживання за планом ШІ'
+const AI_LOAD_LABEL = 'Зсув навантаження ШІ (без УЗЕ)'
 
 // Day preset uses 5-minute buckets (288 per day); show every 12th tick so
 // labels land on the hour and the axis stays readable.
@@ -217,8 +219,8 @@ export function EnergyChart({
         }
       }
       // The recommendation is hourly: the kW value repeats across the
-      // hour's 12 buckets (drawn as a step), the SOC only on the closing
-      // bucket since it is the end-of-hour state.
+      // hour's 12 buckets (drawn as a step), the SOC ramps through them
+      // from the hour's start to its end.
       const bucket = planBuckets.get(idx)
       if (bucket) {
         merged[AI_ESS_KEY] = bucket.essKw
@@ -495,10 +497,13 @@ export function EnergyChart({
                     isAnimationActive={false}
                   />
                 )}
+                {/* Straight, not smoothed: the SOC ramps evenly inside each
+                    hour, so its slope there is the hour's planned power. A
+                    spline would draw charging the plan never asked for. */}
                 {hasAiPlan && !hiddenSeries.has(AI_SOC_KEY) && (
                   <Line
                     yAxisId="soc"
-                    type="monotone"
+                    type="linear"
                     dataKey={AI_SOC_KEY}
                     name={aiSocLabel}
                     stroke={chrome.socPlan}
