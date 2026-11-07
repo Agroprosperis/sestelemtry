@@ -505,8 +505,8 @@ func (s *Service) GetDayPlan(ctx context.Context, orgID, date, tz string) (DayPl
 // not happened yet. Consumption is today's profile (an hour today has not
 // closed yet is taken from yesterday), generation is the supplied forecast
 // in kWh keyed by hour 0..23, and prices are that day's РДН. The starting
-// SOC is the latest known residual, not a projection to midnight. Fact is
-// not compared: there is no fact yet.
+// SOC is the BMS's latest reading (see latestSocKwh), not a projection to
+// midnight. Fact is not compared: there is no fact yet.
 //
 // Today's stored hours are only as complete as the last recompute of the
 // day (economics.today_interval apart), so an hour counts as closed when
@@ -555,6 +555,9 @@ func (s *Service) GetForecastDayPlan(ctx context.Context, orgID, date, tz string
 	ratings := schedule.EssRatingsFor(dayStart).withPowerFallback()
 
 	hours, haveLoad, havePV, havePrice, startKwh := syntheticForecastHours(dayStart, todayStart, measuredUntil.In(loc), today, yesterday, pvByHour, buildPriceMap(dam), tariffs)
+	if kwh, ok := s.latestSocKwh(ctx, orgID, now, tz, ratings.CapacityKwh); ok {
+		startKwh = &kwh
+	}
 	plan := DayPlan{OrganizationID: orgID, Date: date, Tz: loc.String(), CapacityKwh: ratings.CapacityKwh, PowerKw: ratings.PowerLimitKw}
 	if !haveLoad && !havePV && !havePrice {
 		return plan, nil
@@ -625,6 +628,41 @@ func syntheticForecastHours(dayStart, todayStart, measuredUntil time.Time, today
 		start = latestForecastResidual(byYesterday)
 	}
 	return hours, haveLoad, havePV, havePrice, start
+}
+
+// forecastSocLookback is how old a BMS reading the day-ahead plan may start
+// from; with none that recent it falls back to the stored residual.
+const forecastSocLookback = 6 * time.Hour
+
+// latestSocKwh is the usable energy of the last BMS SOC reading in
+// [now − forecastSocLookback, now], on the 10–90 % band the stored
+// residual is anchored to. The residual itself is a poor start: it meets
+// the BMS only at midnight and then rolls the metered flows forward with
+// no losses, so by evening it can be hundreds of kWh off the pack.
+func (s *Service) latestSocKwh(ctx context.Context, orgID string, now time.Time, tz string, capacityKwh float64) (float64, bool) {
+	if capacityKwh <= 0 {
+		return 0, false
+	}
+	from := now.Add(-forecastSocLookback)
+	points, err := s.backend.Timeseries(ctx, orgID, []string{socMetricKey}, from, now, "5 minutes", tz, "last")
+	if err != nil {
+		return 0, false
+	}
+	var at time.Time
+	var soc float64
+	found := false
+	for _, p := range points {
+		if p.MetricKey != socMetricKey || p.Time.Before(from) || p.Time.After(now) || math.IsNaN(p.Value) || math.IsInf(p.Value, 0) {
+			continue
+		}
+		if !found || p.Time.After(at) {
+			at, soc, found = p.Time, p.Value, true
+		}
+	}
+	if !found {
+		return 0, false
+	}
+	return usableKwhFromSOC(soc, capacityKwh), true
 }
 
 func indexForecastHours(recs []HourlyRecord, loc *time.Location) map[int]HourlyRecord {

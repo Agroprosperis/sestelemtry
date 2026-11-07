@@ -673,6 +673,46 @@ func TestGetForecastDayPlanChargesCheapAndDischargesDear(t *testing.T) {
 	}
 }
 
+// The day-ahead plan starts from what the BMS read last, not from the
+// stored residual, which drifts off the pack over the day; with no reading
+// in the last six hours the residual stands.
+func TestGetForecastDayPlanStartsFromTheLatestSoc(t *testing.T) {
+	b, loc := newKyivBackend(t)
+	tariffs := flatTariffs
+	tariffs.EssCapacityKwh = 100
+	tariffs.EssPowerLimitKw = 50
+	b.schedule = Schedule{{EffectiveFrom: mustDate("1970-01-01"), Tariffs: tariffs}}
+	tomorrow := time.Date(2026, 4, 2, 0, 0, 0, 0, loc)
+	today := tomorrow.AddDate(0, 0, -1)
+	rem := 80.0 // 74 % on the 10–90 % band
+	for h := 0; h < 24; h++ {
+		b.hourly = append(b.hourly, HourlyRecord{HourStart: today.Add(time.Duration(h) * time.Hour), GridToLoad: 40, EssRemainingKwhStart: &rem})
+	}
+	now := today.Add(21 * time.Hour)
+	startPct := func(soc []Point) float64 {
+		t.Helper()
+		b.soc = soc
+		plan, err := NewService(b).GetForecastDayPlan(context.Background(), "ze", "2026-04-02", loc.String(), now, nil)
+		if err != nil || !plan.Available {
+			t.Fatalf("GetForecastDayPlan: available %v, err %v", plan.Available, err)
+		}
+		return plan.SocStartPct
+	}
+
+	if got := startPct([]Point{
+		{Time: now.Add(-2 * time.Hour), MetricKey: socMetricKey, Value: 60},
+		{Time: now.Add(-5 * time.Minute), MetricKey: socMetricKey, Value: 20},
+	}); math.Abs(got-20) > 1 {
+		t.Errorf("start %.1f %%, want the BMS's latest 20 %%", got)
+	}
+	if got := startPct(nil); math.Abs(got-74) > 1 {
+		t.Errorf("start %.1f %% without a reading, want the residual's 74 %%", got)
+	}
+	if got := startPct([]Point{{Time: now.Add(-7 * time.Hour), MetricKey: socMetricKey, Value: 20}}); math.Abs(got-74) > 1 {
+		t.Errorf("start %.1f %% from a 7-hour-old reading, want the residual's 74 %%", got)
+	}
+}
+
 func TestForecastHoursUseYesterdayUntilTodayCloses(t *testing.T) {
 	loc := time.FixedZone("Kyiv", 3*3600)
 	tomorrow := time.Date(2026, 4, 2, 0, 0, 0, 0, loc)
