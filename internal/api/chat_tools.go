@@ -48,15 +48,18 @@ func (h *Handlers) chatTools(r *http.Request, org string, loc *time.Location) []
 	full := can(auth.PermAnalyticsFull)
 	p := principalFrom(r.Context())
 	windowOK := func(window time.Duration) bool { return h.auth == nil || h.windowAllowed(p, org, window) }
+	// An economic group has no telemetry, weather or passport of its own:
+	// on one the assistant reads economics, the plan and the market.
+	_, group := h.economicGroup(org)
 
 	var tools []aichat.Tool
-	if can(auth.PermAnalyticsDay) {
+	if can(auth.PermAnalyticsDay) && !group {
 		tools = append(tools, h.chatCurrentTool(org, loc), h.chatEnergyTool(org, loc, windowOK), h.chatWeatherTool(org, loc))
 	}
 	if money || full {
-		tools = append(tools, h.chatPvPlanTool(org, loc, can(auth.PermAnalyticsDay), windowOK))
+		tools = append(tools, h.chatPvPlanTool(org, loc, can(auth.PermAnalyticsDay) && !group, windowOK))
 	}
-	if can(auth.PermService) {
+	if can(auth.PermService) && !group {
 		tools = append(tools, h.chatPassportTool(org, loc))
 	}
 	if h.economics != nil {
@@ -80,11 +83,12 @@ func (h *Handlers) chatTools(r *http.Request, org string, loc *time.Location) []
 	return append(tools, h.chatDAMTool())
 }
 
-// portfolioObjects counts the real objects visible accepts.
+// portfolioObjects counts the real objects of the portfolio visible
+// accepts, an economic group once.
 func (h *Handlers) portfolioObjects(visible func(org string) bool) int {
 	n := 0
-	for _, o := range h.organizations {
-		if o.ID != demoOrgID && visible(o.ID) {
+	for _, o := range h.economicObjects(visible) {
+		if o.ID != demoOrgID {
 			n++
 		}
 	}

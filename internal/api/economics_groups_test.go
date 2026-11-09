@@ -3,7 +3,9 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
+	"slices"
 	"testing"
 	"time"
 
@@ -178,6 +180,25 @@ func TestEconomicGroupNeedsEveryMember(t *testing.T) {
 	}
 	if err := json.Unmarshal(serve(router, http.MethodGet, "/api/v1/auth/me", half, nil).Body.Bytes(), &me); err != nil || len(me.Groups) != 0 {
 		t.Errorf("de alone sees groups %+v (err %v)", me.Groups, err)
+	}
+}
+
+// The assistant opened on a group reads its economics, its plan and the
+// market: a group has no telemetry, weather or passport of its own, and
+// it goes by its own name.
+func TestEconomicGroupAssistantReadsEconomics(t *testing.T) {
+	h := groupHandlers(t, &mockStore{})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/chat?organization_id=de-all", nil)
+	var names []string
+	for _, tool := range h.chatTools(req, "de-all", time.UTC) {
+		names = append(names, tool.Name)
+	}
+	want := []string{"pv_plan", "economics_day", "economics_month", "economics_year", "uze_plan", "portfolio", "dam_prices"}
+	if !slices.Equal(names, want) {
+		t.Errorf("tools on a group = %v, want %v", names, want)
+	}
+	if got := h.organizationName("de-all"); got != "Дубов'язівський елеватор" {
+		t.Errorf("group name for the assistant = %q", got)
 	}
 }
 

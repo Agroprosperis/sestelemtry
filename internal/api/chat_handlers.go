@@ -424,9 +424,12 @@ func (h *Handlers) aiChat(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// organizationName is the configured display name of org, or "" for
-// an organization missing from the config.
+// organizationName is the configured display name of org (an economic
+// group's own name), or "" for an organization missing from the config.
 func (h *Handlers) organizationName(org string) string {
+	if g, ok := h.economicGroup(org); ok {
+		return g.Name
+	}
 	for _, o := range h.organizations {
 		if o.ID == org {
 			return o.Name
