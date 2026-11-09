@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/nesh/sestelemetry/internal/auth"
+	"github.com/nesh/sestelemetry/internal/economics"
 )
 
 // accessKind says how a route establishes who is calling.
@@ -312,8 +313,17 @@ func (h *Handlers) windowAllowed(p *auth.Principal, org string, window time.Dura
 }
 
 // canOnOrg reports whether p holds any of perms on org. Edge shadow
-// telemetry ("<site>" + EDGE_ORG_SUFFIX) is covered by the site's grant.
+// telemetry ("<site>" + EDGE_ORG_SUFFIX) is covered by the site's grant,
+// an economic group by a grant on every member.
 func (h *Handlers) canOnOrg(p *auth.Principal, org string, perms ...auth.Permission) bool {
+	if g, ok := economics.GroupByID(org); ok {
+		for _, m := range g.Members {
+			if !h.canOnOrg(p, m.ID, perms...) {
+				return false
+			}
+		}
+		return len(g.Members) > 0
+	}
 	site, shadow := h.edgeShadowSite(org)
 	for _, perm := range perms {
 		if p.Can(perm, org) || (shadow && p.Can(perm, site)) {

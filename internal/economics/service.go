@@ -122,6 +122,9 @@ func (s *Service) SetFreshTodayWindow(d time.Duration) {
 // ComputeDay computes economics for one calendar day, persists the
 // result, and returns it. date is YYYY-MM-DD in tz.
 func (s *Service) ComputeDay(ctx context.Context, orgID, date, tz string) (StoredDay, error) {
+	if _, ok := s.groupOf(orgID); ok {
+		return StoredDay{}, errGroupView
+	}
 	loc, err := loadLocation(tz)
 	if err != nil {
 		return StoredDay{}, err
@@ -227,6 +230,9 @@ func (s *Service) ComputeDay(ctx context.Context, orgID, date, tz string) (Store
 // is served from cache; a missing or non-final day is recomputed (and
 // persisted) on read.
 func (s *Service) GetDay(ctx context.Context, orgID, date, tz string) (StoredDay, error) {
+	if g, ok := s.groupOf(orgID); ok {
+		return s.groupDay(ctx, g, date, tz)
+	}
 	loc, err := loadLocation(tz)
 	if err != nil {
 		return StoredDay{}, err
@@ -284,6 +290,9 @@ const maxRangeErrors = 50
 // the inclusive [from, to] date span. onProgress (optional) is invoked
 // after each day. Honors ctx cancellation between days.
 func (s *Service) RecomputeRange(ctx context.Context, orgID, from, to, tz string, onProgress func(done, total int, label string)) (RangeResult, error) {
+	if g, ok := s.groupOf(orgID); ok {
+		return s.recomputeGroup(ctx, g, from, to, tz, onProgress)
+	}
 	loc, err := loadLocation(tz)
 	if err != nil {
 		return RangeResult{}, err

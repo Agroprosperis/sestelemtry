@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nesh/sestelemetry/internal/economics"
 	"github.com/nesh/sestelemetry/internal/pvplan"
 )
 
@@ -85,6 +86,9 @@ func pvPlanLastForecastDay(loc *time.Location) time.Time {
 // The model's day totals are its day-ahead plans. The n8n totals are
 // cached in pv_plan_daily and filled from the flow on the way.
 func (h *Handlers) pvPlanTotal(ctx context.Context, orgID string, from, to time.Time, loc *time.Location, lastDay time.Time) PvPlanSummaryResponse {
+	if g, ok := h.economicGroup(orgID); ok {
+		return h.groupPvPlanTotal(ctx, g, from, to, loc, lastDay)
+	}
 	resp := PvPlanSummaryResponse{OrganizationID: orgID}
 	st, err := h.pvPlanStation(ctx, orgID)
 	if err != nil {
@@ -92,30 +96,18 @@ func (h *Handlers) pvPlanTotal(ctx context.Context, orgID string, from, to time.
 		return resp
 	}
 	resp.Source = string(st.Source)
-	code, n8nOK := pvplan.ElevatorCodeFor(orgID)
-	switch st.Source {
-	case pvplan.SourceModel:
-		resp.Supported = st.Modelled()
-	default:
-		resp.Supported = n8nOK
-	}
+	resp.Supported = pvPlanSupported(orgID, st)
 	if !resp.Supported {
 		return resp
 	}
 
-	fromDay, toDay, _ := civilDaySpan(from, to, loc)
-	if fromDay.IsZero() {
+	// A period lying wholly past lastDay has no plan to report, and
+	// nothing about that is an error.
+	fromDay, toDay, ok := pvPlanSpan(from, to, loc, lastDay)
+	if !ok {
 		return resp
 	}
 	today := startOfCivilDay(time.Now(), loc)
-	if toDay.After(lastDay) {
-		toDay = lastDay
-	}
-	if toDay.Before(fromDay) {
-		// The whole period lies past lastDay: no plan to report, and
-		// nothing about that is an error.
-		return resp
-	}
 	resp.FromDay = fromDay.Format("2006-01-02")
 	resp.ToDay = toDay.Format("2006-01-02")
 	resp.DaysExpected = int(civilDayIndex(toDay)-civilDayIndex(fromDay)) + 1
@@ -124,26 +116,9 @@ func (h *Handlers) pvPlanTotal(ctx context.Context, orgID string, from, to time.
 	}
 
 	start := time.Now()
-	var (
-		plans   map[string]PvPlanDayTotal
-		fetched int
-	)
-	if st.Source == pvplan.SourceModel {
-		rows, err := h.store.PvPlanModelDays(ctx, orgID, fromDay, toDay)
-		if err != nil {
-			h.log.Warn("api_pv_plan_summary_model", "organization_id", orgID, "err", err)
-			return resp
-		}
-		plans = make(map[string]PvPlanDayTotal, len(rows))
-		for _, row := range rows {
-			plans[pvPlanKey(row.Day)] = row
-		}
-	} else {
-		var ok bool
-		plans, fetched, ok = h.n8nPlanDays(ctx, orgID, code, fromDay, toDay, today)
-		if !ok {
-			return resp
-		}
+	plans, fetched, ok := h.pvPlanDays(ctx, orgID, st, fromDay, toDay, today)
+	if !ok {
+		return resp
 	}
 
 	for day := fromDay; !day.After(toDay); day = day.AddDate(0, 0, 1) {
@@ -161,6 +136,113 @@ func (h *Handlers) pvPlanTotal(ctx context.Context, orgID string, from, to time.
 		"fetched_days", fetched,
 		"duration_ms", time.Since(start).Milliseconds(),
 	)
+	return resp
+}
+
+// pvPlanSupported reports whether st's source can plan orgID at all.
+func pvPlanSupported(orgID string, st pvplan.Station) bool {
+	if st.Source == pvplan.SourceModel {
+		return st.Modelled()
+	}
+	_, ok := pvplan.ElevatorCodeFor(orgID)
+	return ok
+}
+
+// pvPlanSpan is the civil days [from, to) touches, up to lastDay; ok is
+// false when none is left.
+func pvPlanSpan(from, to time.Time, loc *time.Location, lastDay time.Time) (time.Time, time.Time, bool) {
+	fromDay, toDay, _ := civilDaySpan(from, to, loc)
+	if fromDay.IsZero() {
+		return time.Time{}, time.Time{}, false
+	}
+	if toDay.After(lastDay) {
+		toDay = lastDay
+	}
+	if toDay.Before(fromDay) {
+		return time.Time{}, time.Time{}, false
+	}
+	return fromDay, toDay, true
+}
+
+// pvPlanDays is the plan of the civil days [fromDay, toDay] from the source
+// st selects, keyed by day; fetched counts the days asked of the n8n flow.
+// ok is false when the days could not be read.
+func (h *Handlers) pvPlanDays(ctx context.Context, orgID string, st pvplan.Station, fromDay, toDay, today time.Time) (map[string]PvPlanDayTotal, int, bool) {
+	if st.Source == pvplan.SourceModel {
+		rows, err := h.store.PvPlanModelDays(ctx, orgID, fromDay, toDay)
+		if err != nil {
+			h.log.Warn("api_pv_plan_summary_model", "organization_id", orgID, "err", err)
+			return nil, 0, false
+		}
+		plans := make(map[string]PvPlanDayTotal, len(rows))
+		for _, row := range rows {
+			plans[pvPlanKey(row.Day)] = row
+		}
+		return plans, 0, true
+	}
+	code, _ := pvplan.ElevatorCodeFor(orgID)
+	return h.n8nPlanDays(ctx, orgID, code, fromDay, toDay, today)
+}
+
+// groupPvPlanTotal is pvPlanTotal for an economic group: each day its
+// members' plans added up, except that a member whose planes describe the
+// whole elevator that day plans the group alone — its sister carries a
+// copy of the same planes, and adding both would count the elevator twice.
+func (h *Handlers) groupPvPlanTotal(ctx context.Context, g economics.Group, from, to time.Time, loc *time.Location, lastDay time.Time) PvPlanSummaryResponse {
+	resp := PvPlanSummaryResponse{OrganizationID: g.ID}
+	fromDay, toDay, inSpan := pvPlanSpan(from, to, loc, lastDay)
+	today := startOfCivilDay(time.Now(), loc)
+	type memberPlan struct {
+		st    pvplan.Station
+		plans map[string]PvPlanDayTotal
+	}
+	members := map[string]memberPlan{}
+	for _, id := range g.MemberIDs() {
+		st, err := h.pvPlanStation(ctx, id)
+		if err != nil {
+			h.log.Warn("api_pv_plan_summary_station", "organization_id", id, "err", err)
+			continue
+		}
+		if !pvPlanSupported(id, st) {
+			continue
+		}
+		if resp.Source == "" {
+			resp.Source = string(st.Source)
+		}
+		resp.Supported = true
+		if !inSpan {
+			continue
+		}
+		if plans, _, ok := h.pvPlanDays(ctx, id, st, fromDay, toDay, today); ok {
+			members[id] = memberPlan{st: st, plans: plans}
+		}
+	}
+	if !resp.Supported || !inSpan {
+		return resp
+	}
+	resp.FromDay = fromDay.Format("2006-01-02")
+	resp.ToDay = toDay.Format("2006-01-02")
+	resp.DaysExpected = int(civilDayIndex(toDay)-civilDayIndex(fromDay)) + 1
+	for day := fromDay; !day.After(toDay); day = day.AddDate(0, 0, 1) {
+		key := pvPlanKey(day)
+		var kwh float64
+		for _, id := range g.ActiveOn(key) {
+			m, ok := members[id]
+			if !ok {
+				continue
+			}
+			planned := m.plans[key].PlannedKwh
+			if !m.st.CoversDay(key) {
+				kwh = planned
+				break
+			}
+			kwh += planned
+		}
+		if kwh > 0 {
+			resp.PlannedKwh += kwh
+			resp.DaysCovered++
+		}
+	}
 	return resp
 }
 

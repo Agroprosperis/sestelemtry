@@ -36,6 +36,10 @@ export type AuthGrant = { role: Role; organization_id: string | null }
 
 export type AuthOrganization = { id: string; name: string; permissions: Permission[] }
 
+// AuthGroup is an economic group whose every member the user may act on,
+// with what they may do on all of them.
+export type AuthGroup = AuthOrganization & { members: string[] }
+
 export type AuthMe = {
   user: { id: number; email: string; name: string }
   global_admin: boolean
@@ -43,6 +47,7 @@ export type AuthMe = {
   must_change_password: boolean
   grants: AuthGrant[]
   organizations: AuthOrganization[]
+  groups?: AuthGroup[]
   // The API has the AI assistant configured (POST /api/v1/chat).
   ai_chat?: boolean
 }
@@ -114,7 +119,9 @@ export function shadowSite(organizationID: string): string | null {
 }
 
 export function accessFor(me: AuthMe): Access {
-  const byOrg = new Map(me.organizations.map((o) => [o.id, new Set(o.permissions)]))
+  // A group answers like an object for can(); organizations() keeps to
+  // the sites, so pages that list them never offer a group.
+  const byOrg = new Map([...me.organizations, ...(me.groups ?? [])].map((o) => [o.id, new Set(o.permissions)]))
   const can = (permission: Permission, organizationID: string) => {
     const site = shadowSite(organizationID)
     return (

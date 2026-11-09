@@ -1,6 +1,7 @@
-import { useEffect, useId } from 'react'
+import { useEffect, useId, useState } from 'react'
+import { formatOrganizationLabel } from '../../dashboard/config'
 import { DEFAULT_TARIFFS, type Tariffs } from '../tariffs'
-import type { OrgTariffsStatus } from '../useOrgTariffs'
+import { useOrgTariffs, type OrgTariffsStatus } from '../useOrgTariffs'
 import { TariffScheduleEditor } from './TariffScheduleEditor'
 
 type Props = {
@@ -12,6 +13,10 @@ type Props = {
   tariffsError: string | null
   readOnly?: boolean
   onClose: () => void
+  // members switches the form between the sites of an economic group,
+  // organizationID being the one shown.
+  members?: readonly string[]
+  onMemberChange?: (next: string) => void
 }
 
 function statusLabel(status: OrgTariffsStatus): string {
@@ -149,6 +154,8 @@ export function EconomicsTariffsModal({
   tariffsError,
   readOnly = false,
   onClose,
+  members,
+  onMemberChange,
 }: Props) {
   const update = (patch: Partial<Tariffs>) => onTariffsChange({ ...tariffs, ...patch })
   const statusText = statusLabel(tariffsStatus)
@@ -188,6 +195,28 @@ export function EconomicsTariffsModal({
             ×
           </button>
         </header>
+
+        {members && onMemberChange && (
+          <div className="economics-tariffs-members">
+            <div className="economics-range-switch" role="group" aria-label="Об'єкт тарифів">
+              {members.map((id) => (
+                <button
+                  key={id}
+                  type="button"
+                  className={id === organizationID ? 'active' : ''}
+                  aria-pressed={id === organizationID}
+                  onClick={() => onMemberChange(id)}
+                >
+                  {formatOrganizationLabel(id)}
+                </button>
+              ))}
+            </div>
+            <p>
+              Тарифи вводяться для кожного об'єкта окремо. Елеватор разом бере ціни першого, а ємність і
+              потужність УЗЕ та CAPEX додає.
+            </p>
+          </div>
+        )}
 
         <fieldset className="economics-tariffs-body" disabled={readOnly}>
           <div className="economics-tariffs-grid">
@@ -323,5 +352,37 @@ export function EconomicsTariffsModal({
         </fieldset>
       </div>
     </div>
+  )
+}
+
+// GroupTariffsModal edits an economic group's tariffs where they live: on
+// one member at a time. The group's own tariffs are only ever its members'
+// combined, and the API refuses to write them.
+export function GroupTariffsModal({
+  members,
+  date,
+  readOnly = false,
+  onClose,
+}: {
+  members: readonly string[]
+  date: string
+  readOnly?: boolean
+  onClose: () => void
+}) {
+  const [member, setMember] = useState(members[0])
+  const { tariffs, status, error, setTariffs } = useOrgTariffs(member)
+  return (
+    <EconomicsTariffsModal
+      organizationID={member}
+      date={date}
+      tariffs={tariffs}
+      onTariffsChange={setTariffs}
+      tariffsStatus={status}
+      tariffsError={error}
+      readOnly={readOnly}
+      onClose={onClose}
+      members={members}
+      onMemberChange={setMember}
+    />
   )
 }

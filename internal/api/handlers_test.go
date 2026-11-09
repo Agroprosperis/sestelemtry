@@ -98,6 +98,8 @@ type mockStore struct {
 	tariffsPutErr    error
 	tariffsLastOrg   string
 	tariffsLastWrite OrgTariffs
+	// tariffVersions is each organization's tariff schedule.
+	tariffVersions map[string][]TariffScheduleVersion
 
 	dataRangeMin time.Time
 	dataRangeMax time.Time
@@ -352,8 +354,8 @@ func (m *mockStore) UpsertOrgTariffs(_ context.Context, organizationID string, t
 	return nil
 }
 
-func (m *mockStore) GetTariffScheduleVersions(_ context.Context, _ string) ([]TariffScheduleVersion, error) {
-	return nil, nil
+func (m *mockStore) GetTariffScheduleVersions(_ context.Context, organizationID string) ([]TariffScheduleVersion, error) {
+	return m.tariffVersions[organizationID], nil
 }
 
 func (m *mockStore) UpsertTariffScheduleVersion(_ context.Context, _ string, _ time.Time, _ OrgTariffs) error {

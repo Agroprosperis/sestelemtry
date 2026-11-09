@@ -355,6 +355,8 @@ type OrganizationInfo struct {
 // pagination / metadata fields later without breaking clients.
 type OrganizationsResponse struct {
 	Organizations []OrganizationInfo `json:"organizations"`
+	// Groups are the economic groups the caller covers every member of.
+	Groups []OrganizationGroupInfo `json:"groups"`
 }
 
 // EnergyFlowDevice describes one physical Modbus device's role

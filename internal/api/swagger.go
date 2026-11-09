@@ -2068,6 +2068,26 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/OrganizationInfo"
+        groups:
+          type: array
+          description: >-
+            Economic groups: one object of the economics routes made of
+            several organizations (de-all = de + de1 from 2026-09-24).
+            Listed when the caller covers every member; the economics
+            routes accept the group's id as organization_id.
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+                example: de-all
+              name:
+                type: string
+              members:
+                type: array
+                items:
+                  type: string
+                example: [de, de1]
       required: [organizations]
     CurrentMetric:
       type: object

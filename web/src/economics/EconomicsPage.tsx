@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { refreshDAMPrices, type FxWindow } from '../api'
 import { useAccess } from '../auth/authContext'
-import { energyFloorFor } from '../dashboard/config'
+import { ECONOMIC_GROUPS, energyFloorFor } from '../dashboard/config'
 import { useOrganizationParam } from '../dashboard/hooks/useOrganizationParam'
 import { ModeTopBar, type TopBarMenuItem } from '../shell/ModeTopBar'
 import { navigateView } from '../shell/navigation'
 import { dailyTotals } from './compute'
 import { makeMoney, MoneyContext, parseCurrency, rateLabel, rateNote, type Currency } from './currency'
 import { EconomicsDamPricesModal } from './components/EconomicsDamPricesModal'
-import { EconomicsTariffsModal } from './components/EconomicsTariffsModal'
+import { EconomicsTariffsModal, GroupTariffsModal } from './components/EconomicsTariffsModal'
 import { EconomicsHeader, type EconomicsRange } from './components/EconomicsHeader'
 import { economicsAsOfLabel } from './components/formatAsOf'
 import { EconomicsDayTop } from './components/EconomicsDayTop'
@@ -198,7 +198,10 @@ function updateUrl(date: string, range: EconomicsRange, windowFrom: string, wind
 }
 
 export function EconomicsPage() {
-  const { organizationID, options, change: onOrganizationChange } = useOrganizationParam('economics.read')
+  const { organizationID, options, change: onOrganizationChange } = useOrganizationParam('economics.read', {
+    groups: true,
+  })
+  const groupMembers = ECONOMIC_GROUPS[organizationID]
   const access = useAccess()
   const canEdit = access.can('economics.write', organizationID)
   const [date, setDate] = useState<string>(readDateFromUrl)
@@ -505,7 +508,10 @@ export function EconomicsPage() {
           rateNote={currencyNote}
         />
 
-        {tariffsOpen && (
+        {tariffsOpen && groupMembers && (
+          <GroupTariffsModal members={groupMembers} date={date} readOnly={!canEdit} onClose={closeTariffs} />
+        )}
+        {tariffsOpen && !groupMembers && (
           <EconomicsTariffsModal
             organizationID={organizationID}
             date={date}

@@ -411,8 +411,9 @@ func main() {
 	// Server-side economics: compute + persist + read-through serve.
 	// The backend adapter reuses the energy-flow allocator and the
 	// store queries; the service owns the date-versioned tariffs and
-	// the economics_hourly / economics_daily tables.
-	econSvc := economics.NewService(api.NewEconomicsBackend(svc, store))
+	// the economics_hourly / economics_daily tables. Groups (one
+	// elevator over several loggers) read as their members added up.
+	econSvc := economics.NewService(economics.InGroups(api.NewEconomicsBackend(svc, store), economics.Groups))
 	// When the economics-recompute daemon is enabled it keeps the
 	// current (non-final) day warm in economics_daily. Let the
 	// read-through serve that cache while it is fresh (2x the daemon's

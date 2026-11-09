@@ -460,13 +460,14 @@ func (h *Handlers) organizationsList(w http.ResponseWriter, r *http.Request) {
 	}
 	// Always an explicit array so JSON consumers can iterate without a
 	// nil-check.
+	covers := func(org string) bool { return h.auth == nil || principalFrom(r.Context()).Covers(org) }
 	orgs := make([]OrganizationInfo, 0, len(h.organizations))
 	for _, o := range h.organizations {
-		if h.auth == nil || principalFrom(r.Context()).Covers(o.ID) {
+		if covers(o.ID) {
 			orgs = append(orgs, o)
 		}
 	}
-	writeJSON(w, http.StatusOK, OrganizationsResponse{Organizations: orgs})
+	writeJSON(w, http.StatusOK, OrganizationsResponse{Organizations: orgs, Groups: h.groupInfos(covers)})
 }
 
 // registers serves the static metric_key → Modbus register map used
@@ -1550,7 +1551,7 @@ func (h *Handlers) getOrganizationTariffs(w http.ResponseWriter, r *http.Request
 		http.Error(w, "organization_id is required", http.StatusBadRequest)
 		return
 	}
-	tariffs, ok, err := h.store.GetOrgTariffs(r.Context(), orgID)
+	tariffs, ok, err := h.orgTariffs(r.Context(), orgID)
 	if err != nil {
 		h.log.Error("api_org_tariffs_get", "organization_id", orgID, "err", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
@@ -1567,6 +1568,9 @@ func (h *Handlers) putOrganizationTariffs(w http.ResponseWriter, r *http.Request
 	orgID := strings.TrimSpace(r.URL.Query().Get("organization_id"))
 	if orgID == "" {
 		http.Error(w, "organization_id is required", http.StatusBadRequest)
+		return
+	}
+	if rejectGroupWrite(w, orgID) {
 		return
 	}
 	// Cap the body so a malicious caller can't hand us a multi-MB

@@ -44,6 +44,13 @@ type authOrganization struct {
 	Permissions []auth.Permission `json:"permissions"`
 }
 
+type authGroup struct {
+	ID          string            `json:"id"`
+	Name        string            `json:"name"`
+	Members     []string          `json:"members"`
+	Permissions []auth.Permission `json:"permissions"`
+}
+
 // AuthMeResponse is what the dashboard boots from: who is signed in and
 // what they may do on each configured organization.
 type AuthMeResponse struct {
@@ -54,6 +61,9 @@ type AuthMeResponse struct {
 	MustChangePassword bool               `json:"must_change_password"`
 	Grants             []grantJSON        `json:"grants"`
 	Organizations      []authOrganization `json:"organizations"`
+	// Groups are the economic groups whose every member p may act on,
+	// with what p may do on all of them.
+	Groups []authGroup `json:"groups"`
 	// AIChat: the assistant is switched on with a key and a model
 	// (POST /api/v1/chat).
 	AIChat bool `json:"ai_chat"`
@@ -87,6 +97,12 @@ func (h *Handlers) meResponse(ctx context.Context, p *auth.Principal) AuthMeResp
 			continue
 		}
 		resp.Organizations = append(resp.Organizations, authOrganization{ID: org.ID, Name: org.Name, Permissions: perms})
+	}
+	resp.Groups = []authGroup{}
+	for _, g := range h.economicGroups() {
+		if perms := groupPermissions(p, g); len(perms) > 0 {
+			resp.Groups = append(resp.Groups, authGroup{ID: g.ID, Name: g.Name, Members: g.MemberIDs(), Permissions: perms})
+		}
 	}
 	return resp
 }

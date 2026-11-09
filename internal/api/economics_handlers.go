@@ -1343,13 +1343,13 @@ func resolveCapex(versions []TariffScheduleVersion, formCapexUah float64, lastMo
 // read leaves the object without ROCE rather than failing the whole
 // rollup.
 func (h *Handlers) portfolioCapex(ctx context.Context, orgID, lastMonth string, view fxView) float64 {
-	versions, err := h.store.GetTariffScheduleVersions(ctx, orgID)
+	versions, err := h.tariffVersions(ctx, orgID)
 	if err != nil {
 		h.log.Warn("api_economics_portfolio_capex", "organization_id", orgID, "err", err)
 		versions = nil
 	}
 	var form float64
-	if t, ok, err := h.store.GetOrgTariffs(ctx, orgID); err == nil && ok {
+	if t, ok, err := h.orgTariffs(ctx, orgID); err == nil && ok {
 		form = t.CapexUah
 	}
 	if view.uah() {
@@ -1493,10 +1493,11 @@ func (h *Handlers) portfolioRollupIn(ctx context.Context, q portfolioQuery, loc 
 	}
 	// The demo organization carries synthetic data and is not a real
 	// site, so it must never appear in the portfolio rollup. The rollup
-	// covers only the organizations the caller may read economics of.
+	// covers only the objects the caller may read economics of, an
+	// economic group in place of its members.
 	orgs := make([]OrganizationInfo, 0, len(h.organizations))
-	for _, org := range h.organizations {
-		if org.ID != demoOrgID && visible(org.ID) {
+	for _, org := range h.economicObjects(visible) {
+		if org.ID != demoOrgID {
 			orgs = append(orgs, org)
 		}
 	}
@@ -1812,7 +1813,7 @@ func (h *Handlers) economicsDataRange(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	minTS, maxTS, ok, err := h.store.TelemetryDataRange(r.Context(), orgID)
+	minTS, maxTS, ok, err := h.telemetryDataRange(r.Context(), orgID)
 	if err != nil {
 		h.log.Error("api_economics_data_range", "organization_id", orgID, "err", err)
 		http.Error(w, "failed to read telemetry data range", http.StatusInternalServerError)
@@ -1861,7 +1862,7 @@ func (h *Handlers) getTariffSchedule(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "organization_id is required", http.StatusBadRequest)
 		return
 	}
-	versions, err := h.store.GetTariffScheduleVersions(r.Context(), orgID)
+	versions, err := h.tariffVersions(r.Context(), orgID)
 	if err != nil {
 		h.log.Error("api_tariff_schedule_get", "organization_id", orgID, "err", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
@@ -1877,6 +1878,9 @@ func (h *Handlers) putTariffSchedule(w http.ResponseWriter, r *http.Request) {
 	orgID := strings.TrimSpace(r.URL.Query().Get("organization_id"))
 	if orgID == "" {
 		http.Error(w, "organization_id is required", http.StatusBadRequest)
+		return
+	}
+	if rejectGroupWrite(w, orgID) {
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, 64*1024)
@@ -1910,6 +1914,9 @@ func (h *Handlers) deleteTariffSchedule(w http.ResponseWriter, r *http.Request) 
 	orgID := strings.TrimSpace(r.URL.Query().Get("organization_id"))
 	if orgID == "" {
 		http.Error(w, "organization_id is required", http.StatusBadRequest)
+		return
+	}
+	if rejectGroupWrite(w, orgID) {
 		return
 	}
 	effStr := strings.TrimSpace(r.URL.Query().Get("effective_from"))

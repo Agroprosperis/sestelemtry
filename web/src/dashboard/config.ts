@@ -22,7 +22,18 @@ export const ORGANIZATION_DISPLAY_NAMES: Record<string, string> = {
   pde: 'Поділля елеватор',
   de1: "Дубов'язівський Т1",
   de: "Дубов'язівський Т2",
+  'de-all': "Дубов'язівський елеватор",
   sm: 'Сорочанський мірошник',
+}
+
+// ECONOMIC_GROUPS are the objects the economics pages report over several
+// sites (economics.Groups on the server). Дубовʼязівський is `de` alone
+// until Т1 got its own logger on 2026-09-24 and `de` + `de1` after, so its
+// economics, payback and portfolio row only make sense together. A group
+// stands in for its members in economics only; every other page shows the
+// sites one by one.
+export const ECONOMIC_GROUPS: Record<string, readonly string[]> = {
+  'de-all': ['de', 'de1'],
 }
 
 // formatOrganizationLabel returns the user-facing name for an
@@ -77,6 +88,7 @@ export const ORGANIZATION_OPERATION_START: Record<string, Date> = {
   sm: new Date(2026, 2, 30),
   de: new Date(2026, 3, 14),
   de1: new Date(2026, 8, 24),
+  'de-all': new Date(2026, 3, 14),
 }
 
 // energyFloorFor returns the earliest local instant the dashboard may
