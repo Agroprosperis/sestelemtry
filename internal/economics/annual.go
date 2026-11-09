@@ -106,25 +106,19 @@ func AggregatePeriod(
 	hourly []HourlyRecord,
 	ratingsFor func(day time.Time) EssRatings,
 ) StoredYear {
-	year, _ := aggregatePeriod(context.Background(), periodLabel, monthKeys, loc, days, hourly, ratingsFor)
+	year, _ := aggregatePeriod(context.Background(), periodLabel, monthKeys, loc, recordRollup(loc, days, hourly, ratingsFor, true))
 	return year
 }
 
-// aggregatePeriod is AggregatePeriod that stops solving months once ctx is
-// done (the client went away) and returns ctx's error instead.
-func aggregatePeriod(
-	ctx context.Context,
-	periodLabel string,
-	monthKeys []string,
-	loc *time.Location,
-	days []DailyRecord,
-	hourly []HourlyRecord,
-	ratingsFor func(day time.Time) EssRatings,
-) (StoredYear, error) {
-	// Bucket the daily / hourly records by calendar month so each month
-	// is aggregated against exactly its own slice.
-	daysByMonth := make(map[string][]DailyRecord, len(monthKeys))
-	hourlyByMonth := make(map[string][]HourlyRecord, len(monthKeys))
+// monthRollup rolls one month of a period up; monthKey is YYYY-MM. The
+// period solves its months concurrently, so it must be safe for that.
+type monthRollup func(monthKey string) StoredMonth
+
+// recordRollup rolls each month up from its own slice of the records;
+// optimum is aggregateMonth's.
+func recordRollup(loc *time.Location, days []DailyRecord, hourly []HourlyRecord, ratingsFor func(day time.Time) EssRatings, optimum bool) monthRollup {
+	daysByMonth := make(map[string][]DailyRecord)
+	hourlyByMonth := make(map[string][]HourlyRecord)
 	for _, d := range days {
 		k := d.Day.In(loc).Format("2006-01")
 		daysByMonth[k] = append(daysByMonth[k], d)
@@ -133,7 +127,21 @@ func aggregatePeriod(
 		k := h.HourStart.In(loc).Format("2006-01")
 		hourlyByMonth[k] = append(hourlyByMonth[k], h)
 	}
+	return func(k string) StoredMonth {
+		return aggregateMonth(k, loc, daysByMonth[k], hourlyByMonth[k], ratingsFor, false, optimum)
+	}
+}
 
+// aggregatePeriod is AggregatePeriod over any month rollup that stops
+// solving months once ctx is done (the client went away) and returns
+// ctx's error instead.
+func aggregatePeriod(
+	ctx context.Context,
+	periodLabel string,
+	monthKeys []string,
+	loc *time.Location,
+	rollup monthRollup,
+) (StoredYear, error) {
 	type periodMonth struct {
 		key         string
 		year, month int
@@ -158,8 +166,7 @@ func aggregatePeriod(
 		go func() {
 			defer wg.Done()
 			for i := range next {
-				k := valid[i].key
-				rollups[i] = aggregateMonthTotals(k, loc, daysByMonth[k], hourlyByMonth[k], ratingsFor)
+				rollups[i] = rollup(valid[i].key)
 			}
 		}()
 	}
@@ -434,7 +441,11 @@ func (s *Service) GetYear(ctx context.Context, orgID, period, tz string) (Stored
 
 	schedule, _ := s.backend.TariffSchedule(ctx, orgID)
 
-	result, err := aggregatePeriod(ctx, period, calendarYearKeys(year), loc, daily, hourly, schedule.EssRatingsFor)
+	rollup, err := s.periodRollup(ctx, orgID, firstDay, lastDay, nextYear, daily, hourly, schedule)
+	if err != nil {
+		return StoredYear{}, err
+	}
+	result, err := aggregatePeriod(ctx, period, calendarYearKeys(year), loc, rollup)
 	if err != nil {
 		return StoredYear{}, err
 	}
@@ -445,6 +456,35 @@ func (s *Service) GetYear(ctx context.Context, orgID, period, tz string) (Stored
 		result.PriorMonthsWithData = priorMonths
 	}
 	return result, nil
+}
+
+// periodRollup is how orgID's period over the days from..to (hours up to
+// next) rolls its months up: from its records, or for a group from the
+// merged records with each month's УЗЕ solved per member.
+func (s *Service) periodRollup(ctx context.Context, orgID string, from, to, next time.Time, daily []DailyRecord, hourly []HourlyRecord, schedule Schedule) (monthRollup, error) {
+	loc := from.Location()
+	g, ok := s.groupOf(orgID)
+	if !ok {
+		return recordRollup(loc, daily, hourly, schedule.EssRatingsFor, true), nil
+	}
+	members, err := s.memberRecords(ctx, g, from, to, next)
+	if err != nil {
+		return nil, err
+	}
+	merged := recordRollup(loc, daily, hourly, schedule.EssRatingsFor, false)
+	own := make([]monthRollup, len(members))
+	for i, m := range members {
+		own[i] = recordRollup(loc, m.daily, m.hourly, m.ratingsFor, true)
+	}
+	return func(k string) StoredMonth {
+		month := merged(k)
+		parts := make([]memberMonth, len(members))
+		for i, m := range members {
+			parts[i] = memberMonth{member: m.member, month: own[i](k)}
+		}
+		withMemberUze(&month, g, parts)
+		return month
+	}, nil
 }
 
 // maxWindowMonths bounds a sliding-period request so a malformed or
@@ -494,8 +534,12 @@ func (s *Service) GetPeriod(ctx context.Context, orgID, from, to, tz string) (St
 
 	schedule, _ := s.backend.TariffSchedule(ctx, orgID)
 
+	rollup, err := s.periodRollup(ctx, orgID, firstDay, lastDay, nextAfter, daily, hourly, schedule)
+	if err != nil {
+		return StoredYear{}, err
+	}
 	label := keys[0] + ".." + keys[len(keys)-1]
-	result, err := aggregatePeriod(ctx, label, keys, loc, daily, hourly, schedule.EssRatingsFor)
+	result, err := aggregatePeriod(ctx, label, keys, loc, rollup)
 	if err != nil {
 		return StoredYear{}, err
 	}

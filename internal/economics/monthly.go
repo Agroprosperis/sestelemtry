@@ -291,6 +291,9 @@ type AnomalyHour struct {
 	PeakKw         float64
 	ChargedKwh     float64
 	DischargedKwh  float64
+	// Site is the group member's label the hour is of; empty outside a
+	// group of several sites.
+	Site string
 }
 
 // essAnomalyTolerance is how far above the nominal per-interval power limit
@@ -604,7 +607,7 @@ func pvEssArbitrageGain(
 // telemetry, rate its throughput against the old capacity, and solve the
 // optimum inside an envelope the plant has outgrown.
 func AggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly []HourlyRecord, ratingsFor func(day time.Time) EssRatings) StoredMonth {
-	return aggregateMonth(month, loc, days, hourly, ratingsFor, true)
+	return aggregateMonth(month, loc, days, hourly, ratingsFor, true, true)
 }
 
 // aggregateMonthTotals is AggregateMonth for the multi-month rollups,
@@ -612,10 +615,14 @@ func AggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly
 // ladder and the cycle charts (most of a month's DP work, and none of it
 // feeds Totals) and returns no Days or Cycles.
 func aggregateMonthTotals(month string, loc *time.Location, days []DailyRecord, hourly []HourlyRecord, ratingsFor func(day time.Time) EssRatings) StoredMonth {
-	return aggregateMonth(month, loc, days, hourly, ratingsFor, false)
+	return aggregateMonth(month, loc, days, hourly, ratingsFor, false, true)
 }
 
-func aggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly []HourlyRecord, ratingsFor func(day time.Time) EssRatings, perDay bool) StoredMonth {
+// aggregateMonth with optimum false runs no УЗЕ optimizer, for a caller
+// that solves the battery elsewhere: the month's optimum is its fact, and
+// the days' УЗЕ fields, the export potential with the battery and the
+// cycle charts are left empty.
+func aggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly []HourlyRecord, ratingsFor func(day time.Time) EssRatings, perDay, optimum bool) StoredMonth {
 	ratingsOn := dailyRatings(loc, ratingsFor)
 	badHours, dq := detectEssAnomalies(hourly, loc, ratingsOn, essAnomalyTolerance)
 	dq.TotalDays = len(days)
@@ -788,7 +795,10 @@ func aggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly
 		t := d.Totals
 		key := d.Day.In(loc).Format("2006-01-02")
 		ratings := ratingsOn(d.Day)
-		params := paramsFor(ratings)
+		var params optimumParams
+		if optimum {
+			params = paramsFor(ratings)
+		}
 
 		totals.BaselineCost += t.BaselineCost
 		totals.ActualCost += t.ActualCost
@@ -863,11 +873,14 @@ func aggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly
 		}
 		monthFact += factEssNet
 		if perDay {
-			opt := computeOptimum(do, factEssNet, params)
-			totals.EssPvMissedKwh += opt.pvMissed
-			if opt.reserve >= cycleReserveThresholdUah*moneyScaleOf(d.MoneyScale) {
-				if cyc, ok := buildCycle(key, do, factEssNet, params, ratings.CapacityKwh, ratings.PowerLimitKw, loc); ok {
-					uzeCycles = append(uzeCycles, cyc)
+			var opt optimumResult
+			if optimum {
+				opt = computeOptimum(do, factEssNet, params)
+				totals.EssPvMissedKwh += opt.pvMissed
+				if opt.reserve >= cycleReserveThresholdUah*moneyScaleOf(d.MoneyScale) {
+					if cyc, ok := buildCycle(key, do, factEssNet, params, ratings.CapacityKwh, ratings.PowerLimitKw, loc); ok {
+						uzeCycles = append(uzeCycles, cyc)
+					}
 				}
 			}
 			outDays = append(outDays, MonthDay{
@@ -889,7 +902,7 @@ func aggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly
 			totals.EssPvMissedKwh += math.Max(0, do.pvSurplus-do.actualPv)
 		}
 		dayKeys = append(dayKeys, key)
-		if do != nil {
+		if optimum && do != nil {
 			if curRun == nil || ratings != curRatings {
 				curRun = &socRun{params: params, startKwh: params.socMinKwh}
 				if do.haveStart {
@@ -913,7 +926,9 @@ func aggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly
 	}
 	totals.RdnMaxUahPerKwh = monthRdnMax
 	totals.PvExportPotential = pvExportPotential
-	totals.PvEssExportPotential = pvExportPotential + pvEssArbitrageGain(hourly, ratingsOn, paramsFor)
+	if optimum {
+		totals.PvEssExportPotential = pvExportPotential + pvEssArbitrageGain(hourly, ratingsOn, paramsFor)
+	}
 	totals.RevenueTotal = totals.RevenuePvExport + totals.RevenuePvSelf + totals.RevenueEssExport + totals.RevenueEssSelf
 	totals.ExpenseTotal = totals.ExpenseGridCharge
 	totals.Ebitda = totals.RevenueTotal - totals.ExpenseTotal
@@ -1029,7 +1044,21 @@ func (s *Service) getMonth(ctx context.Context, orgID, month, tz string, perDay 
 
 	schedule, _ := s.backend.TariffSchedule(ctx, orgID)
 
-	result := aggregateMonth(month, loc, daily, hourly, schedule.EssRatingsFor, perDay)
+	var result StoredMonth
+	if g, ok := s.groupOf(orgID); ok {
+		members, err := s.memberRecords(ctx, g, firstDay, lastDay, nextMonth)
+		if err != nil {
+			return StoredMonth{}, err
+		}
+		result = aggregateMonth(month, loc, daily, hourly, schedule.EssRatingsFor, perDay, false)
+		parts := make([]memberMonth, len(members))
+		for i, m := range members {
+			parts[i] = memberMonth{member: m.member, month: aggregateMonth(month, loc, m.daily, m.hourly, m.ratingsFor, perDay, true)}
+		}
+		withMemberUze(&result, g, parts)
+	} else {
+		result = aggregateMonth(month, loc, daily, hourly, schedule.EssRatingsFor, perDay, true)
+	}
 	result.OrganizationID = orgID
 	result.ComputedAt = newestComputedAt(daily)
 	return result, nil

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"strings"
 	"testing"
 	"time"
 )
@@ -62,7 +63,7 @@ func (m orgBackends) SumEbitdaBefore(ctx context.Context, org string, before tim
 
 // testGroup is `a` throughout and `b` from 2026-09-24, the shape of
 // Дубовʼязівський's Т2 and Т1.
-var testGroup = Group{ID: "g", Name: "Елеватор", Members: []GroupMember{{ID: "a"}, {ID: "b", From: "2026-09-24"}}}
+var testGroup = Group{ID: "g", Name: "Елеватор", Members: []GroupMember{{ID: "a", Label: "A"}, {ID: "b", Label: "B", From: "2026-09-24"}}}
 
 func groupService(b orgBackends) *Service {
 	return NewService(InGroups(b, []Group{testGroup}))
@@ -190,5 +191,167 @@ func TestGroupRecomputeRunsEachMemberFromItJoins(t *testing.T) {
 	}
 	if _, ok := b.of("b").saved["2026-09-23"]; ok {
 		t.Error("b was recomputed before it joined")
+	}
+}
+
+// twoBatteries is testGroup over September and October 2026: a has the PV
+// and a 516 kWh pack; b a 344 kWh pack and no PV, and a 100 kW limit its
+// evening discharges overrun, so some of its hours are anomalous.
+func twoBatteries() orgBackends {
+	days, hourly, _ := synthPeriod(time.UTC, time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC), 2)
+	saved := make(map[string]StoredDay, len(days))
+	for _, d := range days {
+		saved[d.Day.Format("2006-01-02")] = StoredDay{Day: d.Day, Totals: d.Totals, IsFinal: true}
+	}
+	noPv := make([]HourlyRecord, len(hourly))
+	for i, h := range hourly {
+		h.EssCharged -= h.PVToEss
+		h.PV, h.PVToLoad, h.PVToGrid, h.PVToEss = 0, 0, 0, 0
+		if h.EssRemainingKwhStart != nil {
+			soc := *h.EssRemainingKwhStart * 344 / 516
+			h.EssRemainingKwhStart = &soc
+		}
+		noPv[i] = h
+	}
+	pack := func(capacity, power float64) Schedule {
+		return Schedule{{EffectiveFrom: mustDate("1970-01-01"), Tariffs: Tariffs{
+			EssCapacityKwh: capacity, EssPowerLimitKw: power, DegradationUahPerKwh: 0.6, RoundtripEfficiency: 0.9,
+		}}}
+	}
+	return orgBackends{
+		"a": {saved: saved, hourly: hourly, schedule: pack(516, 250)},
+		"b": {saved: saved, hourly: noPv, schedule: pack(344, 100)},
+	}
+}
+
+// checkUzeSum checks that a group's УЗЕ figures are its batteries' added up.
+func checkUzeSum(t *testing.T, what string, got MonthlyTotals, batteries ...MonthlyTotals) {
+	t.Helper()
+	for _, f := range []struct {
+		name string
+		of   func(MonthlyTotals) float64
+	}{
+		{"fact", func(m MonthlyTotals) float64 { return m.EssFact }},
+		{"optimum", func(m MonthlyTotals) float64 { return m.EssOptimum }},
+		{"reserve", func(m MonthlyTotals) float64 { return m.EssReserve }},
+		{"timing reserve", func(m MonthlyTotals) float64 { return m.EssReserveTiming }},
+		{"SOC reserve", func(m MonthlyTotals) float64 { return m.EssReserveSoc }},
+		{"PV reserve", func(m MonthlyTotals) float64 { return m.EssReservePv }},
+		{"missed PV", func(m MonthlyTotals) float64 { return m.EssPvMissedKwh }},
+		{"export potential with the УЗЕ", func(m MonthlyTotals) float64 { return m.PvEssExportPotential }},
+	} {
+		var want float64
+		for _, b := range batteries {
+			want += f.of(b)
+		}
+		if !sameMoney(f.of(got), want) {
+			t.Errorf("%s: %s %v, want the batteries' %v", what, f.name, f.of(got), want)
+		}
+	}
+	if got.EssOptimum <= 0 || !sameMoney(got.EssCapturedShare, got.EssFact/got.EssOptimum) {
+		t.Errorf("%s: optimum %v, captured share %v", what, got.EssOptimum, got.EssCapturedShare)
+	}
+}
+
+// Batteries behind separate grid inputs can't serve each other's site, so
+// the group's УЗЕ is each one solved on its own site and added up — not
+// one pack the size of both on the merged flows — while its money stays
+// the merged records'.
+func TestGroupSolvesEachBatteryOnItsOwnSite(t *testing.T) {
+	b := twoBatteries()
+	svc := groupService(b)
+	ctx := context.Background()
+
+	got, err := svc.GetMonth(ctx, "g", "2026-10", "UTC")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ownA, _ := svc.GetMonth(ctx, "a", "2026-10", "UTC")
+	ownB, _ := svc.GetMonth(ctx, "b", "2026-10", "UTC")
+	checkUzeSum(t, "October", got.Totals, ownA.Totals, ownB.Totals)
+	if !sameMoney(got.Totals.Ebitda, ownA.Totals.Ebitda+ownB.Totals.Ebitda) || !sameMoney(got.Totals.PV, ownA.Totals.PV+ownB.Totals.PV) {
+		t.Errorf("money: EBITDA %v, PV %v; want the sites' together", got.Totals.Ebitda, got.Totals.PV)
+	}
+
+	daily, _ := svc.backend.LoadDailyRange(ctx, "g", mustDate("2026-10-01"), mustDate("2026-10-31"))
+	hourly, _ := svc.backend.LoadHourlyRange(ctx, "g", mustDate("2026-10-01"), mustDate("2026-11-01"))
+	schedule, _ := svc.backend.TariffSchedule(ctx, "g")
+	if one := AggregateMonth("2026-10", time.UTC, daily, hourly, schedule.EssRatingsFor).Totals; math.Abs(one.EssOptimum-got.Totals.EssOptimum) < 1 {
+		t.Fatalf("one pack of both has the same optimum %v; the fixture can't tell it apart", one.EssOptimum)
+	}
+
+	dayOf := func(m StoredMonth, date string) MonthDay {
+		for _, d := range m.Days {
+			if d.Date == date {
+				return d
+			}
+		}
+		return MonthDay{}
+	}
+	for _, d := range got.Days {
+		a, b := dayOf(ownA, d.Date), dayOf(ownB, d.Date)
+		if !sameMoney(d.EssOptimum, a.EssOptimum+b.EssOptimum) || !sameMoney(d.EssReserve, a.EssReserve+b.EssReserve) {
+			t.Errorf("%s: optimum %v reserve %v, want %v and %v", d.Date, d.EssOptimum, d.EssReserve, a.EssOptimum+b.EssOptimum, a.EssReserve+b.EssReserve)
+		}
+	}
+
+	if len(got.Cycles) == 0 || len(got.Cycles) != len(ownA.Cycles)+len(ownB.Cycles) {
+		t.Fatalf("%d cycles, want a's %d and b's %d", len(got.Cycles), len(ownA.Cycles), len(ownB.Cycles))
+	}
+	for _, c := range got.Cycles {
+		if !strings.HasPrefix(c.Label, "A · ") && !strings.HasPrefix(c.Label, "B · ") {
+			t.Errorf("cycle %q is not told apart by its site", c.Label)
+		}
+	}
+	dq, own := got.Totals.EssDataQuality, ownB.Totals.EssDataQuality
+	if own.AnomalousHours == 0 || dq.AnomalousHours != ownA.Totals.EssDataQuality.AnomalousHours+own.AnomalousHours || dq.DataOK {
+		t.Fatalf("anomalous hours %d, want a's %d and b's %d", dq.AnomalousHours, ownA.Totals.EssDataQuality.AnomalousHours, own.AnomalousHours)
+	}
+	for _, a := range dq.Anomalies {
+		if a.Site != "B" {
+			t.Errorf("anomalous hour %s of site %q, want b's", a.At, a.Site)
+		}
+	}
+}
+
+// A battery counts from the day its site joins: the month it joins is the
+// first site's month and the second's days from then on, untagged while
+// the first is the group alone, and the year is its months added up.
+func TestGroupBatteryCountsFromTheDayItJoins(t *testing.T) {
+	b := twoBatteries()
+	svc := groupService(b)
+	ctx := context.Background()
+
+	sep, err := svc.GetMonth(ctx, "g", "2026-09", "UTC")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ownA, _ := svc.GetMonth(ctx, "a", "2026-09", "UTC")
+	bDaily, _ := b.of("b").LoadDailyRange(ctx, "b", mustDate("2026-09-24"), mustDate("2026-09-30"))
+	bHourly, _ := b.of("b").LoadHourlyRange(ctx, "b", mustDate("2026-09-24"), mustDate("2026-10-01"))
+	joined := AggregateMonth("2026-09", time.UTC, bDaily, bHourly, b.of("b").schedule.EssRatingsFor)
+	checkUzeSum(t, "September", sep.Totals, ownA.Totals, joined.Totals)
+	for _, c := range sep.Cycles {
+		if alone := c.StartDate < "2026-09-24"; alone == strings.Contains(c.Label, " · ") {
+			t.Errorf("cycle %s labelled %q", c.StartDate, c.Label)
+		}
+	}
+	for _, a := range sep.Totals.EssDataQuality.Anomalies {
+		if a.Date < "2026-09-24" {
+			t.Errorf("anomalous hour %s of b before it joined", a.At)
+		}
+	}
+
+	oct, _ := svc.GetMonthTotals(ctx, "g", "2026-10", "UTC")
+	year, err := svc.GetYear(ctx, "g", "2026", "UTC")
+	if err != nil {
+		t.Fatal(err)
+	}
+	period, err := svc.GetPeriod(ctx, "g", "2026-09", "2026-10", "UTC")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, y := range []StoredYear{year, period} {
+		checkUzeSum(t, y.Period, y.Totals, sep.Totals, oct)
 	}
 }

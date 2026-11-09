@@ -533,6 +533,8 @@ type EconomicsAnomalyHour struct {
 	PeakKw        float64  `json:"peak_kw"`
 	ChargedKwh    float64  `json:"charged_kwh"`
 	DischargedKwh float64  `json:"discharged_kwh"`
+	// Site is the group member's label (Т1, Т2) on an economic group.
+	Site string `json:"site,omitempty"`
 }
 
 func dataQualityToJSON(q economics.DataQuality) EconomicsDataQuality {
@@ -559,6 +561,7 @@ func dataQualityToJSON(q economics.DataQuality) EconomicsDataQuality {
 				PeakKw:        a.PeakKw,
 				ChargedKwh:    a.ChargedKwh,
 				DischargedKwh: a.DischargedKwh,
+				Site:          a.Site,
 			}
 		}
 	}

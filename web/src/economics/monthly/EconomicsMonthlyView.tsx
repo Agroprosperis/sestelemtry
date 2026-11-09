@@ -279,11 +279,11 @@ function formatAnomalyReasons(reasons: string[] | null | undefined): string {
     .join('; ')
 }
 
-function formatAnomalyHourLabel(a: { date: string; hour: number }): string {
+function formatAnomalyHourLabel(a: { date: string; hour: number; site?: string }): string {
   const dm = /^\d{4}-\d{2}-\d{2}$/.test(a.date)
     ? `${a.date.slice(8, 10)}.${a.date.slice(5, 7)}`
     : a.date
-  return `${dm} ${String(a.hour).padStart(2, '0')}:00`
+  return `${a.site ? `${a.site} · ` : ''}${dm} ${String(a.hour).padStart(2, '0')}:00`
 }
 
 export function EssDataQualityNote({ dq }: { dq?: EconomicsDataQuality }) {
@@ -310,7 +310,7 @@ export function EssDataQualityNote({ dq }: { dq?: EconomicsDataQuality }) {
       {anomalies.length > 0 ? (
         <ul className="economics-ai-dq-list">
           {anomalies.slice(0, detailLimit).map((a) => (
-            <li key={`${a.date}-${a.hour}-${a.at}`}>
+            <li key={`${a.site ?? ''}-${a.date}-${a.hour}-${a.at}`}>
               {formatAnomalyHourLabel(a)} — {formatAnomalyReasons(a.reasons) || 'аномалія'}
               {a.peak_kw > 0 ? ` (пік ${Math.round(a.peak_kw)} кВт)` : null}
             </li>

@@ -831,6 +831,8 @@ export type EconomicsAnomalyHour = {
   peak_kw: number
   charged_kwh: number
   discharged_kwh: number
+  // The group member's label (Т1, Т2) on an economic group.
+  site?: string
 }
 
 // EconomicsDataQuality mirrors internal/api.EconomicsDataQuality — the

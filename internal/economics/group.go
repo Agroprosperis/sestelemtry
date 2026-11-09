@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"time"
 )
@@ -17,10 +18,12 @@ type Group struct {
 	Members []GroupMember
 }
 
-// GroupMember is one site of a Group.
+// GroupMember is one site of a Group. Label tells its УЗЕ cycles and
+// anomalous hours apart from the other members' on the days they share.
 type GroupMember struct {
-	ID   string
-	From string
+	ID    string
+	Label string
+	From  string
 }
 
 // Groups are the economic objects reported over several sites.
@@ -31,8 +34,8 @@ var Groups = []Group{{
 	ID:   "de-all",
 	Name: "Дубов'язівський елеватор",
 	Members: []GroupMember{
-		{ID: "de"},
-		{ID: "de1", From: "2026-09-24"},
+		{ID: "de", Label: "Т2"},
+		{ID: "de1", Label: "Т1", From: "2026-09-24"},
 	},
 }}
 
@@ -62,8 +65,50 @@ func (g Group) MemberIDs() []string {
 func (g Group) ActiveOn(day string) []string {
 	var out []string
 	for _, m := range g.Members {
-		if m.From == "" || day >= m.From {
+		if m.joined(day) {
 			out = append(out, m.ID)
+		}
+	}
+	return out
+}
+
+// siteOn tags the member's figures of the civil date day with its label
+// while another member shares the group, and with nothing while it is the
+// group alone.
+func (g Group) siteOn(m GroupMember, day string) string {
+	if len(g.ActiveOn(day)) > 1 {
+		return m.Label
+	}
+	return ""
+}
+
+// joined reports whether the member belongs to its group on the civil
+// date day (YYYY-MM-DD).
+func (m GroupMember) joined(day string) bool { return m.From == "" || day >= m.From }
+
+// ownDays keeps the member's days from the day it joins.
+func (m GroupMember) ownDays(recs []DailyRecord) []DailyRecord {
+	if m.From == "" {
+		return recs
+	}
+	out := make([]DailyRecord, 0, len(recs))
+	for _, r := range recs {
+		if m.joined(r.Day.Format("2006-01-02")) {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// ownHours keeps the member's hours from the day it joins, in loc.
+func (m GroupMember) ownHours(recs []HourlyRecord, loc *time.Location) []HourlyRecord {
+	if m.From == "" {
+		return recs
+	}
+	out := make([]HourlyRecord, 0, len(recs))
+	for _, r := range recs {
+		if m.joined(r.HourStart.In(loc).Format("2006-01-02")) {
+			out = append(out, r)
 		}
 	}
 	return out
@@ -235,11 +280,8 @@ func (b *groupBackend) LoadDailyRange(ctx context.Context, orgID string, from, t
 		if err != nil {
 			return nil, err
 		}
-		for _, r := range recs {
+		for _, r := range m.ownDays(recs) {
 			key := r.Day.Format("2006-01-02")
-			if m.From != "" && key < m.From {
-				continue
-			}
 			byDay[key] = append(byDay[key], r)
 		}
 	}
@@ -267,10 +309,7 @@ func (b *groupBackend) LoadHourlyRange(ctx context.Context, orgID string, from, 
 		if err != nil {
 			return nil, err
 		}
-		for _, r := range recs {
-			if m.From != "" && r.HourStart.In(loc).Format("2006-01-02") < m.From {
-				continue
-			}
+		for _, r := range m.ownHours(recs, loc) {
 			k := r.HourStart.Unix()
 			if acc, ok := byHour[k]; ok {
 				byHour[k] = mergeHourly(acc, r)
@@ -321,12 +360,182 @@ func (b *groupBackend) SumEbitdaBefore(ctx context.Context, orgID string, before
 }
 
 // groupOf reports whether orgID is a group the service's backend reads as
-// one organization.
+// one organization, in a currency view too.
 func (s *Service) groupOf(orgID string) (Group, bool) {
-	if gb, ok := s.backend.(*groupBackend); ok {
+	b := s.backend
+	if cb, ok := b.(*currencyBackend); ok {
+		b = cb.inner
+	}
+	if gb, ok := b.(*groupBackend); ok {
 		return gb.group(orgID)
 	}
 	return Group{}, false
+}
+
+// memberRecords are a member's own stored records over a window, from the
+// day it joins its group, with its own УЗЕ ratings.
+type memberRecords struct {
+	member     GroupMember
+	daily      []DailyRecord
+	hourly     []HourlyRecord
+	ratingsFor func(day time.Time) EssRatings
+}
+
+// memberRecords loads the group's members' own records over the days
+// from..to (hours up to next); a member joining after to is left out.
+func (s *Service) memberRecords(ctx context.Context, g Group, from, to, next time.Time) ([]memberRecords, error) {
+	loc := from.Location()
+	var out []memberRecords
+	for _, m := range g.Members {
+		if !m.joined(to.Format("2006-01-02")) {
+			continue
+		}
+		daily, err := s.backend.LoadDailyRange(ctx, m.ID, from, to)
+		if err != nil {
+			return nil, fmt.Errorf("%s: load daily range: %w", m.ID, err)
+		}
+		hourly, _ := s.backend.LoadHourlyRange(ctx, m.ID, from, next)
+		schedule, _ := s.backend.TariffSchedule(ctx, m.ID)
+		out = append(out, memberRecords{
+			member:     m,
+			daily:      m.ownDays(daily),
+			hourly:     m.ownHours(hourly, loc),
+			ratingsFor: schedule.EssRatingsFor,
+		})
+	}
+	return out, nil
+}
+
+// memberMonth is a member's own month: its battery solved on its site's
+// flows and ratings.
+type memberMonth struct {
+	member GroupMember
+	month  StoredMonth
+}
+
+// withMemberUze puts the members' own УЗЕ into a group's month rolled up
+// from the merged records without the optimizer. A battery behind its own
+// grid input can neither charge from nor serve the other site, so each is
+// solved alone and the group's optimum, its reserve and causes, missed PV,
+// export potential with the battery, anomalous hours, marginality heatmap
+// and cycle charts are the members' put together. Money, energy and the
+// equivalent cycles stay the merged records'.
+func withMemberUze(month *StoredMonth, g Group, members []memberMonth) {
+	t := &month.Totals
+	t.EssFact, t.EssOptimum, t.EssReserve, t.EssCapturedShare = 0, 0, 0, 0
+	t.EssReserveTiming, t.EssReserveSoc, t.EssReservePv, t.EssPvMissedKwh = 0, 0, 0, 0
+	t.PvEssExportPotential = 0
+	dq := DataQuality{TotalDays: t.EssDataQuality.TotalDays, AnomalousDates: []string{}}
+	days := make(map[string]*MonthDay, len(month.Days))
+	for i := range month.Days {
+		d := &month.Days[i]
+		d.EssFact, d.EssOptimum, d.EssReserve = 0, 0, 0
+		d.EssReserveTiming, d.EssReserveSoc, d.EssReservePv, d.EssPvMissedKwh = 0, 0, 0, 0
+		days[d.Date] = d
+	}
+	margins := make(map[string][]*MarginHour, len(month.HourlyMargin))
+	var cycles []UzeCycle
+	for _, m := range members {
+		mt := m.month.Totals
+		t.EssFact += mt.EssFact
+		t.EssOptimum += mt.EssOptimum
+		t.EssReserve += mt.EssReserve
+		t.EssReserveTiming += mt.EssReserveTiming
+		t.EssReserveSoc += mt.EssReserveSoc
+		t.EssReservePv += mt.EssReservePv
+		t.EssPvMissedKwh += mt.EssPvMissedKwh
+		t.PvEssExportPotential += mt.PvEssExportPotential
+		addDataQuality(&dq, mt.EssDataQuality, func(day string) string { return g.siteOn(m.member, day) })
+		for _, md := range m.month.Days {
+			if d := days[md.Date]; d != nil {
+				d.EssFact += md.EssFact
+				d.EssOptimum += md.EssOptimum
+				d.EssReserve += md.EssReserve
+				d.EssReserveTiming += md.EssReserveTiming
+				d.EssReserveSoc += md.EssReserveSoc
+				d.EssReservePv += md.EssReservePv
+				d.EssPvMissedKwh += md.EssPvMissedKwh
+			}
+		}
+		for _, row := range m.month.HourlyMargin {
+			margins[row.Date] = addMarginHours(margins[row.Date], row.Hours)
+		}
+		for _, c := range m.month.Cycles {
+			if site := g.siteOn(m.member, c.StartDate); site != "" {
+				c.Label = site + " · " + c.Label
+			}
+			cycles = append(cycles, c)
+		}
+	}
+	if t.EssOptimum > 0 {
+		t.EssCapturedShare = t.EssFact / t.EssOptimum
+	}
+	sort.Strings(dq.AnomalousDates)
+	sort.SliceStable(dq.Anomalies, func(i, j int) bool { return dq.Anomalies[i].At < dq.Anomalies[j].At })
+	dq.AnomalousDays = len(dq.AnomalousDates)
+	dq.DataOK = dq.AnomalousHours == 0
+	t.EssDataQuality = dq
+	for i := range month.HourlyMargin {
+		row := &month.HourlyMargin[i]
+		row.Hours = margins[row.Date]
+		if row.Hours == nil {
+			row.Hours = make([]*MarginHour, 24)
+		}
+	}
+	sort.SliceStable(cycles, func(i, j int) bool { return cycles[i].ReserveUah > cycles[j].ReserveUah })
+	month.Cycles = cycles
+}
+
+// addDataQuality pools a member's anomaly report into the group's: each
+// battery's hours are excluded from its own figures, so they add up; the
+// dates and reasons pool, the extremes are the largest, and the power
+// limit is the members' together. site tags the member's hours by date.
+func addDataQuality(into *DataQuality, q DataQuality, site func(day string) string) {
+	into.AnomalousHours += q.AnomalousHours
+	for _, d := range q.AnomalousDates {
+		if !slices.Contains(into.AnomalousDates, d) {
+			into.AnomalousDates = append(into.AnomalousDates, d)
+		}
+	}
+	for _, a := range q.Anomalies {
+		a.Site = site(a.Date)
+		into.Anomalies = append(into.Anomalies, a)
+	}
+	for k, v := range q.ReasonCounts {
+		if into.ReasonCounts == nil {
+			into.ReasonCounts = make(map[string]int)
+		}
+		into.ReasonCounts[k] += v
+	}
+	into.MaxChargeKwhPerInterval = max(into.MaxChargeKwhPerInterval, q.MaxChargeKwhPerInterval)
+	into.MaxDischargeKwhPerInterval = max(into.MaxDischargeKwhPerInterval, q.MaxDischargeKwhPerInterval)
+	into.MaxIntervalPowerKw = max(into.MaxIntervalPowerKw, q.MaxIntervalPowerKw)
+	into.PowerLimitKwhPerInterval += q.PowerLimitKwhPerInterval
+}
+
+// addMarginHours adds a member's heatmap hours of one day into acc: the
+// trades add up and the margin is theirs together.
+func addMarginHours(acc, hours []*MarginHour) []*MarginHour {
+	if acc == nil {
+		acc = make([]*MarginHour, 24)
+	}
+	for h, c := range hours {
+		if c == nil || h >= len(acc) {
+			continue
+		}
+		if acc[h] == nil {
+			cell := *c
+			acc[h] = &cell
+			continue
+		}
+		a := acc[h]
+		a.DischargedKwh += c.DischargedKwh
+		a.RevenueUah += c.RevenueUah
+		a.CostUah += c.CostUah
+		a.WearUah += c.WearUah
+		a.Margin = (a.RevenueUah - a.CostUah - a.WearUah) / a.DischargedKwh
+	}
+	return acc
 }
 
 // groupDay is a group's day: each member's own GetDay, so a final day
