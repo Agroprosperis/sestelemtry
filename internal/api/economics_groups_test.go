@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nesh/sestelemetry/internal/aichat"
 	"github.com/nesh/sestelemetry/internal/auth"
 	"github.com/nesh/sestelemetry/internal/economics"
 	"github.com/nesh/sestelemetry/internal/pvplan"
@@ -184,18 +185,42 @@ func TestEconomicGroupNeedsEveryMember(t *testing.T) {
 }
 
 // The assistant opened on a group reads its economics, its plan and the
-// market: a group has no telemetry, weather or passport of its own, and
-// it goes by its own name.
-func TestEconomicGroupAssistantReadsEconomics(t *testing.T) {
-	h := groupHandlers(t, &mockStore{})
+// market as the group's, and the telemetry, weather and passport of the
+// site it names in each call: a group has none of its own. It goes by the
+// group's name.
+func TestEconomicGroupAssistantReadsEachSite(t *testing.T) {
+	store := &mockStore{weatherResp: WeatherForecastResponse{Daily: []WeatherForecastDay{{Day: time.Date(2026, 11, 10, 0, 0, 0, 0, time.UTC)}}}}
+	h := groupHandlers(t, store)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/chat?organization_id=de-all", nil)
+	tools := map[string]aichat.Tool{}
 	var names []string
 	for _, tool := range h.chatTools(req, "de-all", time.UTC) {
 		names = append(names, tool.Name)
+		tools[tool.Name] = tool
 	}
-	want := []string{"pv_plan", "economics_day", "economics_month", "economics_year", "uze_plan", "portfolio", "dam_prices"}
+	want := []string{"current_snapshot", "energy_balance", "weather_forecast", "pv_plan", "station_passport",
+		"economics_day", "economics_month", "economics_year", "uze_plan", "portfolio", "dam_prices"}
 	if !slices.Equal(names, want) {
 		t.Errorf("tools on a group = %v, want %v", names, want)
+	}
+
+	weather := tools["weather_forecast"]
+	var schema struct {
+		Properties map[string]struct {
+			Enum []string `json:"enum"`
+		} `json:"properties"`
+		Required []string `json:"required"`
+	}
+	if err := json.Unmarshal(weather.Parameters, &schema); err != nil || !slices.Equal(schema.Properties["site"].Enum, []string{"de", "de1"}) ||
+		!slices.Equal(schema.Required, []string{"site", "from", "to"}) {
+		t.Errorf("weather schema %s (err %v), want a required site of de, de1", weather.Parameters, err)
+	}
+	_, src, err := weather.Call(req.Context(), json.RawMessage(`{"site":"de1","from":"2026-11-10","to":"2026-11-10"}`))
+	if err != nil || store.weatherOrg != "de1" || src.Label != "Т1 · Прогноз погоди Open-Meteo" {
+		t.Errorf("weather of de1: read %q, source %q, err %v", store.weatherOrg, src.Label, err)
+	}
+	if _, _, err := weather.Call(req.Context(), json.RawMessage(`{"site":"de-all","from":"2026-11-10","to":"2026-11-10"}`)); err == nil {
+		t.Error("weather of the group itself answered")
 	}
 	if got := h.organizationName("de-all"); got != "Дубов'язівський елеватор" {
 		t.Errorf("group name for the assistant = %q", got)

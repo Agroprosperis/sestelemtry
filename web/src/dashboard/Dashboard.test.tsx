@@ -3,8 +3,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AuthContext } from '../auth/authContext'
 import { accessFor, type AuthMe } from '../auth/permissions'
 import { Dashboard } from './Dashboard'
+import { useDashboardData } from './hooks/useDashboardData'
 import { EMPTY_FLOWS } from './transforms/flows'
 import { NO_DATA_ALLOCATION } from './transforms/liveAllocation'
+
+vi.mock('./components/WeatherCard', () => ({
+  WeatherCard: ({ organizationID }: { organizationID: string }) => <div data-testid="weather">{organizationID}</div>,
+}))
 
 vi.mock('./hooks/useDashboardData', () => ({
   useDashboardData: vi.fn(() => ({
@@ -114,5 +119,22 @@ describe('Dashboard', () => {
     fireEvent.click(screen.getAllByRole('button', { name: 'Рік' })[0])
     expect(screen.getByText('Тренд за рік')).toBeTruthy()
     expect(screen.getByText('МВт·год/місяць')).toBeTruthy()
+  })
+
+  it("stacks the elevator's Т1 over its Т2, each on its own telemetry", () => {
+    window.history.replaceState({}, '', '/?organization_id=de-all')
+    vi.mocked(useDashboardData).mockClear()
+    render(<Dashboard />)
+
+    const t1 = screen.getByRole('region', { name: "Дубов'язівський Т1" })
+    const t2 = screen.getByRole('region', { name: "Дубов'язівський Т2" })
+    expect(t1.compareDocumentPosition(t2) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    const read = new Set(vi.mocked(useDashboardData).mock.calls.map(([input]) => input.organizationID))
+    expect([...read].sort()).toEqual(['de', 'de1'])
+    expect(screen.getAllByTestId('weather').map((w) => w.textContent)).toEqual(['de1'])
+
+    fireEvent.click(screen.getByRole('button', { name: 'Сервіс' }))
+    expect(screen.getByRole('menuitem', { name: "Паспорт станції · Дубов'язівський Т1" })).toBeTruthy()
+    expect(screen.getByRole('menuitem', { name: "Експорт даних · Дубов'язівський Т2" })).toBeTruthy()
   })
 })

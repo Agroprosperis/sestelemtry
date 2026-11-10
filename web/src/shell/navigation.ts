@@ -10,6 +10,14 @@ export function navigateView(view: AppView, tab?: string) {
   window.dispatchEvent(new PopStateEvent('popstate'))
 }
 
+// navigateViewOn opens another view on one object.
+export function navigateViewOn(view: AppView, organizationID: string) {
+  const url = viewURL(view)
+  url.searchParams.set('organization_id', organizationID)
+  window.history.pushState({}, '', url)
+  window.dispatchEvent(new PopStateEvent('popstate'))
+}
+
 // navigateEconomicsDay opens the economics day report on date (YYYY-MM-DD).
 export function navigateEconomicsDay(date: string) {
   const url = viewURL('economics')

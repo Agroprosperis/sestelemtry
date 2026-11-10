@@ -1,6 +1,7 @@
 package api
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -47,20 +48,33 @@ func (h *Handlers) chatTools(r *http.Request, org string, loc *time.Location) []
 	money := can(auth.PermEconomicsRead)
 	full := can(auth.PermAnalyticsFull)
 	p := principalFrom(r.Context())
-	windowOK := func(window time.Duration) bool { return h.auth == nil || h.windowAllowed(p, org, window) }
+	windowOn := func(site string) func(time.Duration) bool {
+		return func(window time.Duration) bool { return h.auth == nil || h.windowAllowed(p, site, window) }
+	}
+	windowOK := windowOn(org)
 	// An economic group has no telemetry, weather or passport of its own:
-	// on one the assistant reads economics, the plan and the market.
-	_, group := h.economicGroup(org)
+	// on one the assistant reads them site by site.
+	g, group := h.economicGroup(org)
+	perSite := func(tool func(site string) aichat.Tool) aichat.Tool {
+		if group {
+			return chatSiteTool(g, tool)
+		}
+		return tool(org)
+	}
 
 	var tools []aichat.Tool
-	if can(auth.PermAnalyticsDay) && !group {
-		tools = append(tools, h.chatCurrentTool(org, loc), h.chatEnergyTool(org, loc, windowOK), h.chatWeatherTool(org, loc))
+	if can(auth.PermAnalyticsDay) {
+		tools = append(tools,
+			perSite(func(site string) aichat.Tool { return h.chatCurrentTool(site, loc) }),
+			perSite(func(site string) aichat.Tool { return h.chatEnergyTool(site, loc, windowOn(site)) }),
+			perSite(func(site string) aichat.Tool { return h.chatWeatherTool(site, loc) }),
+		)
 	}
 	if money || full {
 		tools = append(tools, h.chatPvPlanTool(org, loc, can(auth.PermAnalyticsDay) && !group, windowOK))
 	}
-	if can(auth.PermService) && !group {
-		tools = append(tools, h.chatPassportTool(org, loc))
+	if can(auth.PermService) {
+		tools = append(tools, perSite(func(site string) aichat.Tool { return h.chatPassportTool(site, loc) }))
 	}
 	if h.economics != nil {
 		if money {
@@ -81,6 +95,92 @@ func (h *Handlers) chatTools(r *http.Request, org string, loc *time.Location) []
 		}
 	}
 	return append(tools, h.chatDAMTool())
+}
+
+// chatSiteTool offers a site's tool on an economic group once, with the
+// site to read as an argument: the group's sites keep their own meters,
+// so the model reads them one by one.
+func chatSiteTool(g economics.Group, tool func(site string) aichat.Tool) aichat.Tool {
+	bySite := make(map[string]aichat.Tool, len(g.Members))
+	labels := make(map[string]string, len(g.Members))
+	ids := make([]string, 0, len(g.Members))
+	sites := make([]string, 0, len(g.Members))
+	var always []string
+	joined := ""
+	for _, m := range g.Members {
+		bySite[m.ID] = tool(m.ID)
+		labels[m.ID] = cmp.Or(m.Label, m.ID)
+		ids = append(ids, m.ID)
+		site := m.ID + " — " + labels[m.ID]
+		if m.From == "" {
+			always = append(always, m.ID)
+		} else {
+			site += " (з " + m.From + ")"
+			if joined == "" || m.From < joined {
+				joined = m.From
+			}
+		}
+		sites = append(sites, site)
+	}
+	base := bySite[ids[0]]
+	note := fmt.Sprintf(" Об'єкт — майданчики з окремими лічильниками: %s; site — чий майданчик читати, а про весь об'єкт питай кожен.",
+		strings.Join(sites, ", "))
+	if joined != "" && len(always) > 0 {
+		note += fmt.Sprintf(" До %s увесь об'єкт ішов через %s.", joined, strings.Join(always, ", "))
+	}
+	pick := func(raw json.RawMessage) (aichat.Tool, string, bool) {
+		var args struct {
+			Site string `json:"site"`
+		}
+		_ = json.Unmarshal(raw, &args)
+		t, ok := bySite[args.Site]
+		return t, labels[args.Site], ok
+	}
+	return aichat.Tool{
+		Name:        base.Name,
+		Description: base.Description + note,
+		Parameters:  withSiteParam(base.Parameters, ids),
+		Status: func(raw json.RawMessage) string {
+			t, label, ok := pick(raw)
+			if !ok || t.Status == nil {
+				return base.Status(raw)
+			}
+			return t.Status(raw) + " · " + label
+		},
+		Call: func(ctx context.Context, raw json.RawMessage) (any, aichat.Source, error) {
+			t, label, ok := pick(raw)
+			if !ok {
+				return nil, aichat.Source{}, fmt.Errorf("site має бути одним із: %s", strings.Join(ids, ", "))
+			}
+			out, src, err := t.Call(ctx, raw)
+			if src.Label != "" {
+				src.Label = label + " · " + src.Label
+			}
+			return out, src, err
+		},
+	}
+}
+
+// withSiteParam adds the required site argument, one of ids, to a tool's
+// strict-mode schema.
+func withSiteParam(schema json.RawMessage, ids []string) json.RawMessage {
+	var s struct {
+		Type                 string                     `json:"type"`
+		Properties           map[string]json.RawMessage `json:"properties"`
+		Required             []string                   `json:"required"`
+		AdditionalProperties bool                       `json:"additionalProperties"`
+	}
+	if err := json.Unmarshal(schema, &s); err != nil {
+		panic("chat tool schema: " + err.Error())
+	}
+	site, _ := json.Marshal(map[string]any{"type": "string", "enum": ids, "description": "Майданчик об'єкта"})
+	if s.Properties == nil {
+		s.Properties = map[string]json.RawMessage{}
+	}
+	s.Properties["site"] = site
+	s.Required = append([]string{"site"}, s.Required...)
+	out, _ := json.Marshal(s)
+	return out
 }
 
 // portfolioObjects counts the real objects of the portfolio visible

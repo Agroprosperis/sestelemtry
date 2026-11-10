@@ -30,10 +30,22 @@ export const ORGANIZATION_DISPLAY_NAMES: Record<string, string> = {
 // sites (economics.Groups on the server). Дубовʼязівський is `de` alone
 // until Т1 got its own logger on 2026-09-24 and `de` + `de1` after, so its
 // economics, payback and portfolio row only make sense together. A group
-// stands in for its members in economics only; every other page shows the
-// sites one by one.
+// stands in for its members in economics and «Система», which shows its
+// sites one under another; every other page shows the sites one by one.
 export const ECONOMIC_GROUPS: Record<string, readonly string[]> = {
   'de-all': ['de', 'de1'],
+}
+
+// SYSTEM_SITE_ORDER is how «Система» stacks a group's sites, top to
+// bottom; a group missing here keeps its ECONOMIC_GROUPS order.
+const SYSTEM_SITE_ORDER: Record<string, readonly string[]> = {
+  'de-all': ['de1', 'de'],
+}
+
+// systemSites lists the sites «Система» shows for an object: a group's
+// one under another, a site alone.
+export function systemSites(organizationID: string): readonly string[] {
+  return SYSTEM_SITE_ORDER[organizationID] ?? ECONOMIC_GROUPS[organizationID] ?? [organizationID]
 }
 
 // formatOrganizationLabel returns the user-facing name for an
