@@ -121,7 +121,7 @@ describe('Dashboard', () => {
     expect(screen.getByText('МВт·год/місяць')).toBeTruthy()
   })
 
-  it("stacks the elevator's Т1 over its Т2, each on its own telemetry", () => {
+  it("charts the elevator's Т2 right under its Т1, each on its own telemetry", () => {
     window.history.replaceState({}, '', '/?organization_id=de-all')
     vi.mocked(useDashboardData).mockClear()
     render(<Dashboard />)
@@ -132,6 +132,12 @@ describe('Dashboard', () => {
     const read = new Set(vi.mocked(useDashboardData).mock.calls.map(([input]) => input.organizationID))
     expect([...read].sort()).toEqual(['de', 'de1'])
     expect(screen.getAllByTestId('weather').map((w) => w.textContent)).toEqual(['de1'])
+
+    const charts = screen.getAllByRole('heading', { name: /^Energy Trend\s*· / })
+    expect(charts.map((h) => h.textContent)).toEqual(["Energy Trend · Дубов'язівський Т1", "Energy Trend · Дубов'язівський Т2"])
+    const row = (el: Element | null) => (el as HTMLElement | null)?.style.getPropertyValue('--grid-row')
+    expect(charts.map((h) => row(h.closest('.dashboard-site-chart')))).toEqual(['1', '2'])
+    expect([row(t1), row(t2)]).toEqual(['1 / span 2', '3'])
 
     fireEvent.click(screen.getByRole('button', { name: 'Сервіс' }))
     expect(screen.getByRole('menuitem', { name: "Паспорт станції · Дубов'язівський Т1" })).toBeTruthy()

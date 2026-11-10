@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState } from 'react'
+import { lazy, Suspense, useState, type CSSProperties } from 'react'
 import { useAccess } from '../auth/authContext'
 import './dashboard.css'
 import { ModeTopBar, type TopBarMenuItem } from '../shell/ModeTopBar'
@@ -6,7 +6,7 @@ import { useEdgeSiteStatus } from '../shell/useEdgeSiteStatus'
 import { navigateView, navigateViewOn } from '../shell/navigation'
 import { DashboardControls } from './components/DashboardControls'
 import { formatOrganizationLabel, systemSites } from './config'
-import { DashboardSite } from './DashboardSite'
+import { DashboardSite, type SitePlace } from './DashboardSite'
 import { useDebugMode } from './hooks/useDebugMode'
 import { useOrganizationParam } from './hooks/useOrganizationParam'
 import { useRangeParams } from './hooks/useRangeParams'
@@ -19,12 +19,24 @@ const ExportDialog = lazy(() =>
   import('./components/ExportDialog').then((mod) => ({ default: mod.ExportDialog })),
 )
 
+// The sites' charts follow one another in the right column, each beside
+// the first site's cards; the other sites' cards follow below them. The
+// last chart's row is the flexible one, so the first site's cards grow
+// it and not the rows of the charts above.
+function sitesGrid(n: number): CSSProperties & Record<'--grid-rows', string> {
+  return { '--grid-rows': `repeat(${n - 1}, auto) 1fr repeat(${n - 1}, auto)` }
+}
+
+function sitePlace(i: number, n: number): SitePlace {
+  return { chartRow: String(i + 1), cardsRow: i === 0 ? `1 / span ${n}` : String(n + i) }
+}
+
 export function Dashboard() {
   const { organizationID, options, change: onOrganizationChange } = useOrganizationParam('analytics.day', {
     groups: true,
   })
-  // An elevator of several sites shows them one under another: each has
-  // its own telemetry, so the page shows each in full instead of a sum.
+  // An elevator of several sites shows each in full on its own telemetry,
+  // instead of a sum.
   const sites = systemSites(organizationID)
   const stacked = sites.length > 1
   const access = useAccess()
@@ -81,20 +93,35 @@ export function Dashboard() {
         edgeStatus={edgeStatus}
       />
 
-      {sites.map((site, i) => (
+      {stacked ? (
+        <div className="dashboard-content dashboard-sites" style={sitesGrid(sites.length)}>
+          {sites.map((site, i) => (
+            <DashboardSite
+              key={site}
+              organizationID={site}
+              preset={preset}
+              anchor={anchor}
+              metricsAt={metricsAt}
+              onMetricsAtChange={setMetricsAt}
+              debug={debug}
+              registers={registers}
+              weather={i === 0}
+              place={sitePlace(i, sites.length)}
+            />
+          ))}
+        </div>
+      ) : (
         <DashboardSite
-          key={site}
-          organizationID={site}
+          organizationID={organizationID}
           preset={preset}
           anchor={anchor}
           metricsAt={metricsAt}
           onMetricsAtChange={setMetricsAt}
           debug={debug}
           registers={registers}
-          weather={i === 0}
-          titled={stacked}
+          weather
         />
-      ))}
+      )}
 
       {exportSite && (
         <Suspense fallback={null}>

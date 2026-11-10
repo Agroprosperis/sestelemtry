@@ -1,4 +1,4 @@
-import { useMemo, type ReactNode } from 'react'
+import { useMemo, type CSSProperties, type ReactNode } from 'react'
 import { useEconomicsAnnualData } from '../economics/useEconomicsAnnualData'
 import { useEconomicsMonthlyData } from '../economics/useEconomicsMonthlyData'
 import { EdgeStatusChips } from '../shell/EdgeStatusChips'
@@ -15,6 +15,10 @@ import { useUzeDayPlan } from './hooks/useUzeDayPlan'
 import type { RangePreset } from './range'
 import { monthTrendRows, yearTrendRows } from './transforms/energyTrend'
 
+// SitePlace is where a site of a page that shows several goes in the
+// page's grid: its cards in the left column, its chart in the right one.
+export type SitePlace = { cardsRow: string; chartRow: string }
+
 type Props = {
   organizationID: string
   preset: RangePreset
@@ -26,10 +30,13 @@ type Props = {
   // weather shows the forecast card above the chart. The sites of one
   // elevator share a village, so only the first of them shows it.
   weather: boolean
-  // titled heads the block with the site's name and edge status, on a
-  // page that stacks several sites.
-  titled?: boolean
+  // place lays the site out as two cells of the page's grid, the cards
+  // under the site's name and edge status; without it the site is the
+  // whole page.
+  place?: SitePlace
 }
+
+type GridRow = CSSProperties & Record<'--grid-row', string>
 
 // DashboardSite is one site's «Система» block: the live and period cards
 // beside the weather and the energy chart.
@@ -42,9 +49,11 @@ export function DashboardSite({
   debug,
   registers,
   weather,
-  titled = false,
+  place,
 }: Props) {
-  const edgeStatus = useEdgeSiteStatus(organizationID, titled)
+  const name = formatOrganizationLabel(organizationID)
+  const site = place ? name : undefined
+  const edgeStatus = useEdgeSiteStatus(organizationID, place !== undefined)
   const {
     current,
     liveAllocation,
@@ -113,74 +122,91 @@ export function DashboardSite({
     return null
   }, [preset, anchor, monthly, annual])
 
-  const body: ReactNode = (
+  const banner = error && (
+    <section className="error-banner" role="alert" aria-live="polite">
+      Failed to load data: {error}
+    </section>
+  )
+
+  const cards = (
+    <MetricsPanel
+      current={current}
+      liveAllocation={liveAllocation}
+      loading={cardsLoading}
+      metricsAt={metricsAt}
+      onMetricsAtChange={onMetricsAtChange}
+      flows={energyFlows}
+      preset={preset}
+      anchor={anchor}
+      flowsRefreshing={flowsRefreshing}
+      flowsLoaded={flowsLoaded}
+      flowsGap={flowsGap}
+      onRefreshFlows={() => void refreshFlows()}
+      debug={debug}
+      registers={registers}
+      pvForecastTotal={pvForecastTotal}
+      pvForecastLoading={pvForecastLoading}
+      pvForecastCoverage={pvForecastCoverage}
+      pvForecastWholeElevator={pvForecastWholeElevator}
+      gridVoltage={gridVoltage}
+    />
+  )
+
+  const charts: ReactNode = (
     <>
-      {error && (
-        <section className="error-banner" role="alert" aria-live="polite">
-          Failed to load data: {error}
-        </section>
-      )}
-
-      <div className="dashboard-content">
-        <MetricsPanel
-          current={current}
-          liveAllocation={liveAllocation}
-          loading={cardsLoading}
-          metricsAt={metricsAt}
-          onMetricsAtChange={onMetricsAtChange}
-          flows={energyFlows}
-          preset={preset}
-          anchor={anchor}
-          flowsRefreshing={flowsRefreshing}
-          flowsLoaded={flowsLoaded}
-          flowsGap={flowsGap}
-          onRefreshFlows={() => void refreshFlows()}
-          debug={debug}
-          registers={registers}
-          pvForecastTotal={pvForecastTotal}
-          pvForecastLoading={pvForecastLoading}
-          pvForecastCoverage={pvForecastCoverage}
+      {weather && <WeatherCard organizationID={organizationID} anchor={anchor} preset={preset} />}
+      {preset === 'day' || !trend ? (
+        <EnergyChart
+          summary={energySummary}
+          loading={loading}
+          damSeries={damSeries}
+          socSeries={socSeries}
+          powerSeries={powerSeries}
+          pvForecastSeries={pvForecastSeries}
           pvForecastWholeElevator={pvForecastWholeElevator}
-          gridVoltage={gridVoltage}
+          aiPlan={aiPlan}
+          site={site}
         />
-
-        <div className="dashboard-charts">
-          {weather && <WeatherCard organizationID={organizationID} anchor={anchor} preset={preset} />}
-          {preset === 'day' || !trend ? (
-            <EnergyChart
-              summary={energySummary}
-              loading={loading}
-              damSeries={damSeries}
-              socSeries={socSeries}
-              powerSeries={powerSeries}
-              pvForecastSeries={pvForecastSeries}
-              pvForecastWholeElevator={pvForecastWholeElevator}
-              aiPlan={aiPlan}
-            />
-          ) : (
-            <EnergyTrendCard
-              preset={preset}
-              rows={trend.rows}
-              loading={trend.loading}
-              error={trend.error}
-              summary={energySummary}
-              summaryLoading={loading}
-            />
-          )}
-        </div>
-      </div>
+      ) : (
+        <EnergyTrendCard
+          preset={preset}
+          rows={trend.rows}
+          loading={trend.loading}
+          error={trend.error}
+          summary={energySummary}
+          summaryLoading={loading}
+          site={site}
+        />
+      )}
     </>
   )
 
-  if (!titled) return body
-  const name = formatOrganizationLabel(organizationID)
+  if (!place) {
+    return (
+      <>
+        {banner}
+        <div className="dashboard-content">
+          {cards}
+          <div className="dashboard-charts">{charts}</div>
+        </div>
+      </>
+    )
+  }
+  const cardsRow: GridRow = { '--grid-row': place.cardsRow }
+  const chartRow: GridRow = { '--grid-row': place.chartRow }
   return (
-    <section className="dashboard-site" aria-label={name}>
-      <div className="dashboard-site-head">
-        <h2>{name}</h2>
-        <EdgeStatusChips status={edgeStatus} mode="analytics" />
+    <>
+      <section className="dashboard-site-cards" aria-label={name} style={cardsRow}>
+        <div className="dashboard-site-head">
+          <h2>{name}</h2>
+          <EdgeStatusChips status={edgeStatus} mode="analytics" />
+        </div>
+        {banner}
+        {cards}
+      </section>
+      <div className="dashboard-charts dashboard-site-chart" style={chartRow}>
+        {charts}
       </div>
-      {body}
-    </section>
+    </>
   )
 }

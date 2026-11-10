@@ -13,14 +13,21 @@
   align-items: start;
 }
 
-.dashboard-site {
-  display: grid;
-  gap: 14px;
+.dashboard-sites {
+  grid-template-rows: var(--grid-rows);
 }
 
-.dashboard-site + .dashboard-site {
-  border-top: 1px solid var(--border);
-  padding-top: 20px;
+.dashboard-site-cards {
+  grid-column: 1;
+  grid-row: var(--grid-row);
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.dashboard-site-chart {
+  grid-column: 2;
+  grid-row: var(--grid-row);
 }
 
 .dashboard-site-head {
@@ -665,6 +672,11 @@
 .chart-card h2 {
   margin: 0 0 12px;
   font-size: 18px;
+}
+
+.chart-card-site {
+  color: var(--text-muted);
+  font-weight: 500;
 }
 
 .economics-switch-button {
@@ -1875,6 +1887,14 @@
   }
   .dashboard-content {
     grid-template-columns: 1fr;
+  }
+  .dashboard-sites {
+    grid-template-rows: none;
+  }
+  .dashboard-site-cards,
+  .dashboard-site-chart {
+    grid-column: auto;
+    grid-row: auto;
   }
   .energy-tooltip {
     min-width: 0;

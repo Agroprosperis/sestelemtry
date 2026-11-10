@@ -17,6 +17,8 @@ type Props = {
   error: string | null
   summary: Summary
   summaryLoading: boolean
+  // site names the site in the title, on a page that charts several.
+  site?: string
 }
 
 const COPY: Record<Preset, { title: string; subtitle: string; unit: string }> = {
@@ -74,7 +76,7 @@ type TooltipProps = {
 // consumption, the three sources that covered it and the two export
 // flows, one point per day (month) or per month (year), with the
 // period's totals underneath.
-export function EnergyTrendCard({ preset, rows, loading, error, summary, summaryLoading }: Props) {
+export function EnergyTrendCard({ preset, rows, loading, error, summary, summaryLoading, site }: Props) {
   const chrome = useChartChrome()
   const loadColor = useCssVar('--text', '#0f172a')
   const dotRing = useCssVar('--bg-elevated', '#ffffff')
@@ -190,7 +192,10 @@ export function EnergyTrendCard({ preset, rows, loading, error, summary, summary
     <div className="chart-card energy-trend-card">
       <div className="energy-trend-head">
         <div>
-          <h2>{copy.title}</h2>
+          <h2>
+            {copy.title}
+            {site && <span className="chart-card-site"> · {site}</span>}
+          </h2>
           <p className="energy-trend-subtitle">{copy.subtitle}</p>
         </div>
         <ul className="chart-legend energy-trend-legend">

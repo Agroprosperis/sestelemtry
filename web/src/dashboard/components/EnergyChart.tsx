@@ -60,6 +60,8 @@ type Props = {
     defaultVisible?: boolean
     annotation?: { time: string; label: string }
   }
+  // site names the site in the title, on a page that charts several.
+  site?: string
 }
 
 const DAM_PRICE_KEY = 'dam_price_uah_per_mwh'
@@ -156,6 +158,7 @@ export function EnergyChart({
   pvForecastWholeElevator = false,
   aiPlan,
   planOverlay,
+  site,
 }: Props) {
   const chrome = useChartChrome()
   const pvForecastName = pvForecastLabel(pvForecastWholeElevator)
@@ -344,7 +347,10 @@ export function EnergyChart({
 
   return (
     <div className="chart-card">
-      <h2>{planOverlay?.title ?? 'Energy Trend'}</h2>
+      <h2>
+        {planOverlay?.title ?? 'Energy Trend'}
+        {site && <span className="chart-card-site"> · {site}</span>}
+      </h2>
       {/* A day that has not happened has no fact to sum. */}
       {!outlook && <EnergySummary summary={summary} loading={loading} />}
       <div className="chart-wrap">
