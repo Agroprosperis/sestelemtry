@@ -291,18 +291,101 @@ func (h *Handlers) computeEnergyFlowTotals(
 	// rows to the correct role.
 	cfg := h.energyFlowOrgs[orgID]
 	rawSamples := buildRawSamples(rows, cfg)
-	rec := energyflow.Recompute(rawSamples, energyflow.Options{
+	opts := energyflow.Options{
 		EssDischargeSign:        cfg.EssDischargeSign,
 		AllocationWindowSeconds: 60,
 		MaxGapSeconds:           0, // disabled — historical windows can span collector outages
 		MaxEssPowerKw:           essPowerCeiling(cfg),
-	})
-	return &EnergyFlowTotals{
+	}
+	rec := energyflow.Recompute(rawSamples, opts)
+	out := &EnergyFlowTotals{
 		PVToESSKwh:   rec.Totals[energyflow.MetricPVToESSKwh],
 		GridToESSKwh: rec.Totals[energyflow.MetricGridToESSKwh],
 		ESSToLoadKwh: rec.Totals[energyflow.MetricESSToLoadKwh],
 		ESSToGridKwh: rec.Totals[energyflow.MetricESSToGridKwh],
-	}, nil
+	}
+	h.addGenFlowTotals(ctx, out, orgID, rawSamples, from, to, opts)
+	return out, nil
+}
+
+// addGenFlowTotals adds the generator to a live period's flows. Where the
+// economics count the organization's generator, the hours it ran or the
+// site was off the grid take the generator-aware split instead of the
+// four flows above, as AssembleDay does, so today reads like the stored
+// days before it.
+func (h *Handlers) addGenFlowTotals(ctx context.Context, out *EnergyFlowTotals, orgID string, raw []energyflow.RawSample, from, to time.Time, opts energyflow.Options) {
+	genTo := to
+	if now := time.Now(); now.Before(genTo) {
+		genTo = now.Truncate(time.Minute)
+	}
+	tl := energyflow.BuildGenTimeline(raw, from, genTo, time.Minute, h.genSince(ctx, orgID))
+	if tl == nil {
+		return
+	}
+	accounted := h.economics != nil && h.economics.GenAccounting(ctx, orgID, from)
+	type hourFlows struct {
+		plain, gen          [4]float64
+		genToLoad, genToEss float64
+	}
+	hours := map[time.Time]*hourFlows{}
+	at := func(t time.Time) *hourFlows {
+		k := t.Add(-time.Nanosecond).Truncate(time.Hour)
+		if hours[k] == nil {
+			hours[k] = &hourFlows{}
+		}
+		return hours[k]
+	}
+	var stats energyflow.RecomputeResult
+	energyflow.IterateIntervalsWithGen(raw, tl, opts,
+		func(curr time.Time, r energyflow.Result) {
+			f := at(curr)
+			f.plain[0] += r.PVToESSKwh
+			f.plain[1] += r.GridToESSKwh
+			f.plain[2] += r.ESSToLoadKwh
+			f.plain[3] += r.ESSToGridKwh
+		},
+		func(windowEnd time.Time, r energyflow.GenResult) {
+			f := at(windowEnd)
+			f.gen[0] += r.PVToESSKwh
+			f.gen[1] += r.GridToESSKwh
+			f.gen[2] += r.ESSToLoadKwh
+			f.gen[3] += r.ESSToGridKwh
+			f.genToLoad += r.GenToLoadKwh
+			f.genToEss += r.GenToESSKwh
+		},
+		&stats,
+	)
+	gen := &EnergyFlowGenTotals{Accounted: accounted}
+	var flows [4]float64
+	for start, f := range hours {
+		th, ok := tl.Hour(start)
+		active := false
+		if ok {
+			gen.GenKwh += th.GenKwh
+			off := 0
+			for mode, m := range th.Minutes {
+				if mode.Offgrid() {
+					off += m
+				}
+			}
+			active = th.GenKwh > 0 || off > 0
+		}
+		pick := f.plain
+		if accounted && active {
+			pick = f.gen
+			gen.GenToLoadKwh += f.genToLoad
+			gen.GenToESSKwh += f.genToEss
+		}
+		for i := range flows {
+			flows[i] += pick[i]
+		}
+	}
+	if accounted {
+		out.PVToESSKwh, out.GridToESSKwh, out.ESSToLoadKwh, out.ESSToGridKwh = flows[0], flows[1], flows[2], flows[3]
+	}
+	if gen.GenKwh > 0 || accounted {
+		out.Gen = gen
+	}
 }
 
 // essPowerCeiling returns the ESS charge/discharge power ceiling (kW)

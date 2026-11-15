@@ -128,6 +128,7 @@ func InitEconomicsSchema(ctx context.Context, pool *pgxpool.Pool) error {
 		// fall back to the hourly-sum anomaly check until recomputed).
 		`ALTER TABLE economics_hourly ADD COLUMN IF NOT EXISTS ess_peak_interval_kw double precision NOT NULL DEFAULT 0`,
 	}
+	stmts = append(stmts, economicsGenSchema()...)
 	for _, s := range stmts {
 		if _, err := pool.Exec(ctx, s); err != nil {
 			return fmt.Errorf("storage: exec economics schema: %w", err)
@@ -263,6 +264,8 @@ type EconomicsHourlyRow struct {
 	// (kW) for the hour, captured during recompute. 0 means no sub-hourly
 	// signal (or a legacy row written before the column existed).
 	EssPeakIntervalKw float64
+
+	Gen EconomicsGenHour
 }
 
 // UpsertEconomicsHourly replaces the persisted per-hour rows by
@@ -277,7 +280,7 @@ func UpsertEconomicsHourly(ctx context.Context, pool *pgxpool.Pool, rows []Econo
 		return nil
 	}
 	batch := &pgx.Batch{}
-	const stmt = `
+	stmt := `
 		INSERT INTO economics_hourly (
 			organization_id, hour_start,
 			rdn_uah_per_kwh, import_price_uah_per_kwh, export_price_uah_per_kwh,
@@ -290,10 +293,12 @@ func UpsertEconomicsHourly(ctx context.Context, pool *pgxpool.Pool, rows []Econo
 			ess_withdrawn_cost_uah, ess_realized_profit_uah,
 			ess_avg_cost_uah_per_kwh_end, ess_cost_basis_uah_end, ess_residual_kwh_end,
 			ess_peak_interval_kw,
+			` + columnList(genHourColumns) + `,
 			computed_at
 		) VALUES (
 			$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,
-			$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31, now()
+			$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,
+			` + placeholders(32, len(genHourColumns)) + `, now()
 		)
 		ON CONFLICT (organization_id, hour_start) DO UPDATE SET
 			rdn_uah_per_kwh = EXCLUDED.rdn_uah_per_kwh,
@@ -325,10 +330,11 @@ func UpsertEconomicsHourly(ctx context.Context, pool *pgxpool.Pool, rows []Econo
 			ess_cost_basis_uah_end = EXCLUDED.ess_cost_basis_uah_end,
 			ess_residual_kwh_end = EXCLUDED.ess_residual_kwh_end,
 			ess_peak_interval_kw = EXCLUDED.ess_peak_interval_kw,
+			` + excludedSet(genHourColumns) + `,
 			computed_at = now()
 	`
 	for _, r := range rows {
-		batch.Queue(stmt,
+		args := []any{
 			r.OrganizationID, r.HourStart.UTC(),
 			r.Rdn, r.ImportPrice, r.ExportPrice,
 			r.PVGeneration, r.ImportTotal, r.ExportTotal, r.LoadTotal,
@@ -340,7 +346,8 @@ func UpsertEconomicsHourly(ctx context.Context, pool *pgxpool.Pool, rows []Econo
 			r.EssWithdrawnCost, r.EssRealizedProfit,
 			r.EssAvgCostEnd, r.EssCostBasisEnd, r.EssResidualEnd,
 			r.EssPeakIntervalKw,
-		)
+		}
+		batch.Queue(stmt, append(args, r.Gen.values()...)...)
 	}
 	br := pool.SendBatch(ctx, batch)
 	defer br.Close()
@@ -370,7 +377,8 @@ func GetEconomicsHourly(ctx context.Context, pool *pgxpool.Pool, organizationID 
 			ess_remaining_kwh_start, ess_avg_cost_uah_per_kwh_start, ess_cost_basis_uah_start,
 			ess_withdrawn_cost_uah, ess_realized_profit_uah,
 			ess_avg_cost_uah_per_kwh_end, ess_cost_basis_uah_end, ess_residual_kwh_end,
-			ess_peak_interval_kw
+			ess_peak_interval_kw,
+			`+columnList(genHourColumns)+`
 		FROM economics_hourly
 		WHERE organization_id = $1 AND hour_start >= $2 AND hour_start < $3
 		ORDER BY hour_start ASC
@@ -382,7 +390,7 @@ func GetEconomicsHourly(ctx context.Context, pool *pgxpool.Pool, organizationID 
 	var out []EconomicsHourlyRow
 	for rows.Next() {
 		var r EconomicsHourlyRow
-		if err := rows.Scan(
+		targets := []any{
 			&r.OrganizationID, &r.HourStart,
 			&r.Rdn, &r.ImportPrice, &r.ExportPrice,
 			&r.PVGeneration, &r.ImportTotal, &r.ExportTotal, &r.LoadTotal,
@@ -394,7 +402,8 @@ func GetEconomicsHourly(ctx context.Context, pool *pgxpool.Pool, organizationID 
 			&r.EssWithdrawnCost, &r.EssRealizedProfit,
 			&r.EssAvgCostEnd, &r.EssCostBasisEnd, &r.EssResidualEnd,
 			&r.EssPeakIntervalKw,
-		); err != nil {
+		}
+		if err := rows.Scan(append(targets, r.Gen.scanTargets()...)...); err != nil {
 			return nil, fmt.Errorf("storage: scan economics hourly: %w", err)
 		}
 		out = append(out, r)
@@ -467,6 +476,40 @@ type EconomicsDailyRow struct {
 	Reconciled    bool
 	QualityFlags  []string
 	Reconciliation json.RawMessage
+
+	Gen EconomicsGenDay
+}
+
+// economicsDailyColumns is the SELECT list scanned by dailyScanTargets.
+var economicsDailyColumns = `
+			organization_id, day, tz,
+			baseline_cost_uah, actual_cost_uah, effect_uah, ess_net_uah,
+			load_kwh, pv_kwh, grid_import_kwh, grid_export_kwh, ess_charged_kwh, ess_discharged_kwh,
+			pv_to_load_kwh, pv_to_ess_kwh, pv_to_grid_kwh, grid_to_load_kwh, grid_to_ess_kwh, ess_to_load_kwh, ess_to_grid_kwh,
+			avg_import_price_uah_per_kwh, avg_export_price_uah_per_kwh,
+			revenue_pv_export_uah, revenue_pv_self_uah, revenue_ess_export_uah, revenue_ess_self_uah, revenue_total_uah,
+			expense_grid_charge_uah, expense_total_uah, ebitda_uah,
+			ess_withdrawn_cost_uah, ess_realized_profit_uah, ess_degradation_cost_uah,
+			ess_avg_cost_basis_uah_per_kwh_eod, ess_residual_kwh_eod, ess_cost_basis_uah_eod,
+			hours_with_data, hours_missing_price, skip_diagnostics, is_final,
+			reconciled, quality_flags, reconciliation, computed_at,
+			` + columnList(genDayColumns)
+
+func (r *EconomicsDailyRow) dailyScanTargets() []any {
+	targets := []any{
+		&r.OrganizationID, &r.Day, &r.Tz,
+		&r.BaselineCost, &r.ActualCost, &r.Effect, &r.EssNet,
+		&r.Load, &r.PV, &r.GridImport, &r.GridExport, &r.EssCharged, &r.EssDischarged,
+		&r.PVToLoad, &r.PVToEss, &r.PVToGrid, &r.GridToLoad, &r.GridToEss, &r.EssToLoad, &r.EssToGrid,
+		&r.AvgImportPrice, &r.AvgExportPrice,
+		&r.RevenuePvExport, &r.RevenuePvSelf, &r.RevenueEssExport, &r.RevenueEssSelf, &r.RevenueTotal,
+		&r.ExpenseGridCharge, &r.ExpenseTotal, &r.Ebitda,
+		&r.EssWithdrawnCost, &r.EssRealizedProfit, &r.EssDegradationCost,
+		&r.EssAvgCostBasisEod, &r.EssResidualKwhEod, &r.EssCostBasisUahEod,
+		&r.HoursWithData, &r.HoursMissingPrice, &r.SkipDiagnostics, &r.IsFinal,
+		&r.Reconciled, &r.QualityFlags, &r.Reconciliation, &r.ComputedAt,
+	}
+	return append(targets, r.Gen.scanTargets()...)
 }
 
 // UpsertEconomicsDaily replaces the per-day summary by (org, day).
@@ -474,7 +517,7 @@ func UpsertEconomicsDaily(ctx context.Context, pool *pgxpool.Pool, r EconomicsDa
 	if pool == nil {
 		return fmt.Errorf("storage: nil pool")
 	}
-	const stmt = `
+	stmt := `
 		INSERT INTO economics_daily (
 			organization_id, day, tz,
 			baseline_cost_uah, actual_cost_uah, effect_uah, ess_net_uah,
@@ -486,11 +529,14 @@ func UpsertEconomicsDaily(ctx context.Context, pool *pgxpool.Pool, r EconomicsDa
 			ess_withdrawn_cost_uah, ess_realized_profit_uah, ess_degradation_cost_uah,
 			ess_avg_cost_basis_uah_per_kwh_eod, ess_residual_kwh_eod, ess_cost_basis_uah_eod,
 			hours_with_data, hours_missing_price, skip_diagnostics, is_final,
-			reconciled, quality_flags, reconciliation, computed_at
+			reconciled, quality_flags, reconciliation,
+			` + columnList(genDayColumns) + `,
+			computed_at
 		) VALUES (
 			$1,$2::date,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,
 			$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,
-			$41,$42,$43::jsonb, now()
+			$41,$42,$43::jsonb,
+			` + placeholders(44, len(genDayColumns)) + `, now()
 		)
 		ON CONFLICT (organization_id, day) DO UPDATE SET
 			tz = EXCLUDED.tz,
@@ -534,13 +580,14 @@ func UpsertEconomicsDaily(ctx context.Context, pool *pgxpool.Pool, r EconomicsDa
 			reconciled = EXCLUDED.reconciled,
 			quality_flags = EXCLUDED.quality_flags,
 			reconciliation = EXCLUDED.reconciliation,
+			` + excludedSet(genDayColumns) + `,
 			computed_at = now()
 	`
 	var reconciliation []byte
 	if len(r.Reconciliation) > 0 {
 		reconciliation = []byte(r.Reconciliation)
 	}
-	if _, err := pool.Exec(ctx, stmt,
+	args := []any{
 		r.OrganizationID, r.Day, r.Tz,
 		r.BaselineCost, r.ActualCost, r.Effect, r.EssNet,
 		r.Load, r.PV, r.GridImport, r.GridExport, r.EssCharged, r.EssDischarged,
@@ -552,7 +599,8 @@ func UpsertEconomicsDaily(ctx context.Context, pool *pgxpool.Pool, r EconomicsDa
 		r.EssAvgCostBasisEod, r.EssResidualKwhEod, r.EssCostBasisUahEod,
 		r.HoursWithData, r.HoursMissingPrice, r.SkipDiagnostics, r.IsFinal,
 		r.Reconciled, r.QualityFlags, reconciliation,
-	); err != nil {
+	}
+	if _, err := pool.Exec(ctx, stmt, append(args, r.Gen.values()...)...); err != nil {
 		return fmt.Errorf("storage: upsert economics daily: %w", err)
 	}
 	return nil
@@ -566,33 +614,10 @@ func GetEconomicsDaily(ctx context.Context, pool *pgxpool.Pool, organizationID s
 		return r, false, fmt.Errorf("storage: nil pool")
 	}
 	err := pool.QueryRow(ctx, `
-		SELECT
-			organization_id, day, tz,
-			baseline_cost_uah, actual_cost_uah, effect_uah, ess_net_uah,
-			load_kwh, pv_kwh, grid_import_kwh, grid_export_kwh, ess_charged_kwh, ess_discharged_kwh,
-			pv_to_load_kwh, pv_to_ess_kwh, pv_to_grid_kwh, grid_to_load_kwh, grid_to_ess_kwh, ess_to_load_kwh, ess_to_grid_kwh,
-			avg_import_price_uah_per_kwh, avg_export_price_uah_per_kwh,
-			revenue_pv_export_uah, revenue_pv_self_uah, revenue_ess_export_uah, revenue_ess_self_uah, revenue_total_uah,
-			expense_grid_charge_uah, expense_total_uah, ebitda_uah,
-			ess_withdrawn_cost_uah, ess_realized_profit_uah, ess_degradation_cost_uah,
-			ess_avg_cost_basis_uah_per_kwh_eod, ess_residual_kwh_eod, ess_cost_basis_uah_eod,
-			hours_with_data, hours_missing_price, skip_diagnostics, is_final,
-			reconciled, quality_flags, reconciliation, computed_at
+		SELECT`+economicsDailyColumns+`
 		FROM economics_daily
 		WHERE organization_id = $1 AND day = $2::date
-	`, organizationID, day).Scan(
-		&r.OrganizationID, &r.Day, &r.Tz,
-		&r.BaselineCost, &r.ActualCost, &r.Effect, &r.EssNet,
-		&r.Load, &r.PV, &r.GridImport, &r.GridExport, &r.EssCharged, &r.EssDischarged,
-		&r.PVToLoad, &r.PVToEss, &r.PVToGrid, &r.GridToLoad, &r.GridToEss, &r.EssToLoad, &r.EssToGrid,
-		&r.AvgImportPrice, &r.AvgExportPrice,
-		&r.RevenuePvExport, &r.RevenuePvSelf, &r.RevenueEssExport, &r.RevenueEssSelf, &r.RevenueTotal,
-		&r.ExpenseGridCharge, &r.ExpenseTotal, &r.Ebitda,
-		&r.EssWithdrawnCost, &r.EssRealizedProfit, &r.EssDegradationCost,
-		&r.EssAvgCostBasisEod, &r.EssResidualKwhEod, &r.EssCostBasisUahEod,
-		&r.HoursWithData, &r.HoursMissingPrice, &r.SkipDiagnostics, &r.IsFinal,
-		&r.Reconciled, &r.QualityFlags, &r.Reconciliation, &r.ComputedAt,
-	)
+	`, organizationID, day).Scan(r.dailyScanTargets()...)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return r, false, nil
@@ -613,6 +638,11 @@ type EnergyFlowDailySums struct {
 	ESSToLoadKwh float64
 	ESSToGridKwh float64
 	Days         int
+
+	// The generator's energy and, on days counted with it, its split.
+	GenKwh       float64
+	GenToLoadKwh float64
+	GenToESSKwh  float64
 }
 
 // SumEconomicsDailyFlows aggregates the four directional flow totals
@@ -644,7 +674,10 @@ func SumEconomicsDailyFlows(
 			COALESCE(SUM(grid_to_ess_kwh), 0),
 			COALESCE(SUM(ess_to_load_kwh), 0),
 			COALESCE(SUM(ess_to_grid_kwh), 0),
-			COUNT(*)
+			COUNT(*),
+			COALESCE(SUM(gen_kwh), 0),
+			COALESCE(SUM(gen_to_load_kwh), 0),
+			COALESCE(SUM(gen_to_ess_kwh), 0)
 		FROM economics_daily
 		WHERE organization_id = $1 AND day >= $2::date AND day <= $3::date
 	`, organizationID, fromDay, toDay).Scan(
@@ -653,6 +686,9 @@ func SumEconomicsDailyFlows(
 		&out.ESSToLoadKwh,
 		&out.ESSToGridKwh,
 		&out.Days,
+		&out.GenKwh,
+		&out.GenToLoadKwh,
+		&out.GenToESSKwh,
 	)
 	if err != nil {
 		return EnergyFlowDailySums{}, fmt.Errorf("storage: sum economics daily flows: %w", err)
@@ -685,7 +721,10 @@ func SumFinalEconomicsDailyFlows(
 			COALESCE(SUM(grid_to_ess_kwh), 0),
 			COALESCE(SUM(ess_to_load_kwh), 0),
 			COALESCE(SUM(ess_to_grid_kwh), 0),
-			COUNT(*)
+			COUNT(*),
+			COALESCE(SUM(gen_kwh), 0),
+			COALESCE(SUM(gen_to_load_kwh), 0),
+			COALESCE(SUM(gen_to_ess_kwh), 0)
 		FROM economics_daily
 		WHERE organization_id = $1
 			AND day BETWEEN ($2::timestamptz AT TIME ZONE 'UTC')::date - 1
@@ -699,6 +738,9 @@ func SumFinalEconomicsDailyFlows(
 		&out.ESSToLoadKwh,
 		&out.ESSToGridKwh,
 		&out.Days,
+		&out.GenKwh,
+		&out.GenToLoadKwh,
+		&out.GenToESSKwh,
 	)
 	if err != nil {
 		return EnergyFlowDailySums{}, fmt.Errorf("storage: sum final economics daily flows: %w", err)
@@ -717,18 +759,7 @@ func GetEconomicsDailyRange(ctx context.Context, pool *pgxpool.Pool, organizatio
 		return nil, fmt.Errorf("storage: empty organization_id")
 	}
 	rows, err := pool.Query(ctx, `
-		SELECT
-			organization_id, day, tz,
-			baseline_cost_uah, actual_cost_uah, effect_uah, ess_net_uah,
-			load_kwh, pv_kwh, grid_import_kwh, grid_export_kwh, ess_charged_kwh, ess_discharged_kwh,
-			pv_to_load_kwh, pv_to_ess_kwh, pv_to_grid_kwh, grid_to_load_kwh, grid_to_ess_kwh, ess_to_load_kwh, ess_to_grid_kwh,
-			avg_import_price_uah_per_kwh, avg_export_price_uah_per_kwh,
-			revenue_pv_export_uah, revenue_pv_self_uah, revenue_ess_export_uah, revenue_ess_self_uah, revenue_total_uah,
-			expense_grid_charge_uah, expense_total_uah, ebitda_uah,
-			ess_withdrawn_cost_uah, ess_realized_profit_uah, ess_degradation_cost_uah,
-			ess_avg_cost_basis_uah_per_kwh_eod, ess_residual_kwh_eod, ess_cost_basis_uah_eod,
-			hours_with_data, hours_missing_price, skip_diagnostics, is_final,
-			reconciled, quality_flags, reconciliation, computed_at
+		SELECT`+economicsDailyColumns+`
 		FROM economics_daily
 		WHERE organization_id = $1 AND day >= $2::date AND day <= $3::date
 		ORDER BY day ASC
@@ -740,19 +771,7 @@ func GetEconomicsDailyRange(ctx context.Context, pool *pgxpool.Pool, organizatio
 	var out []EconomicsDailyRow
 	for rows.Next() {
 		var r EconomicsDailyRow
-		if err := rows.Scan(
-			&r.OrganizationID, &r.Day, &r.Tz,
-			&r.BaselineCost, &r.ActualCost, &r.Effect, &r.EssNet,
-			&r.Load, &r.PV, &r.GridImport, &r.GridExport, &r.EssCharged, &r.EssDischarged,
-			&r.PVToLoad, &r.PVToEss, &r.PVToGrid, &r.GridToLoad, &r.GridToEss, &r.EssToLoad, &r.EssToGrid,
-			&r.AvgImportPrice, &r.AvgExportPrice,
-			&r.RevenuePvExport, &r.RevenuePvSelf, &r.RevenueEssExport, &r.RevenueEssSelf, &r.RevenueTotal,
-			&r.ExpenseGridCharge, &r.ExpenseTotal, &r.Ebitda,
-			&r.EssWithdrawnCost, &r.EssRealizedProfit, &r.EssDegradationCost,
-			&r.EssAvgCostBasisEod, &r.EssResidualKwhEod, &r.EssCostBasisUahEod,
-			&r.HoursWithData, &r.HoursMissingPrice, &r.SkipDiagnostics, &r.IsFinal,
-			&r.Reconciled, &r.QualityFlags, &r.Reconciliation, &r.ComputedAt,
-		); err != nil {
+		if err := rows.Scan(r.dailyScanTargets()...); err != nil {
 			return nil, fmt.Errorf("storage: scan economics daily range: %w", err)
 		}
 		out = append(out, r)

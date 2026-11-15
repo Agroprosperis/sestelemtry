@@ -193,6 +193,20 @@ type EnergyFlowTotals struct {
 	GridToESSKwh float64 `json:"grid_to_ess_kwh"`
 	ESSToLoadKwh float64 `json:"ess_to_load_kwh"`
 	ESSToGridKwh float64 `json:"ess_to_grid_kwh"`
+
+	Gen *EnergyFlowGenTotals `json:"gen,omitempty"`
+}
+
+// EnergyFlowGenTotals is the generator part of a period's flows, present
+// once the generator gave energy or the economics count it. Accounted
+// says the four flows above are the generator-aware split, which the
+// economics use for the hours the generator ran or the site was off the
+// grid; gen_to_* are set only then.
+type EnergyFlowGenTotals struct {
+	GenKwh       float64 `json:"gen_kwh"`
+	GenToLoadKwh float64 `json:"gen_to_load_kwh"`
+	GenToESSKwh  float64 `json:"gen_to_ess_kwh"`
+	Accounted    bool    `json:"accounted,omitempty"`
 }
 
 // Where a response's `flows` came from. Day-sized windows run the
@@ -564,4 +578,12 @@ type OrgTariffs struct {
 	// page compares the live forecast against it; 0 (or omitted) hides
 	// that comparison.
 	PlannedPaybackMonths float64 `json:"planned_payback_months,omitempty"`
+	// Generator fuel (ems-spec generator handoff §4.4): litre price
+	// without VAT, the accounting method (per_kwh, the default, or
+	// per_hour) and its consumption. Generator economics count only
+	// once the price and the chosen method's consumption are set.
+	GenFuelPriceUahPerL       float64 `json:"gen_fuel_price_uah_per_l,omitempty"`
+	GenFuelMethod             string  `json:"gen_fuel_method,omitempty"`
+	GenFuelConsumptionLPerKwh float64 `json:"gen_fuel_consumption_l_per_kwh,omitempty"`
+	GenFuelConsumptionLPerH   float64 `json:"gen_fuel_consumption_l_per_h,omitempty"`
 }

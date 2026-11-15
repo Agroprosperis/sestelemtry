@@ -26,6 +26,7 @@ const (
 	ReasonHoldForFuturePeak   = "HOLD_FOR_FUTURE_PEAK"
 	ReasonHoldLowPrice        = "HOLD_LOW_PRICE"
 	ReasonNoPrice             = "NO_PRICE"
+	ReasonOffgrid             = "OFFGRID"
 )
 
 // Plan warning codes surfaced next to the recommendation so the operator
@@ -148,6 +149,8 @@ func classifyHour(s dispatchStep, oh optimumHour, socKwh, maxFutureImport float6
 		}
 		return "charge", ReasonChargePvSurplus,
 			fmt.Sprintf("Заряд %.0f кВт·год від надлишку СЕС", charge)
+	case oh.offgrid:
+		return "hold", ReasonOffgrid, "Об'єкт працював без мережі — година поза розрахунком оптимуму"
 	case !oh.tradable:
 		return "hold", ReasonNoPrice, "Немає ціни РДН на цю годину — рішення не приймається"
 	case socKwh > planIdleKwh && maxFutureImport > oh.importPrice:

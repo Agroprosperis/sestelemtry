@@ -107,6 +107,7 @@ func (b *currencyBackend) LoadHourlyRange(ctx context.Context, orgID string, fro
 		h.EssNet *= f
 		h.EssWithdrawnCostUah = scalePtr(h.EssWithdrawnCostUah, f)
 		h.EssRealizedProfitUah = scalePtr(h.EssRealizedProfitUah, f)
+		h.EssOffgridValueUah *= f
 		h.MoneyScale = f
 		out[i] = h
 	}
@@ -261,6 +262,10 @@ func ScaleDay(day StoredDay, f float64) StoredDay {
 		row.EssRealizedProfitUah = scalePtr(r.EssRealizedProfitUah, f)
 		row.EssCostBasisUahEnd = scalePtr(r.EssCostBasisUahEnd, f)
 		row.EssAvgCostUahPerKwhEnd = scalePtr(r.EssAvgCostUahPerKwhEnd, f)
+		row.Econ.GenFuelCostUah *= f
+		row.Econ.PvOffgridValueUah *= f
+		row.Econ.EssOffgridValueUah *= f
+		row.Econ.GenChargeCostUah *= f
 		out.Rows[i] = &row
 	}
 	return out
@@ -286,6 +291,8 @@ func scaleDailyTotals(t DailyTotals, f float64) DailyTotals {
 	t.EssDegradationCost *= f
 	t.EssAvgCostBasisEod *= f
 	t.EssCostBasisUahEod *= f
+	t.GenFuelCost *= f
+	t.ExpenseGenCharge *= f
 	return t
 }
 

@@ -638,6 +638,9 @@ func mergeDays(orgID string, days []StoredDay) StoredDay {
 			}
 			if out.Rows[h] == nil {
 				row := *r
+				// The members share one generator: until the group is
+				// computed as one, its hour carries none of it.
+				row.GenKwh, row.GenEstimated, row.SupplyMinutes = 0, false, SupplyMinutes{}
 				out.Rows[h] = &row
 				continue
 			}

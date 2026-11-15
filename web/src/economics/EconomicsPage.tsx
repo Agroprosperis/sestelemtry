@@ -29,6 +29,7 @@ import { useCapexSchedule } from './useCapexSchedule'
 import { useFxRatesOn } from './useFxRatesOn'
 import { capexResolver, capexStepsInCurrency, fundedCapexSteps } from './payback'
 import { useOrgTariffs } from './useOrgTariffs'
+import { discrepancyFlags } from './qualityFlags'
 
 // DamRefreshState is the small UI state machine that drives the
 // "Оновити ціни РДН" button and its status hint: idle (clickable),
@@ -267,6 +268,7 @@ export function EconomicsPage() {
   })
 
   const totals = useMemo(() => dailyTotals(data.rows), [data.rows])
+  const discrepancies = useMemo(() => discrepancyFlags(data.qualityFlags), [data.qualityFlags])
 
   // month is the YYYY-MM derived from the day anchor.
   const month = date.slice(0, 7)
@@ -647,9 +649,7 @@ export function EconomicsPage() {
               <section className="economics-banner economics-banner-ok" role="status">
                 <span className="economics-reconciled-badge">Звірено з FusionSolar</span>
                 Денні підсумки масштабовано під канонічні KPI станції.
-                {data.qualityFlags.length > 0 && (
-                  <> Розбіжності: {data.qualityFlags.join(', ')}.</>
-                )}
+                {discrepancies.length > 0 && <> Розбіжності: {discrepancies.join(', ')}.</>}
               </section>
             )}
 

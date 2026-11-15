@@ -1233,12 +1233,26 @@ func (s *Store) EnergyFlowDailyTotals(
 	if err != nil {
 		return EnergyFlowTotals{}, 0, err
 	}
-	return EnergyFlowTotals{
+	return flowTotalsFromDailySums(sums), sums.Days, nil
+}
+
+func flowTotalsFromDailySums(sums storage.EnergyFlowDailySums) EnergyFlowTotals {
+	out := EnergyFlowTotals{
 		PVToESSKwh:   sums.PVToESSKwh,
 		GridToESSKwh: sums.GridToESSKwh,
 		ESSToLoadKwh: sums.ESSToLoadKwh,
 		ESSToGridKwh: sums.ESSToGridKwh,
-	}, sums.Days, nil
+	}
+	accounted := sums.GenToLoadKwh+sums.GenToESSKwh > 0
+	if sums.GenKwh > 0 || accounted {
+		out.Gen = &EnergyFlowGenTotals{
+			GenKwh:       sums.GenKwh,
+			GenToLoadKwh: sums.GenToLoadKwh,
+			GenToESSKwh:  sums.GenToESSKwh,
+			Accounted:    accounted,
+		}
+	}
+	return out
 }
 
 // EnergyFlowFinalDays sums the persisted flows of the final days lying
@@ -1252,12 +1266,7 @@ func (s *Store) EnergyFlowFinalDays(
 	if err != nil {
 		return EnergyFlowTotals{}, 0, err
 	}
-	return EnergyFlowTotals{
-		PVToESSKwh:   sums.PVToESSKwh,
-		GridToESSKwh: sums.GridToESSKwh,
-		ESSToLoadKwh: sums.ESSToLoadKwh,
-		ESSToGridKwh: sums.ESSToGridKwh,
-	}, sums.Days, nil
+	return flowTotalsFromDailySums(sums), sums.Days, nil
 }
 
 // PvPlanDays returns the cached per-day PV plan rows for the inclusive

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { fetchEconomicsDaily, type EconomicsHourApi } from '../api'
-import type { HourEconomicsRow } from './compute'
+import type { HourEconomicsRow, HourGen } from './compute'
 import type { Currency } from './currency'
 import type { Tariffs } from './tariffs'
 
@@ -146,7 +146,46 @@ export async function fetchUahDayRows(organizationID: string, date: string): Pro
 
 // mapHourRow converts the flat snake_case wire shape into the nested
 // HourEconomicsRow the dashboard components already consume.
-function mapHourRow(h: EconomicsHourApi): HourEconomicsRow {
+export function mapHourRow(h: EconomicsHourApi): HourEconomicsRow {
+  const row = mapHourCore(h)
+  const gen = mapHourGen(h)
+  return gen ? { ...row, gen } : row
+}
+
+// mapHourGen is the hour's generator part; undefined for an hour without
+// generator data.
+function mapHourGen(h: EconomicsHourApi): HourGen | undefined {
+  const minutes = {
+    generator: h.minutes_generator ?? 0,
+    island: h.minutes_island ?? 0,
+    blackout: h.minutes_blackout ?? 0,
+    transition: h.minutes_transition ?? 0,
+    unknown: h.minutes_unknown ?? 0,
+  }
+  const any =
+    h.gen_accounted || (h.gen_kwh ?? 0) > 0 || Object.values(minutes).some((m) => m > 0)
+  if (!any) return undefined
+  return {
+    genKwh: h.gen_kwh ?? 0,
+    estimated: h.gen_estimated ?? false,
+    minutes,
+    accounted: h.gen_accounted ?? false,
+    genToLoad: h.gen_to_load_kwh ?? 0,
+    genToEss: h.gen_to_ess_kwh ?? 0,
+    loadOffgrid: h.load_offgrid_kwh ?? 0,
+    pvToLoadOffgrid: h.pv_to_load_offgrid_kwh ?? 0,
+    essToLoadOffgrid: h.ess_to_load_offgrid_kwh ?? 0,
+    pvToEssOffgrid: h.pv_to_ess_offgrid_kwh ?? 0,
+    fuelCostUah: h.gen_fuel_cost_uah ?? 0,
+    fuelL: h.gen_fuel_l ?? 0,
+    fuelMethod: h.gen_fuel_method ?? '',
+    pvOffgridValueUah: h.pv_offgrid_value_uah ?? 0,
+    essOffgridValueUah: h.ess_offgrid_value_uah ?? 0,
+    chargeCostUah: h.gen_charge_cost_uah ?? 0,
+  }
+}
+
+function mapHourCore(h: EconomicsHourApi): HourEconomicsRow {
   return {
     hour: h.hour,
     hourStart: h.hour_start,

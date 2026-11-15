@@ -144,6 +144,8 @@ func (s *Service) ComputeDay(ctx context.Context, orgID, date, tz string) (Store
 	if !ok {
 		tariffs = DefaultTariffs
 	}
+	shared := sharedGenerator(orgID)
+	accounting := genAccounting(tariffs, orgID)
 
 	todayFlows, err := s.backend.HourlyFlows(ctx, orgID, dayStart)
 	if err != nil {
@@ -192,10 +194,11 @@ func (s *Service) ComputeDay(ctx context.Context, orgID, date, tz string) (Store
 		DamToday:           damToday,
 		DamHistory:         damHistory,
 		Canonical:          canonical,
+		GenAccounting:      accounting,
 	})
 	totals := ComputeDailyTotals(rows)
 	totals.Reconciled = recon.Applied
-	totals.QualityFlags = recon.Flags
+	totals.QualityFlags = append(recon.Flags, genFlags(rows, accounting, shared)...)
 	totals.Reconciliation = recon.Detail
 	if src, ok := s.backend.(CounterEpisodeSource); ok {
 		episodes, err := src.CounterEpisodes(ctx, orgID, dayStart, dayEnd)

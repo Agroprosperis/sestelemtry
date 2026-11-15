@@ -56,6 +56,13 @@ export type Tariffs = {
   // from the investment case. Display-only: the payback page compares
   // the live forecast against it. 0 = not set (comparison hidden).
   plannedPaybackMonths: number
+  // Generator fuel (ems-spec generator handoff §4.4): litre price without
+  // VAT and the consumption of the chosen method. Generator economics
+  // count only once the price and that consumption are set.
+  genFuelPriceUahPerL: number
+  genFuelMethod: 'per_kwh' | 'per_hour'
+  genFuelConsumptionLPerKwh: number
+  genFuelConsumptionLPerH: number
 }
 
 export const DEFAULT_TARIFFS: Tariffs = {
@@ -74,4 +81,8 @@ export const DEFAULT_TARIFFS: Tariffs = {
   roundtripEfficiency: 0,
   capexUah: 0,
   plannedPaybackMonths: 0,
+  genFuelPriceUahPerL: 0,
+  genFuelMethod: 'per_kwh',
+  genFuelConsumptionLPerKwh: 0,
+  genFuelConsumptionLPerH: 0,
 }

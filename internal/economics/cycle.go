@@ -23,16 +23,24 @@ type dayOpt struct {
 	haveStart bool
 	pvSurplus float64 // Σ available PV surplus
 	actualPv  float64 // Σ actual pv_to_ess
-	essNet    float64 // Σ EssNet excluding anomalous hours
+	essNet    float64 // Σ EssNet excluding anomalous and off-grid hours
+
+	offgridHours int // hours left out as HourlyRecord.Offgrid
 }
 
 // addHour folds one hourly record into the day's optimizer context. An
 // anomalous hour keeps its slot (prices / SOC continuity) but contributes
-// no ESS activity, so a single corrupt spike can't wipe the whole day.
+// no ESS activity, so a single corrupt spike can't wipe the whole day. An
+// off-grid hour keeps its slot without prices: there was no grid to trade
+// with.
 func (do *dayOpt) addHour(hour int, h HourlyRecord, bad bool) {
 	do.raw[hour] = h
 	do.hasRaw[hour] = true
-	if bad {
+	switch {
+	case h.Offgrid:
+		do.offgridHours++
+		do.hours[hour] = optimumHour{moneyScale: h.MoneyScale, offgrid: true}
+	case bad:
 		do.badHour[hour] = true
 		oh := optimumHour{moneyScale: h.MoneyScale}
 		if h.Rdn != nil {
@@ -41,7 +49,7 @@ func (do *dayOpt) addHour(hour int, h HourlyRecord, bad bool) {
 			oh.exportPrice = h.ExportPrice
 		}
 		do.hours[hour] = oh
-	} else {
+	default:
 		pvSurplus := h.PVToGrid + h.PVToEss
 		oh := optimumHour{
 			// PV not consumed by load is available to charge (or

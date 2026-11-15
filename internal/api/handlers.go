@@ -1675,6 +1675,24 @@ func validateOrgTariffs(t OrgTariffs) error {
 	if math.IsNaN(t.PlannedPaybackMonths) || math.IsInf(t.PlannedPaybackMonths, 0) || t.PlannedPaybackMonths < 0 {
 		return fmt.Errorf("planned_payback_months must be >= 0")
 	}
+	// Generator fuel (ems-spec generator handoff §4.4); all optional.
+	fuel := []struct {
+		name string
+		val  float64
+		max  float64
+	}{
+		{"gen_fuel_price_uah_per_l", t.GenFuelPriceUahPerL, 1000},
+		{"gen_fuel_consumption_l_per_kwh", t.GenFuelConsumptionLPerKwh, 2},
+		{"gen_fuel_consumption_l_per_h", t.GenFuelConsumptionLPerH, 500},
+	}
+	for _, f := range fuel {
+		if math.IsNaN(f.val) || math.IsInf(f.val, 0) || f.val < 0 || f.val > f.max {
+			return fmt.Errorf("%s must be in [0, %g]", f.name, f.max)
+		}
+	}
+	if t.GenFuelMethod != "" && t.GenFuelMethod != economics.GenFuelPerKwh && t.GenFuelMethod != economics.GenFuelPerHour {
+		return fmt.Errorf("gen_fuel_method must be %q or %q", economics.GenFuelPerKwh, economics.GenFuelPerHour)
+	}
 	return nil
 }
 

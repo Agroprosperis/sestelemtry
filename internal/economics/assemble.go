@@ -63,6 +63,9 @@ type FlowRow struct {
 	// from the allocator's per-interval walk so the anomaly filter can
 	// catch spikes the hourly sums hide. 0 when no sub-hourly signal.
 	EssPeakIntervalKw float64
+	// Gen is the allocator's generator-aware view; nil for an hour
+	// without generator data.
+	Gen *GenFlowRow
 }
 
 // DAMHour mirrors a /dam-prices row (delivery date, hour 1..24, zone,
@@ -99,6 +102,14 @@ type HourRow struct {
 	// Persisted so the wide-window monthly/annual anomaly filter can read
 	// it without re-running the raw allocator.
 	EssPeakIntervalKw float64
+
+	// GenKwh, GenEstimated and SupplyMinutes describe the hour's
+	// generator data whether or not the hour is counted with it
+	// (Flow.Gen.Accounted): the generator meter's delta (or the power
+	// integral when GenEstimated) and the minutes by supply mode.
+	GenKwh        float64
+	GenEstimated  bool
+	SupplyMinutes SupplyMinutes
 }
 
 // DayInput carries everything AssembleDay needs for one target day. The
@@ -123,6 +134,11 @@ type DayInput struct {
 	// set, today's flows are scaled to match it (reconciliation);
 	// nil leaves the computed flows untouched (parity with live).
 	Canonical *CanonicalDaily
+
+	// GenAccounting counts the generator in the hours it ran or the site
+	// was off the grid (see generator.go). Without it every hour is
+	// computed exactly as before.
+	GenAccounting bool
 }
 
 // AssembleDay builds the 24-element HourRow slice for the target day.
@@ -150,16 +166,29 @@ func AssembleDay(in DayInput) ([]*HourRow, ReconcileResult) {
 	rdns := make([]*float64, 24)
 	starts := make([]time.Time, 24)
 	peaks := make([]float64, 24)
+	gens := make([]*GenFlowRow, 24)
+	var offgridImport float64
 	for h := 0; h < 24; h++ {
 		if h >= len(in.TodayFlows) {
 			continue
 		}
 		flowRow := in.TodayFlows[h]
 		peaks[h] = flowRow.EssPeakIntervalKw
-		f := essFlowsFromCounters(flowRow,
-			hasChargeCounter, chargeByHour[h],
-			hasDischargeCounter, dischargeByHour[h],
-			pvByHour[h], importByHour[h], exportByHour[h])
+		gens[h] = flowRow.Gen
+		var f HourFlows
+		if in.GenAccounting && flowRow.Gen.active() {
+			var claimed float64
+			f, claimed = genFlowsFromCounters(flowRow,
+				hasChargeCounter, chargeByHour[h],
+				hasDischargeCounter, dischargeByHour[h],
+				pvByHour[h], importByHour[h], exportByHour[h])
+			offgridImport += claimed
+		} else {
+			f = essFlowsFromCounters(flowRow,
+				hasChargeCounter, chargeByHour[h],
+				hasDischargeCounter, dischargeByHour[h],
+				pvByHour[h], importByHour[h], exportByHour[h])
+		}
 		flows[h] = &f
 		starts[h] = flowRow.From
 		if p, ok := priceMap[h]; ok {
@@ -191,6 +220,11 @@ func AssembleDay(in DayInput) ([]*HourRow, ReconcileResult) {
 			Econ:              econ,
 			EssPeakIntervalKw: peaks[h],
 		}
+		if g := gens[h]; g != nil {
+			out[h].GenKwh = g.GenKwh
+			out[h].GenEstimated = g.Estimated
+			out[h].SupplyMinutes = g.Minutes
+		}
 	}
 
 	// Залишок УЗЕ second pass: anchor hour 0 from SOC[0] mapped through
@@ -217,7 +251,7 @@ func AssembleDay(in DayInput) ([]*HourRow, ReconcileResult) {
 		if running == nil || cur == nil {
 			running = nil
 		} else {
-			v := *running + cur.Flow.PVToEss + cur.Flow.GridToEss - cur.Flow.EssToLoad - cur.Flow.EssToGrid
+			v := *running + cur.Flow.PVToEss + cur.Flow.GridToEss + cur.Flow.Gen.GenToEss - cur.Flow.EssToLoad - cur.Flow.EssToGrid
 			running = &v
 		}
 	}
@@ -239,7 +273,13 @@ func AssembleDay(in DayInput) ([]*HourRow, ReconcileResult) {
 		if cur.Rdn == nil {
 			continue
 		}
-		result := RollHour(state, cur.Flow, cur.Econ.ImportPrice, cur.Econ.ExportPrice, in.Tariffs.DegradationUahPerKwh)
+		result := rollHour(state, cur.Flow, rollPrices{
+			importPrice:        cur.Econ.ImportPrice,
+			exportPrice:        cur.Econ.ExportPrice,
+			degradation:        in.Tariffs.DegradationUahPerKwh,
+			genChargeCostUah:   cur.Econ.GenChargeCostUah,
+			essOffgridValueUah: cur.Econ.EssOffgridValueUah,
+		})
 		startUah := state.Uah
 		cur.EssCostBasisUahStart = &startUah
 		avgStart := result.AvgCostStart
@@ -262,8 +302,17 @@ func AssembleDay(in DayInput) ([]*HourRow, ReconcileResult) {
 	if lag := importLagKwh(flows); lag > 0 {
 		recon.Flags = append(recon.Flags, fmt.Sprintf("import_lag:%.0f", lag))
 	}
+	// The grid meter should not count without the grid (handoff §4.3);
+	// what it claimed in the day's wholly off-grid hours was dropped.
+	if offgridImport >= offgridImportFlagKwh {
+		recon.Flags = append(recon.Flags, fmt.Sprintf("offgrid_import:%.0f", offgridImport))
+	}
 	return out, recon
 }
+
+// offgridImportFlagKwh is the grid-meter claim over a day's wholly
+// off-grid hours worth flagging; less is metering slack.
+const offgridImportFlagKwh = 1
 
 // importLagKwh sums the hourly grid-attributed ESS charge the hour's own
 // import counter did not cover. The FusionSolar purchased-energy counter

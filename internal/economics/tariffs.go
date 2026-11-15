@@ -43,6 +43,60 @@ type Tariffs struct {
 	// otherwise derive empirically from the month's throughput; 0 keeps
 	// the empirical estimate (see deriveOptimumParams).
 	RoundtripEfficiency float64
+
+	// Diesel generator fuel (ems-spec generator handoff §4.4): the price
+	// of a litre without VAT and the consumption of the chosen method,
+	// litres per generator kWh (GenFuelPerKwh, the default) or per hour
+	// of running (GenFuelPerHour). Only the chosen method's consumption
+	// counts; the other is kept as entered.
+	GenFuelPriceUahPerL       float64
+	GenFuelMethod             string
+	GenFuelConsumptionLPerKwh float64
+	GenFuelConsumptionLPerH   float64
+}
+
+// Fuel accounting methods (handoff §4.4).
+const (
+	GenFuelPerKwh  = "per_kwh"
+	GenFuelPerHour = "per_hour"
+)
+
+// FuelMethod is the effective fuel accounting method.
+func (t Tariffs) FuelMethod() string {
+	if t.GenFuelMethod == GenFuelPerHour {
+		return GenFuelPerHour
+	}
+	return GenFuelPerKwh
+}
+
+// FuelSet reports whether the version prices generator fuel: a litre
+// price and the chosen method's consumption are both set.
+func (t Tariffs) FuelSet() bool {
+	if t.GenFuelPriceUahPerL <= 0 {
+		return false
+	}
+	if t.FuelMethod() == GenFuelPerHour {
+		return t.GenFuelConsumptionLPerH > 0
+	}
+	return t.GenFuelConsumptionLPerKwh > 0
+}
+
+// FuelCostPerKwh is c of handoff §4.4: the cost of one generator kWh,
+// with VAT the same way as the import price.
+func (t Tariffs) FuelCostPerKwh() float64 {
+	return t.GenFuelPriceUahPerL * t.GenFuelConsumptionLPerKwh * t.vatMultiplier()
+}
+
+// FuelCostPerHour is h of handoff §4.4: the cost of one hour of running.
+func (t Tariffs) FuelCostPerHour() float64 {
+	return t.GenFuelPriceUahPerL * t.GenFuelConsumptionLPerH * t.vatMultiplier()
+}
+
+func (t Tariffs) vatMultiplier() float64 {
+	if t.IncludeVat {
+		return 1 + t.VatRate
+	}
+	return 1
 }
 
 // EssRatings are the УЗЕ nameplate numbers the optimizer, the equivalent
