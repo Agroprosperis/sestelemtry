@@ -77,6 +77,15 @@ type HourlyRecord struct {
 	// by (see InCurrency); 0 means the money is in UAH. The optimizer
 	// applies it to the UAH-denominated wear and price floor.
 	MoneyScale float64
+
+	// Offgrid marks an hour counted with the generator that spent minutes
+	// without the grid. The optimum models a battery on the grid, so such
+	// an hour takes part in neither the УЗЕ fact nor the optimum.
+	// EssToLoadOffgrid and EssOffgridValueUah are its discharge used
+	// without the grid and what that displaced (see genHourEconomics).
+	Offgrid            bool
+	EssToLoadOffgrid   float64
+	EssOffgridValueUah float64
 }
 
 // MonthDay is one day's contribution to the month — the full daily
@@ -193,6 +202,8 @@ type MonthlyTotals struct {
 	ExpenseGridCharge float64
 	ExpenseTotal      float64
 	Ebitda            float64
+
+	GenTotals
 
 	// PvExportPotential values the whole PV yield at the export price of
 	// the hour that produced it — what the plant would have earned selling
@@ -660,7 +671,7 @@ func aggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly
 			!isBadHour(h) && h.EssRealizedProfitUah != nil && h.EssWithdrawnCostUah != nil {
 			m := *h.EssRealizedProfitUah / h.EssDischarged
 			if !math.IsInf(m, 0) && !math.IsNaN(m) {
-				revenue := h.EssToLoad*h.ImportPrice + h.EssToGrid*h.ExportPrice
+				revenue := (h.EssToLoad-h.EssToLoadOffgrid)*h.ImportPrice + h.EssOffgridValueUah + h.EssToGrid*h.ExportPrice
 				grid[hour] = &MarginHour{
 					Margin:        m,
 					DischargedKwh: h.EssDischarged,
@@ -825,6 +836,7 @@ func aggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly
 		totals.RevenueEssExport += t.RevenueEssExport
 		totals.RevenueEssSelf += t.RevenueEssSelf
 		totals.ExpenseGridCharge += t.ExpenseGridCharge
+		totals.GenTotals.add(t.GenTotals)
 		totals.EssWithdrawnCost += t.EssWithdrawnCost
 		totals.EssRealizedProfit += t.EssRealizedProfit
 		totals.EssDegradationCost += t.EssDegradationCost
@@ -871,7 +883,7 @@ func aggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly
 		// are dropped — the rest of the day still feeds reserve / cycles.
 		do := dayOpts[key]
 		factEssNet := t.EssNet
-		if do != nil && dq.AnomalousHours > 0 {
+		if do != nil && (dq.AnomalousHours > 0 || do.offgridHours > 0) {
 			factEssNet = do.essNet
 		}
 		monthFact += factEssNet
@@ -933,7 +945,7 @@ func aggregateMonth(month string, loc *time.Location, days []DailyRecord, hourly
 		totals.PvEssExportPotential = pvExportPotential + pvEssArbitrageGain(hourly, ratingsOn, paramsFor)
 	}
 	totals.RevenueTotal = totals.RevenuePvExport + totals.RevenuePvSelf + totals.RevenueEssExport + totals.RevenueEssSelf
-	totals.ExpenseTotal = totals.ExpenseGridCharge
+	totals.ExpenseTotal = totals.ExpenseGridCharge + totals.ExpenseGenCharge
 	totals.Ebitda = totals.RevenueTotal - totals.ExpenseTotal
 	// Authoritative monthly headline: a continuous SOC DP across the
 	// non-anomalous hours of the month (SOC carried across day boundaries,

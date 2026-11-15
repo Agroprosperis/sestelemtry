@@ -184,8 +184,19 @@ export type DailyTotals = {
   revenueEssSelf: number
   revenueTotal: number
   expenseGridCharge: number
+  // expenseGenCharge is the fuel the generator spent charging the
+  // battery (HourGen.chargeCostUah), part of expenseTotal.
+  expenseGenCharge: number
   expenseTotal: number
   ebitda: number
+  // Generator sums: genKwh over every hour with data, the split and fuel
+  // over the hours counted with the generator.
+  genKwh: number
+  genToLoad: number
+  genToEss: number
+  loadOffgrid: number
+  genFuelCost: number
+  genFuelL: number
   // The whole PV yield valued at the export price of the hour that
   // produced it: what a bare plant with no battery and no on-site load
   // would have earned selling everything to the grid. A yardstick, not
@@ -251,8 +262,15 @@ export function dailyTotals(rows: Array<HourEconomicsRow | null>): DailyTotals {
     revenueEssSelf: 0,
     revenueTotal: 0,
     expenseGridCharge: 0,
+    expenseGenCharge: 0,
     expenseTotal: 0,
     ebitda: 0,
+    genKwh: 0,
+    genToLoad: 0,
+    genToEss: 0,
+    loadOffgrid: 0,
+    genFuelCost: 0,
+    genFuelL: 0,
     pvExportPotential: 0,
     essWithdrawnCostUah: 0,
     essRealizedProfitUah: 0,
@@ -267,6 +285,7 @@ export function dailyTotals(rows: Array<HourEconomicsRow | null>): DailyTotals {
   let exportPriceUahSum = 0
   for (const row of rows) {
     if (!row) continue
+    acc.genKwh += row.gen?.genKwh ?? 0
     if (row.rdnUahPerKwh === null) {
       acc.hoursMissingPrice++
       continue
@@ -293,10 +312,24 @@ export function dailyTotals(rows: Array<HourEconomicsRow | null>): DailyTotals {
     const importPrice = row.economics.importPriceUahPerKwh
     const exportPrice = row.economics.exportPriceUahPerKwh
     acc.revenuePvExport += row.economics.pvToGrid * exportPrice
-    acc.revenuePvSelf += row.economics.pvToLoad * importPrice
     acc.revenueEssExport += row.flow.essToGrid * exportPrice
-    acc.revenueEssSelf += row.flow.essToLoad * importPrice
     acc.expenseGridCharge += row.flow.gridToEss * importPrice
+    const gen = row.gen
+    if (gen?.accounted) {
+      acc.revenuePvSelf +=
+        (row.economics.pvToLoad - gen.pvToLoadOffgrid) * importPrice + gen.pvOffgridValueUah
+      acc.revenueEssSelf +=
+        (row.flow.essToLoad - gen.essToLoadOffgrid) * importPrice + gen.essOffgridValueUah
+      acc.expenseGenCharge += gen.chargeCostUah
+      acc.genToLoad += gen.genToLoad
+      acc.genToEss += gen.genToEss
+      acc.loadOffgrid += gen.loadOffgrid
+      acc.genFuelCost += gen.fuelCostUah
+      acc.genFuelL += gen.fuelL
+    } else {
+      acc.revenuePvSelf += row.economics.pvToLoad * importPrice
+      acc.revenueEssSelf += row.flow.essToLoad * importPrice
+    }
     acc.pvExportPotential += row.flow.pv * exportPrice
 
     importLoadKwh += row.flow.gridImport
@@ -315,7 +348,7 @@ export function dailyTotals(rows: Array<HourEconomicsRow | null>): DailyTotals {
   acc.avgExportPriceUahPerKwh = exportKwh > 0 ? exportPriceUahSum / exportKwh : 0
   acc.revenueTotal =
     acc.revenuePvExport + acc.revenuePvSelf + acc.revenueEssExport + acc.revenueEssSelf
-  acc.expenseTotal = acc.expenseGridCharge
+  acc.expenseTotal = acc.expenseGridCharge + acc.expenseGenCharge
   acc.ebitda = acc.revenueTotal - acc.expenseTotal
   // Realized profit obeys the identity
   //   profit = essRevenue − withdrawnCost − degradationCost
@@ -479,4 +512,32 @@ export type HourEconomicsRow = {
   essCostBasisUahEnd: number | null
   essAvgCostUahPerKwhEnd: number | null
   essResidualKwhEnd: number | null
+  // Generator part from the server (internal/api.EconomicsGenHour);
+  // absent for an hour without generator data.
+  gen?: HourGen
+}
+
+// HourGen is an hour's generator data. genKwh, estimated and minutes
+// describe any hour with it; the flows and money are set only when the
+// server counted the hour with the generator (accounted). Off the grid,
+// solar and battery displace diesel rather than import, so the day's
+// revenue legs take pvOffgridValueUah / essOffgridValueUah for the
+// *Offgrid kWh, and the generator's charge of the battery is an expense.
+export type HourGen = {
+  genKwh: number
+  estimated: boolean
+  minutes: { generator: number; island: number; blackout: number; transition: number; unknown: number }
+  accounted: boolean
+  genToLoad: number
+  genToEss: number
+  loadOffgrid: number
+  pvToLoadOffgrid: number
+  essToLoadOffgrid: number
+  pvToEssOffgrid: number
+  fuelCostUah: number
+  fuelL: number
+  fuelMethod: string
+  pvOffgridValueUah: number
+  essOffgridValueUah: number
+  chargeCostUah: number
 }

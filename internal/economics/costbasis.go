@@ -26,13 +26,30 @@ type HourCostBasis struct {
 // free), Grid→ESS at the import price; discharges withdraw at the
 // post-charge average. Port of TS `rollHour`.
 func RollHour(prev EssState, flow HourFlows, importPrice, exportPrice, degradationUahPerKwh float64) HourCostBasis {
+	return rollHour(prev, flow, rollPrices{importPrice: importPrice, exportPrice: exportPrice, degradation: degradationUahPerKwh})
+}
+
+// rollPrices are what one hour's cost-basis roll prices energy at. The
+// generator terms come from genHourEconomics and are zero otherwise:
+// what the generator's charge cost, and the diesel valuation of the
+// discharge used without the grid.
+type rollPrices struct {
+	importPrice        float64
+	exportPrice        float64
+	degradation        float64
+	genChargeCostUah   float64
+	essOffgridValueUah float64
+}
+
+func rollHour(prev EssState, flow HourFlows, p rollPrices) HourCostBasis {
+	importPrice, exportPrice, degradationUahPerKwh := p.importPrice, p.exportPrice, p.degradation
 	avgCostStart := 0.0
 	if prev.Kwh > 0 {
 		avgCostStart = prev.Uah / prev.Kwh
 	}
 
-	chargedKwh := math.Max(flow.PVToEss, 0) + math.Max(flow.GridToEss, 0)
-	chargedUah := math.Max(flow.GridToEss, 0) * importPrice
+	chargedKwh := math.Max(flow.PVToEss, 0) + math.Max(flow.GridToEss, 0) + math.Max(flow.Gen.GenToEss, 0)
+	chargedUah := math.Max(flow.GridToEss, 0)*importPrice + p.genChargeCostUah
 	afterChargeKwh := prev.Kwh + chargedKwh
 	afterChargeUah := prev.Uah + chargedUah
 
@@ -57,7 +74,9 @@ func RollHour(prev EssState, flow HourFlows, importPrice, exportPrice, degradati
 		avgCostEnd = next.Uah / next.Kwh
 	}
 
-	dischargeRevenueUah := math.Max(flow.EssToLoad, 0)*importPrice +
+	// Discharge used without the grid displaced diesel, not import.
+	dischargeRevenueUah := math.Max(flow.EssToLoad-flow.Gen.EssToLoadOffgrid, 0)*importPrice +
+		p.essOffgridValueUah +
 		math.Max(flow.EssToGrid, 0)*exportPrice
 	degradationUah := math.Max(flow.EssDischarged, 0) * degradationUahPerKwh
 	realizedProfitUah := dischargeRevenueUah - withdrawnCostUah - degradationUah

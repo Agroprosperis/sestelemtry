@@ -154,6 +154,10 @@ type optimumHour struct {
 	// the prices above are already converted, the wear rate and the
 	// free-PV floor are UAH and need it. 0 means UAH.
 	moneyScale float64
+
+	// offgrid is an hour without the grid (HourlyRecord.Offgrid), never
+	// tradable.
+	offgrid bool
 }
 
 // money is the factor that turns this hour's UAH amounts into the

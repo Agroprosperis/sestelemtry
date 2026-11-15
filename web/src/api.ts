@@ -616,6 +616,30 @@ export type EconomicsHourApi = {
   ess_cost_basis_uah_end: number | null
   ess_avg_cost_uah_per_kwh_end: number | null
   ess_residual_kwh_end: number | null
+  // Generator part (internal/api.EconomicsGenHour), omitted while zero.
+  // gen_kwh, gen_estimated and minutes_* describe any hour with generator
+  // data; the rest is set only on an hour counted with the generator
+  // (gen_accounted).
+  gen_kwh?: number
+  gen_estimated?: boolean
+  minutes_generator?: number
+  minutes_island?: number
+  minutes_blackout?: number
+  minutes_transition?: number
+  minutes_unknown?: number
+  gen_accounted?: boolean
+  gen_to_load_kwh?: number
+  gen_to_ess_kwh?: number
+  load_offgrid_kwh?: number
+  pv_to_load_offgrid_kwh?: number
+  ess_to_load_offgrid_kwh?: number
+  pv_to_ess_offgrid_kwh?: number
+  gen_fuel_cost_uah?: number
+  gen_fuel_l?: number
+  gen_fuel_method?: string
+  pv_offgrid_value_uah?: number
+  ess_offgrid_value_uah?: number
+  gen_charge_cost_uah?: number
 }
 
 // EconomicsDailyResponse mirrors internal/api.EconomicsDailyResponse:

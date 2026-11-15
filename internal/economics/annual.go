@@ -247,6 +247,7 @@ func aggregatePeriod(
 		totals.PvExportPotential += mt.PvExportPotential
 		totals.PvEssExportPotential += mt.PvEssExportPotential
 		totals.ExpenseGridCharge += mt.ExpenseGridCharge
+		totals.GenTotals.add(mt.GenTotals)
 		totals.EssWithdrawnCost += mt.EssWithdrawnCost
 		totals.EssRealizedProfit += mt.EssRealizedProfit
 		totals.EssDegradationCost += mt.EssDegradationCost
@@ -333,7 +334,7 @@ func aggregatePeriod(
 	}
 	totals.RdnMaxUahPerKwh = rdnMax
 	totals.RevenueTotal = totals.RevenuePvExport + totals.RevenuePvSelf + totals.RevenueEssExport + totals.RevenueEssSelf
-	totals.ExpenseTotal = totals.ExpenseGridCharge
+	totals.ExpenseTotal = totals.ExpenseGridCharge + totals.ExpenseGenCharge
 	totals.Ebitda = totals.RevenueTotal - totals.ExpenseTotal
 	totals.EssReserve = totals.EssOptimum - totals.EssFact
 	if totals.EssOptimum > 0 {

@@ -28,6 +28,10 @@ type OrgTariffsApi = {
   roundtrip_efficiency?: number
   capex_uah?: number
   planned_payback_months?: number
+  gen_fuel_price_uah_per_l?: number
+  gen_fuel_method?: 'per_kwh' | 'per_hour'
+  gen_fuel_consumption_l_per_kwh?: number
+  gen_fuel_consumption_l_per_h?: number
   // seed_ess_cost_uah_per_kwh is the legacy fallback cost-basis
   // tariff. Kept here as a tolerated optional field so legacy DB
   // rows still hydrate without DisallowUnknownFields complaints,
@@ -55,6 +59,10 @@ function tariffsToApi(t: Tariffs): OrgTariffsApi {
     roundtrip_efficiency: t.roundtripEfficiency,
     capex_uah: t.capexUah,
     planned_payback_months: t.plannedPaybackMonths,
+    gen_fuel_price_uah_per_l: t.genFuelPriceUahPerL,
+    gen_fuel_method: t.genFuelMethod,
+    gen_fuel_consumption_l_per_kwh: t.genFuelConsumptionLPerKwh,
+    gen_fuel_consumption_l_per_h: t.genFuelConsumptionLPerH,
   }
 }
 
@@ -75,6 +83,10 @@ function tariffsFromApi(api: OrgTariffsApi): Tariffs {
     roundtripEfficiency: api.roundtrip_efficiency ?? 0,
     capexUah: api.capex_uah ?? 0,
     plannedPaybackMonths: api.planned_payback_months ?? 0,
+    genFuelPriceUahPerL: api.gen_fuel_price_uah_per_l ?? 0,
+    genFuelMethod: api.gen_fuel_method === 'per_hour' ? 'per_hour' : 'per_kwh',
+    genFuelConsumptionLPerKwh: api.gen_fuel_consumption_l_per_kwh ?? 0,
+    genFuelConsumptionLPerH: api.gen_fuel_consumption_l_per_h ?? 0,
   }
 }
 

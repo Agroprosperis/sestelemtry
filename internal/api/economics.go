@@ -3,9 +3,11 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"time"
 
 	"github.com/nesh/sestelemetry/internal/economics"
+	"github.com/nesh/sestelemetry/internal/energyflow"
 	"github.com/nesh/sestelemetry/internal/storage"
 )
 
@@ -37,9 +39,41 @@ func (b *economicsBackend) HourlyFlows(ctx context.Context, orgID string, daySta
 			EssToLoad:         hr.ESSToLoadKwh,
 			EssToGrid:         hr.ESSToGridKwh,
 			EssPeakIntervalKw: hr.EssPeakIntervalKw,
+			Gen:               genFlowRow(hr.Gen),
 		}
 	}
 	return out, nil
+}
+
+func genFlowRow(g *EnergyFlowGenHour) *economics.GenFlowRow {
+	if g == nil {
+		return nil
+	}
+	return &economics.GenFlowRow{
+		GenKwh:    g.GenKwh,
+		Estimated: g.Estimated,
+		Minutes: economics.SupplyMinutes{
+			Generator:  g.Minutes[string(energyflow.SupplyGenerator)],
+			Island:     g.Minutes[string(energyflow.SupplyIsland)],
+			Blackout:   g.Minutes[string(energyflow.SupplyBlackout)],
+			Transition: g.Minutes[string(energyflow.SupplyTransition)],
+			Unknown:    g.Minutes[string(energyflow.SupplyUnknown)],
+		},
+		PVToEss:          g.PVToESSKwh,
+		GenToEss:         g.GenToESSKwh,
+		GridToEss:        g.GridToESSKwh,
+		EssToLoad:        g.ESSToLoadKwh,
+		EssToGrid:        g.ESSToGridKwh,
+		EssCharged:       g.EssChargedKwh,
+		EssDischarged:    g.EssDischargedKwh,
+		GenToLoad:        g.GenToLoadKwh,
+		LoadOffgrid:      g.LoadOffgridKwh,
+		PVToLoadOffgrid:  g.PVToLoadOffgridKwh,
+		EssToLoadOffgrid: g.ESSToLoadOffgridKwh,
+		PVToEssOffgrid:   g.PVToESSOffgridKwh,
+		PVToLoadIsland:   g.PVToLoadIslandKwh,
+		EssToLoadIsland:  g.ESSToLoadIslandKwh,
+	}
 }
 
 func (b *economicsBackend) Timeseries(ctx context.Context, orgID string, metricKeys []string, from, to time.Time, bucket, tz, aggregation string) ([]economics.Point, error) {
@@ -221,7 +255,10 @@ func (b *economicsBackend) LoadHourlyRange(ctx context.Context, orgID string, fr
 			// Persisted during recompute (energy-flow per-day walk); read
 			// cheaply here so the wide-window monthly/annual/portfolio path
 			// never re-runs the raw allocator synchronously.
-			EssPeakIntervalKw: row.EssPeakIntervalKw,
+			EssPeakIntervalKw:  row.EssPeakIntervalKw,
+			Offgrid:            row.Gen.Accounted && row.Gen.MinutesGenerator+row.Gen.MinutesIsland+row.Gen.MinutesBlackout > 0,
+			EssToLoadOffgrid:   row.Gen.EssToLoadOffgrid,
+			EssOffgridValueUah: row.Gen.EssOffgridValue,
 		})
 	}
 	return out, nil
@@ -244,6 +281,11 @@ func orgTariffsToEconomics(t OrgTariffs) economics.Tariffs {
 		EssCapacityKwh:          t.EssCapacityKwh,
 		EssPowerLimitKw:         t.EssPowerLimitKw,
 		RoundtripEfficiency:     t.RoundtripEfficiency,
+
+		GenFuelPriceUahPerL:       t.GenFuelPriceUahPerL,
+		GenFuelMethod:             t.GenFuelMethod,
+		GenFuelConsumptionLPerKwh: t.GenFuelConsumptionLPerKwh,
+		GenFuelConsumptionLPerH:   t.GenFuelConsumptionLPerH,
 	}
 }
 
@@ -280,11 +322,78 @@ func hourRowToStorage(orgID string, r *economics.HourRow) storage.EconomicsHourl
 		EssCostBasisEnd:      r.EssCostBasisUahEnd,
 		EssResidualEnd:       r.EssResidualKwhEnd,
 		EssPeakIntervalKw:    r.EssPeakIntervalKw,
+		Gen:                  genHourToStorage(r),
 	}
 }
 
+func genHourToStorage(r *economics.HourRow) storage.EconomicsGenHour {
+	g := r.Flow.Gen
+	return storage.EconomicsGenHour{
+		GenKwh:            r.GenKwh,
+		Estimated:         r.GenEstimated,
+		MinutesGenerator:  r.SupplyMinutes.Generator,
+		MinutesIsland:     r.SupplyMinutes.Island,
+		MinutesBlackout:   r.SupplyMinutes.Blackout,
+		MinutesTransition: r.SupplyMinutes.Transition,
+		MinutesUnknown:    r.SupplyMinutes.Unknown,
+		Accounted:         g.Accounted,
+		GenToLoad:         g.GenToLoad,
+		GenToEss:          g.GenToEss,
+		LoadOffgrid:       math.Min(g.LoadOffgrid, r.Econ.Load),
+		PVToLoadOffgrid:   r.Econ.PVToLoadOffgrid,
+		EssToLoadOffgrid:  g.EssToLoadOffgrid,
+		PVToEssOffgrid:    g.PVToEssOffgrid,
+		PVToLoadIsland:    g.PVToLoadIsland,
+		EssToLoadIsland:   g.EssToLoadIsland,
+		FuelCost:          r.Econ.GenFuelCostUah,
+		FuelL:             r.Econ.GenFuelL,
+		FuelMethod:        r.Econ.GenFuelMethod,
+		PvOffgridValue:    r.Econ.PvOffgridValueUah,
+		EssOffgridValue:   r.Econ.EssOffgridValueUah,
+		ChargeCost:        r.Econ.GenChargeCostUah,
+	}
+}
+
+// storageToGen restores an hour's generator part. The flows and money
+// are only set on an hour counted with the generator, so a stored grid
+// hour keeps HourFlows.Gen zero, as AssembleDay leaves it.
+func storageToGen(row *economics.HourRow, g storage.EconomicsGenHour) {
+	row.GenKwh = g.GenKwh
+	row.GenEstimated = g.Estimated
+	row.SupplyMinutes = economics.SupplyMinutes{
+		Generator:  g.MinutesGenerator,
+		Island:     g.MinutesIsland,
+		Blackout:   g.MinutesBlackout,
+		Transition: g.MinutesTransition,
+		Unknown:    g.MinutesUnknown,
+	}
+	if !g.Accounted {
+		return
+	}
+	row.Flow.Gen = economics.GenFlows{
+		Accounted:        true,
+		GenKwh:           g.GenKwh,
+		GenToLoad:        g.GenToLoad,
+		GenToEss:         g.GenToEss,
+		LoadOffgrid:      g.LoadOffgrid,
+		PVToLoadOffgrid:  g.PVToLoadOffgrid,
+		EssToLoadOffgrid: g.EssToLoadOffgrid,
+		PVToEssOffgrid:   g.PVToEssOffgrid,
+		PVToLoadIsland:   g.PVToLoadIsland,
+		EssToLoadIsland:  g.EssToLoadIsland,
+		Minutes:          row.SupplyMinutes,
+	}
+	row.Econ.PVToLoadOffgrid = g.PVToLoadOffgrid
+	row.Econ.GenFuelCostUah = g.FuelCost
+	row.Econ.GenFuelL = g.FuelL
+	row.Econ.GenFuelMethod = g.FuelMethod
+	row.Econ.PvOffgridValueUah = g.PvOffgridValue
+	row.Econ.EssOffgridValueUah = g.EssOffgridValue
+	row.Econ.GenChargeCostUah = g.ChargeCost
+}
+
 func storageToHourRow(hour int, r *storage.EconomicsHourlyRow) *economics.HourRow {
-	return &economics.HourRow{
+	row := &economics.HourRow{
 		Hour:      hour,
 		HourStart: r.HourStart,
 		Rdn:       r.Rdn,
@@ -321,6 +430,8 @@ func storageToHourRow(hour int, r *storage.EconomicsHourlyRow) *economics.HourRo
 		EssResidualKwhEnd:        r.EssResidualEnd,
 		EssPeakIntervalKw:        r.EssPeakIntervalKw,
 	}
+	storageToGen(row, r.Gen)
+	return row
 }
 
 func dailyToStorage(day economics.StoredDay) storage.EconomicsDailyRow {
@@ -374,6 +485,21 @@ func dailyToStorage(day economics.StoredDay) storage.EconomicsDailyRow {
 		Reconciled:         t.Reconciled,
 		QualityFlags:       t.QualityFlags,
 		Reconciliation:     reconciliation,
+		Gen: storage.EconomicsGenDay{
+			GenKwh:            t.GenKwh,
+			GenToLoad:         t.GenToLoad,
+			GenToEss:          t.GenToEss,
+			LoadOffgrid:       t.LoadOffgrid,
+			FuelCost:          t.GenFuelCost,
+			FuelL:             t.GenFuelL,
+			FuelMethod:        t.GenFuelMethod,
+			ExpenseGenCharge:  t.ExpenseGenCharge,
+			MinutesGenerator:  t.SupplyMinutes.Generator,
+			MinutesIsland:     t.SupplyMinutes.Island,
+			MinutesBlackout:   t.SupplyMinutes.Blackout,
+			MinutesTransition: t.SupplyMinutes.Transition,
+			MinutesUnknown:    t.SupplyMinutes.Unknown,
+		},
 	}
 }
 
@@ -418,8 +544,25 @@ func storageToDailyTotals(r storage.EconomicsDailyRow) economics.DailyTotals {
 		EssAvgCostBasisEod: r.EssAvgCostBasisEod,
 		EssResidualKwhEod:  r.EssResidualKwhEod,
 		EssCostBasisUahEod: r.EssCostBasisUahEod,
-		Reconciled:         r.Reconciled,
-		QualityFlags:       r.QualityFlags,
-		Reconciliation:     reconciliation,
+		GenTotals: economics.GenTotals{
+			GenKwh:           r.Gen.GenKwh,
+			GenToLoad:        r.Gen.GenToLoad,
+			GenToEss:         r.Gen.GenToEss,
+			LoadOffgrid:      r.Gen.LoadOffgrid,
+			GenFuelCost:      r.Gen.FuelCost,
+			GenFuelL:         r.Gen.FuelL,
+			GenFuelMethod:    r.Gen.FuelMethod,
+			ExpenseGenCharge: r.Gen.ExpenseGenCharge,
+			SupplyMinutes: economics.SupplyMinutes{
+				Generator:  r.Gen.MinutesGenerator,
+				Island:     r.Gen.MinutesIsland,
+				Blackout:   r.Gen.MinutesBlackout,
+				Transition: r.Gen.MinutesTransition,
+				Unknown:    r.Gen.MinutesUnknown,
+			},
+		},
+		Reconciled:     r.Reconciled,
+		QualityFlags:   r.QualityFlags,
+		Reconciliation: reconciliation,
 	}
 }

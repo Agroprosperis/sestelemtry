@@ -62,7 +62,7 @@ func counterFlags(episodes []CounterEpisode) []string {
 // it (PV, import, ESS discharge) by more than metering slack. The flag
 // carries the shortfall in kWh.
 func balanceFlag(t DailyTotals) (string, bool) {
-	in := t.PV + t.GridImport + t.EssDischarged
+	in := t.PV + t.GridImport + t.EssDischarged + t.GenToLoad + t.GenToEss
 	balance := in - t.GridExport - t.EssCharged
 	if balance >= -math.Max(5, 0.02*in) {
 		return "", false

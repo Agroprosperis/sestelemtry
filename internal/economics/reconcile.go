@@ -150,16 +150,33 @@ func reconcileFlows(flows []*HourFlows, canonical *CanonicalDaily) ReconcileResu
 			f.GridToEss += f.PVToEss - f.PV
 			f.PVToEss = f.PV
 		}
+		// The generator's charge is part of the charge counter; the
+		// generator itself is no FusionSolar KPI and keeps its meter.
+		if g := &f.Gen; g.Accounted {
+			g.GenToEss *= fChg
+			if g.GenToEss > g.GenKwh {
+				f.GridToEss += g.GenToEss - g.GenKwh
+				g.GenToEss = g.GenKwh
+			}
+			g.GenToLoad = math.Max(g.GenKwh-g.GenToEss, 0)
+			g.PVToEssOffgrid = math.Min(g.PVToEssOffgrid*fChg, f.PVToEss)
+			g.EssToLoadOffgrid = math.Min(g.EssToLoadOffgrid*fDis, f.EssToLoad)
+			g.EssToLoadIsland = math.Min(g.EssToLoadIsland*fDis, f.EssToLoad)
+			g.PVToLoadOffgrid *= fPV
+			g.PVToLoadIsland *= fPV
+		}
 	}
 
-	// Derived load (energy balance of the scaled counters) vs use_power.
+	// Derived load (energy balance of the scaled counters) vs use_power,
+	// which is compared with the load on the grid only: the off-grid part
+	// of an hour counted with the generator stays out.
 	var derivedLoad float64
 	for _, f := range flows {
 		if f == nil {
 			continue
 		}
 		load, _, _, _ := DeriveDerivedFlows(*f)
-		derivedLoad += load
+		derivedLoad += load - math.Min(f.Gen.LoadOffgrid, load)
 	}
 	res.Detail["load"] = ReconcileField{Computed: derivedLoad, Canonical: canonical.Load, Factor: 1}
 	if canonical.Load > 0 {

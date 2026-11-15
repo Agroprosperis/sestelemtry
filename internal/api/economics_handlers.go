@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"sort"
 	"strings"
@@ -55,6 +56,100 @@ type EconomicsHour struct {
 	EssCostBasisUahEnd       *float64 `json:"ess_cost_basis_uah_end"`
 	EssAvgCostUahPerKwhEnd   *float64 `json:"ess_avg_cost_uah_per_kwh_end"`
 	EssResidualKwhEnd        *float64 `json:"ess_residual_kwh_end"`
+
+	EconomicsGenHour
+}
+
+// EconomicsGenHour is the generator part of an hour (ems-spec generator
+// handoff §4.6), omitted while zero. GenKwh, GenEstimated and the minutes
+// describe any hour with generator data; the rest is set only when the
+// hour was counted with the generator (GenAccounted). The browser's day
+// totals take their revenue legs from the *_offgrid fields, as the
+// server's do.
+type EconomicsGenHour struct {
+	GenKwh              float64 `json:"gen_kwh,omitempty"`
+	GenEstimated        bool    `json:"gen_estimated,omitempty"`
+	MinutesGenerator    int     `json:"minutes_generator,omitempty"`
+	MinutesIsland       int     `json:"minutes_island,omitempty"`
+	MinutesBlackout     int     `json:"minutes_blackout,omitempty"`
+	MinutesTransition   int     `json:"minutes_transition,omitempty"`
+	MinutesUnknown      int     `json:"minutes_unknown,omitempty"`
+	GenAccounted        bool    `json:"gen_accounted,omitempty"`
+	GenToLoadKwh        float64 `json:"gen_to_load_kwh,omitempty"`
+	GenToEssKwh         float64 `json:"gen_to_ess_kwh,omitempty"`
+	LoadOffgridKwh      float64 `json:"load_offgrid_kwh,omitempty"`
+	PvToLoadOffgridKwh  float64 `json:"pv_to_load_offgrid_kwh,omitempty"`
+	EssToLoadOffgridKwh float64 `json:"ess_to_load_offgrid_kwh,omitempty"`
+	PvToEssOffgridKwh   float64 `json:"pv_to_ess_offgrid_kwh,omitempty"`
+	GenFuelCostUah      float64 `json:"gen_fuel_cost_uah,omitempty"`
+	GenFuelL            float64 `json:"gen_fuel_l,omitempty"`
+	GenFuelMethod       string  `json:"gen_fuel_method,omitempty"`
+	PvOffgridValueUah   float64 `json:"pv_offgrid_value_uah,omitempty"`
+	EssOffgridValueUah  float64 `json:"ess_offgrid_value_uah,omitempty"`
+	GenChargeCostUah    float64 `json:"gen_charge_cost_uah,omitempty"`
+}
+
+func economicsGenHourToJSON(r *economics.HourRow) EconomicsGenHour {
+	g := r.Flow.Gen
+	return EconomicsGenHour{
+		GenKwh:              r.GenKwh,
+		GenEstimated:        r.GenEstimated,
+		MinutesGenerator:    r.SupplyMinutes.Generator,
+		MinutesIsland:       r.SupplyMinutes.Island,
+		MinutesBlackout:     r.SupplyMinutes.Blackout,
+		MinutesTransition:   r.SupplyMinutes.Transition,
+		MinutesUnknown:      r.SupplyMinutes.Unknown,
+		GenAccounted:        g.Accounted,
+		GenToLoadKwh:        g.GenToLoad,
+		GenToEssKwh:         g.GenToEss,
+		LoadOffgridKwh:      math.Min(g.LoadOffgrid, r.Econ.Load),
+		PvToLoadOffgridKwh:  r.Econ.PVToLoadOffgrid,
+		EssToLoadOffgridKwh: g.EssToLoadOffgrid,
+		PvToEssOffgridKwh:   g.PVToEssOffgrid,
+		GenFuelCostUah:      r.Econ.GenFuelCostUah,
+		GenFuelL:            r.Econ.GenFuelL,
+		GenFuelMethod:       r.Econ.GenFuelMethod,
+		PvOffgridValueUah:   r.Econ.PvOffgridValueUah,
+		EssOffgridValueUah:  r.Econ.EssOffgridValueUah,
+		GenChargeCostUah:    r.Econ.GenChargeCostUah,
+	}
+}
+
+// EconomicsGenTotals is the generator part of a day, a month, a year or a
+// portfolio site, omitted while zero. gen_fuel_method is "mixed" for a
+// rollup whose days used both methods.
+type EconomicsGenTotals struct {
+	GenKwh              float64 `json:"gen_kwh,omitempty"`
+	GenToLoadKwh        float64 `json:"gen_to_load_kwh,omitempty"`
+	GenToEssKwh         float64 `json:"gen_to_ess_kwh,omitempty"`
+	LoadOffgridKwh      float64 `json:"load_offgrid_kwh,omitempty"`
+	GenFuelCostUah      float64 `json:"gen_fuel_cost_uah,omitempty"`
+	GenFuelL            float64 `json:"gen_fuel_l,omitempty"`
+	GenFuelMethod       string  `json:"gen_fuel_method,omitempty"`
+	ExpenseGenChargeUah float64 `json:"expense_gen_charge_uah,omitempty"`
+	MinutesGenerator    int     `json:"minutes_generator,omitempty"`
+	MinutesIsland       int     `json:"minutes_island,omitempty"`
+	MinutesBlackout     int     `json:"minutes_blackout,omitempty"`
+	MinutesTransition   int     `json:"minutes_transition,omitempty"`
+	MinutesUnknown      int     `json:"minutes_unknown,omitempty"`
+}
+
+func genTotalsToJSON(g economics.GenTotals) EconomicsGenTotals {
+	return EconomicsGenTotals{
+		GenKwh:              g.GenKwh,
+		GenToLoadKwh:        g.GenToLoad,
+		GenToEssKwh:         g.GenToEss,
+		LoadOffgridKwh:      g.LoadOffgrid,
+		GenFuelCostUah:      g.GenFuelCost,
+		GenFuelL:            g.GenFuelL,
+		GenFuelMethod:       g.GenFuelMethod,
+		ExpenseGenChargeUah: g.ExpenseGenCharge,
+		MinutesGenerator:    g.SupplyMinutes.Generator,
+		MinutesIsland:       g.SupplyMinutes.Island,
+		MinutesBlackout:     g.SupplyMinutes.Blackout,
+		MinutesTransition:   g.SupplyMinutes.Transition,
+		MinutesUnknown:      g.SupplyMinutes.Unknown,
+	}
 }
 
 // EconomicsDailyResponse is the body of GET /api/v1/economics/daily.
@@ -154,6 +249,7 @@ func economicsHourToJSON(r *economics.HourRow) *EconomicsHour {
 		EssCostBasisUahEnd:       r.EssCostBasisUahEnd,
 		EssAvgCostUahPerKwhEnd:   r.EssAvgCostUahPerKwhEnd,
 		EssResidualKwhEnd:        r.EssResidualKwhEnd,
+		EconomicsGenHour:         economicsGenHourToJSON(r),
 	}
 }
 
@@ -456,6 +552,8 @@ type EconomicsMonthlyTotals struct {
 	ExpenseTotalUah      float64 `json:"expense_total_uah"`
 	EbitdaUah            float64 `json:"ebitda_uah"`
 
+	EconomicsGenTotals
+
 	// PvExportPotentialUah values the whole PV yield at the export price
 	// of the hour that produced it — the plant with no battery and no
 	// on-site load, selling everything to the grid. A yardstick for the
@@ -612,6 +710,8 @@ type EconomicsMonthlyDay struct {
 	// "import_lag:512", "load_mismatch:0.59") so the daily-detail table
 	// can mark days whose flow split is approximate.
 	QualityFlags []string `json:"quality_flags,omitempty"`
+
+	EconomicsGenTotals
 }
 
 // EconomicsMonthlyMarginHour is one heatmap cell: the margin an hour of
@@ -830,6 +930,7 @@ func monthlyTotalsToJSON(t economics.MonthlyTotals) EconomicsMonthlyTotals {
 		ExpenseGridChargeUah:        t.ExpenseGridCharge,
 		ExpenseTotalUah:             t.ExpenseTotal,
 		EbitdaUah:                   t.Ebitda,
+		EconomicsGenTotals:          genTotalsToJSON(t.GenTotals),
 		PvExportPotentialUah:        t.PvExportPotential,
 		PvEssExportPotentialUah:     t.PvEssExportPotential,
 		ImportCostUah:               importCostUah(t.AvgImportPrice, t.GridImport),
@@ -894,6 +995,7 @@ func monthlyDayToJSON(d economics.MonthDay) EconomicsMonthlyDay {
 		HoursWithData:       t.HoursWithData,
 		HoursMissingPrice:   t.HoursMissingPrice,
 		QualityFlags:        t.QualityFlags,
+		EconomicsGenTotals:  genTotalsToJSON(t.GenTotals),
 	}
 }
 
@@ -1196,6 +1298,8 @@ type EconomicsPortfolioSite struct {
 	// On the total row it is the sum over the objects that have both.
 	CapexUah       float64 `json:"capex_uah"`
 	MonthsWithData int     `json:"months_with_data"`
+
+	EconomicsGenTotals
 }
 
 // EconomicsPortfolioTrendMonth is one month of the portfolio energy trend
@@ -1285,6 +1389,7 @@ func portfolioSiteFromTotals(id, name string, t economics.MonthlyTotals, hasData
 		GridImportKwh:      t.GridImport,
 		GridExportKwh:      t.GridExport,
 		EssNetUah:          t.EssNet,
+		EconomicsGenTotals: genTotalsToJSON(t.GenTotals),
 	}
 }
 
@@ -1601,6 +1706,7 @@ func (h *Handlers) portfolioRollupIn(ctx context.Context, q portfolioQuery, loc 
 		resp.Sites = append(resp.Sites, site)
 		if hasData {
 			weights.Add(rollups[i].weights)
+			totals.GenTotals.Add(t.GenTotals)
 			totals.Effect += t.Effect
 			totals.Ebitda += t.Ebitda
 			totals.EssNet += t.EssNet
@@ -1654,6 +1760,7 @@ func (h *Handlers) portfolioRollupIn(ctx context.Context, q portfolioQuery, loc 
 		EssNetUah:         totals.EssNet,
 		CapexUah:          totalCapex,
 		MonthsWithData:    maxMonthsWithData,
+		EconomicsGenTotals: genTotalsToJSON(totals.GenTotals),
 	}
 	if scope == "month" && totals.Ebitda != 0 {
 		total.MonthsWithData = 1
