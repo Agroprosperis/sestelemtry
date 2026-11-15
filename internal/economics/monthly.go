@@ -140,6 +140,9 @@ type MonthExtreme struct {
 // load_rebalanced are routine bookkeeping notes and do not count.
 func dayHasCounterIssue(flags []string) bool {
 	for _, f := range flags {
+		if strings.HasPrefix(f, "counter_") && strings.HasSuffix(f, ":"+genCounterFlagName) {
+			continue
+		}
 		if strings.HasPrefix(f, "import_lag") ||
 			strings.HasPrefix(f, "load_mismatch") ||
 			strings.HasPrefix(f, "counter_step") ||

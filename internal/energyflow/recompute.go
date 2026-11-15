@@ -33,6 +33,11 @@ type RecomputeResult struct {
 	BucketsConsidered  int
 	BucketsDropped     int
 	Warnings           []string
+
+	// GenIntervals / GenSkippedIntervals count the generator-aware
+	// allocations IterateIntervalsWithGen ran beside the plain ones.
+	GenIntervals        int
+	GenSkippedIntervals int
 }
 
 // Recompute runs the stateless allocation rule over a time-ordered
@@ -86,6 +91,12 @@ func Recompute(rows []RawSample, opts Options) RecomputeResult {
 // presence is reported via the `stats` aggregate.
 type IntervalCallback func(currTimestamp time.Time, out Result)
 
+// GenIntervalCallback receives one non-skipped AllocateGen result with
+// the end of the interval's last window. Windows are right-closed, so
+// the interval belongs to the clock hour of windowEnd − ε — the hour
+// GenTimeline books that window's generator energy and minutes on.
+type GenIntervalCallback func(windowEnd time.Time, out GenResult)
+
 // IterateIntervals is the shared iteration loop used by Recompute
 // and by external callers that need to attribute each Allocate
 // result to a sub-period (e.g. partition the day into 24 hourly
@@ -94,6 +105,16 @@ type IntervalCallback func(currTimestamp time.Time, out Result)
 // callback. Bucket / interval counters and bounded warnings are
 // merged into `stats`. Pass `stats=nil` to discard them.
 func IterateIntervals(rows []RawSample, opts Options, cb IntervalCallback, stats *RecomputeResult) {
+	IterateIntervalsWithGen(rows, nil, opts, cb, nil, stats)
+}
+
+// IterateIntervalsWithGen is IterateIntervals plus, for every interval
+// whose window tl covers, a generator-aware AllocateGen handed to
+// genCb. The plain walk, its callback and its counters are exactly
+// IterateIntervals'; generator rows never enter a bucket. An AllocateGen
+// interval spanning several windows gets their generator energy summed
+// and the mode of its last window.
+func IterateIntervalsWithGen(rows []RawSample, tl *GenTimeline, opts Options, cb IntervalCallback, genCb GenIntervalCallback, stats *RecomputeResult) {
 	// Historical compute must tolerate hours-long gaps caused by
 	// collector outages, so callers who pass MaxGapSeconds=0 actually
 	// mean "disable the guard entirely". Allocate() re-runs
@@ -127,7 +148,7 @@ func IterateIntervals(rows []RawSample, opts Options, cb IntervalCallback, stats
 	bucketEnds := make([]int64, 0, len(rows)/3+1)
 
 	for _, row := range rows {
-		if row.Role == RoleNone || len(row.Values) == 0 {
+		if row.Role == RoleNone || row.Role == RoleGen || len(row.Values) == 0 {
 			continue
 		}
 		clean := cleanRawValues(row.Values)
@@ -186,6 +207,7 @@ func IterateIntervals(rows []RawSample, opts Options, cb IntervalCallback, stats
 	}
 
 	var prev *Sample
+	var prevEnd time.Time
 	for _, key := range bucketEnds {
 		b := bucketsByEnd[key]
 		if stats != nil {
@@ -201,8 +223,27 @@ func IterateIntervals(rows []RawSample, opts Options, cb IntervalCallback, stats
 		if prev == nil {
 			prev = &Sample{}
 			*prev = sample
+			prevEnd = b.end
 			continue
 		}
+
+		if genCb != nil {
+			if w, ok := tl.Window(b.end); ok {
+				w.GenKwh = tl.GenBetween(prevEnd, b.end)
+				gr := AllocateGen(*prev, sample, w, allocOpts)
+				if gr.Skipped {
+					if stats != nil {
+						stats.GenSkippedIntervals++
+					}
+				} else {
+					if stats != nil {
+						stats.GenIntervals++
+					}
+					genCb(b.end, gr)
+				}
+			}
+		}
+		prevEnd = b.end
 
 		out := Allocate(*prev, sample, allocOpts)
 		for _, w := range out.Warnings {

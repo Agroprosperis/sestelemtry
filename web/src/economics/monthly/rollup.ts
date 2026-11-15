@@ -374,7 +374,13 @@ const COUNTER_FLAG_LABELS: Record<string, string> = {
   grid_export: 'експорту',
   ess_charged: 'заряду УЗЕ',
   ess_discharged: 'розряду УЗЕ',
+  gen: 'генератора',
 }
+
+// GEN_COUNTER_SUFFIX marks the generator meter's counter flags. It is
+// read through the Encombi, not a SmartLogger, and its gaps alone don't
+// make the day's flow split approximate (backend dayHasCounterIssue).
+const GEN_COUNTER_SUFFIX = ':gen'
 
 function counterLabel(flag: string, prefix: string): string {
   const name = flag.slice(prefix.length)
@@ -389,8 +395,14 @@ function counterLabel(flag: string, prefix: string): string {
 export function dayQualityTip(flags?: string[]): string | null {
   if (!flags || flags.length === 0) return null
   const parts: string[] = []
+  // notes ride along with a marked day but never mark one on their own.
+  const notes: string[] = []
   for (const f of flags) {
-    if (f.startsWith('counter_dropout:')) {
+    if (f.startsWith('counter_') && f.endsWith(GEN_COUNTER_SUFFIX)) {
+      if (f.startsWith('counter_dropout:')) {
+        notes.push('Лічильник генератора випадав (Encombi не бачив лічильника) — енергію за час обриву дораховано рівномірно.')
+      }
+    } else if (f.startsWith('counter_dropout:')) {
       parts.push(
         `Лічильник ${counterLabel(f, 'counter_dropout:')} випадав (SmartLogger втрачав пристрій) — енергію за час обриву дораховано рівномірно.`,
       )
@@ -424,7 +436,7 @@ export function dayQualityTip(flags?: string[]): string | null {
     }
   }
   if (parts.length === 0) return null
-  return `${parts.join(' ')} Потоки та ціни цього дня приблизні.`
+  return `${[...parts, ...notes].join(' ')} Потоки та ціни цього дня приблизні.`
 }
 
 // heatCellTip spells out a cell's arithmetic under `title` (a day+hour

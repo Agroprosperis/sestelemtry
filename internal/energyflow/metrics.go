@@ -46,6 +46,38 @@ const (
 	SrcSocPercent                 = "soc_percent"
 )
 
+// Generator source metric_keys (registers/encombi_ecpvx.yaml today, the
+// edge after the IoT2050 cutover). They are recognized by key, never by
+// the device that sent them.
+const (
+	SrcAccumulatedGenEnergyKwh = "accumulated_gen_energy_kwh"
+	SrcActiveGenPowerKw        = "active_gen_power_kw"
+	SrcGenBreakersOnBits       = "gen_breakers_on_bits"
+	SrcGridBreakersOnBits      = "grid_breakers_on_bits"
+	SrcGenBusVoltageAV         = "gen_bus_voltage_a_v"
+	SrcGenMeterAlive           = "gen_meter_alive"
+)
+
+// GenSourceMetrics are the generator keys the supply timeline reads.
+var GenSourceMetrics = []string{
+	SrcAccumulatedGenEnergyKwh,
+	SrcActiveGenPowerKw,
+	SrcGenBreakersOnBits,
+	SrcGridBreakersOnBits,
+	SrcGenBusVoltageAV,
+	SrcGenMeterAlive,
+}
+
+// IsGenMetric reports whether key is one of GenSourceMetrics.
+func IsGenMetric(key string) bool {
+	for _, k := range GenSourceMetrics {
+		if k == key {
+			return true
+		}
+	}
+	return false
+}
+
 // PVRequiredMetrics is the set of cumulative counters that must be
 // polled from the PV SmartLogger (or the single SmartLogger) for the
 // allocation rule to run. Missing any of these on every device of an

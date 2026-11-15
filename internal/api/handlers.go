@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/nesh/sestelemetry/internal/alerts"
@@ -29,6 +30,9 @@ type Handlers struct {
 	log            *slog.Logger
 	organizations  []OrganizationInfo
 	energyFlowOrgs map[string]EnergyFlowOrg
+	// genSinceByOrg caches each organization's first generator sample
+	// (orgID → time.Time); see genSince.
+	genSinceByOrg sync.Map
 	// damFetcher backs POST /api/v1/dam-prices/refresh. nil when the
 	// API process was started without an `oree:` config block — the
 	// handler responds 503 in that case so operators get a clear

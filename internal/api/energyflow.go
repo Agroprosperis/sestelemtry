@@ -323,6 +323,8 @@ func essPowerCeiling(cfg EnergyFlowOrg) float64 {
 // safest classification for legacy single-device deployments (no
 // device_host label) and avoids dropping data when an operator
 // renames a SmartLogger between collection and on-the-fly compute.
+// Generator readings (energyflow.GenSourceMetrics) become RoleGen
+// samples by their key, whichever device sent them.
 func buildRawSamples(rows []EnergyFlowRawRow, cfg EnergyFlowOrg) []energyflow.RawSample {
 	roleByHost := make(map[string]energyflow.Role, len(cfg.Devices))
 	for _, d := range cfg.Devices {
@@ -331,11 +333,12 @@ func buildRawSamples(rows []EnergyFlowRawRow, cfg EnergyFlowOrg) []energyflow.Ra
 	type key struct {
 		t    int64
 		host string
+		gen  bool
 	}
 	grouped := make(map[key]map[string]float64, len(rows)/3+1)
 	order := make([]key, 0, len(rows)/3+1)
 	for _, r := range rows {
-		k := key{t: r.Time.UnixNano(), host: r.DeviceHost}
+		k := key{t: r.Time.UnixNano(), host: r.DeviceHost, gen: energyflow.IsGenMetric(r.MetricKey)}
 		bucket, ok := grouped[k]
 		if !ok {
 			bucket = make(map[string]float64, 5)
@@ -346,6 +349,14 @@ func buildRawSamples(rows []EnergyFlowRawRow, cfg EnergyFlowOrg) []energyflow.Ra
 	}
 	out := make([]energyflow.RawSample, 0, len(order))
 	for _, k := range order {
+		if k.gen {
+			out = append(out, energyflow.RawSample{
+				Time:   time.Unix(0, k.t).UTC(),
+				Role:   energyflow.RoleGen,
+				Values: grouped[k],
+			})
+			continue
+		}
 		role, ok := roleByHost[k.host]
 		if !ok {
 			if len(cfg.Devices) == 0 {

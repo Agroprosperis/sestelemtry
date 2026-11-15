@@ -27,12 +27,15 @@ import (
 
 // Metrics lists the lifetime accumulators that are stitched. The
 // *_day_kwh registers reset every midnight by design and stay as read.
+// The generator meter comes from the Encombi controller, one per
+// organization, so its series is as unique per (org, key) as the rest.
 var Metrics = []string{
 	"accumulated_pv_energy_yield_kwh",
 	"accumulated_electricity_purchased_kwh",
 	"accumulated_electricity_sold_kwh",
 	"total_energy_charged_kwh",
 	"total_energy_discharged_kwh",
+	"accumulated_gen_energy_kwh",
 }
 
 // IsStitched reports whether metricKey is one of Metrics.
