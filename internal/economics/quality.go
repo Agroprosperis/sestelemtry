@@ -29,7 +29,13 @@ var counterFlagNames = map[string]string{
 	"accumulated_electricity_sold_kwh":      "grid_export",
 	essChargedCounterKey:                    "ess_charged",
 	essDischargedCounterKey:                 "ess_discharged",
+	"accumulated_gen_energy_kwh":            genCounterFlagName,
 }
+
+// genCounterFlagName names the generator meter in counter flags. Its
+// gaps say nothing about the SmartLogger flow split, so they do not
+// mark a day approximate (dayHasCounterIssue).
+const genCounterFlagName = "gen"
 
 // counterFlags turns the day's counter episodes into flags such as
 // counter_dropout:grid_import, one per kind and counter.

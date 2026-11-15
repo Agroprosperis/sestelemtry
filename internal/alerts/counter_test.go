@@ -62,3 +62,22 @@ func TestBuildCounterMessage(t *testing.T) {
 		t.Fatal("no events, no message")
 	}
 }
+
+// The generator meter is read through the Encombi: that is where the
+// operator has to look, not a SmartLogger.
+func TestBuildCounterMessageGeneratorMeter(t *testing.T) {
+	msg, _ := BuildCounterMessage([]CounterEvent{{
+		OrganizationID:   "ke",
+		OrganizationName: "Кролевецький елеватор",
+		MetricKey:        "accumulated_gen_energy_kwh",
+		Kind:             CounterKindDropout,
+		StartedAt:        time.Date(2026, 11, 15, 21, 30, 0, 0, time.UTC),
+		ValueBefore:      332321,
+	}}, time.Date(2026, 11, 15, 22, 0, 0, 0, time.UTC), time.UTC)
+	if !strings.Contains(msg.Subject, "лічильник генератора") {
+		t.Fatalf("subject = %q", msg.Subject)
+	}
+	if !strings.Contains(msg.Body, "Encombi не бачить пристрою (лічильника генератора)") || strings.Contains(msg.Body, "SmartLogger") {
+		t.Fatalf("body:\n%s", msg.Body)
+	}
+}

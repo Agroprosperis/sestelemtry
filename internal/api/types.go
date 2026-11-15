@@ -392,9 +392,10 @@ type EnergyFlowOrg struct {
 // EnergyFlowRecomputeSourceMetrics is the set of source counter keys
 // the on-the-fly compute reads from telemetry_samples to drive the
 // allocation algorithm. Mirrors energyflow.{PVRequiredMetrics +
-// ESSRequiredMetrics}; centralised here so the handler and the store
-// both reference one list and the catalogue can extend in lockstep.
-var EnergyFlowRecomputeSourceMetrics = []string{
+// ESSRequiredMetrics} plus energyflow.GenSourceMetrics for the supply
+// timeline; centralised here so the handler and the store both
+// reference one list and the catalogue can extend in lockstep.
+var EnergyFlowRecomputeSourceMetrics = append([]string{
 	"accumulated_pv_energy_yield_kwh",
 	"accumulated_electricity_purchased_kwh",
 	"accumulated_electricity_sold_kwh",
@@ -405,7 +406,7 @@ var EnergyFlowRecomputeSourceMetrics = []string{
 	"load_power_kw",
 	"grid_connected_active_power_kw",
 	"soc_percent",
-}
+}, energyflow.GenSourceMetrics...)
 
 // EnergyFlowSyntheticMetrics is the canonical list of synthetic flow
 // metric_keys used by the API handler to detect when a caller has
@@ -460,6 +461,36 @@ type EnergyFlowHourlyRow struct {
 	// surface a per-hour "incomplete data" hint.
 	SkippedIntervals int      `json:"skipped_intervals"`
 	Warnings         []string `json:"warnings,omitempty"`
+	// Gen is the generator-aware view of the hour, present when it has
+	// generator data. The plain flows above never depend on it.
+	Gen *EnergyFlowGenHour `json:"gen,omitempty"`
+}
+
+// EnergyFlowGenHour is one hour of the generator-aware allocation
+// (ems-spec generator handoff §4.1–4.3). GenKwh is the generator
+// meter's delta for the hour (the power integral when Estimated); the
+// split fields are the sums of energyflow.AllocateGen over the hour's
+// intervals, and Minutes counts its windows by supply mode.
+type EnergyFlowGenHour struct {
+	GenKwh              float64        `json:"gen_kwh"`
+	Estimated           bool           `json:"estimated,omitempty"`
+	GenToLoadKwh        float64        `json:"gen_to_load_kwh"`
+	GenToESSKwh         float64        `json:"gen_to_ess_kwh"`
+	PVToESSKwh          float64        `json:"pv_to_ess_kwh"`
+	GridToESSKwh        float64        `json:"grid_to_ess_kwh"`
+	ESSToLoadKwh        float64        `json:"ess_to_load_kwh"`
+	ESSToGridKwh        float64        `json:"ess_to_grid_kwh"`
+	EssChargedKwh       float64        `json:"ess_charged_kwh"`
+	EssDischargedKwh    float64        `json:"ess_discharged_kwh"`
+	LoadOffgridKwh      float64        `json:"load_offgrid_kwh"`
+	PVToLoadOffgridKwh  float64        `json:"pv_to_load_offgrid_kwh"`
+	ESSToLoadOffgridKwh float64        `json:"ess_to_load_offgrid_kwh"`
+	PVToESSOffgridKwh   float64        `json:"pv_to_ess_offgrid_kwh"`
+	PVToLoadIslandKwh   float64        `json:"pv_to_load_island_kwh"`
+	ESSToLoadIslandKwh  float64        `json:"ess_to_load_island_kwh"`
+	OffgridImportKwh    float64        `json:"offgrid_import_kwh"`
+	OffgridExportKwh    float64        `json:"offgrid_export_kwh"`
+	Minutes             map[string]int `json:"minutes"`
 }
 
 // EnergyFlowHourlyResponse is the body of GET /api/v1/energy-flow-hourly.

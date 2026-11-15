@@ -137,9 +137,17 @@ func (h *Handlers) computeEnergyFlowHourly(
 	}
 
 	rawSamples := buildRawSamples(rows, cfg)
+	// Windows still ahead today have no supply mode yet, not an unknown one.
+	genTo := dayEnd
+	if now := time.Now(); now.Before(genTo) {
+		genTo = now.Truncate(time.Minute)
+	}
+	timeline := energyflow.BuildGenTimeline(rawSamples, dayStart, genTo, time.Minute, h.genSince(ctx, orgID))
+	gen := newGenHours(timeline, out.Hours)
 	var stats energyflow.RecomputeResult
-	energyflow.IterateIntervals(
+	energyflow.IterateIntervalsWithGen(
 		rawSamples,
+		timeline,
 		energyflow.Options{
 			EssDischargeSign:        cfg.EssDischargeSign,
 			AllocationWindowSeconds: 60,
@@ -163,8 +171,12 @@ func (h *Handlers) computeEnergyFlowHourly(
 			row.EssChargedKwh += r.EssChargedKwh
 			row.EssDischargedKwh += r.EssDischargedKwh
 		},
+		func(windowEnd time.Time, r energyflow.GenResult) {
+			gen.add(windowEnd.Add(-time.Nanosecond).In(loc).Hour(), r)
+		},
 		&stats,
 	)
+	gen.log(h, orgID, dayStart)
 
 	// Sub-hourly ESS power peak: a SEPARATE walk with the counter-step
 	// guard OFF (MaxEssPowerKw = 0). The economics УЗЕ anomaly filter must

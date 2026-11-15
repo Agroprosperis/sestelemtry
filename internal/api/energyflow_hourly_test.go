@@ -213,6 +213,73 @@ func TestEnergyFlowHourly_TimezonePartitionsCorrectly(t *testing.T) {
 	}
 }
 
+// TestEnergyFlowHourly_GeneratorBlock runs a day once with and once
+// without the generator rows of an Encombi: the plain flows of every
+// hour stay exactly the same, and the generated hour carries a Gen
+// block with the meter's energy, the minutes on the generator and the
+// battery charge it gave.
+func TestEnergyFlowHourly_GeneratorBlock(t *testing.T) {
+	dayStart := time.Date(2026, 11, 15, 0, 0, 0, 0, time.UTC)
+	smart := syntheticDayRows(dayStart)
+	gen := make([]EnergyFlowRawRow, 0, 2000)
+	for s := 18 * 3600; s <= 19*3600; s += 5 {
+		ts := dayStart.Add(time.Duration(s) * time.Second)
+		for k, v := range map[string]float64{
+			energyflow.SrcGridBreakersOnBits: 0,
+			energyflow.SrcGenBreakersOnBits:  1,
+			energyflow.SrcActiveGenPowerKw:   300,
+			energyflow.SrcGenBusVoltageAV:    230,
+			energyflow.SrcGenMeterAlive:      1,
+		} {
+			gen = append(gen, EnergyFlowRawRow{Time: ts, MetricKey: k, Value: v, DeviceHost: "10.24.40.239"})
+		}
+	}
+	gen = append(gen,
+		EnergyFlowRawRow{Time: dayStart.Add(18 * time.Hour), MetricKey: energyflow.SrcAccumulatedGenEnergyKwh, Value: 331000, DeviceHost: "10.24.40.239"},
+		EnergyFlowRawRow{Time: dayStart.Add(19 * time.Hour), MetricKey: energyflow.SrcAccumulatedGenEnergyKwh, Value: 331300, DeviceHost: "10.24.40.239"},
+	)
+
+	day := func(rows []EnergyFlowRawRow) EnergyFlowHourlyResponse {
+		h := NewHandlers(&mockStore{flowSources: rows}, "*")
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/energy-flow-hourly?organization_id=demo&date=2026-11-15&tz=UTC", nil)
+		rec := httptest.NewRecorder()
+		h.Router().ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("want 200 got %d, body=%s", rec.Code, rec.Body.String())
+		}
+		var body EnergyFlowHourlyResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		return body
+	}
+	without := day(smart)
+	with := day(append(append([]EnergyFlowRawRow(nil), smart...), gen...))
+	for i := range with.Hours {
+		a, b := with.Hours[i], without.Hours[i]
+		if a.PVToESSKwh != b.PVToESSKwh || a.GridToESSKwh != b.GridToESSKwh || a.ESSToLoadKwh != b.ESSToLoadKwh ||
+			a.ESSToGridKwh != b.ESSToGridKwh || a.EssChargedKwh != b.EssChargedKwh || a.EssDischargedKwh != b.EssDischargedKwh {
+			t.Fatalf("hour %d plain flows changed: %+v vs %+v", i, a, b)
+		}
+		if b.Gen != nil {
+			t.Fatalf("hour %d without generator rows has a Gen block", i)
+		}
+	}
+	g := with.Hours[18].Gen
+	if g == nil || g.GenKwh != 300 || g.Minutes["generator"] != 60 {
+		t.Fatalf("hour 18 gen = %+v", g)
+	}
+	if g.GenToLoadKwh+g.GenToESSKwh < 299 || g.GenToLoadKwh+g.GenToESSKwh > 301 {
+		t.Fatalf("hour 18 generator split %g + %g, want the 300 kWh", g.GenToLoadKwh, g.GenToESSKwh)
+	}
+	if g.OffgridImportKwh <= 0 || g.GridToESSKwh != 0 {
+		t.Fatalf("hour 18: the synthetic grid meter keeps counting, which off-grid is diagnostics only: %+v", g)
+	}
+	if with.Hours[17].Gen != nil {
+		t.Fatalf("hour 17 precedes the first generator sample: %+v", with.Hours[17].Gen)
+	}
+}
+
 // syntheticDayRows produces a deterministic set of single-SmartLogger
 // rows covering the full 24h of `dayStart` in 5-minute steps. PV
 // generation peaks at noon, grid imports during the morning load

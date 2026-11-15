@@ -36,6 +36,21 @@ var counterLabels = map[string]string{
 	"accumulated_electricity_sold_kwh":      "експорт у мережу",
 	"total_energy_charged_kwh":              "заряд УЗЕ",
 	"total_energy_discharged_kwh":           "розряд УЗЕ",
+	genCounterKey:                           "лічильник генератора",
+}
+
+// genCounterKey is the generator meter, read through the Encombi
+// controller rather than a SmartLogger.
+const genCounterKey = "accumulated_gen_energy_kwh"
+
+// counterDevice is the device that reads the counter, where an operator
+// should look when it falls or freezes: its name, the name after «з»,
+// and the meter it loses.
+func counterDevice(metricKey string) (device, withDevice, meter string) {
+	if metricKey == genCounterKey {
+		return "Encombi", "з Encombi", "лічильника генератора"
+	}
+	return "SmartLogger", "зі SmartLogger", "лічильника мережі чи інвертора"
 }
 
 // Label renders the organization and the counter.
@@ -101,10 +116,11 @@ func writeCounterSection(b *strings.Builder, title string, events []CounterEvent
 
 func describeCounterEvent(e CounterEvent, loc *time.Location) string {
 	dayLayout := "02.01.2006"
+	device, withDevice, meter := counterDevice(e.MetricKey)
 	switch {
 	case e.Kind == CounterKindFrozen && !e.Closed:
-		return fmt.Sprintf("не змінюється з %s (показує %s кВт·год), хоча дані надходять. Перевірте лічильник і його зв'язок зі SmartLogger.",
-			e.StartedAt.In(loc).Format(dayLayout), formatKwh(e.ValueBefore))
+		return fmt.Sprintf("не змінюється з %s (показує %s кВт·год), хоча дані надходять. Перевірте лічильник і його зв'язок %s.",
+			e.StartedAt.In(loc).Format(dayLayout), formatKwh(e.ValueBefore), withDevice)
 	case e.Kind == CounterKindFrozen:
 		days := 0
 		if e.EndedAt != nil {
@@ -113,9 +129,9 @@ func describeCounterEvent(e CounterEvent, loc *time.Location) string {
 		return fmt.Sprintf("знову змінюється; стояв %d %s з %s.", days, pluralUk(days, "день", "дні", "днів"),
 			e.StartedAt.In(loc).Format(dayLayout))
 	case !e.Closed:
-		return fmt.Sprintf("з %s показує %s кВт·год замість %s кВт·год: SmartLogger не бачить пристрою (лічильника мережі чи інвертора). "+
-			"Перевірте його зв'язок зі SmartLogger. Енергію за час обриву буде дораховано, коли значення повернеться.",
-			e.StartedAt.In(loc).Format(timestampLayout), formatKwh(e.ValueAfter), formatKwh(e.ValueBefore))
+		return fmt.Sprintf("з %s показує %s кВт·год замість %s кВт·год: %s не бачить пристрою (%s). "+
+			"Перевірте його зв'язок %s. Енергію за час обриву буде дораховано, коли значення повернеться.",
+			e.StartedAt.In(loc).Format(timestampLayout), formatKwh(e.ValueAfter), formatKwh(e.ValueBefore), device, meter, withDevice)
 	default:
 		var at string
 		var outage time.Duration

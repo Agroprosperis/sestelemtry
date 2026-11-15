@@ -26,6 +26,13 @@ describe('dayQualityTip', () => {
     expect(tip).toContain('приблизні')
   })
 
+  it('names the generator meter by the Encombi, without marking a day on its own', () => {
+    expect(dayQualityTip(['counter_dropout:gen'])).toBeNull()
+    const tip = dayQualityTip(['import_lag:40', 'counter_dropout:gen'])
+    expect(tip).toContain('Лічильник генератора випадав (Encombi не бачив лічильника)')
+    expect(tip).not.toContain('SmartLogger')
+  })
+
   it('ignores routine bookkeeping flags', () => {
     expect(dayQualityTip(['no_scale:grid_export', 'load_rebalanced'])).toBeNull()
     expect(dayQualityTip(['counter_seam:pv', 'counter_spike:ess_charged'])).toBeNull()

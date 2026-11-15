@@ -103,6 +103,9 @@ const (
 	RolePV     Role = "pv"     // PV SmartLogger (dual topology)
 	RoleESS    Role = "ess"    // ESS SmartLogger (dual topology)
 	RoleSingle Role = "single" // single SmartLogger covering both
+	// RoleGen tags generator readings (GenSourceMetrics). They feed the
+	// supply timeline, never a SmartLogger bucket.
+	RoleGen Role = "gen"
 )
 
 // Options tunes the allocation algorithm. The zero value of each
