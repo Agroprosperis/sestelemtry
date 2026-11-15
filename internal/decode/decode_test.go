@@ -1,10 +1,53 @@
 package decode
 
 import (
+	"encoding/binary"
+	"math"
 	"testing"
 
 	"github.com/nesh/sestelemetry/internal/registers"
 )
+
+func float32Bytes(f float32) []byte {
+	b := make([]byte, 4)
+	binary.BigEndian.PutUint32(b, math.Float32bits(f))
+	return b
+}
+
+func TestScaledFloat32(t *testing.T) {
+	// Encombi POWER_P_DG_TOTAL on Кролевець, 2026-11-15 18:30.
+	v, err := Scaled(registers.DTFloat32, float32Bytes(277.1), 1, 0)
+	if err != nil {
+		t.Fatalf("Scaled returned error: %v", err)
+	}
+	if v != 277.1 {
+		t.Fatalf("FLOAT32 277.1 decoded as %v, want the shortest decimal 277.1", v)
+	}
+	v, err = Scaled(registers.DTFloat32, float32Bytes(-103.25), 1, 0)
+	if err != nil || v != -103.25 {
+		t.Fatalf("FLOAT32 -103.25 decoded as %v, %v", v, err)
+	}
+}
+
+func TestIsInvalidFloat32AndBitfield(t *testing.T) {
+	for _, f := range []float32{float32(math.NaN()), float32(math.Inf(1)), float32(math.Inf(-1))} {
+		if !IsInvalid(registers.DTFloat32, float32Bytes(f)) {
+			t.Errorf("FLOAT32 %v must be no value", f)
+		}
+	}
+	if IsInvalid(registers.DTFloat32, float32Bytes(0)) {
+		t.Error("FLOAT32 0 is a reading")
+	}
+	allOnes := []byte{0xff, 0xff}
+	bits := registers.Entry{MetricKey: "gen_breakers_on_bits", DataType: registers.DTUint16, Bitfield: true}
+	if IsInvalidFor(bits, allOnes) {
+		t.Error("bit field 0xFFFF is a reading: all sixteen breakers closed")
+	}
+	plain := registers.Entry{MetricKey: "gen_meter_alive", DataType: registers.DTUint16}
+	if !IsInvalidFor(plain, allOnes) {
+		t.Error("plain UINT16 0xFFFF must stay no value")
+	}
+}
 
 func TestScaledInt32(t *testing.T) {
 	// INT32(-1120) => -1.12 with gain=0.001

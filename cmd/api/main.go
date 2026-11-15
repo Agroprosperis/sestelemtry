@@ -15,10 +15,10 @@ import (
 	"github.com/nesh/sestelemetry/internal/alerts"
 	"github.com/nesh/sestelemetry/internal/api"
 	"github.com/nesh/sestelemetry/internal/askoe"
+	"github.com/nesh/sestelemetry/internal/bootstrap"
 	"github.com/nesh/sestelemetry/internal/config"
 	"github.com/nesh/sestelemetry/internal/dam"
 	"github.com/nesh/sestelemetry/internal/economics"
-	"github.com/nesh/sestelemetry/internal/energyflow"
 	"github.com/nesh/sestelemetry/internal/fusionsolar"
 	"github.com/nesh/sestelemetry/internal/fxrates"
 	"github.com/nesh/sestelemetry/internal/oree"
@@ -208,8 +208,12 @@ func main() {
 			log.Warn("api_config_load", "path", cfgPath, "err", err)
 		} else {
 			loadedCfg = cfg
+			catalogs, err := bootstrap.LoadDeviceCatalogs(cfg)
+			if err != nil {
+				log.Warn("api_device_catalogs", "err", err, "hint", "a device whose catalog did not load feeds no energy flows")
+			}
 			svc.SetOrganizations(toOrganizationInfos(cfg.Organizations))
-			svc.SetEnergyFlowOrgs(toEnergyFlowOrgs(cfg.Organizations))
+			svc.SetEnergyFlowOrgs(toEnergyFlowOrgs(cfg.Organizations, catalogs))
 			// What the notifications page shows until an operator saves
 			// it: the same YAML the watchdog falls back to, so the form
 			// reflects the behaviour actually in force.
@@ -305,7 +309,7 @@ func main() {
 	// and ESS counters to different hosts via per-device metric_keys; we
 	// mirror that exactly so archived rows classify in the energy-flow
 	// allocator like live ones. Metrics not scoped to a device fall back
-	// to the org's first host (the single-logger common case).
+	// to the org's first SmartLogger (the single-logger common case).
 	hostsByOrg := map[string]fusionsolar.OrgHosts{}
 	if loadedCfg != nil {
 		for _, o := range loadedCfg.Organizations {
@@ -314,7 +318,7 @@ func main() {
 				continue
 			}
 			oh := fusionsolar.OrgHosts{
-				Default:     strings.TrimSpace(devices[0].Host),
+				Default:     archiveHost(devices),
 				ByMetricKey: map[string]string{},
 			}
 			for _, d := range devices {
@@ -477,13 +481,13 @@ func main() {
 // than failing — because they may have switched topology over time
 // and historical samples for the older topology are still valid
 // inputs.
-func toEnergyFlowOrgs(orgs []config.Organization) []api.EnergyFlowOrg {
+func toEnergyFlowOrgs(orgs []config.Organization, catalogs map[string]bootstrap.DeviceCatalog) []api.EnergyFlowOrg {
 	out := make([]api.EnergyFlowOrg, 0, len(orgs))
 	for _, o := range orgs {
 		devices := o.Devices()
 		mapped := make([]api.EnergyFlowDevice, 0, len(devices))
 		for _, d := range devices {
-			role := energyflow.DetectRole(d.MetricKeys)
+			role := bootstrap.DeviceRole(d, catalogs)
 			mapped = append(mapped, api.EnergyFlowDevice{
 				Host: strings.TrimSpace(d.Host),
 				Role: string(role),
@@ -497,6 +501,18 @@ func toEnergyFlowOrgs(orgs []config.Organization) []api.EnergyFlowOrg {
 		})
 	}
 	return out
+}
+
+// archiveHost is the device_host FusionSolar archive rows get when no
+// device whitelists their metric: the org's first SmartLogger, never a
+// device with its own catalog (Encombi), which FusionSolar does not know.
+func archiveHost(devices []config.ModbusDevice) string {
+	for _, d := range devices {
+		if !d.OwnCatalog() {
+			return strings.TrimSpace(d.Host)
+		}
+	}
+	return strings.TrimSpace(devices[0].Host)
 }
 
 // toOrganizationInfos projects the YAML config's Organization entries

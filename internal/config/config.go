@@ -33,6 +33,39 @@ type Modbus struct {
 type ModbusDevice struct {
 	Modbus     `yaml:",inline"`
 	MetricKeys []string `yaml:"metric_keys"`
+	// RegisterCatalog gives a device that is not a SmartLogger (the
+	// Encombi generator controller) its own register map. Empty means
+	// the top-level register_catalog. MetricKeys then scope this one.
+	RegisterCatalog string `yaml:"register_catalog"`
+	// RegisterMap is the read function for this device; empty means the
+	// top-level modbus_register_map.
+	RegisterMap ModbusRegisterMap `yaml:"register_map"`
+	// PollInterval overrides the organization's poll_interval.
+	PollInterval time.Duration `yaml:"poll_interval"`
+}
+
+// OwnCatalog reports whether the device reads its own register map
+// rather than the main SmartLogger catalog.
+func (d ModbusDevice) OwnCatalog() bool {
+	return d.RegisterCatalog != ""
+}
+
+// RegisterMapOr returns the device's read function, or fallback (the
+// top-level modbus_register_map) when it sets none.
+func (d ModbusDevice) RegisterMapOr(fallback ModbusRegisterMap) ModbusRegisterMap {
+	if d.RegisterMap != "" {
+		return d.RegisterMap
+	}
+	return fallback
+}
+
+// PollIntervalOr returns the device's poll interval, or fallback (the
+// organization's) when it sets none.
+func (d ModbusDevice) PollIntervalOr(fallback time.Duration) time.Duration {
+	if d.PollInterval > 0 {
+		return d.PollInterval
+	}
+	return fallback
 }
 
 // Location is the geographic site of an organization. Consumed by the
@@ -282,7 +315,9 @@ func Load(path string) (*Root, error) {
 		}
 		if len(o.ModbusDevices) > 0 {
 			for j := range o.ModbusDevices {
-				if err := applyModbusDefaults(&o.ModbusDevices[j].Modbus); err != nil {
+				d := &o.ModbusDevices[j]
+				d.RegisterCatalog = strings.TrimSpace(d.RegisterCatalog)
+				if err := applyModbusDefaults(&d.Modbus); err != nil {
 					return nil, fmt.Errorf("config: org %q modbus_devices[%d]: %w", o.ID, j, err)
 				}
 			}
@@ -622,6 +657,14 @@ func (c *Root) validate() error {
 		for j, d := range o.ModbusDevices {
 			if strings.TrimSpace(d.Host) == "" {
 				return fmt.Errorf("config: org %q modbus_devices[%d].host is required", id, j)
+			}
+			switch d.RegisterMap {
+			case "", MapHolding, MapInput:
+			default:
+				return fmt.Errorf("config: org %q modbus_devices[%d].register_map must be holding or input", id, j)
+			}
+			if d.PollInterval < 0 {
+				return fmt.Errorf("config: org %q modbus_devices[%d].poll_interval must be >= 0, got %s", id, j, d.PollInterval)
 			}
 		}
 		if o.Location != nil {

@@ -18,6 +18,8 @@ type ReadChunk struct {
 
 // PlanChunks starts with one read per catalog entry (never splits a multi-register value),
 // then merges adjacent reads into a single FC3/FC4 request when the combined length is <= maxRegistersPerRead.
+// Entries of one catalog read block share a read that spans the
+// registers between them, within the same length limit.
 func PlanChunks(entries []registers.ResolvedEntry) []ReadChunk {
 	if len(entries) == 0 {
 		return nil
@@ -29,11 +31,25 @@ func PlanChunks(entries []registers.ResolvedEntry) []ReadChunk {
 		}
 		return sorted[i].PDUStart < sorted[j].PDUStart
 	})
+	maxPerRead := configuredMaxRegistersPerRead()
 	chunks := make([]ReadChunk, 0, len(sorted))
+	blockChunk := map[int]int{} // read block -> index of its open chunk
 	for _, e := range sorted {
+		if e.ReadBlock > 0 {
+			if i, ok := blockChunk[e.ReadBlock]; ok {
+				c := &chunks[i]
+				if end := int(e.PDUEnd) + 1; end-int(c.Start) <= maxPerRead {
+					if end > int(c.Start)+int(c.Quantity) {
+						c.Quantity = uint16(end - int(c.Start))
+					}
+					continue
+				}
+			}
+			blockChunk[e.ReadBlock] = len(chunks)
+		}
 		chunks = append(chunks, ReadChunk{Start: e.PDUStart, Quantity: e.WordCount})
 	}
-	return mergeAdjacentChunks(chunks, configuredMaxRegistersPerRead())
+	return mergeAdjacentChunks(chunks, maxPerRead)
 }
 
 func mergeAdjacentChunks(in []ReadChunk, maxPerRead int) []ReadChunk {

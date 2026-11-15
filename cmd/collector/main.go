@@ -88,7 +88,7 @@ func main() {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			runOrg(ctx, log, cfg, org, resolved, pool)
+			runOrg(ctx, log, cfg, org, runtime.CatalogFor, pool)
 		}()
 		wg.Add(1)
 		go func() {
@@ -103,6 +103,10 @@ func main() {
 // dialFunc is a package-level seam so tests can stub Dial without spinning
 // up a real Modbus listener.
 var dialFunc = modbusclient.Dial
+
+// catalogFor returns the resolved register catalog a device reads: the
+// main SmartLogger map, or the one the device brings along.
+type catalogFor func(config.ModbusDevice) []registers.ResolvedEntry
 
 // runOrg spawns one goroutine per Modbus device declared on the
 // organization. Single-device orgs (legacy `modbus:` block) get a
@@ -119,7 +123,7 @@ func runOrg(
 	log *slog.Logger,
 	cfg *config.Root,
 	org config.Organization,
-	resolved []registers.ResolvedEntry,
+	catalogs catalogFor,
 	pool *pgxpool.Pool,
 ) {
 	devices := org.Devices()
@@ -130,14 +134,14 @@ func runOrg(
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			runDevice(ctx, log, cfg, org, dev, i, resolved, pool)
+			runDevice(ctx, log, cfg, org, dev, i, catalogs(dev), pool)
 		}()
 	}
 	wg.Wait()
 }
 
-// runDevice is the per-device polling loop. It filters the global resolved
-// catalog down to the device's `metric_keys` whitelist, plans its own
+// runDevice is the per-device polling loop. It filters the device's
+// resolved catalog down to its `metric_keys` whitelist, plans its own
 // Modbus read chunks, and maintains a single TCP session to the device.
 // Each device is otherwise independent: dial failures, backoff, and
 // per-poll timeouts are scoped to that device.
@@ -172,9 +176,11 @@ func runDevice(
 	if err != nil {
 		log.Warn("optional_reads_unavailable", "err", err, "hint", "the register catalog lacks these optional keys; the other optional reads still run")
 	}
-	log.Info("device_start", "metrics", len(resolved), "modbus_reads", len(chunks), "optional_metrics", optionalMetricCount(opts))
+	pollInterval := dev.PollIntervalOr(org.PollInterval)
+	log.Info("device_start", "metrics", len(resolved), "modbus_reads", len(chunks), "optional_metrics", optionalMetricCount(opts),
+		"poll_interval", pollInterval.String(), "register_map", string(dev.RegisterMapOr(cfg.ModbusRegisterMap)))
 
-	t := time.NewTicker(org.PollInterval)
+	t := time.NewTicker(pollInterval)
 	defer t.Stop()
 
 	var sess *modbusclient.Session
@@ -240,7 +246,7 @@ func pollAndStore(
 	readCtx, cancel := context.WithTimeout(ctx, readBudgetForPoll(dev.RequestTimeout, len(chunks)))
 	defer cancel()
 
-	data, err := readChunkData(readCtx, cfg.ModbusRegisterMap, sess, chunks)
+	data, err := readChunkData(readCtx, dev.RegisterMapOr(cfg.ModbusRegisterMap), sess, chunks)
 	if err != nil {
 		return err
 	}
@@ -291,9 +297,10 @@ type optionalRead struct {
 
 // optionalReadsFor resolves the optional groups a device reads. A group
 // whose keys the catalog lacks is left out and reported; the others
-// still run.
+// still run. The groups are SmartLogger registers, so a device with its
+// own catalog reads none.
 func optionalReadsFor(dev config.ModbusDevice, resolvedAll []registers.ResolvedEntry) ([]*optionalRead, error) {
-	if len(dev.MetricKeys) > 0 {
+	if len(dev.MetricKeys) > 0 || dev.OwnCatalog() {
 		return nil, nil
 	}
 	var reads []*optionalRead
@@ -360,7 +367,7 @@ func pollOptional(
 	now := time.Now()
 	readCtx, cancel := context.WithTimeout(ctx, readBudgetForPoll(dev.RequestTimeout, len(opt.chunks)))
 	defer cancel()
-	data, err := readChunkData(readCtx, cfg.ModbusRegisterMap, sess, opt.chunks)
+	data, err := readChunkData(readCtx, dev.RegisterMapOr(cfg.ModbusRegisterMap), sess, opt.chunks)
 	if err != nil {
 		opt.next = now.Add(optionalBackoff)
 		log.Warn("poll_optional", "metrics", strings.Join(opt.keys, ","), "err", err, "retry_in", optionalBackoff.String())
@@ -414,7 +421,7 @@ func buildSamples(
 		}
 		// No reading is better than a fake one: the API's latest-value
 		// lookups age it out, the charts show a gap.
-		if decode.IsInvalid(e.DataType, payload) {
+		if decode.IsInvalidFor(e.Entry, payload) {
 			continue
 		}
 		v, err := decode.Scaled(e.DataType, payload, e.Gain, e.Offset)
@@ -480,7 +487,7 @@ func dialTargetForDevice(dev config.ModbusDevice) modbusclient.DialTarget {
 }
 
 func reconnectWait(org config.Organization, dev config.ModbusDevice, attempt int) time.Duration {
-	wait := org.PollInterval
+	wait := dev.PollIntervalOr(org.PollInterval)
 	if wait <= 0 {
 		wait = time.Second
 	}

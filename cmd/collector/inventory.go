@@ -94,6 +94,11 @@ func pollOrgInventory(
 	devices := org.Devices()
 	readings := make([]inventory.DeviceReading, 0, len(devices))
 	for _, dev := range devices {
+		// The plant passport lives on the SmartLoggers; a device with
+		// its own catalog (Encombi) has none of these registers.
+		if dev.OwnCatalog() {
+			continue
+		}
 		r := readDeviceInventory(ctx, cfg, dev, resolvedAll)
 		readings = append(readings, r)
 	}
@@ -157,7 +162,7 @@ func readDeviceInventory(
 	readCtx, cancel := context.WithTimeout(ctx, readBudgetForPoll(dev.RequestTimeout, len(chunks)))
 	defer cancel()
 
-	data, err := readChunkData(readCtx, cfg.ModbusRegisterMap, sess, chunks)
+	data, err := readChunkData(readCtx, dev.RegisterMapOr(cfg.ModbusRegisterMap), sess, chunks)
 	if err != nil {
 		return inventory.DeviceReading{Host: host, Err: err}
 	}

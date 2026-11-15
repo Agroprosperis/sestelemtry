@@ -67,6 +67,9 @@ services:
     # frontend features that depend on it (e.g. weather widget) hide.
     volumes:
       - ${SESTELEMETRY_HOST_CONFIG_PATH:-/etc/sestelemetry/config.yaml}:/etc/sestelemetry/config.yaml:ro
+      # Register catalogs a device brings along (Encombi): the API reads
+      # them to tell such devices from the SmartLoggers.
+      - ${SESTELEMETRY_HOST_REGISTERS_PATH:-/etc/sestelemetry/registers}:/etc/sestelemetry/registers:ro
       # Server-side FusionSolar archive-import credentials. Create the
       # host file BEFORE starting the container (a missing path makes
       # Docker bind-mount a directory). Defaults next to config.yaml.

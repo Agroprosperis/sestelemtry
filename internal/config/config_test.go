@@ -568,6 +568,52 @@ organizations:
 	}
 }
 
+func TestLoadDeviceOwnCatalogFields(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	content := `register_catalog: registers/huawei_smartlogger.yaml
+organizations:
+  - id: ke
+    poll_interval: 1s
+    modbus_devices:
+      - host: 10.24.40.238
+      - host: 10.24.40.239
+        unit_id: 1
+        register_catalog: "  registers/encombi_ecpvx.yaml "
+        register_map: input
+        poll_interval: 5s
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load error: %v", err)
+	}
+	sl, enc := cfg.Organizations[0].ModbusDevices[0], cfg.Organizations[0].ModbusDevices[1]
+	if sl.OwnCatalog() || !enc.OwnCatalog() || enc.RegisterCatalog != "registers/encombi_ecpvx.yaml" {
+		t.Fatalf("own catalog: %+v / %+v", sl, enc)
+	}
+	if enc.UnitID != 1 || enc.RegisterMap != MapInput || enc.PollInterval != 5*time.Second {
+		t.Fatalf("Encombi device fields wrong: %+v", enc)
+	}
+	if sl.RegisterMapOr(cfg.ModbusRegisterMap) != MapHolding || sl.PollIntervalOr(cfg.Organizations[0].PollInterval) != time.Second {
+		t.Fatal("the SmartLogger must keep the top-level map and the org poll interval")
+	}
+
+	for name, bad := range map[string]string{
+		"bad map":           strings.Replace(content, "register_map: input", "register_map: coils", 1),
+		"negative interval": strings.Replace(content, "poll_interval: 5s", "poll_interval: -5s", 1),
+	} {
+		if err := os.WriteFile(path, []byte(bad), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Load(path); err == nil {
+			t.Errorf("%s: expected a validation error", name)
+		}
+	}
+}
+
 func TestDevicesLegacyFallback(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
