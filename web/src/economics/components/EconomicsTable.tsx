@@ -2,7 +2,7 @@ import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { ReactElement } from 'react'
 import { formatOrganizationLabel } from '../../dashboard/config'
-import type { HourEconomicsRow } from '../compute'
+import { expenseGenChargeOf, revenueEssSelfOf, revenuePvSelfOf, type HourEconomicsRow } from '../compute'
 import { UAH_MONEY, useMoney, type Money } from '../currency'
 import { dayPivotSheet, exportFileName, type HourMetric } from '../exportSheets'
 import { fetchUahDayRows } from '../useEconomicsData'
@@ -67,7 +67,7 @@ function formatUah(v: number | null | undefined, money: Money): string {
 // label. `pickHourValue` returns the per-hour number and `total`
 // gives the daily aggregate; both return null when the underlying
 // row is missing or the metric is undefined for that hour.
-type MetricKind = 'price' | 'price_with_zero' | 'energy' | 'uah' | 'uah_signed'
+type MetricKind = 'price' | 'price_with_zero' | 'energy' | 'uah' | 'uah_signed' | 'minutes'
 
 type MetricRow = {
   id: string
@@ -128,6 +128,18 @@ function pickRevenue(
     if (!row || row.rdnUahPerKwh === null) return null
     return flow(row) * price(row)
   }
+}
+
+// hourRevenue is the hour's four revenue legs as dailyTotals books them.
+function hourRevenue(r: HourEconomicsRow): number {
+  const exp = r.economics.exportPriceUahPerKwh
+  return r.economics.pvToGrid * exp + revenuePvSelfOf(r) + r.flow.essToGrid * exp + revenueEssSelfOf(r)
+}
+
+// hourExpense is the battery's charge from the grid at the import price
+// plus the fuel the generator spent charging it.
+function hourExpense(r: HourEconomicsRow): number {
+  return r.flow.gridToEss * r.economics.importPriceUahPerKwh + expenseGenChargeOf(r)
 }
 
 function sumOver(
@@ -371,9 +383,11 @@ function metricGroups(money: Money): Array<{ id: string; label: string; rows: Me
       // Revenue / expense per channel — the per-hour version of the
       // EBITDA panel above the chart. Each row is `flowₕ · priceₕ`
       // (matching `dailyTotals` revenue/expense fields exactly), so
-      // the Σ column reproduces the panel's amounts to the гривня.
-      // `Дохід всього` is a summary row (sum of the four below);
-      // Витрати has only one breakdown line, so no separate summary.
+      // the Σ column reproduces the panel's amounts to the гривня. In
+      // an hour counted with the generator, solar and battery used off
+      // the grid take the diesel valuation (revenuePvSelfOf /
+      // revenueEssSelfOf) and the fuel spent charging the battery is an
+      // expense. `Дохід всього` is a summary row (sum of the four below).
       id: 'revenue',
       label: 'Дохід та витрати',
       rows: [
@@ -383,29 +397,8 @@ function metricGroups(money: Money): Array<{ id: string; label: string; rows: Me
           unit: money.unit,
           kind: 'uah',
           summary: true,
-          pickHourValue: (row) => {
-            if (!row || row.rdnUahPerKwh === null) return null
-            const imp = row.economics.importPriceUahPerKwh
-            const exp = row.economics.exportPriceUahPerKwh
-            return (
-              row.economics.pvToGrid * exp +
-              row.economics.pvToLoad * imp +
-              row.flow.essToGrid * exp +
-              row.flow.essToLoad * imp
-            )
-          },
-          total: (rows) =>
-            sumOver(rows, (row) => {
-              if (!row || row.rdnUahPerKwh === null) return null
-              const imp = row.economics.importPriceUahPerKwh
-              const exp = row.economics.exportPriceUahPerKwh
-              return (
-                row.economics.pvToGrid * exp +
-                row.economics.pvToLoad * imp +
-                row.flow.essToGrid * exp +
-                row.flow.essToLoad * imp
-              )
-            }),
+          pickHourValue: pickWhenPriced(hourRevenue),
+          total: (rows) => sumOver(rows, pickWhenPriced(hourRevenue)),
         },
         {
           id: 'revenue_pv_export',
@@ -427,15 +420,8 @@ function metricGroups(money: Money): Array<{ id: string; label: string; rows: Me
           label: 'Дохід: СЕС → споживання',
           unit: money.unit,
           kind: 'uah',
-          pickHourValue: pickRevenue(
-            (r) => r.economics.pvToLoad,
-            (r) => r.economics.importPriceUahPerKwh,
-          ),
-          total: (rows) =>
-            sumOver(
-              rows,
-              pickRevenue((r) => r.economics.pvToLoad, (r) => r.economics.importPriceUahPerKwh),
-            ),
+          pickHourValue: pickWhenPriced(revenuePvSelfOf),
+          total: (rows) => sumOver(rows, pickWhenPriced(revenuePvSelfOf)),
         },
         {
           id: 'revenue_ess_export',
@@ -457,37 +443,20 @@ function metricGroups(money: Money): Array<{ id: string; label: string; rows: Me
           label: 'Дохід: УЗЕ → споживання',
           unit: money.unit,
           kind: 'uah',
-          pickHourValue: pickRevenue(
-            (r) => r.flow.essToLoad,
-            (r) => r.economics.importPriceUahPerKwh,
-          ),
-          total: (rows) =>
-            sumOver(
-              rows,
-              pickRevenue((r) => r.flow.essToLoad, (r) => r.economics.importPriceUahPerKwh),
-            ),
+          pickHourValue: pickWhenPriced(revenueEssSelfOf),
+          total: (rows) => sumOver(rows, pickWhenPriced(revenueEssSelfOf)),
         },
         {
           // Витрати summary mirrors the Дохід всього row above so the
           // panel and the table read the same way (heading row +
-          // breakdown beneath). Today there's only one expense leg
-          // (gridToEss · importPrice), but the summary slot is kept so
-          // adding e.g. degradation cost later doesn't require
-          // restructuring the table.
+          // breakdown beneath).
           id: 'expense_total',
           label: 'Витрати всього',
           unit: money.unit,
           kind: 'uah',
           summary: true,
-          pickHourValue: pickRevenue(
-            (r) => r.flow.gridToEss,
-            (r) => r.economics.importPriceUahPerKwh,
-          ),
-          total: (rows) =>
-            sumOver(
-              rows,
-              pickRevenue((r) => r.flow.gridToEss, (r) => r.economics.importPriceUahPerKwh),
-            ),
+          pickHourValue: pickWhenPriced(hourExpense),
+          total: (rows) => sumOver(rows, pickWhenPriced(hourExpense)),
         },
         {
           id: 'expense_grid_charge',
@@ -516,31 +485,8 @@ function metricGroups(money: Money): Array<{ id: string; label: string; rows: Me
           unit: money.unit,
           kind: 'uah_signed',
           summary: true,
-          pickHourValue: (row) => {
-            if (!row || row.rdnUahPerKwh === null) return null
-            const imp = row.economics.importPriceUahPerKwh
-            const exp = row.economics.exportPriceUahPerKwh
-            const revenue =
-              row.economics.pvToGrid * exp +
-              row.economics.pvToLoad * imp +
-              row.flow.essToGrid * exp +
-              row.flow.essToLoad * imp
-            const expense = row.flow.gridToEss * imp
-            return revenue - expense
-          },
-          total: (rows) =>
-            sumOver(rows, (row) => {
-              if (!row || row.rdnUahPerKwh === null) return null
-              const imp = row.economics.importPriceUahPerKwh
-              const exp = row.economics.exportPriceUahPerKwh
-              const revenue =
-                row.economics.pvToGrid * exp +
-                row.economics.pvToLoad * imp +
-                row.flow.essToGrid * exp +
-                row.flow.essToLoad * imp
-              const expense = row.flow.gridToEss * imp
-              return revenue - expense
-            }),
+          pickHourValue: pickWhenPriced((r) => hourRevenue(r) - hourExpense(r)),
+          total: (rows) => sumOver(rows, pickWhenPriced((r) => hourRevenue(r) - hourExpense(r))),
         },
       ],
     },
@@ -574,6 +520,69 @@ function metricGroups(money: Money): Array<{ id: string; label: string; rows: Me
   ]
 }
 
+// genValue reads a generator field of an hour with data; an hour without
+// generator data reads zero.
+function genValue(pick: (gen: NonNullable<HourEconomicsRow['gen']>) => number) {
+  return (row: HourEconomicsRow | null): number | null => (row ? (row.gen ? pick(row.gen) : 0) : null)
+}
+
+function genRow(id: string, label: string, unit: string, kind: MetricKind, pick: (gen: NonNullable<HourEconomicsRow['gen']>) => number, summary = false): MetricRow {
+  const value = genValue(pick)
+  return { id, label, unit, kind, summary, pickHourValue: value, total: (rows) => sumOver(rows, value) }
+}
+
+// hasGenData reports whether the day has any generator data to show.
+function hasGenData(rows: Array<HourEconomicsRow | null>): boolean {
+  return rows.some((r) => r?.gen !== undefined)
+}
+
+// tableGroups is metricGroups with the generator of a day that has its
+// data: its leg of the consumption, a «Генератор» group, and the fuel
+// spent charging the battery among the expenses.
+function tableGroups(money: Money, withGen: boolean): Array<{ id: string; label: string; rows: MetricRow[] }> {
+  const groups = metricGroups(money)
+  if (!withGen) return groups
+  return groups.flatMap((group) => {
+    if (group.id === 'consumption') {
+      return [
+        {
+          ...group,
+          rows: [...group.rows, genRow('gen_to_load', 'Генератор → Споживання', 'кВт·год', 'energy', (g) => g.genToLoad)],
+        },
+        {
+          id: 'generator',
+          label: 'Генератор',
+          rows: [
+            genRow('gen_kwh', 'Генератор (виробіток)', 'кВт·год', 'energy', (g) => g.genKwh, true),
+            genRow('gen_to_load_gen', 'Генератор → Споживання', 'кВт·год', 'energy', (g) => g.genToLoad),
+            genRow('gen_to_ess', 'Генератор → УЗЕ', 'кВт·год', 'energy', (g) => g.genToEss),
+            genRow('minutes_generator', 'Робота генератора', 'хв', 'minutes', (g) => g.minutes.generator),
+            genRow('minutes_island', 'Острів (від УЗЕ)', 'хв', 'minutes', (g) => g.minutes.island),
+            genRow('minutes_blackout', 'Без живлення', 'хв', 'minutes', (g) => g.minutes.blackout),
+            genRow('load_offgrid', 'Навантаження без мережі', 'кВт·год', 'energy', (g) => g.loadOffgrid),
+            genRow('gen_fuel_l', 'Пальне', 'л', 'energy', (g) => g.fuelL),
+            genRow('gen_fuel_cost', 'Вартість пального', money.unit, 'uah', (g) => g.fuelCostUah),
+          ],
+        },
+      ]
+    }
+    if (group.id === 'revenue') {
+      const at = group.rows.findIndex((r) => r.id === 'expense_grid_charge')
+      const rows = [...group.rows]
+      rows.splice(at + 1, 0, {
+        id: 'expense_gen_charge',
+        label: 'Витрати: Заряд УЗЕ від генератора',
+        unit: money.unit,
+        kind: 'uah',
+        pickHourValue: pickWhenPriced(expenseGenChargeOf),
+        total: (rows) => sumOver(rows, pickWhenPriced(expenseGenChargeOf)),
+      })
+      return [{ ...group, rows }]
+    }
+    return [group]
+  })
+}
+
 function renderCell(
   value: number | null,
   kind: MetricKind,
@@ -600,6 +609,9 @@ function renderCell(
       formatted = formatUah(value, money)
       className = value >= 0 ? 'cell-positive' : 'cell-negative'
       break
+    case 'minutes':
+      formatted = String(Math.round(value))
+      break
   }
   const merged = [className, extraClass].filter(Boolean).join(' ') || undefined
   return <td className={merged}>{formatted}</td>
@@ -617,11 +629,12 @@ const XLSX_FORMAT: Record<MetricKind, XlsxFormat> = {
   energy: 'decimal1',
   uah: 'money',
   uah_signed: 'money',
+  minutes: 'int',
 }
 
 // exportDay writes the pivot in UAH; rows must be the UAH day.
 function exportDay(rows: Array<HourEconomicsRow | null>, organizationID: string, date: string) {
-  const metrics: HourMetric[] = metricGroups(UAH_MONEY).flatMap((group) => group.rows).map((metric) => ({
+  const metrics: HourMetric[] = tableGroups(UAH_MONEY, hasGenData(rows)).flatMap((group) => group.rows).map((metric) => ({
     label: metric.label,
     unit: metric.unit,
     format: XLSX_FORMAT[metric.kind],
@@ -665,10 +678,27 @@ function essNetTerms(row: HourEconomicsRow, money: Money): EssNetTerm[] {
       uah: sign * kwh * price,
     })
   }
-  add(flow.essToLoad, e.importPriceUahPerKwh, 1, 'Розряд у споживання (замість купівлі)')
+  // Off the grid the discharge displaced fuel, the generator's charge cost
+  // fuel, and storing PV gave up no export.
+  const gen = row.gen?.accounted ? row.gen : undefined
+  add(flow.essToLoad - (gen?.essToLoadOffgrid ?? 0), e.importPriceUahPerKwh, 1, 'Розряд у споживання (замість купівлі)')
+  if (gen && gen.essToLoadOffgrid > 0) {
+    terms.push({
+      label: 'Розряд без мережі (замість пального)',
+      detail: `${formatNumber(gen.essToLoadOffgrid)} кВт·год`,
+      uah: gen.essOffgridValueUah,
+    })
+  }
   add(flow.essToGrid, e.exportPriceUahPerKwh, 1, 'Розряд у мережу')
   add(flow.gridToEss, e.importPriceUahPerKwh, -1, 'Заряд із мережі')
-  add(flow.pvToEss, e.exportPriceUahPerKwh, -1, 'Заряд від СЕС (недоотриманий експорт)')
+  if (gen && gen.chargeCostUah > 0) {
+    terms.push({
+      label: 'Заряд від генератора (пальне)',
+      detail: `${formatNumber(gen.genToEss)} кВт·год`,
+      uah: -gen.chargeCostUah,
+    })
+  }
+  add(flow.pvToEss - (gen?.pvToEssOffgrid ?? 0), e.exportPriceUahPerKwh, -1, 'Заряд від СЕС (недоотриманий експорт)')
   // Wear closes the sum. Taking it as the residual — instead of
   // multiplying by the tariff form's degradation rate — keeps the lines
   // adding up to the figure the backend computed, which used the
@@ -803,7 +833,8 @@ type HourColumns = {
 
 export function EconomicsTable({ rows, organizationID, date }: Props) {
   const money = useMoney()
-  const groups = useMemo(() => metricGroups(money), [money])
+  const withGen = hasGenData(rows)
+  const groups = useMemo(() => tableGroups(money, withGen), [money, withGen])
   const orgLabel = formatOrganizationLabel(organizationID)
   const dateLabel = formatLocalDate(date)
   const tableRef = useRef<HTMLTableElement>(null)
@@ -948,5 +979,7 @@ function renderTotal(value: number, kind: MetricKind, money: Money): ReactElemen
           {formatUah(value, money)}
         </span>
       )
+    case 'minutes':
+      return <span>{Math.round(value)}</span>
   }
 }

@@ -148,8 +148,10 @@ const GenFuelMixed = "mixed"
 // GenTotals is the generator part of a day or a rollup (ems-spec generator
 // handoff §4.6). GenKwh and SupplyMinutes describe any day with generator
 // data; the flows, the fuel and ExpenseGenCharge are non-zero only on
-// hours counted with the generator. GenFuelMethod is the fuel method of
-// those hours: "" without any, GenFuelMixed in a rollup of both.
+// hours counted with the generator. EffectOffgrid is the effect of those
+// of them that spent minutes without the grid. GenFuelMethod is the fuel
+// method of the hours counted: "" without any, GenFuelMixed in a rollup
+// of both.
 type GenTotals struct {
 	GenKwh           float64
 	GenToLoad        float64
@@ -159,6 +161,7 @@ type GenTotals struct {
 	GenFuelL         float64
 	GenFuelMethod    string
 	ExpenseGenCharge float64
+	EffectOffgrid    float64
 	SupplyMinutes    SupplyMinutes
 }
 
@@ -171,6 +174,7 @@ func (g *GenTotals) add(o GenTotals) {
 	g.GenFuelCost += o.GenFuelCost
 	g.GenFuelL += o.GenFuelL
 	g.ExpenseGenCharge += o.ExpenseGenCharge
+	g.EffectOffgrid += o.EffectOffgrid
 	g.SupplyMinutes.add(o.SupplyMinutes)
 	switch {
 	case g.GenFuelMethod == "":

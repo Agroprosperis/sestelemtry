@@ -284,6 +284,122 @@
   background: var(--border);
 }
 
+.economics-banner-action {
+  margin-left: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--info-link);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* Form field help: a «?» whose bubble opens on hover, click, keyboard
+   and touch (HelpTip). */
+.help-tip {
+  position: relative;
+  display: inline-flex;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+.help-tip-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text-subtle);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 0;
+  cursor: pointer;
+}
+
+.help-tip-button:hover,
+.help-tip-button[aria-expanded='true'] {
+  border-color: var(--info-link);
+  color: var(--info-link);
+}
+
+.help-tip-button:focus-visible {
+  outline: 2px solid var(--info-link);
+  outline-offset: 1px;
+}
+
+.help-tip-bubble {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: -8px;
+  z-index: 40;
+  width: max-content;
+  max-width: min(340px, 80vw);
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.45;
+  white-space: normal;
+  text-align: left;
+}
+
+.help-tip-bubble p {
+  margin: 0;
+}
+
+.help-tip-bubble p + p {
+  margin-top: 6px;
+}
+
+/* Generator fuel block of the tariff form (handoff §4.4). */
+.economics-tariffs-gen {
+  margin-top: 18px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-sunken);
+}
+
+.economics-tariffs-gen h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.economics-tariffs-gen .economics-tariffs-grid {
+  margin-top: 10px;
+}
+
+.economics-tariffs-gen-cost {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  padding: 6px 0;
+}
+
+.economics-tariffs-gen-cost.is-unset {
+  font-weight: 400;
+  color: var(--text-subtle);
+}
+
+.economics-tariffs-gen-example {
+  margin: 12px 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
 .economics-tariff-schedule {
   margin-top: 20px;
   padding: 16px;
@@ -769,6 +885,22 @@
 
 .eco-kpi-grid-7 {
   grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+.eco-kpi-grid-4 {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+@media (max-width: 860px) {
+  .eco-kpi-grid-4 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 520px) {
+  .eco-kpi-grid-4 {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 /* Day view: the financial strip and the energy strip below share six

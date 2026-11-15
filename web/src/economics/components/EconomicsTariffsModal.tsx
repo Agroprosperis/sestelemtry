@@ -2,6 +2,7 @@ import { useEffect, useId, useState } from 'react'
 import { formatOrganizationLabel } from '../../dashboard/config'
 import { DEFAULT_TARIFFS, type Tariffs } from '../tariffs'
 import { useOrgTariffs, type OrgTariffsStatus } from '../useOrgTariffs'
+import { GeneratorFuelFields } from './GeneratorFuelFields'
 import { TariffScheduleEditor } from './TariffScheduleEditor'
 
 type Props = {
@@ -341,6 +342,7 @@ export function EconomicsTariffsModal({
               </button>
             )}
           </div>
+          <GeneratorFuelFields tariffs={tariffs} onChange={update} organizationID={organizationID} date={date} />
           <TariffScheduleEditor
             key={organizationID}
             organizationID={organizationID}

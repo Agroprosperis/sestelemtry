@@ -30,6 +30,7 @@ import { useFxRatesOn } from './useFxRatesOn'
 import { capexResolver, capexStepsInCurrency, fundedCapexSteps } from './payback'
 import { useOrgTariffs } from './useOrgTariffs'
 import { discrepancyFlags } from './qualityFlags'
+import { GenCostMissingBanner } from './components/GenCostMissingBanner'
 
 // DamRefreshState is the small UI state machine that drives the
 // "Оновити ціни РДН" button and its status hint: idle (clickable),
@@ -278,6 +279,10 @@ export function EconomicsPage() {
     currency,
     refreshKey,
   })
+  const monthGenCostMissing = useMemo(
+    () => (monthly.month?.days ?? []).filter((d) => d.quality_flags?.includes('gen_cost_missing')).length,
+    [monthly.month],
+  )
 
   // period is the YYYY calendar year derived from the day anchor; an
   // explicit from/to window (if set) overrides it in the year view.
@@ -606,6 +611,11 @@ export function EconomicsPage() {
                 Не вдалося завантажити дані: {monthly.error}
               </section>
             )}
+            {!monthly.loading && monthGenCostMissing > 0 && (
+              <GenCostMissingBanner onOpenTariffs={() => setTariffsOpen(true)}>
+                Генератор працював, але вартість пального не задана: {monthGenCostMissing} дн. пораховано без пального.
+              </GenCostMissingBanner>
+            )}
             {monthly.loading || capexLoading ? (
               <p className="economics-loading">Завантаження…</p>
             ) : monthly.month ? (
@@ -650,6 +660,19 @@ export function EconomicsPage() {
                 <span className="economics-reconciled-badge">Звірено з FusionSolar</span>
                 Денні підсумки масштабовано під канонічні KPI станції.
                 {discrepancies.length > 0 && <> Розбіжності: {discrepancies.join(', ')}.</>}
+              </section>
+            )}
+
+            {!data.error && !data.loading && data.qualityFlags.includes('gen_cost_missing') && (
+              <GenCostMissingBanner onOpenTariffs={() => setTariffsOpen(true)}>
+                Генератор працював, але вартість пального на цю дату не задана: доба порахована без пального.
+              </GenCostMissingBanner>
+            )}
+
+            {!data.error && !data.loading && data.qualityFlags.includes('gen_shared') && (
+              <section className="economics-banner" role="status">
+                Генератор спільний для Т1 і Т2. Поки елеватор не рахується з ним як одне ціле, години генератора
+                тут рахуються без пального, за звичайними формулами.
               </section>
             )}
 

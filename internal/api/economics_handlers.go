@@ -116,7 +116,8 @@ func economicsGenHourToJSON(r *economics.HourRow) EconomicsGenHour {
 
 // EconomicsGenTotals is the generator part of a day, a month, a year or a
 // portfolio site, omitted while zero. gen_fuel_method is "mixed" for a
-// rollup whose days used both methods.
+// rollup whose days used both methods; effect_offgrid_uah is the effect of
+// the hours counted with the generator that spent minutes without the grid.
 type EconomicsGenTotals struct {
 	GenKwh              float64 `json:"gen_kwh,omitempty"`
 	GenToLoadKwh        float64 `json:"gen_to_load_kwh,omitempty"`
@@ -126,6 +127,7 @@ type EconomicsGenTotals struct {
 	GenFuelL            float64 `json:"gen_fuel_l,omitempty"`
 	GenFuelMethod       string  `json:"gen_fuel_method,omitempty"`
 	ExpenseGenChargeUah float64 `json:"expense_gen_charge_uah,omitempty"`
+	EffectOffgridUah    float64 `json:"effect_offgrid_uah,omitempty"`
 	MinutesGenerator    int     `json:"minutes_generator,omitempty"`
 	MinutesIsland       int     `json:"minutes_island,omitempty"`
 	MinutesBlackout     int     `json:"minutes_blackout,omitempty"`
@@ -143,6 +145,7 @@ func genTotalsToJSON(g economics.GenTotals) EconomicsGenTotals {
 		GenFuelL:            g.GenFuelL,
 		GenFuelMethod:       g.GenFuelMethod,
 		ExpenseGenChargeUah: g.ExpenseGenCharge,
+		EffectOffgridUah:    g.EffectOffgrid,
 		MinutesGenerator:    g.SupplyMinutes.Generator,
 		MinutesIsland:       g.SupplyMinutes.Island,
 		MinutesBlackout:     g.SupplyMinutes.Blackout,

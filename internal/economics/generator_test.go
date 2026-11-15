@@ -217,6 +217,7 @@ func TestGenPerKwhDay(t *testing.T) {
 	near(t, "load off grid", tot.LoadOffgrid, 270)
 	near(t, "fuel", tot.GenFuelCost, 3900)
 	near(t, "litres", tot.GenFuelL, 78)
+	near(t, "effect of the off-grid hours", tot.EffectOffgrid, -750+450+450)
 	if tot.GenFuelMethod != GenFuelPerKwh {
 		t.Fatalf("method = %q", tot.GenFuelMethod)
 	}

@@ -876,9 +876,31 @@ export type EconomicsDataQuality = {
   max_interval_power_kw: number
 }
 
+// EconomicsGenTotalsApi is the generator part of a day, month, year or
+// portfolio site (internal/api.EconomicsGenTotals), omitted while zero.
+// gen_fuel_method is "mixed" for a rollup of days of both methods;
+// effect_offgrid_uah the effect of the hours counted with the generator
+// that spent minutes without the grid.
+export type EconomicsGenTotalsApi = {
+  gen_kwh?: number
+  gen_to_load_kwh?: number
+  gen_to_ess_kwh?: number
+  load_offgrid_kwh?: number
+  gen_fuel_cost_uah?: number
+  gen_fuel_l?: number
+  gen_fuel_method?: string
+  expense_gen_charge_uah?: number
+  effect_offgrid_uah?: number
+  minutes_generator?: number
+  minutes_island?: number
+  minutes_blackout?: number
+  minutes_transition?: number
+  minutes_unknown?: number
+}
+
 // EconomicsMonthlyTotals mirrors internal/api.EconomicsMonthlyTotals —
 // the month rollup of the per-day economics.
-export type EconomicsMonthlyTotals = {
+export type EconomicsMonthlyTotals = EconomicsGenTotalsApi & {
   baseline_cost_uah: number
   actual_cost_uah: number
   effect_uah: number
@@ -957,7 +979,7 @@ export type EconomicsMonthlyTotals = {
 }
 
 // EconomicsMonthlyDay is one day of the month breakdown.
-export type EconomicsMonthlyDay = {
+export type EconomicsMonthlyDay = EconomicsGenTotalsApi & {
   date: string
   is_final: boolean
   rdn_avg_uah_per_kwh: number
@@ -1180,7 +1202,7 @@ export async function fetchEconomicsAnnual(
 // EconomicsPortfolioSite is one object's row in the portfolio rollup:
 // project effect + the two reserve levers (work-schedule + УЗЕ optimum,
 // project_net) + УЗЕ data-quality flags + key energy totals.
-export type EconomicsPortfolioSite = {
+export type EconomicsPortfolioSite = EconomicsGenTotalsApi & {
   id: string
   name: string
   has_data: boolean

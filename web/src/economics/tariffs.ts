@@ -65,6 +65,37 @@ export type Tariffs = {
   genFuelConsumptionLPerH: number
 }
 
+// fuelSet mirrors the server's Tariffs.FuelSet: the litre price and the
+// chosen method's consumption are both set, so the economics count the
+// generator.
+export function fuelSet(t: Tariffs): boolean {
+  if (!(t.genFuelPriceUahPerL > 0)) return false
+  return t.genFuelMethod === 'per_hour' ? t.genFuelConsumptionLPerH > 0 : t.genFuelConsumptionLPerKwh > 0
+}
+
+// fuelCostUah is c (грн/кВт·год) for per_kwh or h (грн/год) for per_hour
+// of handoff §4.4, with VAT the way the import price takes it.
+export function fuelCostUah(t: Tariffs): number {
+  const vat = t.includeVat ? 1 + t.vatRate : 1
+  const consumption = t.genFuelMethod === 'per_hour' ? t.genFuelConsumptionLPerH : t.genFuelConsumptionLPerKwh
+  return t.genFuelPriceUahPerL * consumption * vat
+}
+
+// fuelExample is the tariff form's example of handoff §4.4.1 for an hour
+// without the grid at loadKw: on the generator alone, and with half of
+// it on the battery — what that half hour costs and what the battery
+// saved.
+export function fuelExample(
+  t: Tariffs,
+  loadKw: number,
+): { generatorOnly: number; halfGenerator: number; essEffect: number } {
+  const cost = fuelCostUah(t)
+  if (t.genFuelMethod === 'per_hour') {
+    return { generatorOnly: cost, halfGenerator: cost / 2, essEffect: cost / 2 }
+  }
+  return { generatorOnly: loadKw * cost, halfGenerator: (loadKw / 2) * cost, essEffect: (loadKw / 2) * cost }
+}
+
 export const DEFAULT_TARIFFS: Tariffs = {
   distributionUahPerKwh: 2.75218,
   transmissionUahPerKwh: 0.74291,

@@ -323,6 +323,9 @@ func ComputeDailyTotals(rows []*HourRow) DailyTotals {
 			acc.GenFuelCost += row.Econ.GenFuelCostUah
 			acc.GenFuelL += row.Econ.GenFuelL
 			acc.GenFuelMethod = row.Econ.GenFuelMethod
+			if g.Minutes.Offgrid() > 0 {
+				acc.EffectOffgrid += row.Econ.Effect
+			}
 		} else {
 			acc.RevenuePvSelf += row.Econ.PVToLoad * importPrice
 			acc.RevenueEssSelf += row.Flow.EssToLoad * importPrice

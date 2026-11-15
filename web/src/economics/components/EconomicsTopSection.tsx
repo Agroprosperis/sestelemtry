@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import type { EconomicsMonthlyTotals } from '../../api'
 import { PV_FORECAST_WHOLE_ELEVATOR_NOTE, pvPlanCaption } from '../../dashboard/transforms/pvForecast'
 import { useMoney } from '../currency'
+import { formatDuration, fuelMethodLabel, hasRollupGen, rollupOffgridMinutes } from '../generatorText'
 import { formatMwh, formatPercent } from '../monthly/format'
 import { PERIOD_WORDS, reserveSplit, uahShort, type PeriodScope } from '../monthly/rollup'
 import { KpiIcon as Icon } from './kpiIcons'
@@ -483,6 +484,82 @@ export function EconomicsTopSection({
           </Card>
         </div>
       </div>
+
+      {hasRollupGen(totals) && <GeneratorSection totals={totals} per={w.per} />}
     </section>
   )
+}
+
+// GeneratorSection is the period's generator: its energy and running
+// time, the fuel, the time without the grid and the effect of those
+// hours. The money is set once a tariff prices the fuel.
+function GeneratorSection({ totals, per }: { totals: EconomicsMonthlyTotals; per: string }) {
+  const money = useMoney()
+  const counted = (totals.gen_fuel_cost_uah ?? 0) > 0 || (totals.load_offgrid_kwh ?? 0) > 0
+  const method = fuelMethodLabel(totals.gen_fuel_method)
+  return (
+    <div className="eco-kpi-section">
+      <header className="eco-kpi-head">
+        <span className="eco-kpi-head-icon eco-tone-orange">
+          <Icon d={ICONS.zap} />
+        </span>
+        <div className="eco-kpi-head-text">
+          <h3 className="eco-kpi-title">Генератор</h3>
+          <span className="eco-kpi-subtitle">Робота генератора й години без мережі {per}</span>
+        </div>
+      </header>
+      <div className="eco-kpi-grid eco-kpi-grid-4">
+        <Card
+          tone="orange"
+          icon={ICONS.zap}
+          label="Генератор"
+          tip="Енергія генератора за його лічильником (контролер Encombi)."
+          value={formatMwh(totals.gen_kwh ?? 0)}
+        >
+          <span>У роботі: {formatDuration(totals.minutes_generator ?? 0)}</span>
+          {counted && (
+            <span>
+              Навантаженню {formatMwh(totals.gen_to_load_kwh ?? 0)} · УЗЕ {formatMwh(totals.gen_to_ess_kwh ?? 0)}
+            </span>
+          )}
+        </Card>
+        <Card
+          tone="amber"
+          icon={ICONS.tag}
+          label="Пальне"
+          tip="Вартість пального генератора за тарифом кожної доби: ціна літра × витрата × ПДВ."
+          value={counted ? money.format(totals.gen_fuel_cost_uah ?? 0) : '—'}
+        >
+          {counted ? (
+            <span>
+              {formatLitres(totals.gen_fuel_l ?? 0)}
+              {method ? ` · ${method}` : ''}
+            </span>
+          ) : (
+            <span>вартість пального не задана</span>
+          )}
+        </Card>
+        <Card tone="steel" icon={ICONS.clock} label="Без мережі" value={formatDuration(rollupOffgridMinutes(totals))}>
+          <span>
+            Генератор {formatDuration(totals.minutes_generator ?? 0)} · острів {formatDuration(totals.minutes_island ?? 0)} ·
+            без живлення {formatDuration(totals.minutes_blackout ?? 0)}
+          </span>
+          {counted && <span>Навантаження без мережі: {formatMwh(totals.load_offgrid_kwh ?? 0)}</span>}
+        </Card>
+        <Card
+          tone="green"
+          icon={ICONS.trendUp}
+          label="Ефект годин без мережі"
+          tip="Ефект годин, коли об'єкт працював без мережі: скільки пального заощадили СЕС і УЗЕ проти роботи лише генератора, мінус пальне на заряд УЗЕ."
+          value={counted ? money.format(totals.effect_offgrid_uah ?? 0) : '—'}
+        />
+      </div>
+    </div>
+  )
+}
+
+const litresFmt = new Intl.NumberFormat('uk-UA', { maximumFractionDigits: 0 })
+
+function formatLitres(l: number): string {
+  return `${litresFmt.format(l)} л`
 }

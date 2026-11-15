@@ -501,6 +501,7 @@ func dailyToStorage(day economics.StoredDay) storage.EconomicsDailyRow {
 			MinutesBlackout:   t.SupplyMinutes.Blackout,
 			MinutesTransition: t.SupplyMinutes.Transition,
 			MinutesUnknown:    t.SupplyMinutes.Unknown,
+			EffectOffgrid:     t.EffectOffgrid,
 		},
 	}
 }
@@ -555,6 +556,7 @@ func storageToDailyTotals(r storage.EconomicsDailyRow) economics.DailyTotals {
 			GenFuelL:         r.Gen.FuelL,
 			GenFuelMethod:    r.Gen.FuelMethod,
 			ExpenseGenCharge: r.Gen.ExpenseGenCharge,
+			EffectOffgrid:    r.Gen.EffectOffgrid,
 			SupplyMinutes: economics.SupplyMinutes{
 				Generator:  r.Gen.MinutesGenerator,
 				Island:     r.Gen.MinutesIsland,
