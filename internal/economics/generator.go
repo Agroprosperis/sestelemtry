@@ -291,6 +291,40 @@ func genFlowsFromCounters(
 	return f, offgridImport
 }
 
+// offgridParts is an hour's load without the grid and the solar and
+// battery parts of it, made to add up with the generator's: L_off =
+// gen_to_load + pv_off + ess_off, which keeps EBITDA equal to effect +
+// wear. A wholly off-grid hour is off the grid in full. In a mixed hour
+// the allocator's off-grid load bounds the solar and battery parts: the
+// counter scaling can claim more for them than the off-grid windows saw,
+// as when the generator data begins mid-hour.
+type offgridParts struct {
+	load, pvToLoad, essToLoad, pvToEss float64
+}
+
+func offgridPartsOf(e HourEconomics, flow HourFlows) offgridParts {
+	g := flow.Gen
+	if g.Minutes.Offgrid() >= 60 {
+		return offgridParts{
+			load:      math.Min(g.GenToLoad+e.PVToLoad+flow.EssToLoad, e.Load),
+			pvToLoad:  e.PVToLoad,
+			essToLoad: flow.EssToLoad,
+			pvToEss:   flow.PVToEss,
+		}
+	}
+	p := offgridParts{
+		pvToLoad:  math.Min(g.PVToLoadOffgrid, e.PVToLoad),
+		essToLoad: math.Min(g.EssToLoadOffgrid, flow.EssToLoad),
+		pvToEss:   math.Min(g.PVToEssOffgrid, flow.PVToEss),
+	}
+	if room, sum := math.Max(g.LoadOffgrid-g.GenToLoad, 0), p.pvToLoad+p.essToLoad; sum > room {
+		p.pvToLoad *= room / sum
+		p.essToLoad *= room / sum
+	}
+	p.load = math.Min(g.GenToLoad+p.pvToLoad+p.essToLoad, e.Load)
+	return p
+}
+
 // genHourEconomics replaces e's money with handoff §4.5 for an hour
 // counted with the generator. e carries the prices and derived flows of
 // HourEconomicsFor.
@@ -309,9 +343,8 @@ func genFlowsFromCounters(
 func genHourEconomics(e HourEconomics, flow HourFlows, t Tariffs) HourEconomics {
 	g := flow.Gen
 	imp, exp := e.ImportPrice, e.ExportPrice
-	lOff := math.Min(g.LoadOffgrid, e.Load)
-	pvOff := math.Min(g.PVToLoadOffgrid, e.PVToLoad)
-	essOff := g.EssToLoadOffgrid
+	off := offgridPartsOf(e, flow)
+	lOff, pvOff, essOff := off.load, off.pvToLoad, off.essToLoad
 	tGen := float64(g.Minutes.Generator) / 60
 	tIsland := float64(g.Minutes.Island) / 60
 
@@ -347,9 +380,12 @@ func genHourEconomics(e HourEconomics, flow HourFlows, t Tariffs) HourEconomics 
 		flow.EssToGrid*exp -
 		flow.GridToEss*imp -
 		g.GenToEss*cEss -
-		(flow.PVToEss-g.PVToEssOffgrid)*exp -
+		(flow.PVToEss-off.pvToEss)*exp -
 		flow.EssDischarged*t.DegradationUahPerKwh
+	e.LoadOffgrid = lOff
 	e.PVToLoadOffgrid = pvOff
+	e.EssToLoadOffgrid = essOff
+	e.PVToEssOffgrid = off.pvToEss
 	e.GenFuelCostUah = fuel
 	e.GenFuelL = litres
 	e.GenFuelMethod = method

@@ -269,13 +269,52 @@ func TestGenEbitdaWithWear(t *testing.T) {
 	}
 }
 
+// The first hour of generator data can start mid-hour: the allocator then
+// saw the island half only, and scaling its battery split onto the whole
+// hour's discharge counter claims every discharged kWh as off the grid.
+// The off-grid load bounds the claim, so EBITDA stays effect + wear.
+func TestGenMixedHourBoundedByOffgridLoad(t *testing.T) {
+	tf := genTariffs(GenFuelPerKwh)
+	tf.DegradationUahPerKwh = 0.3
+	start := time.Date(2026, 10, 20, 22, 0, 0, 0, time.UTC)
+	flow := HourFlows{
+		GridImport: 44.6, EssDischarged: 245.6, EssToLoad: 245.6,
+		Gen: GenFlows{
+			Accounted: true, LoadOffgrid: 154.4, EssToLoadOffgrid: 245.6, EssToLoadIsland: 245.6,
+			Minutes: SupplyMinutes{Island: 30},
+		},
+	}
+	row := &HourRow{HourStart: start, Rdn: ptr(9.8), Flow: flow, Econ: HourEconomicsFor(9.8, flow, tf)}
+	e := row.Econ
+	near(t, "load", e.Load, 290.2)
+	near(t, "load off grid", e.LoadOffgrid, 154.4)
+	near(t, "battery off grid ≤ the off-grid load", e.EssToLoadOffgrid, 154.4)
+	near(t, "V_ess_off", e.EssOffgridValueUah, 154.4*15)
+	tot := ComputeDailyTotals([]*HourRow{row})
+	near(t, "EBITDA = effect + wear", tot.Ebitda, tot.Effect+245.6*0.3)
+}
+
+// Rebalancing scales the load the grid counters imply; an hour counted
+// with the generator has its load from the generator's meter and keeps it.
+func TestGenHoursStayOutOfRebalance(t *testing.T) {
+	gen := &HourRow{Rdn: ptr(10), Flow: HourFlows{Gen: GenFlows{Accounted: true, GenKwh: 100}}, Econ: HourEconomics{Load: 100, BaselineCost: 2500, ActualCost: 2500}}
+	shifted := &HourRow{Rdn: ptr(10), Flow: HourFlows{EssCharged: 20}, Econ: HourEconomics{}}
+	late := &HourRow{Rdn: ptr(10), Flow: HourFlows{GridImport: 50}, Econ: HourEconomics{Load: 50, BaselineCost: 500, ActualCost: 500}}
+	if !rebalanceDailyLoad([]*HourRow{gen, shifted, late}) {
+		t.Fatal("the grid hours carry 20 kWh of phantom load")
+	}
+	near(t, "generator hour load", gen.Econ.Load, 100)
+	near(t, "generator hour effect", gen.Econ.Effect, 0)
+	near(t, "grid hour load", late.Econ.Load, 30)
+}
+
 func TestRollHourGenerator(t *testing.T) {
 	charged := rollHour(EssState{}, HourFlows{EssCharged: 50, Gen: GenFlows{Accounted: true, GenToEss: 50}},
 		rollPrices{importPrice: 2, exportPrice: 2, genChargeCostUah: 750})
 	near(t, "kWh", charged.Next.Kwh, 50)
 	near(t, "UAH", charged.Next.Uah, 750)
-	out := rollHour(charged.Next, HourFlows{EssDischarged: 20, EssToLoad: 20, Gen: GenFlows{Accounted: true, EssToLoadOffgrid: 20}},
-		rollPrices{importPrice: 2, exportPrice: 2, essOffgridValueUah: 300})
+	out := rollHour(charged.Next, HourFlows{EssDischarged: 20, EssToLoad: 20, Gen: GenFlows{Accounted: true}},
+		rollPrices{importPrice: 2, exportPrice: 2, essToLoadOffgrid: 20, essOffgridValueUah: 300})
 	near(t, "withdrawn", out.WithdrawnCostUah, 300)
 	near(t, "realized (diesel valuation)", out.RealizedProfitUah, 0)
 }

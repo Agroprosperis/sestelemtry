@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"encoding/json"
-	"math"
 	"time"
 
 	"github.com/nesh/sestelemetry/internal/economics"
@@ -339,10 +338,10 @@ func genHourToStorage(r *economics.HourRow) storage.EconomicsGenHour {
 		Accounted:         g.Accounted,
 		GenToLoad:         g.GenToLoad,
 		GenToEss:          g.GenToEss,
-		LoadOffgrid:       math.Min(g.LoadOffgrid, r.Econ.Load),
+		LoadOffgrid:       r.Econ.LoadOffgrid,
 		PVToLoadOffgrid:   r.Econ.PVToLoadOffgrid,
-		EssToLoadOffgrid:  g.EssToLoadOffgrid,
-		PVToEssOffgrid:    g.PVToEssOffgrid,
+		EssToLoadOffgrid:  r.Econ.EssToLoadOffgrid,
+		PVToEssOffgrid:    r.Econ.PVToEssOffgrid,
 		PVToLoadIsland:    g.PVToLoadIsland,
 		EssToLoadIsland:   g.EssToLoadIsland,
 		FuelCost:          r.Econ.GenFuelCostUah,
@@ -383,7 +382,10 @@ func storageToGen(row *economics.HourRow, g storage.EconomicsGenHour) {
 		EssToLoadIsland:  g.EssToLoadIsland,
 		Minutes:          row.SupplyMinutes,
 	}
+	row.Econ.LoadOffgrid = g.LoadOffgrid
 	row.Econ.PVToLoadOffgrid = g.PVToLoadOffgrid
+	row.Econ.EssToLoadOffgrid = g.EssToLoadOffgrid
+	row.Econ.PVToEssOffgrid = g.PVToEssOffgrid
 	row.Econ.GenFuelCostUah = g.FuelCost
 	row.Econ.GenFuelL = g.FuelL
 	row.Econ.GenFuelMethod = g.FuelMethod

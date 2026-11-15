@@ -39,11 +39,15 @@ type HourEconomics struct {
 
 	// Generator terms (ems-spec generator handoff §4.5), zero unless the
 	// hour is counted with the generator (Flow.Gen.Accounted).
-	// PVToLoadOffgrid is the solar the load used without the grid,
-	// PvOffgridValueUah / EssOffgridValueUah what solar and battery
-	// saved there at the diesel valuation (V_ess_off for the battery),
+	// LoadOffgrid is the load without the grid and the *Offgrid flows the
+	// solar and battery parts priced in it (see offgridPartsOf);
+	// PvOffgridValueUah / EssOffgridValueUah what solar and battery saved
+	// there at the diesel valuation (V_ess_off for the battery),
 	// GenChargeCostUah what the battery's generator charge cost.
+	LoadOffgrid        float64
 	PVToLoadOffgrid    float64
+	EssToLoadOffgrid   float64
+	PVToEssOffgrid     float64
 	GenFuelCostUah     float64
 	GenFuelL           float64
 	GenFuelMethod      string
@@ -140,22 +144,24 @@ const loadRebalanceEpsilonKwh = 0.5
 // load-serving split fields used in revenue rollups) are scaled so the
 // daily totals match pv + import + discharge − export − charge.
 func rebalanceDailyLoad(rows []*HourRow) bool {
-	var sumPV, sumImp, sumDis, sumGen, sumExp, sumChg, reportedLoad float64
+	var sumPV, sumImp, sumDis, sumExp, sumChg, reportedLoad float64
 	priced := make([]*HourRow, 0, 24)
 	for _, row := range rows {
-		if row == nil || row.Rdn == nil {
+		// An hour counted with the generator has its load from the
+		// generator's meter, not from the lagging grid counters: it is
+		// neither in the day's balance nor scaled.
+		if row == nil || row.Rdn == nil || row.Flow.Gen.Accounted {
 			continue
 		}
 		priced = append(priced, row)
 		sumPV += row.Flow.PV
 		sumImp += row.Flow.GridImport
 		sumDis += row.Flow.EssDischarged
-		sumGen += row.Flow.Gen.GenKwh
 		sumExp += row.Flow.GridExport
 		sumChg += row.Flow.EssCharged
 		reportedLoad += row.Econ.Load
 	}
-	balancedLoad := math.Max(sumPV+sumImp+sumDis+sumGen-sumExp-sumChg, 0)
+	balancedLoad := math.Max(sumPV+sumImp+sumDis-sumExp-sumChg, 0)
 	if reportedLoad <= balancedLoad+loadRebalanceEpsilonKwh || reportedLoad <= 0 {
 		return false
 	}
@@ -166,8 +172,6 @@ func rebalanceDailyLoad(rows []*HourRow) bool {
 		row.Econ.GridToLoad *= factor
 		row.Econ.BaselineCost *= factor
 		row.Econ.Effect = row.Econ.BaselineCost - row.Econ.ActualCost
-		row.Econ.PVToLoadOffgrid *= factor
-		row.Econ.PvOffgridValueUah *= factor
 	}
 	return true
 }
@@ -311,11 +315,11 @@ func ComputeDailyTotals(rows []*HourRow) DailyTotals {
 			// Without the grid solar and battery displace diesel, not
 			// import (genHourEconomics), so EBITDA stays effect + wear.
 			acc.RevenuePvSelf += (row.Econ.PVToLoad-row.Econ.PVToLoadOffgrid)*importPrice + row.Econ.PvOffgridValueUah
-			acc.RevenueEssSelf += (row.Flow.EssToLoad-g.EssToLoadOffgrid)*importPrice + row.Econ.EssOffgridValueUah
+			acc.RevenueEssSelf += (row.Flow.EssToLoad-row.Econ.EssToLoadOffgrid)*importPrice + row.Econ.EssOffgridValueUah
 			acc.ExpenseGenCharge += row.Econ.GenChargeCostUah
 			acc.GenToLoad += g.GenToLoad
 			acc.GenToEss += g.GenToEss
-			acc.LoadOffgrid += math.Min(g.LoadOffgrid, row.Econ.Load)
+			acc.LoadOffgrid += row.Econ.LoadOffgrid
 			acc.GenFuelCost += row.Econ.GenFuelCostUah
 			acc.GenFuelL += row.Econ.GenFuelL
 			acc.GenFuelMethod = row.Econ.GenFuelMethod

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math"
 	"net/http"
 	"sort"
 	"strings"
@@ -102,10 +101,10 @@ func economicsGenHourToJSON(r *economics.HourRow) EconomicsGenHour {
 		GenAccounted:        g.Accounted,
 		GenToLoadKwh:        g.GenToLoad,
 		GenToEssKwh:         g.GenToEss,
-		LoadOffgridKwh:      math.Min(g.LoadOffgrid, r.Econ.Load),
+		LoadOffgridKwh:      r.Econ.LoadOffgrid,
 		PvToLoadOffgridKwh:  r.Econ.PVToLoadOffgrid,
-		EssToLoadOffgridKwh: g.EssToLoadOffgrid,
-		PvToEssOffgridKwh:   g.PVToEssOffgrid,
+		EssToLoadOffgridKwh: r.Econ.EssToLoadOffgrid,
+		PvToEssOffgridKwh:   r.Econ.PVToEssOffgrid,
 		GenFuelCostUah:      r.Econ.GenFuelCostUah,
 		GenFuelL:            r.Econ.GenFuelL,
 		GenFuelMethod:       r.Econ.GenFuelMethod,

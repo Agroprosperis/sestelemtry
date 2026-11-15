@@ -31,13 +31,14 @@ func RollHour(prev EssState, flow HourFlows, importPrice, exportPrice, degradati
 
 // rollPrices are what one hour's cost-basis roll prices energy at. The
 // generator terms come from genHourEconomics and are zero otherwise:
-// what the generator's charge cost, and the diesel valuation of the
-// discharge used without the grid.
+// what the generator's charge cost, and the discharge used without the
+// grid with the diesel valuation it gets instead of the import price.
 type rollPrices struct {
 	importPrice        float64
 	exportPrice        float64
 	degradation        float64
 	genChargeCostUah   float64
+	essToLoadOffgrid   float64
 	essOffgridValueUah float64
 }
 
@@ -75,7 +76,7 @@ func rollHour(prev EssState, flow HourFlows, p rollPrices) HourCostBasis {
 	}
 
 	// Discharge used without the grid displaced diesel, not import.
-	dischargeRevenueUah := math.Max(flow.EssToLoad-flow.Gen.EssToLoadOffgrid, 0)*importPrice +
+	dischargeRevenueUah := math.Max(flow.EssToLoad-p.essToLoadOffgrid, 0)*importPrice +
 		p.essOffgridValueUah +
 		math.Max(flow.EssToGrid, 0)*exportPrice
 	degradationUah := math.Max(flow.EssDischarged, 0) * degradationUahPerKwh
