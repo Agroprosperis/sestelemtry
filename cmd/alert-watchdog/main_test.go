@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/nesh/sestelemetry/internal/alerts"
+	"github.com/nesh/sestelemetry/internal/bootstrap"
 	"github.com/nesh/sestelemetry/internal/config"
 )
 
@@ -17,7 +18,7 @@ func TestMonitoredDevicesLegacySingleDevice(t *testing.T) {
 		Name:   "Кролевецький елеватор",
 		Modbus: config.Modbus{Host: "10.24.40.238"},
 	}}}
-	got := monitoredDevices(cfg)
+	got, _ := monitoredDevices(cfg, nil)
 	if len(got) != 1 {
 		t.Fatalf("devices = %d, want 1", len(got))
 	}
@@ -48,7 +49,7 @@ func TestMonitoredDevicesPrefersExclusiveProbe(t *testing.T) {
 			},
 		},
 	}}}
-	got := monitoredDevices(cfg)
+	got, _ := monitoredDevices(cfg, nil)
 	if len(got) != 2 {
 		t.Fatalf("devices = %d, want 2", len(got))
 	}
@@ -58,6 +59,41 @@ func TestMonitoredDevicesPrefersExclusiveProbe(t *testing.T) {
 	// Ties among exclusive keys resolve alphabetically for stability.
 	if got[1].ProbeMetricKey != "active_pv_power_kw" {
 		t.Fatalf("probe[1] = %q", got[1].ProbeMetricKey)
+	}
+}
+
+// The Encombi is watched by its own bit field and named in the email,
+// so losing it does not read as losing the site. Without its catalog
+// it is not watched at all rather than through the SmartLogger clock.
+func TestMonitoredDevicesEncombi(t *testing.T) {
+	const catalog = "../../registers/encombi_ecpvx.yaml"
+	cfg := &config.Root{Organizations: []config.Organization{{
+		ID:   "ke",
+		Name: "Кролевецький елеватор",
+		ModbusDevices: []config.ModbusDevice{
+			{Modbus: config.Modbus{Host: "10.24.40.238"}},
+			{Modbus: config.Modbus{Host: "10.24.40.239"}, RegisterCatalog: catalog},
+		},
+	}}}
+	catalogs, err := bootstrap.LoadDeviceCatalogs(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, unprobed := monitoredDevices(cfg, catalogs)
+	if len(got) != 2 || len(unprobed) != 0 {
+		t.Fatalf("devices = %+v, unprobed = %+v", got, unprobed)
+	}
+	if got[0].ProbeMetricKey != probePreferredKey || got[0].DeviceName != "" {
+		t.Fatalf("SmartLogger = %+v", got[0])
+	}
+	if got[1].ProbeMetricKey != "grid_breakers_on_bits" ||
+		got[1].Label() != "Кролевецький елеватор — Encombi ECpvX (10.24.40.239)" {
+		t.Fatalf("Encombi = %+v, label %q", got[1], got[1].Label())
+	}
+
+	got, unprobed = monitoredDevices(cfg, nil)
+	if len(got) != 1 || len(unprobed) != 1 || unprobed[0].Host != "10.24.40.239" {
+		t.Fatalf("without its catalog: devices = %+v, unprobed = %+v", got, unprobed)
 	}
 }
 

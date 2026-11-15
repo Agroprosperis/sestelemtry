@@ -105,12 +105,23 @@ organizations:
       latitude: 51.564077
       longitude: 33.375058
       city: "Кролевець"
-    modbus:
-      host: 10.24.40.238
-      port: 502
-      unit_id: 99
-      connect_timeout: 2s
-      request_timeout: 2s
+    modbus_devices:
+      - host: 10.24.40.238
+        port: 502
+        unit_id: 99
+        connect_timeout: 2s
+        request_timeout: 2s
+      # Encombi ECpvX generator controller: read-only, its own catalog,
+      # input registers, every 5 s.
+      - host: 10.24.40.239
+        port: 502
+        unit_id: 1
+        connect_timeout: 2s
+        request_timeout: 2s
+        reconnect_backoff: true
+        register_catalog: registers/encombi_ecpvx.yaml
+        register_map: input
+        poll_interval: 5s
 
   # Поділля елеватор. Internal id is `pde` to keep it distinct from a
   # different production tenant that already owns `id: pe`.

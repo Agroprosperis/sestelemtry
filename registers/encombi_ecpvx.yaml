@@ -1,0 +1,181 @@
+# Encombi ECpvX — generator (DG) and supply-mode telemetry.
+# Read only: input registers (FC4), unit id 1, port 502. Never write to
+# this controller; it runs the site's generator and battery switching.
+# Addresses are the vendor's PDU addresses, no offset. Multi-register
+# values are big-endian (ABCD). Source: ems-spec
+# docs/specs/encombi_generator_telemetry.md and
+# docs/handoff/generator_prod_agent_handoff.md §3.2.
+#
+# Not read on purpose (handoff §3.4): Encombi fuel and tariff settings
+# (30124…30147, 30860…30867), its day/month/year DG counters (clock
+# dependent), 29000/29001 and the "genset mode / grid mode" bits.
+device:
+  name: Encombi ECpvX
+  # A bit field is written on every poll (no "no value" sentinel), so
+  # the watchdog never mistakes a silent generator meter for a lost
+  # controller.
+  probe_metric_key: grid_breakers_on_bits
+
+addressing:
+  holding_address_base: 0
+
+# Ranges every controller answered in one request (probe 2026-11-15,
+# all eight sites). They cut a poll from 14 requests to 8.
+read_blocks:
+  - start: 0 # generator meter 1
+    count: 70
+  - start: 30000 # totals and DG energy
+    count: 44
+
+registers:
+  # Required: energy flows, supply mode and economics depend on these.
+  - metric_key: active_gen_power_kw
+    name: Generator active power, kW (POWER_P_DG_TOTAL), + = generating
+    address: 30000
+    data_type: FLOAT32
+    swap_type: ABCD_BE
+    gain: 1
+    offset: 0
+
+  - metric_key: accumulated_gen_energy_kwh
+    name: Generator meter energy, kWh (KWH_IMP)
+    address: 60
+    data_type: UINT32
+    swap_type: ABCD_BE
+    gain: 1
+    offset: 0
+
+  - metric_key: gen_breakers_on_bits
+    name: Generator breakers 1..16 closed (BITFIELD_1), > 0 = closed
+    address: 31000
+    data_type: UINT16
+    gain: 1
+    offset: 0
+    bitfield: true
+
+  - metric_key: grid_breakers_on_bits
+    name: Mains breakers 1..16 closed (BITFIELD_2), > 0 = grid connected
+    address: 31001
+    data_type: UINT16
+    gain: 1
+    offset: 0
+    bitfield: true
+
+  - metric_key: gen_bus_voltage_a_v
+    name: Bus voltage L1-N at the generator meter, V
+    address: 38
+    data_type: UINT32
+    swap_type: ABCD_BE
+    gain: 0.1
+    offset: 0
+
+  - metric_key: gen_meter_alive
+    name: Generator meter online (ALIVE), 1 = yes
+    address: 199
+    data_type: UINT16
+    gain: 1
+    offset: 0
+
+  # Cross-checks and diagnostics; nothing downstream depends on them.
+  - metric_key: gen_meter_power_kw
+    name: Generator meter active power, kW (ACP)
+    address: 0
+    data_type: INT32
+    swap_type: ABCD_BE
+    gain: 0.001
+    offset: 0
+
+  - metric_key: gen_meter_freq_hz
+    name: Bus frequency at the generator meter, Hz
+    address: 52
+    data_type: UINT32
+    swap_type: ABCD_BE
+    gain: 0.01
+    offset: 0
+
+  - metric_key: accumulated_gen_reverse_energy_kwh
+    name: Generator meter reverse energy, kWh (KWH_EXP)
+    address: 62
+    data_type: UINT32
+    swap_type: ABCD_BE
+    gain: 1
+    offset: 0
+
+  - metric_key: encombi_accumulated_gen_energy_kwh
+    name: Generator energy counted by ECpvX, kWh (DG_KWH_TOTAL)
+    address: 30036
+    data_type: FLOAT32
+    swap_type: ABCD_BE
+    gain: 1
+    offset: 0
+
+  - metric_key: encombi_grid_power_kw
+    name: Mains power per Encombi, kW (POWER_P_MAINS_TOTAL), + = import
+    address: 30018
+    data_type: FLOAT32
+    swap_type: ABCD_BE
+    gain: 1
+    offset: 0
+
+  - metric_key: encombi_load_power_kw
+    name: Load power per Encombi, kW (POWER_P_LOAD_TOTAL)
+    address: 30027
+    data_type: FLOAT32
+    swap_type: ABCD_BE
+    gain: 1
+    offset: 0
+
+  - metric_key: encombi_ess_power_kw
+    name: Battery power per Encombi, kW (POWER_P_BAT_TOTAL), + = discharge
+    address: 30590
+    data_type: FLOAT32
+    swap_type: ABCD_BE
+    gain: 1
+    offset: 0
+
+  - metric_key: encombi_soc_percent
+    name: Battery SOC per Encombi, %
+    address: 30619
+    data_type: FLOAT32
+    swap_type: ABCD_BE
+    gain: 1
+    offset: 0
+
+  - metric_key: gen_rated_online_kw
+    name: Generator rated power, kW (DG_P_GENERATING_CAPACITY), non-zero only while running
+    address: 30508
+    data_type: FLOAT32
+    swap_type: ABCD_BE
+    gain: 1
+    offset: 0
+
+  - metric_key: gen_loading_pct
+    name: Generator loading, % (DG_P_LOADING_PCT)
+    address: 30510
+    data_type: FLOAT32
+    swap_type: ABCD_BE
+    gain: 1
+    offset: 0
+
+  - metric_key: encombi_state_bits
+    name: Encombi state bits (BITFIELD_3), bit 0 any GB on, bit 1 any MB on
+    address: 31002
+    data_type: UINT16
+    gain: 1
+    offset: 0
+    bitfield: true
+
+  - metric_key: encombi_di_bits
+    name: IO module 1 digital inputs, raw (map per site)
+    address: 20500
+    data_type: UINT16
+    gain: 1
+    offset: 0
+    bitfield: true
+
+  - metric_key: encombi_sw_version
+    name: ECpvX software version (ECPV_SW_VERSION)
+    address: 30999
+    data_type: UINT16
+    gain: 1
+    offset: 0

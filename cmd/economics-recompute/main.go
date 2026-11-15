@@ -34,10 +34,10 @@ import (
 	"time"
 
 	"github.com/nesh/sestelemetry/internal/api"
+	"github.com/nesh/sestelemetry/internal/bootstrap"
 	"github.com/nesh/sestelemetry/internal/config"
 	"github.com/nesh/sestelemetry/internal/counterstitch"
 	"github.com/nesh/sestelemetry/internal/economics"
-	"github.com/nesh/sestelemetry/internal/energyflow"
 	"github.com/nesh/sestelemetry/internal/storage"
 )
 
@@ -118,7 +118,11 @@ func main() {
 	// The energy-flow allocator that backs HourlyFlows needs the per-org
 	// device→role mapping; without it the directional flows come back
 	// empty. This mirrors cmd/api/main.go.
-	h.SetEnergyFlowOrgs(toEnergyFlowOrgs(cfg.Organizations))
+	catalogs, err := bootstrap.LoadDeviceCatalogs(cfg)
+	if err != nil {
+		log.Warn("device_catalogs", "err", err, "hint", "a device whose catalog did not load feeds no energy flows")
+	}
+	h.SetEnergyFlowOrgs(toEnergyFlowOrgs(cfg.Organizations, catalogs))
 	svc := economics.NewService(api.NewEconomicsBackend(h, store))
 
 	orgs := orgIDs(cfg)
@@ -496,13 +500,13 @@ func orgIDs(cfg *config.Root) []string {
 // recompute shape (id, ess_discharge_sign, device host → role). It
 // mirrors cmd/api/main.go so HourlyFlows classifies samples identically
 // to the API and the live collector.
-func toEnergyFlowOrgs(orgs []config.Organization) []api.EnergyFlowOrg {
+func toEnergyFlowOrgs(orgs []config.Organization, catalogs map[string]bootstrap.DeviceCatalog) []api.EnergyFlowOrg {
 	out := make([]api.EnergyFlowOrg, 0, len(orgs))
 	for _, o := range orgs {
 		devices := o.Devices()
 		mapped := make([]api.EnergyFlowDevice, 0, len(devices))
 		for _, d := range devices {
-			role := energyflow.DetectRole(d.MetricKeys)
+			role := bootstrap.DeviceRole(d, catalogs)
 			mapped = append(mapped, api.EnergyFlowDevice{
 				Host: strings.TrimSpace(d.Host),
 				Role: string(role),

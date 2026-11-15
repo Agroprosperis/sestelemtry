@@ -26,6 +26,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"slices"
 	"sort"
 	"strings"
 	"syscall"
@@ -34,6 +35,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/nesh/sestelemetry/internal/alerts"
+	"github.com/nesh/sestelemetry/internal/bootstrap"
 	"github.com/nesh/sestelemetry/internal/config"
 	"github.com/nesh/sestelemetry/internal/storage"
 )
@@ -79,9 +81,18 @@ func main() {
 	for _, o := range cfg.Organizations {
 		orgNames[o.ID] = o.Name
 	}
+	catalogs, err := bootstrap.LoadDeviceCatalogs(cfg)
+	if err != nil {
+		log.Warn("device_catalogs", "err", err)
+	}
+	devices, unprobed := monitoredDevices(cfg, catalogs)
+	for _, d := range unprobed {
+		log.Warn("device_not_monitored", "organization_id", d.OrganizationID, "device_host", d.Host,
+			"hint", "its register catalog did not load, so no metric shows whether it is alive")
+	}
 	wd := &watchdog{
 		log:                log,
-		devices:            monitoredDevices(cfg),
+		devices:            devices,
 		orgNames:           orgNames,
 		fallback:           alerts.SettingsFromConfig(cfg.Alerts),
 		fallbackPassword:   fallbackPassword,
@@ -501,8 +512,14 @@ type monitoredDevice struct {
 // walks org.Devices() rather than distinct hosts already present in the
 // database, so a device that has never written a single row is reported
 // as down instead of silently ignored.
-func monitoredDevices(cfg *config.Root) []monitoredDevice {
-	out := make([]monitoredDevice, 0, len(cfg.Organizations))
+//
+// A device with its own register catalog (Encombi) writes none of the
+// SmartLogger keys: its name and freshness probe come from that catalog.
+// One whose catalog did not load and that names no keys of its own has
+// no probe at all; it is returned in unprobed instead of being watched
+// through a SmartLogger key that would keep it looking healthy.
+func monitoredDevices(cfg *config.Root, catalogs map[string]bootstrap.DeviceCatalog) (out []monitoredDevice, unprobed []alerts.Device) {
+	out = make([]monitoredDevice, 0, len(cfg.Organizations))
 	for i := range cfg.Organizations {
 		org := &cfg.Organizations[i]
 		devices := org.Devices()
@@ -512,17 +529,32 @@ func monitoredDevices(cfg *config.Root) []monitoredDevice {
 			if host == "" {
 				continue
 			}
-			out = append(out, monitoredDevice{
+			md := monitoredDevice{
 				Device: alerts.Device{
 					OrganizationID:   org.ID,
 					OrganizationName: org.Name,
 					Host:             host,
 				},
-				ProbeMetricKey: probeMetricKey(dev, counts),
-			})
+			}
+			if dev.OwnCatalog() {
+				meta := catalogs[dev.RegisterCatalog].Device
+				md.DeviceName = meta.Name
+				switch {
+				case meta.ProbeMetricKey != "" && (len(dev.MetricKeys) == 0 || slices.Contains(dev.MetricKeys, meta.ProbeMetricKey)):
+					md.ProbeMetricKey = meta.ProbeMetricKey
+				case len(dev.MetricKeys) > 0:
+					md.ProbeMetricKey = probeMetricKey(dev, counts)
+				default:
+					unprobed = append(unprobed, md.Device)
+					continue
+				}
+			} else {
+				md.ProbeMetricKey = probeMetricKey(dev, counts)
+			}
+			out = append(out, md)
 		}
 	}
-	return out
+	return out, unprobed
 }
 
 func deviceList(devices []monitoredDevice) []alerts.Device {

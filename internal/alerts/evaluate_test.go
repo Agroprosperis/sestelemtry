@@ -250,3 +250,10 @@ func TestDeviceLabelFallsBackToID(t *testing.T) {
 		t.Fatalf("Label() = %q, want %q", got, want)
 	}
 }
+
+func TestDeviceLabelNamesTheDevice(t *testing.T) {
+	d := Device{OrganizationID: "ab", OrganizationName: "Агродар Бар", Host: "10.23.40.252", DeviceName: "Encombi ECpvX"}
+	if got, want := d.Label(), "Агродар Бар — Encombi ECpvX (10.23.40.252)"; got != want {
+		t.Fatalf("Label() = %q, want %q", got, want)
+	}
+}

@@ -30,7 +30,6 @@ func main() {
 		os.Exit(1)
 	}
 	cfg := runtime.Config
-	resolved := runtime.Resolved
 
 	org, err := pickOrganization(cfg.Organizations, *orgID)
 	if err != nil {
@@ -47,7 +46,12 @@ func main() {
 		fmt.Fprintf(os.Stderr, "config: org %q has %d device(s); -device %d is out of range\n", org.ID, len(devices), *deviceIdx)
 		os.Exit(1)
 	}
-	dev := devices[*deviceIdx].Modbus
+	device := devices[*deviceIdx]
+	dev := device.Modbus
+	// Every entry of the catalog the device reads (its own one for an
+	// Encombi), with that device's read function.
+	resolved := runtime.CatalogFor(device)
+	registerMap := device.RegisterMapOr(cfg.ModbusRegisterMap)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -70,14 +74,14 @@ func main() {
 	}
 	defer func() { _ = sess.Close() }()
 
-	fmt.Printf("Checking org=%s device=%d host=%s:%d map=%s registers=%d\n", org.ID, *deviceIdx, dev.Host, dev.Port, cfg.ModbusRegisterMap, len(resolved))
+	fmt.Printf("Checking org=%s device=%d host=%s:%d unit=%d map=%s registers=%d\n", org.ID, *deviceIdx, dev.Host, dev.Port, dev.UnitID, registerMap, len(resolved))
 
 	okCount := 0
 	failCount := 0
 	for _, e := range resolved {
 		readCtx, cancel := context.WithTimeout(ctx, dev.RequestTimeout)
 		var raw []byte
-		switch cfg.ModbusRegisterMap {
+		switch registerMap {
 		case config.MapInput:
 			raw, err = sess.ReadInput(readCtx, e.PDUStart, e.WordCount)
 		default:
@@ -87,6 +91,17 @@ func main() {
 		if err != nil {
 			failCount++
 			fmt.Printf("FAIL metric=%s addr=%d type=%s qty=%d err=%v\n", e.MetricKey, e.Address, e.DataType, e.WordCount, err)
+			if !sleepBetween(ctx, *delay) {
+				break
+			}
+			continue
+		}
+
+		// The read worked; the device just has no value for it (a meter
+		// that is not answering, a NaN). The collector skips these.
+		if decode.IsInvalidFor(e.Entry, raw) {
+			okCount++
+			fmt.Printf("NA   metric=%s addr=%d type=%s qty=%d raw=% x\n", e.MetricKey, e.Address, e.DataType, e.WordCount, raw)
 			if !sleepBetween(ctx, *delay) {
 				break
 			}

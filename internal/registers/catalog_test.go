@@ -100,6 +100,99 @@ func TestHuaweiCatalogResolvesAllKeys(t *testing.T) {
 	}
 }
 
+// TestEncombiCatalog guards registers/encombi_ecpvx.yaml: it resolves,
+// keys are unique and never shared with the SmartLogger catalog (samples
+// are keyed by organization and metric_key), PDU ranges do not overlap,
+// and the six keys the handoff requires are there.
+func TestEncombiCatalog(t *testing.T) {
+	cat, err := Load("../../registers/encombi_ecpvx.yaml")
+	if err != nil {
+		t.Fatalf("Load error: %v", err)
+	}
+	if cat.Device.Name != "Encombi ECpvX" || cat.Device.ProbeMetricKey != "grid_breakers_on_bits" {
+		t.Fatalf("device = %+v", cat.Device)
+	}
+	resolved, err := cat.Resolve(0)
+	if err != nil {
+		t.Fatalf("Resolve error: %v", err)
+	}
+	huawei, err := Load("../../registers/huawei_smartlogger.yaml")
+	if err != nil {
+		t.Fatalf("Load huawei: %v", err)
+	}
+	huaweiKeys := map[string]bool{}
+	for _, e := range huawei.Registers {
+		huaweiKeys[e.MetricKey] = true
+	}
+	keys := map[string]ResolvedEntry{}
+	for _, e := range resolved {
+		if _, dup := keys[e.MetricKey]; dup {
+			t.Fatalf("duplicate metric_key %q", e.MetricKey)
+		}
+		if huaweiKeys[e.MetricKey] {
+			t.Fatalf("metric_key %q is also a SmartLogger key", e.MetricKey)
+		}
+		keys[e.MetricKey] = e
+	}
+	for _, k := range []string{
+		"active_gen_power_kw", "accumulated_gen_energy_kwh", "gen_breakers_on_bits",
+		"grid_breakers_on_bits", "gen_bus_voltage_a_v", "gen_meter_alive",
+	} {
+		if _, ok := keys[k]; !ok {
+			t.Fatalf("missing required metric_key %q", k)
+		}
+	}
+	if e := keys["active_gen_power_kw"]; e.PDUStart != 30000 || e.WordCount != 2 || e.DataType != DTFloat32 {
+		t.Fatalf("active_gen_power_kw resolved as %+v", e)
+	}
+	if !keys["grid_breakers_on_bits"].Bitfield || keys["gen_meter_alive"].Bitfield {
+		t.Fatal("bitfield flags wrong")
+	}
+	if keys["gen_bus_voltage_a_v"].ReadBlock != 1 || keys["encombi_accumulated_gen_energy_kwh"].ReadBlock != 2 || keys["gen_meter_alive"].ReadBlock != 0 {
+		t.Fatalf("read blocks: voltage %d, ECpvX counter %d, alive %d",
+			keys["gen_bus_voltage_a_v"].ReadBlock, keys["encombi_accumulated_gen_energy_kwh"].ReadBlock, keys["gen_meter_alive"].ReadBlock)
+	}
+	sort.Slice(resolved, func(i, j int) bool { return resolved[i].PDUStart < resolved[j].PDUStart })
+	for i := 1; i < len(resolved); i++ {
+		if resolved[i].PDUStart <= resolved[i-1].PDUEnd {
+			t.Fatalf("PDU overlap between %q and %q", resolved[i-1].MetricKey, resolved[i].MetricKey)
+		}
+	}
+}
+
+func TestResolveRejectsBadReadBlocks(t *testing.T) {
+	entry := Entry{MetricKey: "m", Address: 10, DataType: DTUint32}
+	cases := map[string][]ReadBlock{
+		"too long": {{Start: 0, Count: 126}},
+		"empty":    {{Start: 0, Count: 0}},
+		"overlap":  {{Start: 0, Count: 20}, {Start: 15, Count: 10}},
+		"straddle": {{Start: 0, Count: 11}}, // m spans 10..11
+	}
+	for name, blocks := range cases {
+		c := &Catalog{ReadBlocks: blocks, Registers: []Entry{entry}}
+		if _, err := c.Resolve(0); err == nil {
+			t.Errorf("%s: expected an error", name)
+		}
+	}
+}
+
+func TestLoadValidatesDeviceAndBitfield(t *testing.T) {
+	dir := t.TempDir()
+	write := func(body string) string {
+		path := filepath.Join(dir, "c.yaml")
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	if _, err := Load(write("device:\n  probe_metric_key: nope\nregisters:\n  - {metric_key: a, address: 1, data_type: UINT16, gain: 1}\n")); err == nil {
+		t.Error("a probe key outside the catalog must be rejected")
+	}
+	if _, err := Load(write("registers:\n  - {metric_key: a, address: 1, data_type: FLOAT32, gain: 1, bitfield: true}\n")); err == nil {
+		t.Error("a FLOAT32 bit field must be rejected")
+	}
+}
+
 func TestSubsetFiltersAndPreservesOrder(t *testing.T) {
 	all := []ResolvedEntry{
 		{Entry: Entry{MetricKey: "a"}},

@@ -193,6 +193,37 @@ Notes:
 - The collector spawns one goroutine and one TCP session per device;
   device-A failures do not stall device-B.
 
+### A device that is not a SmartLogger (Encombi)
+
+A device can bring its own register map, read function and poll
+interval. The Encombi ECpvX generator controller is read this way, input
+registers only; nothing ever writes to it.
+
+```yaml
+    modbus_devices:
+      - host: 10.24.40.238            # SmartLogger, the main catalog
+      - host: 10.24.40.239            # Encombi ECpvX
+        unit_id: 1
+        register_catalog: /etc/sestelemetry/registers/encombi_ecpvx.yaml
+        register_map: input           # FC4; default: modbus_register_map
+        poll_interval: 5s             # default: the org's poll_interval
+        reconnect_backoff: true
+```
+
+- `metric_keys`, if set, scope the device's own catalog.
+- The catalog's `addressing` applies; the top-level `register_addressing`
+  override is for the main catalog only.
+- A catalog may declare `read_blocks`: ranges the device answers in one
+  request, so entries that are not adjacent share a read.
+- Its `device:` block names the device in alert emails and picks the
+  freshness probe (`probe_metric_key`) of the alert watchdog.
+- Such a device never feeds the energy-flow allocator, the SmartLogger
+  optional reads or the plant passport, and the API container mounts the
+  registers directory to tell it apart.
+- Check it before enabling, from the host, at no more than 3 requests a
+  second, with a throwaway config that lists the device:
+  `docker compose -f deploy/docker-compose.yml run --rm --no-deps -v /tmp/check.yaml:/tmp/check.yaml:ro --entrypoint /usr/local/bin/modbuscheck collector -config /tmp/check.yaml -org ke -device 1 -delay 400ms`.
+
 ## Energy flow (PV / Grid / ESS / Load)
 
 The API computes four directional energy flows on the fly from the

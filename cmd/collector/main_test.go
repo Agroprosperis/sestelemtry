@@ -162,6 +162,54 @@ func TestPollAndStoreDropsInvalidReadings(t *testing.T) {
 	}
 }
 
+// An Encombi device reads input registers even when the top-level map
+// is holding, decodes FLOAT32, keeps a bit field that is all ones and
+// drops a NaN.
+func TestPollAndStoreEncombiDevice(t *testing.T) {
+	var got []storage.Sample
+	prevInsert := insertSamples
+	insertSamples = func(_ context.Context, _ *pgxpool.Pool, samples []storage.Sample) error {
+		got = append([]storage.Sample(nil), samples...)
+		return nil
+	}
+	t.Cleanup(func() { insertSamples = prevInsert })
+
+	cfg := &config.Root{ModbusRegisterMap: config.MapHolding}
+	org := config.Organization{ID: "ke"}
+	dev := config.ModbusDevice{
+		Modbus:          config.Modbus{Host: "10.24.40.239", RequestTimeout: time.Second},
+		RegisterCatalog: "registers/encombi_ecpvx.yaml",
+		RegisterMap:     config.MapInput,
+	}
+	resolved := []registers.ResolvedEntry{
+		{Entry: registers.Entry{MetricKey: "active_gen_power_kw", DataType: registers.DTFloat32, Gain: 1}, PDUStart: 0, WordCount: 2, PDUEnd: 1},
+		{Entry: registers.Entry{MetricKey: "gen_breakers_on_bits", DataType: registers.DTUint16, Gain: 1, Bitfield: true}, PDUStart: 2, WordCount: 1, PDUEnd: 2},
+		{Entry: registers.Entry{MetricKey: "gen_loading_pct", DataType: registers.DTFloat32, Gain: 1}, PDUStart: 3, WordCount: 2, PDUEnd: 4},
+	}
+	chunks := []modbusclient.ReadChunk{{Start: 0, Quantity: 5}}
+	payload := []byte{
+		0x43, 0x8a, 0x8c, 0xcd, // 277.1
+		0xff, 0xff, // all sixteen generator breakers closed
+		0x7f, 0xc0, 0x00, 0x00, // NaN
+	}
+	reader := &mockModbusReader{input: map[uint16][]byte{0: payload}}
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	if err := pollAndStore(context.Background(), logger, cfg, org, dev, reader, resolved, chunks, nil); err != nil {
+		t.Fatalf("pollAndStore error: %v", err)
+	}
+	if reader.inputCalls != 1 || reader.holdingCalls != 0 {
+		t.Fatalf("calls: input=%d holding=%d, want FC4 only", reader.inputCalls, reader.holdingCalls)
+	}
+	if len(got) != 2 || got[0].MetricKey != "active_gen_power_kw" || got[0].Value != 277.1 ||
+		got[1].MetricKey != "gen_breakers_on_bits" || got[1].Value != 65535 {
+		t.Fatalf("samples = %+v", got)
+	}
+	if got[0].Labels["device_host"] != "10.24.40.239" {
+		t.Fatalf("labels = %+v", got[0].Labels)
+	}
+}
+
 func TestPollAndStoreMissingSlice(t *testing.T) {
 	cfg := &config.Root{ModbusRegisterMap: config.MapHolding}
 	org := config.Organization{ID: "org-a"}
@@ -218,6 +266,9 @@ func TestOptionalReads(t *testing.T) {
 	}
 	if reads, err := optionalReadsFor(config.ModbusDevice{MetricKeys: []string{"soc_percent"}}, all); err != nil || len(reads) != 0 {
 		t.Fatal("a whitelisted device reads only what it names")
+	}
+	if reads, err := optionalReadsFor(config.ModbusDevice{RegisterCatalog: "registers/encombi_ecpvx.yaml"}, all); err != nil || len(reads) != 0 {
+		t.Fatal("a device with its own catalog reads no SmartLogger optional groups")
 	}
 	reads, err := optionalReadsFor(config.ModbusDevice{}, []registers.ResolvedEntry{all[0], all[4]})
 	if err == nil || len(reads) != 1 || reads[0].entries[0].MetricKey != "array_soc_percent" {
@@ -373,7 +424,7 @@ func TestRunOrgFanOutPerDevice(t *testing.T) {
 
 	doneRun := make(chan struct{})
 	go func() {
-		runOrg(ctx, logger, cfg, org, resolved, nil)
+		runOrg(ctx, logger, cfg, org, func(config.ModbusDevice) []registers.ResolvedEntry { return resolved }, nil)
 		close(doneRun)
 	}()
 
@@ -408,6 +459,88 @@ func TestRunOrgFanOutPerDevice(t *testing.T) {
 	}
 	if keys["c"] == 0 {
 		t.Fatalf("device 2 should produce samples for c: %+v", keys)
+	}
+}
+
+// TestRunOrgRoutesDeviceCatalogs runs a SmartLogger and an Encombi side
+// by side: each polls its own catalog and stamps its own host.
+func TestRunOrgRoutesDeviceCatalogs(t *testing.T) {
+	prevDial := dialFunc
+	dialFunc = func(ctx context.Context, target modbusclient.DialTarget) (*modbusclient.Session, error) {
+		return modbusclient.Dial(ctx, modbusclient.DialTarget{Host: "mock"})
+	}
+	t.Cleanup(func() { dialFunc = prevDial })
+
+	var mu sync.Mutex
+	hostOf := map[string]string{}
+	seen := make(chan struct{})
+	var once sync.Once
+	prevInsert := insertSamples
+	insertSamples = func(_ context.Context, _ *pgxpool.Pool, batch []storage.Sample) error {
+		mu.Lock()
+		defer mu.Unlock()
+		for _, s := range batch {
+			hostOf[s.MetricKey] = s.Labels["device_host"]
+		}
+		if hostOf["soc_percent"] != "" && hostOf["active_gen_power_kw"] != "" {
+			once.Do(func() { close(seen) })
+		}
+		return nil
+	}
+	t.Cleanup(func() { insertSamples = prevInsert })
+
+	smartLogger := []registers.ResolvedEntry{
+		{Entry: registers.Entry{MetricKey: "soc_percent", DataType: registers.DTUint16, Gain: 0.1}, PDUStart: 0, WordCount: 1, PDUEnd: 0},
+	}
+	encombi := []registers.ResolvedEntry{
+		{Entry: registers.Entry{MetricKey: "active_gen_power_kw", DataType: registers.DTFloat32, Gain: 1}, PDUStart: 0, WordCount: 2, PDUEnd: 1},
+	}
+	catalogs := func(dev config.ModbusDevice) []registers.ResolvedEntry {
+		if dev.OwnCatalog() {
+			return encombi
+		}
+		return smartLogger
+	}
+	org := config.Organization{
+		ID:           "ke",
+		PollInterval: 5 * time.Millisecond,
+		ModbusDevices: []config.ModbusDevice{
+			{Modbus: config.Modbus{Host: "10.24.40.238", RequestTimeout: time.Second, ConnectTimeout: time.Second}},
+			{
+				Modbus:          config.Modbus{Host: "10.24.40.239", RequestTimeout: time.Second, ConnectTimeout: time.Second},
+				RegisterCatalog: "registers/encombi_ecpvx.yaml",
+				RegisterMap:     config.MapInput,
+				PollInterval:    5 * time.Millisecond,
+			},
+		},
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		runOrg(ctx, slog.New(slog.NewTextHandler(io.Discard, nil)), &config.Root{ModbusRegisterMap: config.MapHolding}, org, catalogs, nil)
+		close(done)
+	}()
+	select {
+	case <-seen:
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for both devices")
+	}
+	cancel()
+	<-done
+
+	mu.Lock()
+	defer mu.Unlock()
+	if hostOf["soc_percent"] != "10.24.40.238" || hostOf["active_gen_power_kw"] != "10.24.40.239" {
+		t.Fatalf("hosts = %+v", hostOf)
+	}
+}
+
+func TestReconnectWaitUsesDevicePollInterval(t *testing.T) {
+	org := config.Organization{PollInterval: time.Second}
+	dev := config.ModbusDevice{PollInterval: 5 * time.Second}
+	if got := reconnectWait(org, dev, 1); got != 5*time.Second {
+		t.Fatalf("an Encombi polled every 5 s retries after %s", got)
 	}
 }
 

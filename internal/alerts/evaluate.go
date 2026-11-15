@@ -38,6 +38,10 @@ type Device struct {
 	// "Кролевецький елеватор"); falls back to the id when unset.
 	OrganizationName string
 	Host             string
+	// DeviceName names a device that is not a SmartLogger (e.g.
+	// "Encombi ECpvX"), so its email does not read as the whole site
+	// going dark. Empty for SmartLoggers.
+	DeviceName string
 }
 
 // Key is the map key for a device: the same pair that forms the primary
@@ -52,11 +56,15 @@ func (d Device) Key() Key {
 	return Key{OrganizationID: d.OrganizationID, Host: d.Host}
 }
 
-// Label renders the device for humans: organization name plus host.
+// Label renders the device for humans: organization name, the device
+// name when it has one, and the host.
 func (d Device) Label() string {
 	name := d.OrganizationName
 	if name == "" {
 		name = d.OrganizationID
+	}
+	if d.DeviceName != "" {
+		name += " — " + d.DeviceName
 	}
 	if d.Host == "" {
 		return name
