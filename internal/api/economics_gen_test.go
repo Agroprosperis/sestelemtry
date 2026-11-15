@@ -61,7 +61,7 @@ func TestGenHourStorageRoundTrip(t *testing.T) {
 			Minutes: economics.SupplyMinutes{Generator: 60},
 		}},
 		Econ: economics.HourEconomics{
-			Load: 100, GenFuelCostUah: 2250, GenFuelL: 45, GenFuelMethod: economics.GenFuelPerKwh, GenChargeCostUah: 750,
+			Load: 100, LoadOffgrid: 100, GenFuelCostUah: 2250, GenFuelL: 45, GenFuelMethod: economics.GenFuelPerKwh, GenChargeCostUah: 750,
 		},
 	}
 	stored := hourRowToStorage("ke", row)
@@ -69,7 +69,7 @@ func TestGenHourStorageRoundTrip(t *testing.T) {
 	if back.Flow.Gen != row.Flow.Gen || back.SupplyMinutes != row.SupplyMinutes || back.GenKwh != 150 || !back.GenEstimated {
 		t.Fatalf("round trip lost the generator: %+v", back)
 	}
-	if back.Econ.GenFuelCostUah != 2250 || back.Econ.GenChargeCostUah != 750 || back.Econ.GenFuelMethod != economics.GenFuelPerKwh {
+	if back.Econ.GenFuelCostUah != 2250 || back.Econ.GenChargeCostUah != 750 || back.Econ.GenFuelMethod != economics.GenFuelPerKwh || back.Econ.LoadOffgrid != 100 {
 		t.Fatalf("round trip lost the fuel: %+v", back.Econ)
 	}
 

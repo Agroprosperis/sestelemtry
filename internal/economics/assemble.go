@@ -278,6 +278,7 @@ func AssembleDay(in DayInput) ([]*HourRow, ReconcileResult) {
 			exportPrice:        cur.Econ.ExportPrice,
 			degradation:        in.Tariffs.DegradationUahPerKwh,
 			genChargeCostUah:   cur.Econ.GenChargeCostUah,
+			essToLoadOffgrid:   cur.Econ.EssToLoadOffgrid,
 			essOffgridValueUah: cur.Econ.EssOffgridValueUah,
 		})
 		startUah := state.Uah
