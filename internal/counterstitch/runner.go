@@ -56,6 +56,90 @@ type Runner struct {
 	Loc *time.Location
 	// Now is the clock; time.Now when nil.
 	Now func() time.Time
+	// OffgridBetween reports the site off the grid inside [from, to];
+	// storage.OffgridBetween when nil.
+	OffgridBetween func(ctx context.Context, org string, from, to time.Time) (bool, error)
+}
+
+// The windows around a dropout that tell an outage explains it
+// (counters.KindOffgrid): the generator controller sees the switchover
+// within seconds of the fall, and a counter back within minutes of the
+// grid came back with it. offgridRecheck is how far back stored dropouts
+// are looked at again, for readings that arrived after the pass.
+const (
+	offgridBeforeFall   = 30 * time.Second
+	offgridAfterFall    = 2 * time.Minute
+	offgridBeforeReturn = 10 * time.Minute
+	offgridRecheck      = 7 * 24 * time.Hour
+)
+
+func (r *Runner) offgridBetween(ctx context.Context, org string, from, to time.Time) (bool, error) {
+	if r.OffgridBetween != nil {
+		return r.OffgridBetween(ctx, org, from, to)
+	}
+	return storage.OffgridBetween(ctx, r.Pool, org, from, to)
+}
+
+// outageDropout reports a dropout of the site that its outage explains.
+func (r *Runner) outageDropout(ctx context.Context, org string, start, end time.Time) (bool, error) {
+	off, err := r.offgridBetween(ctx, org, start.Add(-offgridBeforeFall), start.Add(offgridAfterFall))
+	if err != nil || off || end.IsZero() {
+		return off, err
+	}
+	return r.offgridBetween(ctx, org, end.Add(-offgridBeforeReturn), end)
+}
+
+// markOffgrid reclassifies the dropouts among episodes that the site's
+// outage explains.
+func (r *Runner) markOffgrid(ctx context.Context, org string, episodes []counters.Episode) error {
+	for i, e := range episodes {
+		if e.Kind != counters.KindDropout {
+			continue
+		}
+		off, err := r.outageDropout(ctx, org, e.Start, e.End)
+		if err != nil {
+			return err
+		}
+		if off {
+			episodes[i].Kind = counters.KindOffgrid
+		}
+	}
+	return nil
+}
+
+// recheckOffgrid reclassifies the recent stored dropouts that the site's
+// outage explains, and returns the days whose flags that changes.
+func (r *Runner) recheckOffgrid(ctx context.Context, org string, until time.Time) ([]Span, error) {
+	stored, err := storage.CounterEpisodesSince(ctx, r.Pool, org, string(counters.KindDropout), until.Add(-offgridRecheck))
+	if err != nil {
+		return nil, err
+	}
+	var write []storage.CounterEpisode
+	var changed []Span
+	for _, e := range stored {
+		var end time.Time
+		if e.EndedAt != nil {
+			end = *e.EndedAt
+		}
+		off, err := r.outageDropout(ctx, org, e.StartedAt, end)
+		if err != nil {
+			return nil, err
+		}
+		if !off {
+			continue
+		}
+		e.Kind = string(counters.KindOffgrid)
+		write = append(write, e)
+		to := until
+		if !end.IsZero() {
+			to = end
+		}
+		changed = append(changed, Span{From: e.StartedAt, To: to})
+	}
+	if err := storage.UpsertCounterEpisodes(ctx, r.Pool, org, write); err != nil {
+		return nil, err
+	}
+	return changed, nil
 }
 
 func (r *Runner) now() time.Time {
@@ -120,6 +204,12 @@ func (r *Runner) Sync(ctx context.Context, org string) ([]Span, error) {
 		}
 	}
 
+	spans, err := r.recheckOffgrid(ctx, org, until)
+	if err != nil {
+		return nil, err
+	}
+	changed = append(changed, spans...)
+
 	if r.HasCAGG {
 		spans, err := r.syncFrozen(ctx, org, until, hasRebuild || len(states) == 0)
 		if err != nil {
@@ -165,6 +255,9 @@ func (r *Runner) stitch(ctx context.Context, org, metric string, st counters.Sta
 		at = next
 	}
 
+	if err := r.markOffgrid(ctx, org, episodes); err != nil {
+		return nil, err
+	}
 	raw, err := json.Marshal(st)
 	if err != nil {
 		return nil, err
@@ -263,6 +356,11 @@ func (r *Runner) syncFrozen(ctx context.Context, org string, until time.Time, fu
 		if err != nil {
 			return nil, err
 		}
+		outages, err := storage.CounterEpisodesOfKind(ctx, r.Pool, org, rule.metric, string(counters.KindOffgrid), time.Time{}, to)
+		if err != nil {
+			return nil, err
+		}
+		dropouts = append(dropouts, outages...)
 		stored, err := storage.CounterEpisodesOfKind(ctx, r.Pool, org, rule.metric, string(counters.KindFrozen), from, to)
 		if err != nil {
 			return nil, err
@@ -392,11 +490,12 @@ func toStoredEpisodes(org, metric string, eps []counters.Episode) []storage.Coun
 		if !e.End.IsZero() {
 			end := e.End
 			row.EndedAt = &end
-			if e.Kind == counters.KindDropout || e.Kind == counters.KindSpike {
+			dropout := e.Kind == counters.KindDropout || e.Kind == counters.KindOffgrid
+			if dropout || e.Kind == counters.KindSpike {
 				returned := e.Returned
 				row.ValueReturned = &returned
 			}
-			if e.Kind == counters.KindDropout {
+			if dropout {
 				gap := e.GapKwh
 				row.GapKwh = &gap
 			}

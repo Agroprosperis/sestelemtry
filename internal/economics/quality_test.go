@@ -12,6 +12,8 @@ func TestCounterFlags(t *testing.T) {
 		{MetricKey: "accumulated_electricity_purchased_kwh", Kind: "dropout"},
 		{MetricKey: "accumulated_pv_energy_yield_kwh", Kind: "frozen"},
 		{MetricKey: "soc_percent", Kind: "dropout"},
+		// The grid meter's fall during an outage is the outage.
+		{MetricKey: "total_energy_charged_kwh", Kind: "offgrid"},
 	})
 	want := []string{"counter_dropout:grid_export", "counter_dropout:grid_import", "counter_frozen:pv"}
 	if !reflect.DeepEqual(got, want) {

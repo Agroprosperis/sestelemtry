@@ -37,6 +37,10 @@ var counterFlagNames = map[string]string{
 // mark a day approximate (dayHasCounterIssue).
 const genCounterFlagName = "gen"
 
+// counterKindOffgrid is a dropout the site's outage explains
+// (counters.KindOffgrid): the outage, not a counter fault.
+const counterKindOffgrid = "offgrid"
+
 // counterFlags turns the day's counter episodes into flags such as
 // counter_dropout:grid_import, one per kind and counter.
 func counterFlags(episodes []CounterEpisode) []string {
@@ -44,7 +48,7 @@ func counterFlags(episodes []CounterEpisode) []string {
 	var out []string
 	for _, e := range episodes {
 		name, ok := counterFlagNames[e.MetricKey]
-		if !ok {
+		if !ok || e.Kind == counterKindOffgrid {
 			continue
 		}
 		flag := "counter_" + e.Kind + ":" + name
