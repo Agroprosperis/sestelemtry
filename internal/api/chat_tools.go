@@ -15,6 +15,7 @@ import (
 	"github.com/nesh/sestelemetry/internal/aichat"
 	"github.com/nesh/sestelemetry/internal/auth"
 	"github.com/nesh/sestelemetry/internal/economics"
+	"github.com/nesh/sestelemetry/internal/energyflow"
 )
 
 // chatTZ is the zone the sites keep their civil days and DAM hours in,
@@ -62,11 +63,21 @@ func (h *Handlers) chatTools(r *http.Request, org string, loc *time.Location) []
 		return tool(org)
 	}
 
+	gens := map[string]chatGen{}
+	genOf := func(id string) chatGen {
+		g, ok := gens[id]
+		if !ok {
+			g = h.chatGenOf(r.Context(), id)
+			gens[id] = g
+		}
+		return g
+	}
+
 	var tools []aichat.Tool
 	if can(auth.PermAnalyticsDay) {
 		tools = append(tools,
-			perSite(func(site string) aichat.Tool { return h.chatCurrentTool(site, loc) }),
-			perSite(func(site string) aichat.Tool { return h.chatEnergyTool(site, loc, windowOn(site)) }),
+			perSite(func(site string) aichat.Tool { return h.chatCurrentTool(site, loc, genOf(site)) }),
+			perSite(func(site string) aichat.Tool { return h.chatEnergyTool(site, loc, windowOn(site), genOf(site)) }),
 			perSite(func(site string) aichat.Tool { return h.chatWeatherTool(site, loc) }),
 		)
 	}
@@ -74,12 +85,12 @@ func (h *Handlers) chatTools(r *http.Request, org string, loc *time.Location) []
 		tools = append(tools, h.chatPvPlanTool(org, loc, can(auth.PermAnalyticsDay) && !group, windowOK))
 	}
 	if can(auth.PermService) {
-		tools = append(tools, perSite(func(site string) aichat.Tool { return h.chatPassportTool(site, loc) }))
+		tools = append(tools, perSite(func(site string) aichat.Tool { return h.chatPassportTool(site, loc, money, genOf(site)) }))
 	}
 	if h.economics != nil {
 		var gen chatGen
 		if money || full {
-			gen = h.chatGenOf(r.Context(), org)
+			gen = genOf(org)
 		}
 		if money {
 			tools = append(tools, h.chatEconomicsDayTool(org, loc, gen))
@@ -212,15 +223,26 @@ type chatMetric struct {
 	AgeS  int64   `json:"age_s"`
 }
 
-func (h *Handlers) chatCurrentTool(org string, loc *time.Location) aichat.Tool {
+func (h *Handlers) chatCurrentTool(org string, loc *time.Location, gen chatGen) aichat.Tool {
+	desc := "Останні значення телеметрії об'єкта (опитування щосекунди): потужності СЕС, УЗЕ, навантаження й точки приєднання (кВт), " +
+		"SOC (%), лічильники з початку доби (*_day_kwh) і накопичені лічильники. active_ess_power_kw: плюс — розряд, мінус — заряд. " +
+		"Знак grid_connected_active_power_kw залежить від прошивки, тож імпорт чи експорт визначай за electricity_purchased_day_kwh " +
+		"і electricity_sold_day_kwh. age_s — скільки секунд тому прийшло значення: кілька хвилин і більше означає, що зв'язок з об'єктом втрачено."
+	if gen.on {
+		desc += " Генератор (контролер Encombi): active_gen_power_kw — його потужність (кВт), gen_loading_pct — завантаження (%), " +
+			"grid_breakers_on_bits і gen_breakers_on_bits — вимикачі мережі й генератора (більше нуля — увімкнено), gen_bus_voltage_a_v — напруга шин (В). " +
+			"supply_mode — режим живлення, як на живій схемі: grid — від мережі, generator — від генератора, island — без мережі від УЗЕ, " +
+			"blackout — знеструмлено, transition — перемикання, unknown — показники Encombi на 30 с і більше старші за найсвіжіші. " +
+			"Без мережі SmartLogger не віддає мережу й навантаження: навантаження тоді — сума потужностей СЕС, УЗЕ й генератора."
+		if gen.shared != "" {
+			desc += " Генератор спільний для майданчиків об'єкта «" + gen.shared + "»: його потужність кожен майданчик показує той самий."
+		}
+	}
 	return aichat.Tool{
-		Name: "current_snapshot",
-		Description: "Останні значення телеметрії об'єкта (опитування щосекунди): потужності СЕС, УЗЕ, навантаження й точки приєднання (кВт), " +
-			"SOC (%), лічильники з початку доби (*_day_kwh) і накопичені лічильники. active_ess_power_kw: плюс — розряд, мінус — заряд. " +
-			"Знак grid_connected_active_power_kw залежить від прошивки, тож імпорт чи експорт визначай за electricity_purchased_day_kwh " +
-			"і electricity_sold_day_kwh. age_s — скільки секунд тому прийшло значення: кілька хвилин і більше означає, що зв'язок з об'єктом втрачено.",
-		Parameters: chatNoArgsSchema,
-		Status:     func(json.RawMessage) string { return "Читаю поточні показники" },
+		Name:        "current_snapshot",
+		Description: desc,
+		Parameters:  chatNoArgsSchema,
+		Status:      func(json.RawMessage) string { return "Читаю поточні показники" },
 		Call: func(ctx context.Context, _ json.RawMessage) (any, aichat.Source, error) {
 			resp, err := h.store.Current(ctx, org, nil, time.Time{})
 			if err != nil {
@@ -238,12 +260,44 @@ func (h *Handlers) chatCurrentTool(org string, loc *time.Location) aichat.Tool {
 					AgeS:  int64(now.Sub(m.Time) / time.Second),
 				}
 			}
-			return map[string]any{
+			out := map[string]any{
 				"now":     now.In(loc).Format("2006-01-02 15:04:05"),
 				"metrics": metrics,
-			}, aichat.Source{Label: "Поточні показники"}, nil
+			}
+			if mode, ok := chatSupplyMode(resp.Metrics); gen.on && ok {
+				out["supply_mode"] = mode
+			}
+			return out, aichat.Source{Label: "Поточні показники"}, nil
 		},
 	}
+}
+
+// chatSupplyMode reads the supply mode off a snapshot the way the live
+// diagram does: the readings' age counts from the snapshot's newest, so
+// a snapshot late as a whole still tells the mode. false for a snapshot
+// without the breakers.
+func chatSupplyMode(metrics map[string]CurrentMetric) (energyflow.SupplyMode, bool) {
+	grid, okGrid := metrics[energyflow.SrcGridBreakersOnBits]
+	gen, okGen := metrics[energyflow.SrcGenBreakersOnBits]
+	if !okGrid && !okGen {
+		return energyflow.SupplyNone, false
+	}
+	var newest time.Time
+	for _, m := range metrics {
+		if m.Time.After(newest) {
+			newest = m.Time
+		}
+	}
+	fresh := func(m CurrentMetric, ok bool) bool { return ok && newest.Sub(m.Time) <= energyflow.GenStaleAfter }
+	value := func(key string) float64 {
+		if m, ok := metrics[key]; fresh(m, ok) {
+			return m.Value
+		}
+		return 0
+	}
+	return energyflow.SupplyModeOf(grid.Value, gen.Value,
+		value(energyflow.SrcActiveGenPowerKw), value(energyflow.SrcGenBusVoltageAV),
+		fresh(grid, okGrid) && fresh(gen, okGen)), true
 }
 
 // chatEnergyBalance is the analytics summary card of a period: the
@@ -265,6 +319,9 @@ type chatEnergyBalance struct {
 	PvExportedPct      float64           `json:"pv_exported_pct"`
 	EssFlows           *EnergyFlowTotals `json:"ess_flows,omitempty"`
 	FlowsMeta          *EnergyFlowMeta   `json:"flows_meta,omitempty"`
+	// Generator is the generator part of the flows, the summary card's
+	// «Генератор» block (DailySummaryNarrative).
+	Generator *EnergyFlowGenTotals `json:"generator,omitempty"`
 }
 
 func newChatEnergyBalance(totals map[string]float64) chatEnergyBalance {
@@ -299,16 +356,27 @@ func newChatEnergyBalance(totals map[string]float64) chatEnergyBalance {
 	return out
 }
 
-func (h *Handlers) chatEnergyTool(org string, loc *time.Location, windowOK func(time.Duration) bool) aichat.Tool {
+func (h *Handlers) chatEnergyTool(org string, loc *time.Location, windowOK func(time.Duration) bool, gen chatGen) aichat.Tool {
+	desc := "Енергобаланс за київські доби від from до to включно (сьогодні — з початку доби до зараз), за лічильниками SmartLogger: " +
+		"виробіток СЕС, споживання елеватора, імпорт і експорт, заряд і розряд УЗЕ (кВт·год); розподіл споживання за джерелами " +
+		"(load_from_*, self_sufficiency_pct) — так само, як на картці підсумку; ess_flows — потоки через УЗЕ. " +
+		"Нуль може означати, що лічильник за період не дав даних. flows_meta.days_covered менше за days_expected означає, " +
+		"що частина днів ще не порахована."
+	if gen.on {
+		desc += " generator — дизель-генератор за період, як блок «Генератор» картки підсумку: gen_kwh — енергія за його лічильником; " +
+			"minutes_generator, minutes_island, minutes_blackout — час від генератора, без мережі від УЗЕ (острів) і знеструмлено; " +
+			"gen_to_load_kwh і gen_to_ess_kwh — куди пішла його енергія, лише коли accounted=true (години з генератором уже пораховано в економіці). " +
+			"Лічильник споживання SmartLogger генератора не бачить, тож load_kwh і load_from_* — без енергії генератора."
+		if gen.shared != "" {
+			desc += " Генератор спільний для майданчиків об'єкта «" + gen.shared + "»: кожен майданчик показує той самий лічильник, " +
+				"тож енергію генератора по майданчиках не додавай."
+		}
+	}
 	return aichat.Tool{
-		Name: "energy_balance",
-		Description: "Енергобаланс за київські доби від from до to включно (сьогодні — з початку доби до зараз), за лічильниками SmartLogger: " +
-			"виробіток СЕС, споживання елеватора, імпорт і експорт, заряд і розряд УЗЕ (кВт·год); розподіл споживання за джерелами " +
-			"(load_from_*, self_sufficiency_pct) — так само, як на картці підсумку; ess_flows — потоки через УЗЕ. " +
-			"Нуль може означати, що лічильник за період не дав даних. flows_meta.days_covered менше за days_expected означає, " +
-			"що частина днів ще не порахована.",
-		Parameters: chatSpanSchema,
-		Status:     func(raw json.RawMessage) string { return "Рахую енергобаланс" + chatSpanStatus(raw) },
+		Name:        "energy_balance",
+		Description: desc,
+		Parameters:  chatSpanSchema,
+		Status:      func(raw json.RawMessage) string { return "Рахую енергобаланс" + chatSpanStatus(raw) },
 		Call: func(ctx context.Context, raw json.RawMessage) (any, aichat.Source, error) {
 			first, last, err := chatSpan(raw, loc, int(maxTimeseriesRange/(24*time.Hour)))
 			if err != nil {
@@ -332,7 +400,12 @@ func (h *Handlers) chatEnergyTool(org string, loc *time.Location, windowOK func(
 			h.maybeAttachEnergyFlow(ctx, &resp, org, from, to, EnergyFlowSyntheticMetrics, loc)
 			out := newChatEnergyBalance(resp.Totals)
 			out.From, out.To = first.Format("2006-01-02"), last.Format("2006-01-02")
-			out.EssFlows, out.FlowsMeta = resp.Flows, resp.FlowsMeta
+			out.FlowsMeta = resp.FlowsMeta
+			if f := resp.Flows; f != nil {
+				flows := *f
+				out.Generator, flows.Gen = flows.Gen, nil
+				out.EssFlows = &flows
+			}
 			label := "Енергобаланс " + chatSpanLabel(out.From, out.To)
 			if m := resp.FlowsMeta; m != nil && m.DaysExpected > 0 && m.DaysCovered < m.DaysExpected {
 				label += fmt.Sprintf(" (потоки УЗЕ за %d з %d днів)", m.DaysCovered, m.DaysExpected)
@@ -1026,15 +1099,78 @@ type chatPassport struct {
 	PcsCount     *float64 `json:"pcs_count,omitempty"`
 	EssSohPct    *float64 `json:"ess_soh_pct,omitempty"`
 	QualityFlags []string `json:"quality_flags,omitempty"`
+
+	Generator *chatPassportGen `json:"generator,omitempty"`
 }
 
-func (h *Handlers) chatPassportTool(org string, loc *time.Location) aichat.Tool {
+// chatPassportGen is the passport's «Генератор» block (ems-spec generator
+// handoff §5.4); the fuel only for a role that reads economics.
+type chatPassportGen struct {
+	RatedKw      *float64          `json:"rated_kw,omitempty"`
+	MeterKwh     *float64          `json:"meter_kwh,omitempty"`
+	MeterAt      string            `json:"meter_at,omitempty"`
+	MeterAlive   *bool             `json:"meter_alive,omitempty"`
+	LastRunAt    string            `json:"last_run_at,omitempty"`
+	DeviceHost   string            `json:"device_host,omitempty"`
+	SwVersion    *float64          `json:"sw_version,omitempty"`
+	LastSampleAt string            `json:"last_sample_at,omitempty"`
+	LinkOk       bool              `json:"link_ok"`
+	Fuel         *chatPassportFuel `json:"fuel,omitempty"`
+}
+
+// chatPassportFuel is the fuel in force today, as the passport's fuel
+// card shows it (web/src/station/GeneratorSection.tsx): the cost per kWh
+// or per hour of the method, with VAT the way the import price takes it.
+type chatPassportFuel struct {
+	PriceUahPerL       float64 `json:"price_uah_per_l"`
+	IncludeVat         bool    `json:"include_vat"`
+	Method             string  `json:"method"`
+	ConsumptionLPerKwh float64 `json:"consumption_l_per_kwh,omitempty"`
+	ConsumptionLPerH   float64 `json:"consumption_l_per_h,omitempty"`
+	CostUahPerKwh      float64 `json:"cost_uah_per_kwh,omitempty"`
+	CostUahPerH        float64 `json:"cost_uah_per_h,omitempty"`
+}
+
+// chatFuelOf is t's fuel; false while the price or the method's
+// consumption is not set.
+func chatFuelOf(t OrgTariffs) (*chatPassportFuel, bool) {
+	vat := 1.0
+	if t.IncludeVat {
+		vat += t.VatRate
+	}
+	out := &chatPassportFuel{PriceUahPerL: t.GenFuelPriceUahPerL, IncludeVat: t.IncludeVat, Method: cmp.Or(t.GenFuelMethod, string(economics.GenFuelPerKwh))}
+	if out.Method == string(economics.GenFuelPerHour) {
+		out.ConsumptionLPerH = t.GenFuelConsumptionLPerH
+		out.CostUahPerH = t.GenFuelPriceUahPerL * t.GenFuelConsumptionLPerH * vat
+		return out, out.PriceUahPerL > 0 && out.ConsumptionLPerH > 0
+	}
+	out.ConsumptionLPerKwh = t.GenFuelConsumptionLPerKwh
+	out.CostUahPerKwh = t.GenFuelPriceUahPerL * t.GenFuelConsumptionLPerKwh * vat
+	return out, out.PriceUahPerL > 0 && out.ConsumptionLPerKwh > 0
+}
+
+func (h *Handlers) chatPassportTool(org string, loc *time.Location, money bool, gen chatGen) aichat.Tool {
+	desc := "Паспорт станції, як на сервісній сторінці: номінальна потужність СЕС (кВт), номінальна потужність і ємність УЗЕ (кВт, кВт·год), " +
+		"кількість шаф УЗЕ й PCS, стан здоров'я батареї SOH (%). Кожне поле — останнє реальне зчитування з SmartLogger; read_at — коли паспорт оновлено."
+	if gen.on {
+		desc += " generator — блок «Генератор»: rated_kw — номінал, meter_kwh і meter_at — показник лічильника генератора, meter_alive — чи лічильник на зв'язку, " +
+			"last_run_at — коли генератор востаннє працював, device_host і sw_version — адреса й версія ПЗ контролера Encombi, " +
+			"link_ok — чи прийшли його показники за останні 30 с."
+		switch {
+		case !money:
+			desc += " Вартість пального — лише для ролей з доступом до режиму «Економіка»."
+		case gen.shared != "":
+			desc += " fuel — вартість пального на сьогодні з розкладу тарифів об'єкта «" + gen.shared + "», який рахує спільний генератор; немає — ціну не задано."
+		default:
+			desc += " fuel — вартість пального на сьогодні з розкладу тарифів: ціна літра, спосіб обліку (per_kwh — л/кВт·год, per_hour — л/год), " +
+				"витрата й вартість кВт·год або години; немає — ціну не задано."
+		}
+	}
 	return aichat.Tool{
-		Name: "station_passport",
-		Description: "Паспорт станції, як на сервісній сторінці: номінальна потужність СЕС (кВт), номінальна потужність і ємність УЗЕ (кВт, кВт·год), " +
-			"кількість шаф УЗЕ й PCS, стан здоров'я батареї SOH (%). Кожне поле — останнє реальне зчитування з SmartLogger; read_at — коли паспорт оновлено.",
-		Parameters: chatNoArgsSchema,
-		Status:     func(json.RawMessage) string { return "Читаю паспорт станції" },
+		Name:        "station_passport",
+		Description: desc,
+		Parameters:  chatNoArgsSchema,
+		Status:      func(json.RawMessage) string { return "Читаю паспорт станції" },
 		Call: func(ctx context.Context, _ json.RawMessage) (any, aichat.Source, error) {
 			snap, ok, err := h.store.LatestPlantInventory(ctx, org)
 			if err != nil {
@@ -1043,14 +1179,68 @@ func (h *Handlers) chatPassportTool(org string, loc *time.Location) aichat.Tool 
 			if !ok {
 				return nil, aichat.Source{}, errors.New("паспорт станції ще не зчитано")
 			}
-			return chatPassport{
+			out := chatPassport{
 				ReadAt:    snap.Time.In(loc).Format("2006-01-02 15:04"),
 				PvRatedKw: snap.PVRatedKw, EssRatedKw: snap.ESSRatedKw, EssRatedKwh: snap.ESSRatedKwh,
 				EssCabinets: snap.ESSCount, PcsCount: snap.PCSCount, EssSohPct: snap.ESSSOHPct,
 				QualityFlags: snap.QualityFlags,
-			}, aichat.Source{Label: "Паспорт станції"}, nil
+			}
+			if gen.on {
+				g, err := h.chatPassportGen(ctx, org, loc, money)
+				if err != nil {
+					return nil, aichat.Source{}, h.chatReadFailed("station_passport", org, err)
+				}
+				out.Generator = g
+			}
+			return out, aichat.Source{Label: "Паспорт станції"}, nil
 		},
 	}
+}
+
+// chatPassportGen reads org's generator block; nil for a site whose
+// controller has not answered yet. A site sharing its group's generator
+// takes the fuel from the group's first site, whose tariffs count it.
+func (h *Handlers) chatPassportGen(ctx context.Context, org string, loc *time.Location, money bool) (*chatPassportGen, error) {
+	src, ok := h.store.(generatorPassportSource)
+	if !ok {
+		return nil, nil
+	}
+	row, found, err := src.GeneratorPassport(ctx, org)
+	if err != nil || !found {
+		return nil, err
+	}
+	at := func(t *time.Time) string {
+		if t == nil {
+			return ""
+		}
+		return t.In(loc).Format("2006-01-02 15:04:05")
+	}
+	out := &chatPassportGen{
+		RatedKw: row.RatedKw, MeterKwh: row.MeterKwh, MeterAt: at(row.MeterAt), LastRunAt: at(row.LastRunAt),
+		DeviceHost: row.DeviceHost, SwVersion: row.SwVersion, LastSampleAt: at(row.LastSampleAt),
+		LinkOk: row.LastSampleAt != nil && time.Since(*row.LastSampleAt) < energyflow.GenStaleAfter,
+	}
+	if row.MeterAlive != nil {
+		alive := *row.MeterAlive == 1
+		out.MeterAlive = &alive
+	}
+	if !money {
+		return out, nil
+	}
+	fuelOrg := org
+	if g, ok := h.groupOfMember(org); ok && g.SharedGenerator {
+		fuelOrg = g.Members[0].ID
+	}
+	versions, err := h.tariffVersions(ctx, fuelOrg)
+	if err != nil {
+		return nil, err
+	}
+	if t, ok := tariffVersionOn(versions, time.Now().In(loc).Format("2006-01-02")); ok {
+		if fuel, set := chatFuelOf(t); set {
+			out.Fuel = fuel
+		}
+	}
+	return out, nil
 }
 
 type chatPortfolioSite struct {
@@ -1068,6 +1258,8 @@ type chatPortfolioSite struct {
 	LoadKwh            float64 `json:"load_kwh"`
 	GridImportKwh      float64 `json:"grid_import_kwh"`
 	GridExportKwh      float64 `json:"grid_export_kwh"`
+	GenKwh             float64 `json:"gen_kwh,omitempty"`
+	GenFuelCostUah     float64 `json:"gen_fuel_cost_uah,omitempty"`
 }
 
 func chatPortfolioSiteOf(s EconomicsPortfolioSite) chatPortfolioSite {
@@ -1077,6 +1269,7 @@ func chatPortfolioSiteOf(s EconomicsPortfolioSite) chatPortfolioSite {
 		ScheduleReserveUah: s.ScheduleReserveUah, EssReserveUah: s.BessReserveUah, ActionReserveUah: s.ActionReserveUah,
 		EssDataOk: s.BessDataOk,
 		PvKwh:     s.PvKwh, LoadKwh: s.LoadKwh, GridImportKwh: s.GridImportKwh, GridExportKwh: s.GridExportKwh,
+		GenKwh: s.GenKwh, GenFuelCostUah: s.GenFuelCostUah,
 	}
 }
 
@@ -1088,7 +1281,8 @@ func (h *Handlers) chatPortfolioTool(loc *time.Location, visible func(org string
 		Description: "Зведення по всіх об'єктах, економіку яких бачить користувач (не лише поточний), як на сторінці портфеля, за місяць (YYYY-MM) " +
 			"або календарний рік (YYYY): ефект проєкту й EBITDA (₴), резерв графіка робіт і резерв таймінгу УЗЕ, сумарний резерв (action_reserve_uah), " +
 			"енергія (кВт·год). Об'єкти відсортовані за сумарним резервом, без даних — у кінці; total — підсумок портфеля. " +
-			"ess_data_ok=false — частину годин УЗЕ виключено як аномальні.",
+			"ess_data_ok=false — частину годин УЗЕ виключено як аномальні. " +
+			"gen_kwh і gen_fuel_cost_uah — енергія дизель-генератора й вартість пального, лише в об'єктів, де він працював.",
 		Parameters: chatPeriodSchema,
 		Status: func(raw json.RawMessage) string {
 			var args struct {

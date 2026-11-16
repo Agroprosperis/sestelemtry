@@ -30,13 +30,38 @@ func (m SupplyMode) Offgrid() bool {
 	return m == SupplyGenerator || m == SupplyIsland || m == SupplyBlackout
 }
 
-// Supply thresholds of handoff §4.1.
+// Supply thresholds of handoff §4.1. GenStaleAfter is how old a reading
+// may be and still tell the mode.
 const (
 	busLiveVolts   = 180.0
 	genRunningKw   = 5.0
-	genStaleAfter  = 30 * time.Second
+	GenStaleAfter  = 30 * time.Second
 	genMaxPowerGap = 2 * time.Minute // a longer silence adds nothing to the power integral
 )
+
+// SupplyModeOf applies the handoff §4.1 table to one set of readings:
+// the breaker bit fields, the generator power and the bus voltage. fresh
+// is false when a breaker reading is missing or older than GenStaleAfter;
+// a stale power or voltage reading is passed as zero.
+func SupplyModeOf(gridBits, genBits, genKw, busVolts float64, fresh bool) SupplyMode {
+	if !fresh {
+		return SupplyUnknown
+	}
+	gridOn := gridBits > 0
+	genOn := genBits > 0 || genKw > genRunningKw
+	switch {
+	case gridOn && genOn:
+		return SupplyTransition
+	case gridOn:
+		return SupplyGrid
+	case genOn:
+		return SupplyGenerator
+	case busVolts > busLiveVolts:
+		return SupplyIsland
+	default:
+		return SupplyBlackout
+	}
+}
 
 // GenWindow is the generator state of one allocation window.
 type GenWindow struct {
@@ -165,25 +190,9 @@ func BuildGenTimeline(samples []RawSample, from, to time.Time, window time.Durat
 func supplyModeAt(end time.Time, grid, gen, power, bus *cursor) SupplyMode {
 	gridBits, gridOK := grid.freshAt(end)
 	genBits, genOK := gen.freshAt(end)
-	if !gridOK || !genOK {
-		return SupplyUnknown
-	}
 	kw, _ := power.freshAt(end)
 	volts, _ := bus.freshAt(end)
-	gridOn := gridBits > 0
-	genOn := genBits > 0 || kw > genRunningKw
-	switch {
-	case gridOn && genOn:
-		return SupplyTransition
-	case gridOn:
-		return SupplyGrid
-	case genOn:
-		return SupplyGenerator
-	case volts > busLiveVolts:
-		return SupplyIsland
-	default:
-		return SupplyBlackout
-	}
+	return SupplyModeOf(gridBits, genBits, kw, volts, gridOK && genOK)
 }
 
 // powerIntegralByWindow integrates the generator power (trapezoid,
@@ -336,7 +345,7 @@ type cursor struct {
 func newCursor(pts []genPoint) *cursor { return &cursor{pts: pts, i: -1} }
 
 // freshAt returns the latest reading at or before t, if it is no older
-// than genStaleAfter. Calls must come with non-decreasing t.
+// than GenStaleAfter. Calls must come with non-decreasing t.
 func (c *cursor) freshAt(t time.Time) (float64, bool) {
 	for c.i+1 < len(c.pts) && !c.pts[c.i+1].t.After(t) {
 		c.i++
@@ -345,7 +354,7 @@ func (c *cursor) freshAt(t time.Time) (float64, bool) {
 		return 0, false
 	}
 	p := c.pts[c.i]
-	if t.Sub(p.t) > genStaleAfter {
+	if t.Sub(p.t) > GenStaleAfter {
 		return 0, false
 	}
 	return p.v, true
