@@ -18,7 +18,20 @@
 // zeros (e.g. a flat period with no battery activity) is real data,
 // not "we didn't try".
 
-import type { EnergyFlowTotals } from '../../api'
+import type { EnergyFlowGenTotals, EnergyFlowTotals } from '../../api'
+
+// EnergyFlowsGen is a generator site's part of the period: what the
+// generator gave, where it went (once the hours are counted with it) and
+// how long the site ran without the grid.
+export type EnergyFlowsGen = {
+  genKwh: number
+  genToLoadKwh: number
+  genToEssKwh: number
+  accounted: boolean
+  minutesGenerator: number
+  minutesIsland: number
+  minutesBlackout: number
+}
 
 export type EnergyFlows = {
   pvToLoadKwh: number
@@ -39,12 +52,28 @@ export type EnergyFlows = {
   essChargedKwh: number
   essDischargedKwh: number
   loadConsumedKwh: number
+
+  // gen is null for a site without a generator.
+  gen: EnergyFlowsGen | null
 }
 
 function nonNegative(value: number | undefined | null): number {
   return typeof value === 'number' && Number.isFinite(value) && value > 0
     ? value
     : 0
+}
+
+function genFlows(g: EnergyFlowGenTotals | null | undefined): EnergyFlowsGen | null {
+  if (!g) return null
+  return {
+    genKwh: nonNegative(g.gen_kwh),
+    genToLoadKwh: nonNegative(g.gen_to_load_kwh),
+    genToEssKwh: nonNegative(g.gen_to_ess_kwh),
+    accounted: g.accounted === true,
+    minutesGenerator: nonNegative(g.minutes_generator),
+    minutesIsland: nonNegative(g.minutes_island),
+    minutesBlackout: nonNegative(g.minutes_blackout),
+  }
 }
 
 export function flowsFromTotals(
@@ -73,7 +102,8 @@ export function flowsFromTotals(
   const pvToGrid = Math.max(gridExport - essToGrid, 0)
   const pvToLoad = Math.max(pvProduced - pvToGrid - pvToEss, 0)
   const gridToLoad = Math.max(gridImport - gridToEss, 0)
-  const loadConsumed = pvToLoad + gridToLoad + essToLoad
+  const gen = genFlows(flows?.gen)
+  const loadConsumed = pvToLoad + gridToLoad + essToLoad + (gen?.genToLoadKwh ?? 0)
 
   return {
     pvToLoadKwh: pvToLoad,
@@ -89,6 +119,7 @@ export function flowsFromTotals(
     essChargedKwh: essCharged,
     essDischargedKwh: essDischarged,
     loadConsumedKwh: loadConsumed,
+    gen,
   }
 }
 

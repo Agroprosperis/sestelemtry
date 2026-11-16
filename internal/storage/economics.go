@@ -639,10 +639,14 @@ type EnergyFlowDailySums struct {
 	ESSToGridKwh float64
 	Days         int
 
-	// The generator's energy and, on days counted with it, its split.
-	GenKwh       float64
-	GenToLoadKwh float64
-	GenToESSKwh  float64
+	// The generator's energy and, on days counted with it, its split;
+	// the minutes on the generator, in island and without supply.
+	GenKwh           float64
+	GenToLoadKwh     float64
+	GenToESSKwh      float64
+	MinutesGenerator int
+	MinutesIsland    int
+	MinutesBlackout  int
 }
 
 // SumEconomicsDailyFlows aggregates the four directional flow totals
@@ -677,7 +681,10 @@ func SumEconomicsDailyFlows(
 			COUNT(*),
 			COALESCE(SUM(gen_kwh), 0),
 			COALESCE(SUM(gen_to_load_kwh), 0),
-			COALESCE(SUM(gen_to_ess_kwh), 0)
+			COALESCE(SUM(gen_to_ess_kwh), 0),
+			COALESCE(SUM(minutes_generator), 0),
+			COALESCE(SUM(minutes_island), 0),
+			COALESCE(SUM(minutes_blackout), 0)
 		FROM economics_daily
 		WHERE organization_id = $1 AND day >= $2::date AND day <= $3::date
 	`, organizationID, fromDay, toDay).Scan(
@@ -689,6 +696,9 @@ func SumEconomicsDailyFlows(
 		&out.GenKwh,
 		&out.GenToLoadKwh,
 		&out.GenToESSKwh,
+		&out.MinutesGenerator,
+		&out.MinutesIsland,
+		&out.MinutesBlackout,
 	)
 	if err != nil {
 		return EnergyFlowDailySums{}, fmt.Errorf("storage: sum economics daily flows: %w", err)
@@ -724,7 +734,10 @@ func SumFinalEconomicsDailyFlows(
 			COUNT(*),
 			COALESCE(SUM(gen_kwh), 0),
 			COALESCE(SUM(gen_to_load_kwh), 0),
-			COALESCE(SUM(gen_to_ess_kwh), 0)
+			COALESCE(SUM(gen_to_ess_kwh), 0),
+			COALESCE(SUM(minutes_generator), 0),
+			COALESCE(SUM(minutes_island), 0),
+			COALESCE(SUM(minutes_blackout), 0)
 		FROM economics_daily
 		WHERE organization_id = $1
 			AND day BETWEEN ($2::timestamptz AT TIME ZONE 'UTC')::date - 1
@@ -741,6 +754,9 @@ func SumFinalEconomicsDailyFlows(
 		&out.GenKwh,
 		&out.GenToLoadKwh,
 		&out.GenToESSKwh,
+		&out.MinutesGenerator,
+		&out.MinutesIsland,
+		&out.MinutesBlackout,
 	)
 	if err != nil {
 		return EnergyFlowDailySums{}, fmt.Errorf("storage: sum final economics daily flows: %w", err)

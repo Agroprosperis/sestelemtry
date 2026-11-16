@@ -425,6 +425,31 @@ paths:
           description: Missing organization_id
         "404":
           description: No snapshot yet
+  /api/v1/generator:
+    get:
+      summary: Generator passport (Encombi)
+      operationId: getGeneratorPassport
+      description: |
+        The station passport's «Генератор» block: the last non-zero
+        rating, the generator meter, the last run, the Encombi address,
+        firmware and its newest sample. has_generator is false for a
+        site without an Encombi. The fuel price comes from the tariff
+        schedule, not from here.
+      parameters:
+        - name: organization_id
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Generator passport
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GeneratorPassport"
+        "400":
+          description: Missing organization_id
   /api/v1/weather-forecast:
     get:
       summary: Cached Open-Meteo forecast for an organization
@@ -2341,6 +2366,8 @@ components:
           type: array
           items:
             type: string
+        gen:
+          $ref: "#/components/schemas/EnergyFlowGenHour"
       required:
         - hour
         - from
@@ -2352,6 +2379,74 @@ components:
         - ess_charged_kwh
         - ess_discharged_kwh
         - skipped_intervals
+    EnergyFlowGenHour:
+      type: object
+      description: |
+        The generator-aware view of an hour, present when it has
+        generator data. gen_kwh is the generator meter's delta (the
+        power integral when estimated); the flows are the generator-aware
+        allocation; *_offgrid / *_island are the parts without the grid;
+        minutes counts the hour by supply mode (grid, generator, island,
+        blackout, transition, unknown).
+      properties:
+        gen_kwh: {type: number, format: double}
+        estimated: {type: boolean}
+        gen_to_load_kwh: {type: number, format: double}
+        gen_to_ess_kwh: {type: number, format: double}
+        pv_to_ess_kwh: {type: number, format: double}
+        grid_to_ess_kwh: {type: number, format: double}
+        ess_to_load_kwh: {type: number, format: double}
+        ess_to_grid_kwh: {type: number, format: double}
+        ess_charged_kwh: {type: number, format: double}
+        ess_discharged_kwh: {type: number, format: double}
+        load_offgrid_kwh: {type: number, format: double}
+        pv_to_load_offgrid_kwh: {type: number, format: double}
+        ess_to_load_offgrid_kwh: {type: number, format: double}
+        pv_to_ess_offgrid_kwh: {type: number, format: double}
+        pv_to_load_island_kwh: {type: number, format: double}
+        ess_to_load_island_kwh: {type: number, format: double}
+        offgrid_import_kwh: {type: number, format: double}
+        offgrid_export_kwh: {type: number, format: double}
+        minutes:
+          type: object
+          additionalProperties:
+            type: integer
+      required: [gen_kwh, gen_to_load_kwh, gen_to_ess_kwh, minutes]
+    GeneratorPassport:
+      type: object
+      properties:
+        organization_id:
+          type: string
+          example: ke
+        has_generator:
+          type: boolean
+        device_host:
+          type: string
+          example: 10.24.40.239
+        last_sample_at:
+          type: string
+          format: date-time
+          description: Newest Encombi sample; older than 30 s means no link.
+        rated_kw:
+          type: number
+          format: double
+          description: Last non-zero gen_rated_online_kw (reported only while running).
+        meter_kwh:
+          type: number
+          format: double
+        meter_at:
+          type: string
+          format: date-time
+        meter_alive:
+          type: boolean
+        sw_version:
+          type: number
+          format: double
+        last_run_at:
+          type: string
+          format: date-time
+          description: Last moment the generator gave more than 5 kW.
+      required: [organization_id, has_generator]
     EnergyFlowHourlyResponse:
       type: object
       properties:
@@ -2825,6 +2920,28 @@ components:
             Business-plan payback period (months from the start of
             operation). Display-only metadata for the payback page's
             plan-vs-forecast comparison; 0 (or omitted) hides it.
+        gen_fuel_price_uah_per_l:
+          type: number
+          format: double
+          minimum: 0
+          description: >
+            Generator fuel price, UAH per litre without VAT. Generator
+            hours count in the economics only once the price and the
+            chosen method's consumption are set.
+        gen_fuel_method:
+          type: string
+          enum: ["per_kwh", "per_hour"]
+          description: >
+            Fuel accounting: per kWh of the generator meter or per hour
+            of running.
+        gen_fuel_consumption_l_per_kwh:
+          type: number
+          format: double
+          minimum: 0
+        gen_fuel_consumption_l_per_h:
+          type: number
+          format: double
+          minimum: 0
       required:
         - distribution_uah_per_kwh
         - transmission_uah_per_kwh

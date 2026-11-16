@@ -107,9 +107,24 @@
 }
 
 .station-card-icon[data-icon='mode'],
-.station-card-icon[data-icon='meta'] {
+.station-card-icon[data-icon='meta'],
+.station-card-icon[data-icon='gen'] {
   color: var(--warn-text);
   background: var(--warn-chip);
+}
+
+/* The generator block's way to the tariff schedule. */
+.station-link {
+  align-self: flex-start;
+  margin-top: 8px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent, var(--sky));
+  font: inherit;
+  font-size: 0.82rem;
+  text-decoration: underline;
+  cursor: pointer;
 }
 
 .station-card-body {

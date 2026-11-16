@@ -191,3 +191,33 @@ describe('PowerTooltip AI recommendation', () => {
     expect(screen.queryByText(/^(ШІ|Сценарій):/)).toBeNull()
   })
 })
+
+describe('PowerTooltip with a generator', () => {
+  it('shows the supply mode, the generator and no grid off the grid', () => {
+    const row = { time: '10:00', supply_mode: 'generator' }
+    const payload = buildPayload({
+      active_pv_power_kw: 10,
+      active_ess_power_kw: 0,
+      grid_connected_active_power_kw: 0,
+      load_power_kw: -70,
+      active_gen_power_kw: 60,
+    }).map((e) => ({ ...e, payload: row }))
+    render(<PowerTooltip active label="10:00" payload={payload} />)
+    expect(screen.getByText('Живлення')).toBeInTheDocument()
+    expect(screen.getByText('Генератор', { selector: '.energy-tooltip-value' })).toBeInTheDocument()
+    expect(screen.getByText('Мережі немає')).toBeInTheDocument()
+    expect(screen.getByText('60 kW')).toBeInTheDocument()
+  })
+
+  it('stays as it was for a site without one', () => {
+    render(
+      <PowerTooltip
+        active
+        label="10:00"
+        payload={buildPayload({ active_pv_power_kw: 10, grid_connected_active_power_kw: 5 })}
+      />,
+    )
+    expect(screen.queryByText('Живлення')).toBeNull()
+    expect(screen.queryByText('Мережі немає')).toBeNull()
+  })
+})

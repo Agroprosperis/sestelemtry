@@ -3,6 +3,7 @@ import { useAccess } from '../auth/authContext'
 import { useOrganizationParam } from '../dashboard/hooks/useOrganizationParam'
 import { ModeTopBar } from '../shell/ModeTopBar'
 import type { PlantInventory, PlantInventoryChange, PlantInventoryHistory } from '../types'
+import { GeneratorSection } from './GeneratorSection'
 import { PvPlanSection } from './PvPlanSection'
 import { StationIcon } from './StationIcon'
 import './station.css'
@@ -253,6 +254,14 @@ export function StationPage() {
 
       {!error && !loading && !historyLoading && data != null ? (
         <InventoryBody inv={data} history={history} />
+      ) : null}
+
+      {organizationID ? (
+        <GeneratorSection
+          key={`gen-${organizationID}`}
+          organizationID={organizationID}
+          canSeeFuel={access.can('economics.read', organizationID)}
+        />
       ) : null}
 
       {organizationID ? (

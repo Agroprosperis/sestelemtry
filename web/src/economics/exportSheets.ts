@@ -8,10 +8,12 @@
 
 import type {
   EconomicsAnnualMonthRollup,
+  EconomicsGenTotalsApi,
   EconomicsMonthlyDay,
   EconomicsMonthlyTotals,
 } from '../api'
 import { formatOrganizationLabel } from '../dashboard/config'
+import { hasRollupGen, rollupOffgridMinutes } from './generatorText'
 import { formatMonthName, formatMonthTitle } from './monthly/format'
 import { importPriceUahPerKwh, unitCostUahPerKwh } from './monthly/rollup'
 import { dateSerial, type XlsxColumn, type XlsxFormat, type XlsxSheet } from './xlsx'
@@ -40,25 +42,49 @@ function nullIfNaN(v: number): number | null {
   return Number.isFinite(v) ? v : null
 }
 
-const MONTH_COLUMNS: XlsxColumn[] = [
-  col('Дата', undefined, 'date'),
-  col('СЕС', 'кВт·год', 'int'),
-  col('Споживання', 'кВт·год', 'int'),
-  col('Імпорт', 'кВт·год', 'int'),
-  col('Вартість імпорту', 'грн', 'money'),
-  col('Ціна імпорту', 'грн/кВт·год', 'price'),
-  col('Факт. ціна', 'грн/кВт·год', 'price'),
-  col('РДН сер.', 'грн/кВт·год', 'price'),
-  col('Експорт', 'кВт·год', 'int'),
-  col('Самоспоживання СЕС', '%', 'percent'),
-  col('УЗЕ цикли', 'екв.', 'ratio'),
-  col('EBITDA', 'грн', 'money'),
-  // The screen shows this as an amber "!" on the date; a spreadsheet has
-  // nowhere to hover, so the diagnosis gets its own column.
-  col('Якість даних', undefined, 'text'),
+// GEN_COLUMNS go in front of EBITDA when the period ran a generator; a
+// period without one keeps the sheet as it was.
+const GEN_COLUMNS: XlsxColumn[] = [
+  col('Генератор', 'кВт·год', 'int'),
+  col('Пальне', 'грн', 'money'),
+  col('Пальне', 'л', 'int'),
+  col('Без мережі', 'год', 'decimal1'),
+  col('Ефект без мережі', 'грн', 'money'),
 ]
 
-function monthDayValues(d: EconomicsMonthlyDay, note: string | null) {
+function genValues(t: EconomicsGenTotalsApi, gen: boolean) {
+  if (!gen) return []
+  return [
+    t.gen_kwh ?? 0,
+    t.gen_fuel_cost_uah ?? 0,
+    t.gen_fuel_l ?? 0,
+    rollupOffgridMinutes(t) / 60,
+    t.effect_offgrid_uah ?? 0,
+  ]
+}
+
+function monthColumns(gen: boolean): XlsxColumn[] {
+  return [
+    col('Дата', undefined, 'date'),
+    col('СЕС', 'кВт·год', 'int'),
+    col('Споживання', 'кВт·год', 'int'),
+    col('Імпорт', 'кВт·год', 'int'),
+    col('Вартість імпорту', 'грн', 'money'),
+    col('Ціна імпорту', 'грн/кВт·год', 'price'),
+    col('Факт. ціна', 'грн/кВт·год', 'price'),
+    col('РДН сер.', 'грн/кВт·год', 'price'),
+    col('Експорт', 'кВт·год', 'int'),
+    col('Самоспоживання СЕС', '%', 'percent'),
+    col('УЗЕ цикли', 'екв.', 'ratio'),
+    ...(gen ? GEN_COLUMNS : []),
+    col('EBITDA', 'грн', 'money'),
+    // The screen shows this as an amber "!" on the date; a spreadsheet has
+    // nowhere to hover, so the diagnosis gets its own column.
+    col('Якість даних', undefined, 'text'),
+  ]
+}
+
+function monthDayValues(d: EconomicsMonthlyDay, note: string | null, gen: boolean) {
   const pvSelf = d.pv_to_load_kwh + d.pv_to_ess_kwh
   return [
     dateSerial(d.date),
@@ -72,6 +98,7 @@ function monthDayValues(d: EconomicsMonthlyDay, note: string | null) {
     d.grid_export_kwh,
     d.pv_kwh > 0 ? pvSelf / d.pv_kwh : null,
     d.equivalent_cycles,
+    ...genValues(d, gen),
     d.ebitda_uah,
     note,
   ]
@@ -86,13 +113,14 @@ export function monthDetailSheet(
   qualityNote: (flags?: string[]) => string | null,
 ): XlsxSheet {
   const pvSelf = totals.pv_to_load_kwh + totals.pv_to_ess_kwh
+  const gen = hasRollupGen(totals)
   return {
     name: tabName(formatMonthTitle(month), formatOrganizationLabel(organizationID)),
-    columns: MONTH_COLUMNS,
+    columns: monthColumns(gen),
     freeze: { columns: 1, rows: 1 },
     autoFilter: true,
     rows: [
-      ...days.map((d) => ({ values: monthDayValues(d, qualityNote(d.quality_flags)) })),
+      ...days.map((d) => ({ values: monthDayValues(d, qualityNote(d.quality_flags), gen) })),
       {
         bold: true,
         values: [
@@ -107,6 +135,7 @@ export function monthDetailSheet(
           totals.grid_export_kwh,
           totals.pv_kwh > 0 ? pvSelf / totals.pv_kwh : null,
           totals.equivalent_cycles,
+          ...genValues(totals, gen),
           totals.ebitda_uah,
           null,
         ],
@@ -115,26 +144,29 @@ export function monthDetailSheet(
   }
 }
 
-const ANNUAL_COLUMNS: XlsxColumn[] = [
-  col('Місяць', undefined, 'text'),
-  col('Факт. ціна', 'грн/кВт·год', 'price'),
-  col('РДН сер.', 'грн/кВт·год', 'price'),
-  col('СЕС', 'кВт·год', 'int'),
-  col('Споживання', 'кВт·год', 'int'),
-  col('Імпорт', 'кВт·год', 'int'),
-  col('Експорт', 'кВт·год', 'int'),
-  col('Самоспоживання СЕС', '%', 'percent'),
-  col('УЗЕ цикли', 'екв.', 'ratio'),
-  col('EBITDA', 'грн', 'money'),
-  col('Дні з приблизними даними', undefined, 'int'),
-]
+function annualColumns(gen: boolean): XlsxColumn[] {
+  return [
+    col('Місяць', undefined, 'text'),
+    col('Факт. ціна', 'грн/кВт·год', 'price'),
+    col('РДН сер.', 'грн/кВт·год', 'price'),
+    col('СЕС', 'кВт·год', 'int'),
+    col('Споживання', 'кВт·год', 'int'),
+    col('Імпорт', 'кВт·год', 'int'),
+    col('Експорт', 'кВт·год', 'int'),
+    col('Самоспоживання СЕС', '%', 'percent'),
+    col('УЗЕ цикли', 'екв.', 'ratio'),
+    ...(gen ? GEN_COLUMNS : []),
+    col('EBITDA', 'грн', 'money'),
+    col('Дні з приблизними даними', undefined, 'int'),
+  ]
+}
 
 // cycles is passed in rather than read off the totals because the Разом
 // row leaves it empty: a month's cycles are normalised by the pack
 // installed that month, so summing them across a capacity change
 // describes neither pack. The screen shows a dash there for the same
 // reason.
-function annualMonthValues(o: EconomicsMonthlyTotals, label: string, cycles: number | null) {
+function annualMonthValues(o: EconomicsMonthlyTotals, label: string, cycles: number | null, gen: boolean) {
   const pvSelf = o.pv_to_load_kwh + o.pv_to_ess_kwh
   return [
     label,
@@ -146,6 +178,7 @@ function annualMonthValues(o: EconomicsMonthlyTotals, label: string, cycles: num
     o.grid_export_kwh,
     o.pv_kwh > 0 ? pvSelf / o.pv_kwh : null,
     cycles,
+    ...genValues(o, gen),
     o.ebitda_uah,
     o.flagged_days > 0 ? o.flagged_days : null,
   ]
@@ -159,16 +192,17 @@ export function annualDetailSheet(
   periodLabel: string,
   organizationID: string,
 ): XlsxSheet {
+  const gen = hasRollupGen(totals)
   return {
     name: tabName(periodLabel, formatOrganizationLabel(organizationID)),
-    columns: ANNUAL_COLUMNS,
+    columns: annualColumns(gen),
     freeze: { columns: 1, rows: 1 },
     autoFilter: true,
     rows: [
       ...months.map((m) => ({
-        values: annualMonthValues(m.totals, formatMonthName(m.month), m.totals.equivalent_cycles),
+        values: annualMonthValues(m.totals, formatMonthName(m.month), m.totals.equivalent_cycles, gen),
       })),
-      { bold: true, values: annualMonthValues(totals, 'Разом', null) },
+      { bold: true, values: annualMonthValues(totals, 'Разом', null, gen) },
     ],
   }
 }

@@ -27,6 +27,19 @@ export function navigateEconomicsDay(date: string) {
   window.dispatchEvent(new PopStateEvent('popstate'))
 }
 
+// navigateEconomicsTariffs opens the economics of one object with its
+// tariff form open.
+export function navigateEconomicsTariffs(organizationID: string) {
+  const url = viewURL('economics')
+  url.searchParams.set('organization_id', organizationID)
+  url.searchParams.set(TARIFFS_PARAM, '1')
+  window.history.pushState({}, '', url)
+  window.dispatchEvent(new PopStateEvent('popstate'))
+}
+
+// TARIFFS_PARAM asks the economics page to open its tariff form.
+export const TARIFFS_PARAM = 'tariffs'
+
 // replaceView points the URL at a view the user may open, without
 // adding a history entry for the one they may not.
 export function replaceView(view: AppView) {

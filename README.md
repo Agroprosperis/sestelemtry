@@ -18,6 +18,7 @@ Modbus telemetry collector for Huawei SmartLogger + dashboard stack.
 - `GET /api/v1/dashboard-config`
 - `GET /api/v1/current?organization_id=demo-org`
 - `GET /api/v1/timeseries?organization_id=demo-org&metric_keys=active_pv_power_kw,load_power_kw&from=2026-04-26T00:00:00Z&to=2026-04-26T23:59:59Z&bucket=15 minutes`
+- `GET /api/v1/generator?organization_id=ke` (generator passport of a site with an Encombi)
 - `GET /swagger` (Swagger UI)
 - `GET /swagger/openapi.yaml` (OpenAPI spec)
 
@@ -217,9 +218,14 @@ registers only; nothing ever writes to it.
   request, so entries that are not adjacent share a read.
 - Its `device:` block names the device in alert emails and picks the
   freshness probe (`probe_metric_key`) of the alert watchdog.
-- Such a device never feeds the energy-flow allocator, the SmartLogger
-  optional reads or the plant passport, and the API container mounts the
-  registers directory to tell it apart.
+- Such a device never feeds the SmartLogger optional reads or the plant
+  inventory snapshot, and the API container mounts the registers
+  directory to tell it apart. The Encombi's readings are the exception the
+  allocator knows about: they give the supply mode and the generator's
+  part of the flows, the economics and the dashboard (the fifth node of
+  the live diagram, the generator series and supply strip of the day
+  chart, the export columns and the passport's «Генератор» block from
+  `GET /api/v1/generator`); see `docs/dashboard-metrics.md` §4.1.1.
 - Check it before enabling, from the host, at no more than 3 requests a
   second, with a throwaway config that lists the device:
   `docker compose -f deploy/docker-compose.yml run --rm --no-deps -v /tmp/check.yaml:/tmp/check.yaml:ro --entrypoint /usr/local/bin/modbuscheck collector -config /tmp/check.yaml -org ke -device 1 -delay 400ms`.

@@ -286,6 +286,102 @@ describe('liveAllocationFromCurrent', () => {
     expect(out.gridKw).toBeCloseTo(424.9)
   })
 
+  it('runs on the generator: the grid is zero and offline, the load adds the generator', () => {
+    const out = liveAllocationFromCurrent(
+      buildCurrent({
+        active_pv_power_kw: 20,
+        active_ess_power_kw: -10,
+        grid_breakers_on_bits: 0,
+        gen_breakers_on_bits: 1,
+        active_gen_power_kw: 90,
+        gen_loading_pct: 45,
+        gen_bus_voltage_a_v: 230,
+      }),
+    )
+    expect(out.supplyMode).toBe('generator')
+    expect(out.gridState).toBe('offline')
+    expect(out.gridKw).toBe(0)
+    expect(out.loadKw).toBe(100)
+    expect(out.pvToLoadKw).toBe(20)
+    expect(out.genToEssKw).toBe(10)
+    expect(out.genToLoadKw).toBe(80)
+    expect(out.gridToEssKw).toBe(0)
+    expect(out.genState).toBe('running')
+    expect(out.genLoadingPct).toBe(45)
+  })
+
+  it('ignores a grid reading while the site is off the grid', () => {
+    const out = liveAllocationFromCurrent(
+      buildCurrent({
+        active_pv_power_kw: 10,
+        active_ess_power_kw: 50,
+        grid_connected_active_power_kw: 12,
+        grid_breakers_on_bits: 0,
+        gen_breakers_on_bits: 0,
+        gen_bus_voltage_a_v: 231,
+      }),
+    )
+    expect(out.supplyMode).toBe('island')
+    expect(out.gridKw).toBe(0)
+    expect(out.loadKw).toBe(60)
+    expect(out.essToLoadKw).toBe(50)
+    expect(out.essToGridKw).toBe(0)
+    expect(out.genState).toBe('idle')
+  })
+
+  it('tells a blackout from an island by the bus voltage', () => {
+    const out = liveAllocationFromCurrent(
+      buildCurrent({ active_pv_power_kw: 0, active_ess_power_kw: 0, grid_breakers_on_bits: 0, gen_breakers_on_bits: 0, gen_bus_voltage_a_v: 0 }),
+    )
+    expect(out.supplyMode).toBe('blackout')
+    expect(out.gridState).toBe('offline')
+  })
+
+  it('keeps the grid flows on the grid with an idle generator', () => {
+    const out = liveAllocationFromCurrent(
+      buildCurrent({
+        active_pv_power_kw: 0,
+        active_ess_power_kw: 0,
+        grid_connected_active_power_kw: 30,
+        grid_breakers_on_bits: 1,
+        gen_breakers_on_bits: 0,
+        active_gen_power_kw: 0,
+      }),
+    )
+    expect(out.supplyMode).toBe('grid')
+    expect(out.gridState).toBe('importing')
+    expect(out.gridToLoadKw).toBe(30)
+    expect(out.genState).toBe('idle')
+    expect(out.genKw).toBe(0)
+  })
+
+  it('marks stale Encombi readings and counts the load as before', () => {
+    const fresh = '2026-11-15T10:00:00Z'
+    const old = '2026-11-15T09:59:00Z'
+    const out = liveAllocationFromCurrent({
+      organization_id: 'ke',
+      metrics: {
+        active_pv_power_kw: { metric_key: 'active_pv_power_kw', value: 5, time: fresh },
+        active_ess_power_kw: { metric_key: 'active_ess_power_kw', value: 0, time: fresh },
+        grid_connected_active_power_kw: { metric_key: 'grid_connected_active_power_kw', value: 25, time: fresh },
+        grid_breakers_on_bits: { metric_key: 'grid_breakers_on_bits', value: 0, time: old },
+        gen_breakers_on_bits: { metric_key: 'gen_breakers_on_bits', value: 1, time: old },
+        active_gen_power_kw: { metric_key: 'active_gen_power_kw', value: 80, time: old },
+      },
+    })
+    expect(out.supplyMode).toBe('unknown')
+    expect(out.genState).toBe('stale')
+    expect(out.genKw).toBe(0)
+    expect(out.gridState).toBe('importing')
+    expect(out.loadKw).toBe(30)
+  })
+
+  it('has no generator for a site without an Encombi', () => {
+    const out = liveAllocationFromCurrent(buildCurrent({ active_pv_power_kw: 5, active_ess_power_kw: 0, grid_connected_active_power_kw: 1 }))
+    expect(out.supplyMode).toBeNull()
+    expect(out.genState).toBeNull()
+  })
+
   it('isModbusPowerSentinel matches INT32 and UINT32 all-ones after gain', () => {
     expect(isModbusPowerSentinel(2147483647 * 0.001)).toBe(true)
     expect(isModbusPowerSentinel(2147483.65)).toBe(true)

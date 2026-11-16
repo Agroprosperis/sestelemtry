@@ -1243,14 +1243,17 @@ func flowTotalsFromDailySums(sums storage.EnergyFlowDailySums) EnergyFlowTotals 
 		ESSToLoadKwh: sums.ESSToLoadKwh,
 		ESSToGridKwh: sums.ESSToGridKwh,
 	}
-	accounted := sums.GenToLoadKwh+sums.GenToESSKwh > 0
-	if sums.GenKwh > 0 || accounted {
-		out.Gen = &EnergyFlowGenTotals{
-			GenKwh:       sums.GenKwh,
-			GenToLoadKwh: sums.GenToLoadKwh,
-			GenToESSKwh:  sums.GenToESSKwh,
-			Accounted:    accounted,
-		}
+	gen := EnergyFlowGenTotals{
+		GenKwh:           sums.GenKwh,
+		GenToLoadKwh:     sums.GenToLoadKwh,
+		GenToESSKwh:      sums.GenToESSKwh,
+		Accounted:        sums.GenToLoadKwh+sums.GenToESSKwh > 0,
+		MinutesGenerator: sums.MinutesGenerator,
+		MinutesIsland:    sums.MinutesIsland,
+		MinutesBlackout:  sums.MinutesBlackout,
+	}
+	if gen.GenKwh > 0 || gen.offgridMinutes() > 0 || gen.Accounted {
+		out.Gen = &gen
 	}
 	return out
 }

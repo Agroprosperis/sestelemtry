@@ -1,5 +1,6 @@
 import type { TimeseriesPoint } from '../../types'
 import { DAY_BUCKET_MINUTES, timelineBuckets } from '../timeline'
+import { GEN_POWER_KEY, isOffgrid, type DaySupplyBucket } from './supply'
 
 export type PowerChartRow = { time: string } & Record<string, string | number | null>
 
@@ -133,13 +134,21 @@ function clampAnomaly(value: number): number {
 // fallback is applied per bucket and per metric, so a day that mixes live
 // and archive segments renders one continuous line. Instantaneous samples
 // always take precedence when present.
+//
+// A site with a generator adds its power to the load (a generator that
+// sent nothing counts as zero), and `supply` — the day's supply modes —
+// zeroes the grid in buckets without it, where the SmartLogger has no grid
+// reading to give.
 export function powerChartRows(
   points: TimeseriesPoint[],
   keys: string[],
   anchor: Date,
   now: Date = new Date(),
   fallbackPoints: TimeseriesPoint[] = [],
+  supply: DaySupplyBucket[] | null = null,
 ): PowerChartRow[] {
+  const modeAt = new Map<number, DaySupplyBucket['mode']>()
+  for (const b of supply ?? []) modeAt.set(b.t, b.mode)
   const lastByKey = new Map<string, { value: number; time: number }>()
   for (const p of points) {
     if (!keys.includes(p.metric_key)) continue
@@ -186,6 +195,9 @@ export function powerChartRows(
         row[key] = null
       }
     }
+    if (!isFuture && keys.includes(GRID_KEY) && row[GRID_KEY] == null && isOffgrid(modeAt.get(t))) {
+      row[GRID_KEY] = 0
+    }
     if (wantsLoad) {
       if (isFuture) {
         row[LOAD_KEY] = null
@@ -193,12 +205,13 @@ export function powerChartRows(
         const pv = row[PV_KEY]
         const grid = row[GRID_KEY]
         const ess = row[ESS_KEY]
+        const gen = row[GEN_POWER_KEY]
         if (
           typeof pv === 'number' &&
           typeof grid === 'number' &&
           typeof ess === 'number'
         ) {
-          row[LOAD_KEY] = -(pv + grid + ess)
+          row[LOAD_KEY] = typeof gen === 'number' ? -(pv + grid + ess + Math.max(gen, 0)) : -(pv + grid + ess)
         } else {
           row[LOAD_KEY] = null
         }

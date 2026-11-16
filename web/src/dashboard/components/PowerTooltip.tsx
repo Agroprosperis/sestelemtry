@@ -1,5 +1,12 @@
 import { formatChartNumber } from '../format'
 import { DAY_POWER_METRIC_KEYS, DAY_POWER_METRIC_LABELS } from '../metrics'
+import {
+  GEN_POWER_KEY,
+  isOffgrid,
+  SUPPLY_MODE_KEY,
+  SUPPLY_MODE_LABELS,
+  type SupplyMode,
+} from '../transforms/supply'
 
 type PowerTooltipEntry = {
   dataKey?: string | number | ((obj: unknown) => unknown)
@@ -107,15 +114,35 @@ export function PowerTooltip({ active, label, payload }: Props) {
   const showAiLoad = Number.isFinite(aiLoadValue)
   const reasonRaw = payload.find((e) => e.payload?.[AI_REASON_KEY] != null)?.payload?.[AI_REASON_KEY]
   const reasonText = typeof reasonRaw === 'string' ? reasonRaw : ''
+  const modeRaw = payload.find((e) => e.payload?.[SUPPLY_MODE_KEY] != null)?.payload?.[SUPPLY_MODE_KEY]
+  const supplyMode = typeof modeRaw === 'string' && modeRaw in SUPPLY_MODE_LABELS ? (modeRaw as SupplyMode) : null
+  const genEntry = byKey.get(GEN_POWER_KEY)
+  const genValue = Number(genEntry?.value)
+  const showGen = Number.isFinite(genValue)
 
   return (
     <div className="energy-tooltip">
       <div className="energy-tooltip-label">{label}</div>
+      {supplyMode && (
+        <div className="energy-tooltip-row energy-tooltip-supply">
+          <span className="energy-tooltip-name">Живлення</span>
+          <span className="energy-tooltip-value">{SUPPLY_MODE_LABELS[supplyMode]}</span>
+        </div>
+      )}
       <div>
         {DAY_POWER_METRIC_KEYS.map((key) => {
           const entry = byKey.get(key)
           const raw = Number(entry?.value)
           const value = Number.isFinite(raw) ? raw : null
+          if (key === 'grid_connected_active_power_kw' && isOffgrid(supplyMode)) {
+            return (
+              <div key={key} className="energy-tooltip-row">
+                <span className="energy-tooltip-dot" style={{ backgroundColor: entry?.color ?? '#94a3b8' }} />
+                <span className="energy-tooltip-name">Мережі немає</span>
+                <span className="energy-tooltip-value">--</span>
+              </div>
+            )
+          }
           // Sign-aware metrics get a direction-specific label and the
           // displayed magnitude is the absolute value — analysts read
           // "Заряд УЗЕ: 0.82 кВт" much faster than "УЗЕ: -0.82 kW"
@@ -143,6 +170,13 @@ export function PowerTooltip({ active, label, payload }: Props) {
             </div>
           )
         })}
+        {showGen && (
+          <div className="energy-tooltip-row">
+            <span className="energy-tooltip-dot" style={{ backgroundColor: genEntry?.color ?? '#c2410c' }} />
+            <span className="energy-tooltip-name">Генератор</span>
+            <span className="energy-tooltip-value">{formatChartNumber(Math.max(genValue, 0))} kW</span>
+          </div>
+        )}
       </div>
       {showPvForecast && (
         <div className="energy-tooltip-row energy-tooltip-dam">

@@ -133,6 +133,35 @@ export async function fetchPlantInventory(
 
 // fetchPlantInventoryHistory returns per-field change events derived from
 // recent plant-inventory snapshots (identical polls are filtered out).
+// GeneratorPassport is GET /api/v1/generator: the station passport's
+// «Генератор» block. has_generator is false for a site without an
+// Encombi, and the rest is then absent.
+export type GeneratorPassport = {
+  organization_id: string
+  has_generator: boolean
+  device_host?: string
+  last_sample_at?: string
+  // rated_kw is the last non-zero rating, reported only while running.
+  rated_kw?: number
+  meter_kwh?: number
+  meter_at?: string
+  meter_alive?: boolean
+  sw_version?: number
+  last_run_at?: string
+}
+
+export async function fetchGeneratorPassport(
+  organizationID: string,
+  signal?: AbortSignal,
+): Promise<GeneratorPassport> {
+  const url = buildURL('/api/v1/generator', { organization_id: organizationID })
+  const res = await apiFetch(url, { signal })
+  if (!res.ok) {
+    throw new Error(`generator request failed: ${res.status}`)
+  }
+  return (await res.json()) as GeneratorPassport
+}
+
 export async function fetchPlantInventoryHistory(
   organizationID: string,
   opts?: { limit?: number; signal?: AbortSignal },
@@ -237,6 +266,21 @@ export type EnergyFlowTotals = {
   grid_to_ess_kwh: number
   ess_to_load_kwh: number
   ess_to_grid_kwh: number
+  // gen is a generator site's part, absent for the rest.
+  gen?: EnergyFlowGenTotals
+}
+
+// EnergyFlowGenTotals: gen_to_* are filled once the period's generator
+// hours are counted (accounted); the minutes are how long the site ran on
+// the generator, as an island off the battery, or without power.
+export type EnergyFlowGenTotals = {
+  gen_kwh: number
+  gen_to_load_kwh: number
+  gen_to_ess_kwh: number
+  accounted?: boolean
+  minutes_generator?: number
+  minutes_island?: number
+  minutes_blackout?: number
 }
 
 // EnergyFlowMeta says which pipeline produced `flows`. Day-sized

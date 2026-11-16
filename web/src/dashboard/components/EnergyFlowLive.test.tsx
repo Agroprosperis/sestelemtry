@@ -103,4 +103,54 @@ describe('EnergyFlowLive', () => {
     render(<EnergyFlowLive allocation={allocation} />)
     expect(screen.getAllByText(/імпорт/i).length).toBeGreaterThan(0)
   })
+
+  it('draws the generator as a fifth node and says the grid is gone', () => {
+    const allocation = buildAllocation({
+      active_pv_power_kw: 20,
+      active_ess_power_kw: 0,
+      grid_breakers_on_bits: 0,
+      gen_breakers_on_bits: 1,
+      active_gen_power_kw: 80,
+      gen_loading_pct: 40,
+    })
+    const { container } = render(<EnergyFlowLive allocation={allocation} />)
+    const genNode = container.querySelector('.energy-flow-live-node--gen')
+    expect(genNode).not.toBeNull()
+    expect(genNode?.getAttribute('data-state')).toBe('running')
+    expect(screen.getByText('Генератор')).toBeInTheDocument()
+    expect(screen.getByText('Працює · 40%')).toBeInTheDocument()
+    expect(screen.getByText('Мережі немає')).toBeInTheDocument()
+    expect(screen.getByText('Від генератора')).toBeInTheDocument()
+    const edges = Array.from(container.querySelectorAll('.energy-flow-live-path')).map((p) => p.getAttribute('data-edge'))
+    expect(edges).toContain('gen')
+  })
+
+  it('captions the hub by the supply mode', () => {
+    const island = buildAllocation({
+      active_pv_power_kw: 0,
+      active_ess_power_kw: 40,
+      grid_breakers_on_bits: 0,
+      gen_breakers_on_bits: 0,
+      gen_bus_voltage_a_v: 230,
+    })
+    const { rerender } = render(<EnergyFlowLive allocation={island} />)
+    expect(screen.getByText('Острів: живлення від УЗЕ')).toBeInTheDocument()
+
+    const blackout = buildAllocation({
+      active_pv_power_kw: 0,
+      active_ess_power_kw: 0,
+      grid_breakers_on_bits: 0,
+      gen_breakers_on_bits: 0,
+      gen_bus_voltage_a_v: 0,
+    })
+    rerender(<EnergyFlowLive allocation={blackout} />)
+    expect(screen.getAllByText('Без живлення').length).toBeGreaterThan(0)
+  })
+
+  it('keeps four nodes for a site without a generator', () => {
+    const allocation = buildAllocation({ active_pv_power_kw: 5, active_ess_power_kw: 0, grid_connected_active_power_kw: 0 })
+    const { container } = render(<EnergyFlowLive allocation={allocation} />)
+    expect(container.querySelector('.energy-flow-live-node--gen')).toBeNull()
+    expect(container.querySelector('.energy-flow-live-stage.has-gen')).toBeNull()
+  })
 })

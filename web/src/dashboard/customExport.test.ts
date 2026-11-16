@@ -119,6 +119,50 @@ describe('fetchCustomExportData', () => {
     expect(api.fetchTimeseries).not.toHaveBeenCalled()
   })
 
+  it('adds the generator group with the supply mode derived per bucket', async () => {
+    vi.mocked(api.fetchTimeseries).mockImplementation(async (input) => ({
+      organization_id: input.organizationID,
+      metric_keys: input.metricKeys,
+      bucket: input.bucket,
+      from: input.from,
+      to: input.to,
+      points: [
+        { time: '2026-05-07T00:00:00.000Z', metric_key: 'accumulated_gen_energy_kwh', value: 12 },
+        { time: '2026-05-07T00:00:00.000Z', metric_key: 'grid_breakers_on_bits', value: 0 },
+        { time: '2026-05-07T00:00:00.000Z', metric_key: 'gen_breakers_on_bits', value: 1 },
+        { time: '2026-05-07T00:00:00.000Z', metric_key: 'active_gen_power_kw', value: 70 },
+        { time: '2026-05-07T01:00:00.000Z', metric_key: 'grid_breakers_on_bits', value: 1 },
+        { time: '2026-05-07T01:00:00.000Z', metric_key: 'gen_breakers_on_bits', value: 0 },
+      ].filter((p) => input.metricKeys.includes(p.metric_key)),
+    }))
+    const table = await fetchCustomExportData({
+      organizationID: 'ke',
+      from: new Date(2026, 4, 7),
+      to: new Date(2026, 4, 8),
+      bucket: '1 hour',
+      columns: { energy: false, flow: false, price: false, soc: false, power: false, device: false, forecast: false, gen: true },
+    })
+    expect(table.headers).toEqual([
+      'time',
+      'accumulated_gen_energy_kwh',
+      'active_gen_power_kw',
+      'gen_loading_pct',
+      'gen_breakers_on_bits',
+      'grid_breakers_on_bits',
+      'gen_bus_voltage_a_v',
+      'supply_mode',
+    ])
+    expect(table.rows[0].accumulated_gen_energy_kwh).toBe(12)
+    expect(table.rows[0].supply_mode).toBe('generator')
+    expect(table.rows[1].supply_mode).toBe('grid')
+    const calls = vi.mocked(api.fetchTimeseries).mock.calls.map(([input]) => [input.aggregation, input.metricKeys])
+    expect(calls).toContainEqual(['delta', ['accumulated_gen_energy_kwh']])
+    expect(calls).toContainEqual([
+      'last',
+      ['active_gen_power_kw', 'gen_loading_pct', 'gen_breakers_on_bits', 'grid_breakers_on_bits', 'gen_bus_voltage_a_v'],
+    ])
+  })
+
   it('joins energy, soc, and power columns by bucket-start timestamp', async () => {
     const table = await fetchCustomExportData({
       organizationID: 'pe',

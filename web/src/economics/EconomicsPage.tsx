@@ -4,7 +4,7 @@ import { useAccess } from '../auth/authContext'
 import { ECONOMIC_GROUPS, energyFloorFor } from '../dashboard/config'
 import { useOrganizationParam } from '../dashboard/hooks/useOrganizationParam'
 import { ModeTopBar, type TopBarMenuItem } from '../shell/ModeTopBar'
-import { navigateView } from '../shell/navigation'
+import { navigateView, TARIFFS_PARAM } from '../shell/navigation'
 import { dailyTotals } from './compute'
 import { makeMoney, MoneyContext, parseCurrency, rateLabel, rateNote, type Currency } from './currency'
 import { EconomicsDamPricesModal } from './components/EconomicsDamPricesModal'
@@ -240,8 +240,18 @@ export function EconomicsPage() {
   const [damRefreshError, setDamRefreshError] = useState<string | null>(null)
   const [recomputeOpen, setRecomputeOpen] = useState(false)
   const [damImportOpen, setDamImportOpen] = useState(false)
-  const [tariffsOpen, setTariffsOpen] = useState(false)
+  const [tariffsOpen, setTariffsOpen] = useState(
+    () => new URLSearchParams(window.location.search).get(TARIFFS_PARAM) === '1',
+  )
   const closeTariffs = useCallback(() => setTariffsOpen(false), [])
+  // The station passport links here with the form open; the flag is
+  // dropped from the URL so a reload does not open it again.
+  useEffect(() => {
+    const url = new URL(window.location.href)
+    if (!url.searchParams.has(TARIFFS_PARAM)) return
+    url.searchParams.delete(TARIFFS_PARAM)
+    window.history.replaceState({}, '', url)
+  }, [])
 
   const onRefreshDam = useCallback(async () => {
     setDamRefreshState('loading')

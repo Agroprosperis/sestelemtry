@@ -154,6 +154,7 @@ func (h *Handlers) routes() []route {
 		{"/api/v1/weather-forecast", h.weatherForecast, need(day)},
 		{"/api/v1/plant-inventory/history", h.plantInventoryHistory, need(passport)},
 		{"/api/v1/plant-inventory", h.plantInventory, need(passport)},
+		{"/api/v1/generator", h.generatorPassport, need(passport)},
 		{"/api/v1/organization-tariffs", h.organizationTariffs, need(econRead).on(http.MethodPut, econEdit)},
 		{"/api/v1/organization-tariff-schedule", h.organizationTariffSchedule,
 			need(econRead).on(http.MethodPut, econEdit).on(http.MethodDelete, econEdit)},

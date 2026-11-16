@@ -616,7 +616,7 @@ func TestSwaggerSpecEndpoint(t *testing.T) {
 	if err := yaml.Unmarshal(rec.Body.Bytes(), &spec); err != nil {
 		t.Fatalf("spec is not valid YAML: %v", err)
 	}
-	for _, p := range []string{"/api/v1/auth/login", "/api/v1/auth/me", "/api/v1/users"} {
+	for _, p := range []string{"/api/v1/auth/login", "/api/v1/auth/me", "/api/v1/users", "/api/v1/generator"} {
 		if _, ok := spec.Paths[p]; !ok {
 			t.Errorf("spec does not document %s", p)
 		}

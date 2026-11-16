@@ -356,12 +356,21 @@ func (h *Handlers) addGenFlowTotals(ctx context.Context, out *EnergyFlowTotals, 
 		&stats,
 	)
 	gen := &EnergyFlowGenTotals{Accounted: accounted}
+	for start := from.Truncate(time.Hour); start.Before(genTo); start = start.Add(time.Hour) {
+		th, ok := tl.Hour(start)
+		if !ok {
+			continue
+		}
+		gen.GenKwh += th.GenKwh
+		gen.MinutesGenerator += th.Minutes[energyflow.SupplyGenerator]
+		gen.MinutesIsland += th.Minutes[energyflow.SupplyIsland]
+		gen.MinutesBlackout += th.Minutes[energyflow.SupplyBlackout]
+	}
 	var flows [4]float64
 	for start, f := range hours {
 		th, ok := tl.Hour(start)
 		active := false
 		if ok {
-			gen.GenKwh += th.GenKwh
 			off := 0
 			for mode, m := range th.Minutes {
 				if mode.Offgrid() {
@@ -383,7 +392,7 @@ func (h *Handlers) addGenFlowTotals(ctx context.Context, out *EnergyFlowTotals, 
 	if accounted {
 		out.PVToESSKwh, out.GridToESSKwh, out.ESSToLoadKwh, out.ESSToGridKwh = flows[0], flows[1], flows[2], flows[3]
 	}
-	if gen.GenKwh > 0 || accounted {
+	if gen.GenKwh > 0 || gen.offgridMinutes() > 0 || accounted {
 		out.Gen = gen
 	}
 }

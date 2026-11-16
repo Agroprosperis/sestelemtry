@@ -159,6 +159,10 @@ func TestAuthRouteMatrix(t *testing.T) {
 		{"ceo", http.MethodPut, "/api/v1/organization-tariffs?organization_id=ze", denied},
 		{"ceo", http.MethodPost, "/api/v1/economics/recompute?organization_id=ze", denied},
 		{"ceo", http.MethodGet, "/api/v1/plant-inventory?organization_id=ze", denied},
+		{"ceo", http.MethodGet, "/api/v1/generator?organization_id=ze", denied},
+		{"engineer", http.MethodGet, "/api/v1/generator?organization_id=ze", denied},
+		{"admin", http.MethodGet, "/api/v1/generator?organization_id=ze", ok},
+		{"admin", http.MethodGet, "/api/v1/generator?organization_id=pe", denied},
 		{"ceo", http.MethodGet, "/api/v1/samples?organization_id=ze", denied},
 		{"ceo", http.MethodGet, "/api/v1/users", denied},
 

@@ -239,3 +239,40 @@ describe('powerChartRows', () => {
     })
   })
 })
+
+describe('powerChartRows with a generator', () => {
+  const anchor = new Date(2026, 10, 15)
+  const now = new Date(2026, 10, 16, 12, 0, 0)
+  const keys = [
+    'active_pv_power_kw',
+    'active_ess_power_kw',
+    'grid_connected_active_power_kw',
+    'load_power_kw',
+    'active_gen_power_kw',
+  ]
+
+  it('zeroes the grid off the grid and adds the generator to the load', () => {
+    const points: TimeseriesPoint[] = [
+      { time: bucketTime(anchor, 120), metric_key: 'active_pv_power_kw', value: 10 },
+      { time: bucketTime(anchor, 120), metric_key: 'active_ess_power_kw', value: 5 },
+      { time: bucketTime(anchor, 120), metric_key: 'active_gen_power_kw', value: 60 },
+    ]
+    const t = new Date(anchor)
+    t.setHours(0, 120 * DAY_BUCKET_MINUTES, 0, 0)
+    const rows = powerChartRows(points, keys, anchor, now, [], [{ t: t.getTime(), time: '10:00', mode: 'generator' }])
+    expect(rows[120].grid_connected_active_power_kw).toBe(0)
+    expect(rows[120].load_power_kw).toBe(-75)
+  })
+
+  it('leaves a missing grid reading alone on the grid', () => {
+    const points: TimeseriesPoint[] = [
+      { time: bucketTime(anchor, 10), metric_key: 'active_pv_power_kw', value: 10 },
+      { time: bucketTime(anchor, 10), metric_key: 'active_ess_power_kw', value: 0 },
+    ]
+    const t = new Date(anchor)
+    t.setHours(0, 10 * DAY_BUCKET_MINUTES, 0, 0)
+    const rows = powerChartRows(points, keys, anchor, now, [], [{ t: t.getTime(), time: '00:50', mode: 'grid' }])
+    expect(rows[10].grid_connected_active_power_kw).toBeNull()
+    expect(rows[10].load_power_kw).toBeNull()
+  })
+})

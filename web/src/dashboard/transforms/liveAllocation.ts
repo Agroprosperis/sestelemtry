@@ -37,6 +37,16 @@
 // exceeds the destination's draw within sensor noise.
 
 import type { CurrentResponse, CurrentMetric } from '../../types'
+import {
+  BUS_VOLTAGE_KEY,
+  GEN_BITS_KEY,
+  GEN_POWER_KEY,
+  GEN_RUNNING_KW,
+  GRID_BITS_KEY,
+  isOffgrid,
+  supplyModeOf,
+  type SupplyMode,
+} from './supply'
 
 // Anything closer to zero than this is treated as "idle". Same
 // threshold as PowerTooltip — the ESS and grid meters routinely
@@ -50,8 +60,19 @@ export type LiveLoadState = 'consuming' | 'idle'
 export type LiveEssState = 'charging' | 'discharging' | 'idle'
 // `unavailable` = SmartLogger returned its INT32/UINT32 "all-ones"
 // sentinel (typically when the grid meter is offline / the site is
-// islanded). The UI renders a dash instead of a kW number.
-export type LiveGridState = 'importing' | 'exporting' | 'idle' | 'unavailable'
+// islanded). The UI renders a dash instead of a kW number. `offline`
+// = the Encombi says the site runs without the grid (generator, island
+// or blackout), so there is nothing to read.
+export type LiveGridState = 'importing' | 'exporting' | 'idle' | 'unavailable' | 'offline'
+
+export type { SupplyMode }
+
+// LiveGenState is the generator node's state; `stale` when the Encombi
+// readings are older than GEN_STALE_MS.
+export type LiveGenState = 'running' | 'idle' | 'stale'
+
+// Encombi readings older than this stop counting (§4.1, §5.1).
+export const GEN_STALE_MS = 30 * 1000
 
 export type LiveAllocation = {
   pvKw: number
@@ -75,6 +96,14 @@ export type LiveAllocation = {
   // X kW to grid" / "Importing Y kW from grid" subtitle in the
   // central status hub. Zero when the grid reading is unavailable.
   netExportKw: number
+  // The generator of a site with an Encombi; supplyMode and genState
+  // are null for a site without one, and the diagram has no fifth node.
+  supplyMode: SupplyMode | null
+  genKw: number
+  genLoadingPct: number | null
+  genState: LiveGenState | null
+  genToLoadKw: number
+  genToEssKw: number
   status: 'normal' | 'no_data'
   // observedAt mirrors the freshest timestamp we found among the
   // four power readings. The dashboard surfaces it as "Updated N s
@@ -100,8 +129,56 @@ export const NO_DATA_ALLOCATION: LiveAllocation = {
   essToLoadKw: 0,
   essToGridKw: 0,
   netExportKw: 0,
+  supplyMode: null,
+  genKw: 0,
+  genLoadingPct: null,
+  genState: null,
+  genToLoadKw: 0,
+  genToEssKw: 0,
   status: 'no_data',
   observedAt: null,
+}
+
+const GEN_KEYS = [GRID_BITS_KEY, GEN_BITS_KEY, GEN_POWER_KEY, BUS_VOLTAGE_KEY, 'gen_loading_pct']
+
+type LiveGenerator = {
+  mode: SupplyMode
+  state: LiveGenState
+  kw: number
+  loadingPct: number | null
+  at: Date | null
+}
+
+// readGenerator applies the §4.1 table to the snapshot's Encombi readings,
+// judging their age against the freshest reading of the whole snapshot.
+// null for a site that reports none of them.
+function readGenerator(metrics: CurrentResponse['metrics']): LiveGenerator | null {
+  if (!GEN_KEYS.some((k) => metrics[k])) return null
+  const latest = freshestTimestamp(Object.values(metrics))
+  const fresh = (key: string): number | null => {
+    const m = metrics[key]
+    if (!m || !latest) return null
+    const t = Date.parse(m.time)
+    if (!Number.isFinite(t) || latest.getTime() - t > GEN_STALE_MS) return null
+    const n = Number(m.value)
+    return Number.isFinite(n) ? n : null
+  }
+  const gridBits = fresh(GRID_BITS_KEY)
+  const genBits = fresh(GEN_BITS_KEY)
+  const at = freshestTimestamp(GEN_KEYS.map((k) => metrics[k]))
+  if (gridBits === null || genBits === null) {
+    return { mode: 'unknown', state: 'stale', kw: 0, loadingPct: null, at }
+  }
+  const kw = Math.max(fresh(GEN_POWER_KEY) ?? 0, 0)
+  const mode = supplyModeOf({ gridBits, genBits, genKw: kw, busV: fresh(BUS_VOLTAGE_KEY) })
+  const genOn = genBits > 0 || kw > GEN_RUNNING_KW
+  return {
+    mode,
+    state: genOn ? 'running' : 'idle',
+    kw,
+    loadingPct: genOn ? fresh('gen_loading_pct') : null,
+    at,
+  }
 }
 
 // INT32_MAX / UINT32_MAX scaled by the Huawei power-register gain
@@ -158,6 +235,8 @@ function readOptionalNumber(metric: CurrentMetric | undefined): number | null {
 function derivedLoadKw(
   metrics: CurrentResponse['metrics'],
   essDischargeSign: 1 | -1,
+  gridKw: number | null,
+  genKw: number,
 ): number | null {
   const pv = readOptionalNumber(metrics.active_pv_power_kw)
   const ess = readOptionalNumber(metrics.active_ess_power_kw)
@@ -165,8 +244,8 @@ function derivedLoadKw(
   // Grid may be null (sentinel / missing) — treat as 0 for the
   // islanded bus balance. Explicit zero from a healthy meter is
   // already a real reading and arrives as 0 via readOptionalNumber.
-  const grid = readOptionalNumber(metrics.grid_connected_active_power_kw) ?? 0
-  return Math.abs(pv + grid + essDischargeSign * ess)
+  const grid = gridKw ?? readOptionalNumber(metrics.grid_connected_active_power_kw) ?? 0
+  return Math.abs(pv + grid + essDischargeSign * ess + genKw)
 }
 
 function freshestTimestamp(metrics: Iterable<CurrentMetric | undefined>): Date | null {
@@ -208,6 +287,8 @@ export function liveAllocationFromCurrent(
   if (!current) return NO_DATA_ALLOCATION
 
   const m = withoutStalePower(current.metrics)
+  const gen = readGenerator(current.metrics)
+  const offgrid = isOffgrid(gen?.mode ?? null)
   const pvKw = readNumber(m.active_pv_power_kw)
   // Grid meter offline / islanded: SmartLogger returns INT32_MAX
   // (→ ~2.15e6 kW after gain), which the collector now drops, so the
@@ -219,12 +300,15 @@ export function liveAllocationFromCurrent(
   const gridStale = Boolean(current.metrics.grid_connected_active_power_kw) && !m.grid_connected_active_power_kw
   const gridUnavailable =
     gridStale || (rawGrid !== null && Number.isFinite(rawGrid) && isModbusPowerSentinel(rawGrid))
-  const gridKw = gridUnavailable ? 0 : readNumber(m.grid_connected_active_power_kw)
+  // Without the grid the SmartLogger has no grid reading to give
+  // (handoff §4.3): the grid is zero by the supply mode, not by a sample.
+  const gridKw = offgrid || gridUnavailable ? 0 : readNumber(m.grid_connected_active_power_kw)
   const essKw = essDischargeSign * readNumber(m.active_ess_power_kw)
+  const genProd = gen?.state === 'running' ? gen.kw : 0
   // Prefer bus-balance derivation; raw 40503 is a backup-load-only
   // reading that misrepresents site-wide consumption in many modes.
   const loadKw =
-    derivedLoadKw(m, essDischargeSign) ?? readNumber(m.load_power_kw)
+    derivedLoadKw(m, essDischargeSign, offgrid ? 0 : null, genProd) ?? readNumber(m.load_power_kw)
   const socPercent = readOptionalNumber(m.soc_percent)
 
   const observedAt = freshestTimestamp([
@@ -232,6 +316,7 @@ export function liveAllocationFromCurrent(
     m.load_power_kw,
     m.grid_connected_active_power_kw,
     m.active_ess_power_kw,
+    gen ? m.active_gen_power_kw : undefined,
   ])
 
   // No power readings at all = the device is offline / hasn't
@@ -243,7 +328,8 @@ export function liveAllocationFromCurrent(
     m.active_pv_power_kw ||
     m.load_power_kw ||
     m.active_ess_power_kw ||
-    (m.grid_connected_active_power_kw && !gridUnavailable)
+    (m.grid_connected_active_power_kw && !gridUnavailable) ||
+    genProd > 0
   if (!anyReading) {
     return { ...NO_DATA_ALLOCATION, observedAt }
   }
@@ -264,14 +350,20 @@ export function liveAllocationFromCurrent(
   let pvSurplus = pvProd - pvToLoad
   const pvToEss = Math.min(pvSurplus, essCharge)
   pvSurplus -= pvToEss
-  const essChargeFromGrid = Math.max(essCharge - pvToEss, 0)
-  const pvToGrid = Math.max(pvSurplus, 0)
+  // The generator charges the battery before the grid does (§4.3).
+  const essChargeAfterPv = Math.max(essCharge - pvToEss, 0)
+  const genToEss = Math.min(essChargeAfterPv, genProd)
+  const essChargeFromGrid = Math.max(essChargeAfterPv - genToEss, 0)
+  const pvToGrid = offgrid ? 0 : Math.max(pvSurplus, 0)
 
   // ESS-discharge → load → grid (any leftover discharge that the
   // load can't absorb shows up at the export point).
   const essToLoad = Math.min(essDischarge, loadRemaining)
   loadRemaining -= essToLoad
-  const essToGrid = Math.max(essDischarge - essToLoad, 0)
+  const essToGrid = offgrid ? 0 : Math.max(essDischarge - essToLoad, 0)
+
+  const genToLoad = Math.min(Math.max(genProd - genToEss, 0), loadRemaining)
+  loadRemaining -= genToLoad
 
   // Grid-import → load → ESS. We charge the battery from the grid
   // only when PV alone couldn't cover the requested charge (the
@@ -291,13 +383,15 @@ export function liveAllocationFromCurrent(
       essKw > IDLE_KW ? 'discharging' : essKw < -IDLE_KW ? 'charging' : 'idle',
     socPercent,
     gridKw: Math.abs(gridKw),
-    gridState: gridUnavailable
-      ? 'unavailable'
-      : gridKw > IDLE_KW
-        ? 'importing'
-        : gridKw < -IDLE_KW
-          ? 'exporting'
-          : 'idle',
+    gridState: offgrid
+      ? 'offline'
+      : gridUnavailable
+        ? 'unavailable'
+        : gridKw > IDLE_KW
+          ? 'importing'
+          : gridKw < -IDLE_KW
+            ? 'exporting'
+            : 'idle',
     pvToLoadKw: pvToLoad,
     pvToEssKw: pvToEss,
     pvToGridKw: pvToGrid,
@@ -306,6 +400,12 @@ export function liveAllocationFromCurrent(
     essToLoadKw: essToLoad,
     essToGridKw: essToGrid,
     netExportKw,
+    supplyMode: gen?.mode ?? null,
+    genKw: genProd,
+    genLoadingPct: gen?.loadingPct ?? null,
+    genState: gen?.state ?? null,
+    genToLoadKw: genToLoad,
+    genToEssKw: genToEss,
     status: 'normal',
     observedAt,
   }

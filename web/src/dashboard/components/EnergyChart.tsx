@@ -18,7 +18,9 @@ import {
   AI_PLAN_COLOR,
   AI_PLAN_LOAD_COLOR,
   dayPowerColor,
+  GEN_POWER_COLOR,
   PV_FORECAST_COLOR,
+  SUPPLY_MODE_COLORS,
 } from '../colors'
 import { formatChartNumber } from '../format'
 import { DAY_POWER_METRIC_KEYS, DAY_POWER_METRIC_LABELS } from '../metrics'
@@ -33,6 +35,14 @@ import type { PowerChartRow } from '../transforms/power'
 import { pvForecastLabel, type PvForecastHourlyRow } from '../transforms/pvForecast'
 import type { SOCChartRow } from '../transforms/soc'
 import type { EnergySummary as Summary } from '../transforms/summary'
+import {
+  GEN_POWER_KEY,
+  SUPPLY_MODE_KEY,
+  SUPPLY_MODE_LABELS,
+  supplySegments,
+  type DaySupplyBucket,
+  type SupplyMode,
+} from '../transforms/supply'
 import { useChartChrome } from '../../theme/useChartChrome'
 import { ChartSkeleton } from './ChartSkeleton'
 import { EnergySummary } from './EnergySummary'
@@ -44,6 +54,9 @@ type Props = {
   damSeries?: DAMChartRow[]
   socSeries?: SOCChartRow[]
   powerSeries?: PowerChartRow[]
+  // supplySeries is the day's supply mode per bucket, drawn as a strip
+  // along the bottom of the chart; null for a site without an Encombi.
+  supplySeries?: DaySupplyBucket[] | null
   pvForecastSeries?: PvForecastHourlyRow[]
   // pvForecastWholeElevator marks the forecast series as the whole
   // elevator's rather than the site's.
@@ -89,6 +102,14 @@ const AI_REASON_KEY = 'ai_reason_text'
 // up to one balance of the plant.
 const AI_LOAD_KEY = 'ai_load_kw'
 const AI_LOAD_LABEL = 'Робота в дешеві години (сценарій)'
+const GEN_POWER_LABEL = 'Генератор'
+// SUPPLY_KEY is the strip's legend toggle.
+const SUPPLY_KEY = 'supply_strip'
+const SUPPLY_LABEL = 'Режим живлення'
+// The strip's height, in percent of the plot, on its own 0..100 axis.
+const SUPPLY_STRIP_PCT = 4
+// A generator that never gave more than this all day draws no series.
+const GEN_SHOWN_KW = 0.5
 
 // Day preset uses 5-minute buckets (288 per day); show every 12th tick so
 // labels land on the hour and the axis stays readable.
@@ -154,6 +175,7 @@ export function EnergyChart({
   damSeries,
   socSeries,
   powerSeries,
+  supplySeries = null,
   pvForecastSeries,
   pvForecastWholeElevator = false,
   aiPlan,
@@ -207,12 +229,16 @@ export function EnergyChart({
     for (const row of pvForecastSeries ?? []) {
       if (Number.isFinite(row.plannedKw)) forecastByHour.set(row.hour, row.plannedKw)
     }
+    const modeByTime = new Map<string, SupplyMode>()
+    for (const b of supplySeries ?? []) if (b.mode) modeByTime.set(b.time, b.mode)
     return rows.map((row, idx) => {
       const merged: PowerChartRow = { ...row }
       const price = priceByTime.get(String(row.time))
       if (price != null && Number.isFinite(price)) merged[DAM_PRICE_KEY] = price
       const soc = socByTime.get(String(row.time))
       if (soc != null && Number.isFinite(soc)) merged[SOC_KEY] = soc
+      const mode = modeByTime.get(String(row.time))
+      if (mode) merged[SUPPLY_MODE_KEY] = mode
       const hour = Math.floor(idx / 12)
       const inHour = idx % 12
       if (inHour === PV_FORECAST_BUCKET_OFFSET) {
@@ -237,8 +263,18 @@ export function EnergyChart({
       }
       return merged
     })
-  }, [powerSeries, damSeries, socSeries, pvForecastSeries, planBuckets])
+  }, [powerSeries, damSeries, socSeries, pvForecastSeries, planBuckets, supplySeries])
   const hasSoc = (socSeries ?? []).some((r) => r.soc != null && Number.isFinite(r.soc))
+  const hasGen = dayData.some((r) => {
+    const v = r[GEN_POWER_KEY]
+    return typeof v === 'number' && v > GEN_SHOWN_KW
+  })
+  const supplyStrip = useMemo(() => (supplySeries ? supplySegments(supplySeries) : []), [supplySeries])
+  const hasSupply = supplyStrip.length > 0
+  const supplyModes = useMemo(() => {
+    const seen = new Set(supplyStrip.map((s) => s.mode))
+    return (Object.keys(SUPPLY_MODE_LABELS) as SupplyMode[]).filter((m) => seen.has(m))
+  }, [supplyStrip])
   const hasPvForecast = (pvForecastSeries ?? []).length > 0
   const hasAiPlan = aiPlanHasDispatch(aiPlan ?? null)
   const hasAiLoad = aiPlanHasLoad(aiPlan ?? null)
@@ -295,6 +331,9 @@ export function EnergyChart({
       label: DAY_POWER_METRIC_LABELS[key] ?? key,
       color: dayPowerColor(key),
     }))
+    if (hasGen) {
+      items.push({ id: GEN_POWER_KEY, label: GEN_POWER_LABEL, color: GEN_POWER_COLOR })
+    }
     if (hasPvForecast) {
       items.push({ id: PV_FORECAST_KEY, label: pvForecastName, color: PV_FORECAST_COLOR })
     }
@@ -311,32 +350,47 @@ export function EnergyChart({
     if (hasAiPlan) {
       items.push({ id: AI_SOC_KEY, label: aiSocLabel, color: chrome.socPlan })
     }
+    if (hasSupply) {
+      items.push({ id: SUPPLY_KEY, label: SUPPLY_LABEL, color: SUPPLY_MODE_COLORS.generator })
+    }
     return items
-  }, [hasSoc, hasPvForecast, pvForecastName, hasAiPlan, hasAiLoad, aiEssLabel, aiSocLabel, chrome.soc, chrome.socPlan])
+  }, [hasSoc, hasGen, hasSupply, hasPvForecast, pvForecastName, hasAiPlan, hasAiLoad, aiEssLabel, aiSocLabel, chrome.soc, chrome.socPlan])
 
   const renderDayLegend = useCallback(
     () => (
-      <ul className="chart-legend">
-        {dayLegendItems.map((item) => {
-          const hidden = hiddenSeries.has(item.id)
-          return (
-            <li key={item.id}>
-              <button
-                type="button"
-                className={`chart-legend-item${hidden ? ' chart-legend-item--hidden' : ''}`}
-                aria-pressed={hidden}
-                title={hidden ? 'Показати' : 'Сховати'}
-                onClick={() => toggleSeries(item.id)}
-              >
-                <span className="chart-legend-swatch" style={{ background: item.color }} />
-                <span className="chart-legend-label">{item.label}</span>
-              </button>
-            </li>
-          )
-        })}
-      </ul>
+      <>
+        <ul className="chart-legend">
+          {dayLegendItems.map((item) => {
+            const hidden = hiddenSeries.has(item.id)
+            return (
+              <li key={item.id}>
+                <button
+                  type="button"
+                  className={`chart-legend-item${hidden ? ' chart-legend-item--hidden' : ''}`}
+                  aria-pressed={hidden}
+                  title={hidden ? 'Показати' : 'Сховати'}
+                  onClick={() => toggleSeries(item.id)}
+                >
+                  <span className="chart-legend-swatch" style={{ background: item.color }} />
+                  <span className="chart-legend-label">{item.label}</span>
+                </button>
+              </li>
+            )
+          })}
+        </ul>
+        {hasSupply && !hiddenSeries.has(SUPPLY_KEY) && (
+          <ul className="chart-legend chart-legend--supply" aria-label="Смуга режимів живлення">
+            {supplyModes.map((m) => (
+              <li key={m} className="chart-legend-item chart-legend-item--static">
+                <span className="chart-legend-swatch" style={{ background: SUPPLY_MODE_COLORS[m] }} />
+                <span className="chart-legend-label">{SUPPLY_MODE_LABELS[m]}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </>
     ),
-    [dayLegendItems, hiddenSeries, toggleSeries],
+    [dayLegendItems, hiddenSeries, toggleSeries, hasSupply, supplyModes],
   )
 
   const dayTickFormatter = useCallback((v: unknown): string => {
@@ -388,6 +442,7 @@ export function EnergyChart({
                   hide
                   width={0}
                 />
+                <YAxis yAxisId="supply" orientation="right" domain={[0, 100]} hide width={0} />
                 <Tooltip
                   content={powerTooltip}
                   offset={12}
@@ -433,6 +488,22 @@ export function EnergyChart({
                       }}
                     />
                   ))}
+                {hasSupply &&
+                  !hiddenSeries.has(SUPPLY_KEY) &&
+                  supplyStrip.map((s, i) => (
+                    <ReferenceArea
+                      key={`supply-${i}`}
+                      yAxisId="supply"
+                      x1={s.x1}
+                      x2={s.x2}
+                      y1={0}
+                      y2={SUPPLY_STRIP_PCT}
+                      fill={SUPPLY_MODE_COLORS[s.mode]}
+                      fillOpacity={s.mode === 'grid' ? 0.35 : 0.85}
+                      stroke="none"
+                      ifOverflow="visible"
+                    />
+                  ))}
                 <ReferenceLine y={0} yAxisId="power" stroke={chrome.zero} />
                 {planOverlay?.annotation && dayLabels.includes(planOverlay.annotation.time) && (
                   <ReferenceLine
@@ -469,6 +540,23 @@ export function EnergyChart({
                     />
                   )
                 })}
+                {hasGen && (
+                  <Area
+                    yAxisId="power"
+                    type="monotone"
+                    dataKey={GEN_POWER_KEY}
+                    name={GEN_POWER_LABEL}
+                    stroke={GEN_POWER_COLOR}
+                    strokeWidth={2}
+                    fill={GEN_POWER_COLOR}
+                    fillOpacity={0.18}
+                    baseValue={0}
+                    dot={false}
+                    connectNulls={false}
+                    hide={hiddenSeries.has(GEN_POWER_KEY)}
+                    isAnimationActive={false}
+                  />
+                )}
                 {hasPvForecast && !hiddenSeries.has(PV_FORECAST_KEY) && (
                   <Line
                     yAxisId="power"

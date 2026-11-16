@@ -115,6 +115,41 @@ describe('annualDetailSheet', () => {
     expect(sheet.rows[0].values[8]).toBe(1.6)
     expect(last.values[8]).toBeNull()
   })
+
+  it('adds the generator columns before EBITDA when the period ran one', () => {
+    const gen = { gen_kwh: 300, gen_fuel_cost_uah: 7425, gen_fuel_l: 90, minutes_generator: 150, minutes_island: 30, effect_offgrid_uah: 1200 }
+    const sheet = annualDetailSheet([{ month: '2026-11', totals: totals(gen) }], totals(gen), '2026 рік', 'ke')
+    const headers = sheet.columns.map((c) => c.header)
+    expect(headers.slice(9, 15)).toEqual([
+      'Генератор, кВт·год',
+      'Пальне, грн',
+      'Пальне, л',
+      'Без мережі, год',
+      'Ефект без мережі, грн',
+      'EBITDA, грн',
+    ])
+    expect(sheet.rows[0].values.slice(9, 15)).toEqual([300, 7425, 90, 3, 1200, 24690])
+  })
+})
+
+describe('monthDetailSheet with a generator', () => {
+  it('keeps the sheet as it was without one and widens it with one', () => {
+    const plain = monthDetailSheet([day({})], totals(), '2026-11', 'pe', () => null)
+    expect(plain.columns.map((c) => c.header)).not.toContain('Генератор, кВт·год')
+
+    const sheet = monthDetailSheet(
+      [day({ gen_kwh: 100, gen_fuel_cost_uah: 2475, gen_fuel_l: 30, minutes_generator: 60 })],
+      totals({ gen_kwh: 100, gen_fuel_cost_uah: 2475, gen_fuel_l: 30, minutes_generator: 60 }),
+      '2026-11',
+      'ke',
+      () => null,
+    )
+    const headers = sheet.columns.map((c) => c.header)
+    const at = headers.indexOf('Генератор, кВт·год')
+    expect(at).toBe(11)
+    expect(sheet.rows[0].values.slice(at, at + 5)).toEqual([100, 2475, 30, 1, 0])
+    expect(sheet.rows[0].values).toHaveLength(headers.length)
+  })
 })
 
 describe('dayPivotSheet', () => {
