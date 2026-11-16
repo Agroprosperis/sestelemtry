@@ -59,6 +59,7 @@ type Normalizer struct {
 	siteID     string
 	topology   Topology
 	essSign    float64
+	gridSign   float64
 	expected   []DeviceRole
 	staleAfter time.Duration
 	faultAfter time.Duration
@@ -80,6 +81,7 @@ func NewNormalizer(cfg *Config) *Normalizer {
 		siteID:     cfg.SiteID,
 		topology:   cfg.SmartLogger.Topology,
 		essSign:    cfg.EffectiveEssSign(),
+		gridSign:   cfg.EffectiveGridSign(),
 		expected:   expected,
 		staleAfter: stale,
 		faultAfter: 30 * time.Second,
@@ -114,7 +116,7 @@ func (n *Normalizer) BuildTick(now time.Time) Tick {
 			values[k] = v
 		}
 	}
-	return buildTickFromValues(n.siteID, n.topology, n.essSign, now, values, quality)
+	return buildTickFromValues(n.siteID, n.topology, n.essSign, n.gridSign, now, values, quality)
 }
 
 // buildTickFromValues maps raw metric_key values into the normalized
@@ -123,7 +125,7 @@ func (n *Normalizer) BuildTick(now time.Time) Tick {
 func buildTickFromValues(
 	siteID string,
 	topology Topology,
-	essSign float64,
+	essSign, gridSign float64,
 	ts time.Time,
 	values map[string]float64,
 	quality string,
@@ -144,7 +146,7 @@ func buildTickFromValues(
 		t.ESSPowerKw = f64ptr(v * essSign)
 	}
 	if v, ok := values["grid_connected_active_power_kw"]; ok {
-		t.GridPowerKw = f64ptr(v)
+		t.GridPowerKw = f64ptr(v * gridSign)
 	}
 	if v, ok := values["load_power_kw"]; ok {
 		t.LoadPowerKw = f64ptr(v)

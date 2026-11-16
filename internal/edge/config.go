@@ -9,6 +9,7 @@ package edge
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -34,10 +35,10 @@ const (
 	RoleESS DeviceRole = "ess"
 )
 
-// Mode is the control mode. MVP supports only monitor/shadow; any
-// auto_* mode is rejected at config load because the write path does
-// not exist in this build (spec: write to 40378/40381 is forbidden
-// until MVP-3 sign-off).
+// Mode is the control mode: monitor (telemetry only) or shadow (the
+// engine decides every second). Whether its decisions reach the
+// SmartLogger is not a mode at all but the device's own write flag
+// (WriteGate), off unless a person turns it on.
 type Mode string
 
 const (
@@ -128,6 +129,28 @@ type ControlConfig struct {
 	Mode     Mode          `yaml:"mode"`
 	Preset   string        `yaml:"preset"`
 	Interval time.Duration `yaml:"interval"`
+	Write    WriteConfig   `yaml:"write"`
+}
+
+// WriteConfig tunes the SmartLogger write path (ems_sl_write_cutover.md
+// §4, §12). Nothing here turns writing on: that is the device flag.
+type WriteConfig struct {
+	// StatePath is the write flag file; default next to the manifest cache.
+	StatePath string `yaml:"state_path"`
+	// InitialHold keeps the battery at 0 kW after writing is turned on
+	// (cutover §3: щонайменше 15 хвилин на нулі).
+	InitialHold time.Duration `yaml:"initial_hold"`
+	// FirstCommandMaxKw caps every non-zero command until the battery has
+	// followed one (cutover §4: перша ненульова ≤ 100 кВт).
+	FirstCommandMaxKw float64 `yaml:"first_command_max_kw"`
+	// SocMinPct/SocMaxPct are the hard SOC window of every written
+	// command, whatever the manifest says (cutover §4: 20–90 %).
+	SocMinPct float64 `yaml:"soc_min_pct"`
+	SocMaxPct float64 `yaml:"soc_max_pct"`
+	// PVInterval/ESSInterval are how often each logger's setpoints are
+	// rewritten (cutover §12.1: СЕС ~2 с, УЗЕ ~3 с).
+	PVInterval  time.Duration `yaml:"pv_interval"`
+	ESSInterval time.Duration `yaml:"ess_interval"`
 }
 
 // LocalUIConfig is the on-device web console (spec ems_ui_edge_vs_cloud
@@ -146,6 +169,9 @@ func (l LocalUIConfig) On() bool { return l.Enabled == nil || *l.Enabled }
 type GridLimits struct {
 	ImportLimitKw  float64 `yaml:"import_limit_kw"`
 	TargetImportKw float64 `yaml:"target_import_kw"`
+	// ExportCapKw is the PCC export ceiling until a manifest carries one
+	// (ЖЕ 850 = 50 % of 1 700). Writing cannot be turned on without it.
+	ExportCapKw float64 `yaml:"export_cap_kw"`
 }
 
 type PVLimits struct {
@@ -215,6 +241,10 @@ type Config struct {
 	// 1, -1. The normalizer applies it so the tick's ess_power_kw is
 	// always + discharge / − charge per the spec.
 	EssDischargeSign int `yaml:"ess_discharge_sign"`
+	// GridImportSign fixes the convention of 40505 to "+ import". Set
+	// to -1 only when the start-up check against the meter's 32278
+	// shows the logger reports export as positive (cutover §12.6 п. 3).
+	GridImportSign int `yaml:"grid_import_sign"`
 }
 
 // DefaultMetricKeys returns the per-role register whitelist from the
@@ -440,6 +470,28 @@ func (c *Config) applyDefaults() {
 	if ctl.Interval <= 0 {
 		ctl.Interval = time.Second
 	}
+	w := &ctl.Write
+	if strings.TrimSpace(w.StatePath) == "" {
+		w.StatePath = filepath.Join(filepath.Dir(m.CachePath), "write_gate.json")
+	}
+	if w.InitialHold <= 0 {
+		w.InitialHold = 15 * time.Minute
+	}
+	if w.FirstCommandMaxKw <= 0 {
+		w.FirstCommandMaxKw = 100
+	}
+	if w.SocMinPct <= 0 {
+		w.SocMinPct = 20
+	}
+	if w.SocMaxPct <= 0 {
+		w.SocMaxPct = 90
+	}
+	if w.PVInterval <= 0 {
+		w.PVInterval = 2 * time.Second
+	}
+	if w.ESSInterval <= 0 {
+		w.ESSInterval = 3 * time.Second
+	}
 
 	if c.Limits.Bess.SocMinEconomicPct <= 0 {
 		c.Limits.Bess.SocMinEconomicPct = 20
@@ -467,8 +519,28 @@ func (c *Config) validate() error {
 	switch c.Control.Mode {
 	case ModeMonitor, ModeShadow:
 	default:
-		// Hard gate: this build has no SmartLogger write path at all.
-		return fmt.Errorf("edge config: control.mode must be monitor or shadow (write modes are not built until MVP-3), got %q", c.Control.Mode)
+		// Writing is the device flag, never a configured mode.
+		return fmt.Errorf("edge config: control.mode must be monitor or shadow, got %q", c.Control.Mode)
+	}
+	w := c.Control.Write
+	if w.SocMinPct < 0 || w.SocMaxPct > 100 || w.SocMinPct >= w.SocMaxPct {
+		return fmt.Errorf("edge config: control.write SOC window %g…%g%% out of range", w.SocMinPct, w.SocMaxPct)
+	}
+	if w.PVInterval < 500*time.Millisecond || w.ESSInterval < 500*time.Millisecond {
+		return fmt.Errorf("edge config: control.write intervals must be at least 500ms")
+	}
+	if w.PVInterval > time.Minute || w.ESSInterval > time.Minute {
+		// The logger drops to its timeout schedule after ~300 s without a
+		// command; rewriting must stay well inside it.
+		return fmt.Errorf("edge config: control.write intervals must be at most 1m")
+	}
+	if c.Limits.Grid.ExportCapKw < 0 {
+		return fmt.Errorf("edge config: limits.grid.export_cap_kw must not be negative")
+	}
+	switch c.GridImportSign {
+	case 0, 1, -1:
+	default:
+		return fmt.Errorf("edge config: grid_import_sign must be 1 or -1, got %d", c.GridImportSign)
 	}
 
 	sl := c.SmartLogger
@@ -537,6 +609,14 @@ func (c *Config) validate() error {
 // EffectiveEssSign returns +1 or -1.
 func (c *Config) EffectiveEssSign() float64 {
 	if c.EssDischargeSign == -1 {
+		return -1
+	}
+	return 1
+}
+
+// EffectiveGridSign returns +1 or -1.
+func (c *Config) EffectiveGridSign() float64 {
+	if c.GridImportSign == -1 {
 		return -1
 	}
 	return 1

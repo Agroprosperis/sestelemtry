@@ -48,7 +48,7 @@ func (h *Handlers) publishDispatch(ctx context.Context, siteID string) (EdgePubl
 	if err != nil {
 		return EdgePublishResult{SiteID: siteID}, err
 	}
-	doc, run := buildDispatchManifest(env, m, res, ver.Version)
+	doc, run := buildDispatchManifest(env, m, res, ver)
 
 	out := EdgePublishResult{
 		SiteID: siteID, ManifestID: doc.ManifestID, Source: doc.Source,
@@ -59,11 +59,12 @@ func (h *Handlers) publishDispatch(ctx context.Context, siteID string) (EdgePubl
 	} else {
 		out.LoadSource = "none"
 	}
-	_, latestID, hasLatest, err := storage.LatestEdgeManifest(ctx, e.Pool, siteID)
+	latestPayload, latestID, hasLatest, err := storage.LatestEdgeManifest(ctx, e.Pool, siteID)
 	if err != nil {
 		return out, err
 	}
 	if !hasLatest || latestID != doc.ManifestID {
+		doc.ManifestSeq = nextManifestSeq(latestPayload, time.Now())
 		payload, err := json.Marshal(doc)
 		if err != nil {
 			return out, err
@@ -87,9 +88,64 @@ func (h *Handlers) publishDispatch(ctx context.Context, siteID string) (EdgePubl
 	return out, nil
 }
 
+// nextManifestSeq numbers a newly stored manifest: past the previous
+// one's, and never behind the clock.
+func nextManifestSeq(prevPayload []byte, now time.Time) int64 {
+	seq := now.UnixMilli()
+	var prev struct {
+		ManifestSeq int64 `json:"manifest_seq"`
+	}
+	if len(prevPayload) > 0 && json.Unmarshal(prevPayload, &prev) == nil && prev.ManifestSeq >= seq {
+		seq = prev.ManifestSeq + 1
+	}
+	return seq
+}
+
+// manualBlocks turns the model's hourly commands back into the
+// operator's blocks: consecutive hours of one block (same id, else same
+// intent) merge. AUTO hours carry nothing.
+func manualBlocks(m dispatch.Model, start time.Time, ver storage.DispatchVersion) []edgeManualCommand {
+	var out []edgeManualCommand
+	var srcIDs []string // the desk's own block id of each entry of out
+	same := func(i int, c *dispatch.Command) bool {
+		if srcIDs[i] != "" || c.ID != "" {
+			return srcIDs[i] == c.ID
+		}
+		b := out[i]
+		return b.Type == string(c.Type) && b.Value == c.Value && b.Direction == c.Direction
+	}
+	for i, c := range m.Commands {
+		if c == nil || c.Type == dispatch.CmdAuto || c.Type == "" {
+			continue
+		}
+		from := start.Add(time.Duration(i) * time.Hour)
+		until := from.Add(time.Hour)
+		if n := len(out); n > 0 && out[n-1].Until.Equal(from) && same(n-1, c) {
+			out[n-1].Until = until
+			if c.Value > 0 {
+				// A target block's goal sits on its last hour.
+				out[n-1].Value = c.Value
+			}
+			continue
+		}
+		id := c.ID
+		if id == "" {
+			id = fmt.Sprintf("v%d-%s", ver.Version, from.UTC().Format("200601021504"))
+		}
+		out = append(out, edgeManualCommand{
+			ID: id, Type: string(c.Type), Value: c.Value, Direction: c.Direction,
+			From: from, Until: until, ConfirmedBy: ver.ConfirmedBy, ConfirmedAt: ver.ConfirmedAt,
+		})
+		srcIDs = append(srcIDs, c.ID)
+	}
+	return out
+}
+
 // buildDispatchManifest turns a simulated plan into manifest-lite (the
-// edge follows plan.intervals[].ess_kw) and the run record. Pure.
-func buildDispatchManifest(env *dispatchEnv, m dispatch.Model, res dispatch.Result, version int) (edgeManifestDoc, []dispatchRunHour) {
+// edge follows plan.intervals[].ess_kw, a manual block first) and the
+// run record. Pure.
+func buildDispatchManifest(env *dispatchEnv, m dispatch.Model, res dispatch.Result, ver storage.DispatchVersion) (edgeManifestDoc, []dispatchRunHour) {
+	version := ver.Version
 	cfg := m.Cfg
 	doc := edgeManifestDoc{
 		SchemaVersion: "lite-1",
@@ -120,8 +176,10 @@ func buildDispatchManifest(env *dispatchEnv, m dispatch.Model, res dispatch.Resu
 		doc.GridLimits.TargetImportKw = env.params.GridTargetKw
 	}
 	doc.GridLimits.PvRatedKw = env.params.PvRatedKw
+	doc.GridLimits.ExportCapKw = cfg.EffectiveExportCap()
 	doc.SocPolicy.MinEconomicPct = cfg.ReservePct
 	doc.SocPolicy.MaxEconomicPct = env.site.SocMaxPct
+	doc.ManualCommands = manualBlocks(m, env.start, ver)
 
 	var intervals []edgePlanInterval
 	run := []dispatchRunHour{}

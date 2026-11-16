@@ -34,6 +34,7 @@ func (s *Service) runLocalUI(ctx context.Context) {
 	mux.HandleFunc("/api/events", s.uiEvents)
 	mux.HandleFunc("/api/manifest", s.uiManifest)
 	mux.HandleFunc("/api/override", s.uiOverride)
+	mux.HandleFunc("/api/write", s.uiWrite)
 
 	srv := &http.Server{
 		Addr:              s.cfg.LocalUI.Listen,
@@ -77,7 +78,8 @@ func (s *Service) uiStatus(w http.ResponseWriter, r *http.Request) {
 		"now":           now,
 		"uptime_s":      int64(time.Since(s.startedAt).Seconds()),
 		"timezone":      s.cfg.Timezone,
-		"write_enabled": false,
+		"write_enabled": s.gate.Enabled(),
+		"write":         s.writeHealth(),
 		"limits": map[string]any{
 			"source":                params.planSource,
 			"grid_import_kw":        s.effectiveImportLimitKw(now),
@@ -229,6 +231,42 @@ func (s *Service) uiOverride(w http.ResponseWriter, r *http.Request) {
 		uiJSON(w, map[string]any{"override": ov})
 	default:
 		http.Error(w, "mode must be auto, fallback_safe or monitor", http.StatusBadRequest)
+	}
+}
+
+// uiWrite is the write flag on the console.
+//
+//	GET  → state, preconditions
+//	POST {"action":"enable","confirm":"<site_id>"} — turn writing on
+//	     {"action":"stop"}    — battery 0 now, keep writing safe values
+//	     {"action":"disable"} — battery 0 and PV at its rating, read back, off
+func (s *Service) uiWrite(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		uiJSON(w, map[string]any{
+			"write":         s.writeHealth(),
+			"preconditions": s.writePreconditions(time.Now().UTC()),
+		})
+	case http.MethodPost:
+		var body struct {
+			Action  string `json:"action"`
+			Confirm string `json:"confirm"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		by := "local-console " + r.RemoteAddr
+		reply := s.requestWrite(r.Context(), strings.TrimSpace(body.Action), by, body.Confirm)
+		if !reply.OK {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusConflict)
+			_ = json.NewEncoder(w).Encode(reply)
+			return
+		}
+		uiJSON(w, reply)
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
 }
 

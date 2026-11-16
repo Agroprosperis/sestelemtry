@@ -34,13 +34,23 @@ type Decision struct {
 	PBessVirtualKw    float64 // + discharge / − charge, kW
 	PPVLimitVirtualKw float64 // PV active power limit, kW
 
-	// Journal (ems_sl_write_cutover.md): write_enabled is device-local
-	// and off in this build — there is no Modbus write path. Readback
-	// is Encombi's current setpoint until cutover.
+	// Journal (ems_sl_write_cutover.md §8): write_enabled is the device
+	// flag. While it is off the readback is whatever else writes the
+	// logger (Encombi); while it is on the service fills the write
+	// fields with what actually went out and what the logger accepted.
 	WriteEnabled  bool
 	Readback40381 *float64
 	Readback40378 *float64
 	MeterPowerKw  *float64
+
+	ManualCommandID  string
+	WriteState       string
+	WriteReason      string
+	CommandESSKw     *float64 // 40381 after the write-side clamps
+	CommandPVLimitKw *float64 // 40378 after the write-side clamps
+	Written40381     *float64
+	Written40378     *float64
+	WriteClamps      []string
 
 	ReasonCode string
 	Rationale  string
@@ -68,6 +78,9 @@ func (d Decision) Record(siteID string) map[string]any {
 	putF(inputs, "load_power_kw", d.LoadPowerKw)
 	putF(inputs, "p_bess_plan_kw", d.PBessPlanKw)
 	putF(inputs, "meter_active_power_kw", d.MeterPowerKw)
+	if d.ManualCommandID != "" {
+		inputs["manual_command_id"] = d.ManualCommandID
+	}
 
 	clamps := d.Clamps
 	if clamps == nil {
@@ -81,6 +94,19 @@ func (d Decision) Record(siteID string) map[string]any {
 		"written_40381":         nil,
 		"written_40378":         nil,
 		"clamps":                clamps,
+	}
+	putF(outputs, "written_40381", d.Written40381)
+	putF(outputs, "written_40378", d.Written40378)
+	putF(outputs, "command_40381", d.CommandESSKw)
+	putF(outputs, "command_40378", d.CommandPVLimitKw)
+	if d.WriteState != "" {
+		outputs["write_state"] = d.WriteState
+		outputs["write_reason"] = d.WriteReason
+		wc := d.WriteClamps
+		if wc == nil {
+			wc = []string{}
+		}
+		outputs["write_clamps"] = wc
 	}
 	putF(outputs, "readback_40381", d.Readback40381)
 	putF(outputs, "readback_40378", d.Readback40378)
@@ -117,6 +143,12 @@ type engineParams struct {
 	pvRatedKw      float64
 	targetImportKw float64
 	exportAllowed  bool
+
+	// manual is the operator block in force; importCapKw is set by a
+	// «cap» block.
+	manual      *ManualCommand
+	importCapKw float64
+	capacityKwh float64
 }
 
 func resolveParams(now time.Time, m *Manifest, cfg *Config) engineParams {
@@ -166,6 +198,17 @@ func resolveParams(now time.Time, m *Manifest, cfg *Config) engineParams {
 	if m.GridLimits.TargetImportKw > 0 {
 		p.targetImportKw = m.GridLimits.TargetImportKw
 	}
+	if c := m.ManualAt(now); c != nil {
+		p.manual = c
+		switch c.Type {
+		case ManualExport:
+			// Selling through the PCC is the block's very purpose; the
+			// export ceiling still applies on the write side.
+			p.exportAllowed = true
+		case ManualCap:
+			p.importCapKw = c.Value
+		}
+	}
 	return p
 }
 
@@ -175,6 +218,10 @@ func resolveParams(now time.Time, m *Manifest, cfg *Config) engineParams {
 // deduplication before hitting the black box.
 func Decide(t Tick, m *Manifest, cfg *Config) (Decision, []Event) {
 	params := resolveParams(t.TS, m, cfg)
+	params.capacityKwh = cfg.Limits.Bess.PassportKwh
+	if v, ok := t.Values["ess_rated_kwh"]; ok && v > 0 {
+		params.capacityKwh = v
+	}
 
 	d := Decision{
 		TS:           t.TS,
@@ -189,6 +236,9 @@ func Decide(t Tick, m *Manifest, cfg *Config) (Decision, []Event) {
 		GridPowerKw:  t.GridPowerKw,
 		LoadPowerKw:  t.LoadPowerKw,
 		WriteEnabled: false,
+	}
+	if params.manual != nil {
+		d.ManualCommandID = params.manual.ID
 	}
 	if v, ok := t.Values["ess_active_power_adjustment_kw"]; ok {
 		d.Readback40381 = f64ptr(v)
@@ -260,6 +310,13 @@ func Decide(t Tick, m *Manifest, cfg *Config) (Decision, []Event) {
 			Context: map[string]any{"reason_code": d.ReasonCode},
 		})
 	}
+	if params.manual != nil && len(clamps) > 0 {
+		events = append(events, Event{
+			TS: t.TS, Severity: SevWarning, Code: EvManualClamped,
+			Message: fmt.Sprintf("ручну команду %s обрізано: %s", params.manual.ID, strings.Join(clamps, ", ")),
+			Context: map[string]any{"command_id": params.manual.ID, "type": params.manual.Type},
+		})
+	}
 	return d, events
 }
 
@@ -281,9 +338,14 @@ func applySetpoint(d *Decision, s setpoint) {
 }
 
 // desiredPower picks the first applicable setpoint source, then
-// returns its kW. Sources stay ordered so a later one (manual) can
-// be prepended without changing the existing two.
+// returns its kW: the operator's block, the plan, self-consumption.
 func desiredPower(t Tick, params engineParams, d *Decision) float64 {
+	if params.manual != nil {
+		if s, ok := manualSetpoint(t, *params.manual, params.capacityKwh); ok {
+			applySetpoint(d, s)
+			return s.kw
+		}
+	}
 	if params.preset == PresetEconomicArbitrage {
 		if s, ok := planSetpoint(t, params); ok {
 			applySetpoint(d, s)
@@ -355,6 +417,11 @@ var clampSteps = []clampStep{
 	clampDynamicSL,
 	clampNoExport,
 	clampChargeSource,
+	clampManualImportCap,
+}
+
+func clampManualImportCap(t Tick, params engineParams, p float64, note func(string)) (float64, bool) {
+	return clampImportCap(t, p, params.importCapKw, note), false
 }
 
 // clampBess applies, in order: SOC policy, SmartLogger dynamic limits

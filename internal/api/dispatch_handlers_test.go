@@ -137,7 +137,7 @@ func TestBuildDispatchManifest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	doc, run := buildDispatchManifest(env, m, res, 3)
+	doc, run := buildDispatchManifest(env, m, res, storage.DispatchVersion{Version: 3, ConfirmedBy: "op@x"})
 	if doc.Plan == nil || len(doc.Plan.Intervals) != 4 || len(run) != 4 {
 		t.Fatalf("plan = %+v, want 4 known hours", doc.Plan)
 	}
@@ -147,20 +147,61 @@ func TestBuildDispatchManifest(t *testing.T) {
 	if !doc.ExportAllowed || doc.Source != "dispatch" || doc.SocPolicy.MinEconomicPct != 20 {
 		t.Fatalf("manifest header = %+v", doc)
 	}
-	again, _ := buildDispatchManifest(env, m, res, 3)
+	again, _ := buildDispatchManifest(env, m, res, storage.DispatchVersion{Version: 3, ConfirmedBy: "op@x"})
 	if again.ManifestID != doc.ManifestID {
 		t.Fatal("same plan must hash to the same manifest id")
 	}
 	if run[1].Command == nil || run[1].ExportKw < 299.9 {
 		t.Fatalf("run hour 1 = %+v", run[1])
 	}
+	// The block itself reaches the edge too, to be carried out live.
+	if len(doc.ManualCommands) != 1 {
+		t.Fatalf("manual_commands = %+v", doc.ManualCommands)
+	}
+	if b := doc.ManualCommands[0]; b.ID != "b-exp" || b.Type != "export" || b.Value != 300 ||
+		!b.From.Equal(env.start.Add(time.Hour)) || !b.Until.Equal(env.start.Add(2*time.Hour)) || b.ConfirmedBy != "op@x" {
+		t.Fatalf("block = %+v", b)
+	}
 
 	// No known load → empty plan: the edge runs self-consumption.
 	empty := dispatch.Model{Loads: make([]*float64, 24), Commands: make([]*dispatch.Command, 24), Cfg: env.defaults}
 	res, _ = dispatch.Simulate(env.inputs, empty)
-	doc, run = buildDispatchManifest(env, empty, res, 0)
-	if doc.Plan != nil || len(run) != 0 {
-		t.Fatalf("empty model published a plan: %+v", doc.Plan)
+	doc, run = buildDispatchManifest(env, empty, res, storage.DispatchVersion{})
+	if doc.Plan != nil || len(run) != 0 || len(doc.ManualCommands) != 0 {
+		t.Fatalf("empty model published a plan: %+v / %+v", doc.Plan, doc.ManualCommands)
+	}
+
+	// Without a load the commands still go out: two hours of one fixed
+	// block merge, a later hold is its own block.
+	fixed := dispatch.Command{Type: dispatch.CmdFixed, Value: 100, Direction: "charge"}
+	hold := dispatch.Command{Type: dispatch.CmdHold}
+	empty.Commands[2], empty.Commands[3], empty.Commands[5] = &fixed, &fixed, &hold
+	res, _ = dispatch.Simulate(env.inputs, empty)
+	doc, _ = buildDispatchManifest(env, empty, res, storage.DispatchVersion{Version: 7})
+	if doc.Plan != nil || len(doc.ManualCommands) != 2 {
+		t.Fatalf("no-load commands: plan %+v, blocks %+v", doc.Plan, doc.ManualCommands)
+	}
+	if b := doc.ManualCommands[0]; b.Type != "fixed" || b.Direction != "charge" ||
+		!b.From.Equal(env.start.Add(2*time.Hour)) || !b.Until.Equal(env.start.Add(4*time.Hour)) {
+		t.Fatalf("fixed block = %+v", b)
+	}
+	if doc.ManualCommands[1].Type != "hold" {
+		t.Fatalf("hold block = %+v", doc.ManualCommands[1])
+	}
+}
+
+func TestNextManifestSeqGrows(t *testing.T) {
+	now := time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC)
+	if got := nextManifestSeq(nil, now); got != now.UnixMilli() {
+		t.Fatalf("first seq = %d", got)
+	}
+	ahead, _ := json.Marshal(map[string]any{"manifest_seq": now.UnixMilli() + 500})
+	if got := nextManifestSeq(ahead, now); got != now.UnixMilli()+501 {
+		t.Fatalf("seq after a later one = %d", got)
+	}
+	behind, _ := json.Marshal(map[string]any{"manifest_seq": 5})
+	if got := nextManifestSeq(behind, now); got != now.UnixMilli() {
+		t.Fatalf("seq after an older one = %d", got)
 	}
 }
 
@@ -173,7 +214,7 @@ func TestBuildDispatchManifestGridLimits(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	doc, _ := buildDispatchManifest(env, m, res, 0)
+	doc, _ := buildDispatchManifest(env, m, res, storage.DispatchVersion{Version: 0})
 	if doc.GridLimits.ImportLimitKw != 1700 {
 		t.Fatalf("default import_limit_kw = %v, want contract 1700", doc.GridLimits.ImportLimitKw)
 	}
@@ -182,14 +223,14 @@ func TestBuildDispatchManifestGridLimits(t *testing.T) {
 	}
 
 	m.Cfg.ImportCapKw = 900
-	doc, _ = buildDispatchManifest(env, m, res, 0)
+	doc, _ = buildDispatchManifest(env, m, res, storage.DispatchVersion{Version: 0})
 	if doc.GridLimits.ImportLimitKw != 1700 || doc.GridLimits.TargetImportKw != 480 {
 		t.Fatalf("desk 900 vs target 480: limit=%v target=%v, want 1700 / 480",
 			doc.GridLimits.ImportLimitKw, doc.GridLimits.TargetImportKw)
 	}
 
 	env.params.GridTargetKw = 1600
-	doc, _ = buildDispatchManifest(env, m, res, 0)
+	doc, _ = buildDispatchManifest(env, m, res, storage.DispatchVersion{Version: 0})
 	if doc.GridLimits.ImportLimitKw != 1700 || doc.GridLimits.TargetImportKw != 900 {
 		t.Fatalf("desk 900 vs target 1600: limit=%v target=%v, want 1700 / 900",
 			doc.GridLimits.ImportLimitKw, doc.GridLimits.TargetImportKw)
@@ -199,7 +240,7 @@ func TestBuildDispatchManifestGridLimits(t *testing.T) {
 	env.site.ImportKw = dispatchUncappedImportKw
 	m.Cfg.ImportCapKw = dispatchUncappedImportKw
 	env.params.GridTargetKw = 480
-	doc, _ = buildDispatchManifest(env, m, res, 0)
+	doc, _ = buildDispatchManifest(env, m, res, storage.DispatchVersion{Version: 0})
 	if doc.GridLimits.ImportLimitKw != 0 {
 		t.Fatalf("import unset: import_limit_kw = %v, want omitted (0)", doc.GridLimits.ImportLimitKw)
 	}
@@ -228,7 +269,7 @@ func TestDispatchManifestOutlivesHorizonRollover(t *testing.T) {
 		if published > 0 && !live.ValidUntil.After(env.now) {
 			t.Fatalf("manifest %s expired at %v before the %v run republished it", live.ManifestID, live.ValidUntil, env.now)
 		}
-		if doc, _ := buildDispatchManifest(env, m, res, 1); doc.ManifestID != live.ManifestID {
+		if doc, _ := buildDispatchManifest(env, m, res, storage.DispatchVersion{Version: 1}); doc.ManifestID != live.ManifestID {
 			live = doc
 			published++
 		}

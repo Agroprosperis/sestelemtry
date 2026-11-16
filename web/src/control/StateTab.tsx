@@ -9,7 +9,7 @@ import { EnergyChart } from '../dashboard/components/EnergyChart'
 import { WeatherCard } from '../dashboard/components/WeatherCard'
 import { useDashboardData } from '../dashboard/hooks/useDashboardData'
 import { useGridVoltage } from '../dashboard/hooks/useGridVoltage'
-import type { BessHealth, EdgeSiteStatus, HealthCheck, InverterHealth } from './controlClient'
+import type { BessHealth, EdgeSiteStatus, EdgeWriteHealth, HealthCheck, InverterHealth } from './controlClient'
 import { PLAN_SOURCE_LABELS, REASON_LABELS } from './decisionLabels'
 import { appliedAnnotation, manifestPlanToUzePlan } from './manifestPlan'
 
@@ -145,7 +145,8 @@ export function StateTab({ site, status }: Props) {
           </div>
         </section>
 
-        {health?.bess && <BessCard bess={health.bess} />}
+        {health?.write && <WriteCard write={health.write} alarms={health.alarms?.words} />}
+        {health?.bess && <BessCard bess={health.bess} iotWrites={health.write?.enabled === true} />}
 
         <section className="ctl-card">
           <h2>Стан керування</h2>
@@ -240,7 +241,90 @@ const BESS_CLASS_SEV: Record<string, string> = {
   unknown: 'warn',
 }
 
-function BessCard({ bess }: { bess: BessHealth }) {
+const WRITE_STATE_LABELS: Record<EdgeWriteHealth['state'], string> = {
+  off: 'запис вимкнено',
+  hold: 'утримання: УЗЕ 0 кВт',
+  run: 'робота',
+  stopped: 'зупинка: УЗЕ 0 кВт',
+  stopping: 'вимикання запису',
+}
+
+// WriteCard — the device write flag (ems_sl_write_cutover.md §4, §8): who
+// writes the loggers, what went out and what they read back. It only
+// shows the flag; turning it on is the device console's.
+function WriteCard({ write, alarms }: { write: EdgeWriteHealth; alarms?: string[] }) {
+  const on = write.enabled
+  const state = on ? write.state : 'off'
+  const sev = !on ? 'plain' : state === 'stopped' ? 'err' : 'warn'
+  const cmd = write.command
+  return (
+    <section className="ctl-card">
+      <h2>Запис у SmartLogger</h2>
+      <div className="ctl-bess-head">
+        <span className={'ctl-chip ' + sev}>{on ? 'пише IoT2050' : 'IoT2050 не пише'}</span>
+        <span>{WRITE_STATE_LABELS[state] ?? state}</span>
+      </div>
+      <div className="ctl-rows">
+        <div className="ctl-row">
+          <span className="k">Хто пише</span>
+          <span className="v">{on ? 'IoT2050' : 'Encombi або ніхто'}</span>
+        </div>
+        <div className="ctl-row">
+          <span className="k">Прапорець на пристрої</span>
+          <span className="v muted">
+            {on ? 'увімкнено' : 'вимкнено'}
+            {write.gate?.by ? ` · ${write.gate.by}` : ''}
+            {write.gate?.reason ? ` · ${write.gate.reason}` : ''}
+          </span>
+        </div>
+        {on && write.reason && (
+          <div className="ctl-row">
+            <span className="k">Причина</span>
+            <span className={'v ' + (state === 'stopped' ? 'err' : 'muted')}>{write.reason}</span>
+          </div>
+        )}
+        {on && cmd && (
+          <div className="ctl-row">
+            <span className="k">Команда</span>
+            <span className="v">
+              40381 {fmtKw(cmd.ess_kw)} · 40378 {cmd.pv_known ? fmtNum(cmd.pv_limit_kw, 0, ' кВт') : 'не пишеться'}
+            </span>
+          </div>
+        )}
+        {on && cmd?.clamps && cmd.clamps.length > 0 && (
+          <div className="ctl-row">
+            <span className="k">Обмежено</span>
+            <span className="v warn">{cmd.clamps.join('; ')}</span>
+          </div>
+        )}
+        {on &&
+          (write.registers ?? []).map((r) => (
+            <div className="ctl-row" key={r.register}>
+              <span className="k">{r.register} · readback</span>
+              <span className={'v ' + (r.ok ? 'ok' : 'err')}>
+                {fmtNum(r.kw, 1, ' кВт')} → {fmtNum(r.readback_kw, 1, ' кВт')}
+                {r.error ? ` · ${r.error}` : ''}
+              </span>
+            </div>
+          ))}
+        {alarms && alarms.length > 0 && (
+          <div className="ctl-row">
+            <span className="k">Аварії 50000…</span>
+            <span className={'v ' + (alarms.some((w) => w !== '0x0') ? 'err' : 'muted')}>{alarms.join(' ')}</span>
+          </div>
+        )}
+        {write.applied_manifest_seq ? (
+          <div className="ctl-row">
+            <span className="k">Застосований manifest</span>
+            <span className="v muted">№ {write.applied_manifest_seq}</span>
+          </div>
+        ) : null}
+      </div>
+    </section>
+  )
+}
+
+function BessCard({ bess, iotWrites }: { bess: BessHealth; iotWrites: boolean }) {
   const socOut =
     bess.soc_percent != null &&
     (bess.soc_percent < bess.soc_min_pct || bess.soc_percent > bess.soc_max_pct)
@@ -258,7 +342,7 @@ function BessCard({ bess }: { bess: BessHealth }) {
       </div>
       <div className="ctl-bess-sub">
         PCS: {bess.pcs_label || '—'} · ліміти −{fmtNum(bess.charge_max_kw, 0)} / +
-        {fmtNum(bess.discharge_max_kw, 0)} кВт · керує Encombi (shadow)
+        {fmtNum(bess.discharge_max_kw, 0)} кВт · {iotWrites ? 'керує IoT2050' : 'керує Encombi (shadow)'}
       </div>
       <details className="ctl-bess-details" open>
         <summary>Деталі УЗЕ</summary>

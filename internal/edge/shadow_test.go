@@ -33,7 +33,7 @@ func testCfg() *Config {
 }
 
 func testTick(values map[string]float64, quality string) Tick {
-	return buildTickFromValues("ab", TopologySingle, 1, testTS, values, quality)
+	return buildTickFromValues("ab", TopologySingle, 1, 1, testTS, values, quality)
 }
 
 func arbitrageManifest(planKw float64) *Manifest {

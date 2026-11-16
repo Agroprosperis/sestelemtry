@@ -114,7 +114,7 @@ func RunReplay(ctx context.Context, cfg *Config, log *slog.Logger, opts ReplayOp
 		if !ok {
 			continue
 		}
-		tick := buildTickFromValues(cfg.SiteID, cfg.SmartLogger.Topology, cfg.EffectiveEssSign(), ts, values, QualityOK)
+		tick := buildTickFromValues(cfg.SiteID, cfg.SmartLogger.Topology, cfg.EffectiveEssSign(), cfg.EffectiveGridSign(), ts, values, QualityOK)
 		d, _ := Decide(tick, manifest, cfg)
 		decisions++
 		reasons[d.ReasonCode]++

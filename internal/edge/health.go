@@ -80,6 +80,7 @@ type HealthSnapshot struct {
 	Bess      *BessHealth        `json:"bess,omitempty"`
 	Inverters []InverterSnapshot `json:"inverters,omitempty"`
 	Alarms    *HealthAlarms      `json:"alarms,omitempty"`
+	Write     *WriteHealth       `json:"write,omitempty"`
 }
 
 // BESS class labels (§7.1).
@@ -288,6 +289,9 @@ func (s *Service) buildHealth(now time.Time) *HealthSnapshot {
 		add(*c)
 	}
 
+	if s.gate != nil {
+		h.Write = s.writeHealth()
+	}
 	return h
 }
 

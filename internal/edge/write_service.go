@@ -1,0 +1,359 @@
+package edge
+
+import (
+	"context"
+	"fmt"
+	"math"
+	"strings"
+	"time"
+)
+
+// stepWrite runs the controller for this tick while the write flag is on
+// and records the write side of the decision. d is nil when no decision
+// was made this tick.
+func (s *Service) stepWrite(ctx context.Context, now time.Time, tick Tick, d *Decision) {
+	if !s.gate.Enabled() || s.ctl == nil {
+		if s.ctl != nil && s.ctl.State() != WriteOff {
+			s.ctl.Off()
+		}
+		s.writeCmd.Store(nil)
+		return
+	}
+	if s.ctl.State() == WriteStopping {
+		since := s.ctl.StoppingSince()
+		confirmed := s.stoppingConfirmed(since)
+		if confirmed || s.ctl.StoppingTimedOut(now) {
+			reason := s.ctl.Reason()
+			if !confirmed {
+				reason += " (readback безпечних уставок не підтверджено)"
+			}
+			ev, err := s.gate.Disable("edge", reason, now)
+			if err != nil {
+				s.log.Error("edge_write_gate_persist", "err", err)
+			}
+			s.writeEventDeduped(ctx, ev)
+			s.ctl.Off()
+			s.writeCmd.Store(nil)
+			return
+		}
+	}
+	decision := Decision{TS: now, ReasonCode: "no_decision"}
+	if d != nil {
+		decision = *d
+	}
+	n, faults := s.inverterCounts(now)
+	cmd, evs := s.ctl.Step(ControlInputs{
+		Now:            now,
+		Tick:           tick,
+		Decision:       decision,
+		ExportCapKw:    s.exportCapKw(now),
+		ImportLimitKw:  s.effectiveImportLimitKw(now),
+		InverterCount:  n,
+		InverterFaults: faults,
+	})
+	s.writeCmd.Store(&cmd)
+	for _, ev := range evs {
+		s.writeEventDeduped(ctx, ev)
+	}
+	if d == nil {
+		return
+	}
+	d.WriteEnabled = true
+	d.StateMachine = "WRITE_" + strings.ToUpper(cmd.State)
+	d.WriteState, d.WriteReason, d.WriteClamps = cmd.State, cmd.Reason, cmd.Clamps
+	ess := cmd.ESSKw
+	d.CommandESSKw = &ess
+	if cmd.PVKnown {
+		pv := cmd.PVLimitKw
+		d.CommandPVLimitKw = &pv
+	}
+	if fb, ok := s.feedback(regESSPower); ok && fb.Err == "" {
+		kw := fb.Kw
+		d.Written40381 = &kw
+		if fb.ReadbackKw != nil {
+			d.Readback40381 = fb.ReadbackKw
+		}
+	}
+	if fb, ok := s.feedback(regPVLimit); ok && fb.Err == "" {
+		kw := fb.Kw
+		d.Written40378 = &kw
+		if fb.ReadbackKw != nil {
+			d.Readback40378 = fb.ReadbackKw
+		}
+	}
+}
+
+// onWriteFault handles a failed write or a readback that differs
+// (handoff §9.1 п. 2): battery 0, then the flag drops.
+func (s *Service) onWriteFault(ctx context.Context, f writeFault) {
+	if !s.gate.Enabled() || s.ctl.State() == WriteStopping {
+		return
+	}
+	s.writeEventDeduped(ctx, Event{
+		TS: f.at, Severity: SevAlarm, Code: EvWriteFault,
+		Message: "відмова запису: " + f.msg + " — УЗЕ 0 кВт, запис вимикається",
+	})
+	s.ctl.BeginStopping(f.at, "відмова запису: "+f.msg)
+}
+
+// onWriteRequest serves a console action in the core loop.
+func (s *Service) onWriteRequest(ctx context.Context, now time.Time, req writeRequest) writeReply {
+	switch req.action {
+	case "enable":
+		if s.gate.Enabled() {
+			return writeReply{Error: "запис уже ввімкнено"}
+		}
+		if strings.TrimSpace(req.confirm) != s.cfg.SiteID {
+			return writeReply{Error: fmt.Sprintf("для підтвердження введіть код об'єкта (%s)", s.cfg.SiteID)}
+		}
+		pre := s.writePreconditions(now)
+		for _, p := range pre {
+			if !p.OK {
+				return writeReply{Error: "не виконані передумови запису", Preconditions: pre}
+			}
+		}
+		ev, err := s.gate.Enable(req.by, now)
+		if err != nil {
+			return writeReply{Error: err.Error(), Preconditions: pre}
+		}
+		s.ctl.Start(now)
+		s.writeEventDeduped(ctx, ev)
+		return writeReply{OK: true, Preconditions: pre}
+	case "stop":
+		if !s.gate.Enabled() {
+			return writeReply{Error: "запис не ввімкнено"}
+		}
+		if ev, ok := s.ctl.Stop(now, "оператор: УЗЕ 0 кВт ("+req.by+")"); ok {
+			s.writeEventDeduped(ctx, ev)
+		}
+		return writeReply{OK: true}
+	case "disable":
+		if !s.gate.Enabled() {
+			return writeReply{Error: "запис не ввімкнено"}
+		}
+		s.ctl.BeginStopping(now, "вимкнено оператором ("+req.by+")")
+		return writeReply{OK: true}
+	}
+	return writeReply{Error: "action must be enable, stop or disable"}
+}
+
+// requestWrite hands a console action to the core loop.
+func (s *Service) requestWrite(ctx context.Context, action, by, confirm string) writeReply {
+	req := writeRequest{action: action, by: by, confirm: confirm, reply: make(chan writeReply, 1)}
+	select {
+	case s.writeRequests <- req:
+	case <-ctx.Done():
+		return writeReply{Error: ctx.Err().Error()}
+	case <-time.After(5 * time.Second):
+		return writeReply{Error: "сервіс не відповів"}
+	}
+	select {
+	case r := <-req.reply:
+		return r
+	case <-ctx.Done():
+		return writeReply{Error: ctx.Err().Error()}
+	}
+}
+
+// exportCapKw is the PCC export ceiling in force: the manifest's, else
+// the device config's.
+func (s *Service) exportCapKw(now time.Time) float64 {
+	if m := s.manifest.Load(); m != nil && m.ActiveAt(now) && m.GridLimits.ExportCapKw > 0 {
+		return m.GridLimits.ExportCapKw
+	}
+	return s.cfg.Limits.Grid.ExportCapKw
+}
+
+// inverterCounts sizes the PV ceiling: configured inverters and those in
+// fault in a fresh sweep. A stale sweep counts no faults.
+func (s *Service) inverterCounts(now time.Time) (int, int) {
+	n := len(s.cfg.Diagnostics.Inverters.DeviceAddresses)
+	fleet := s.lastInverters.Load()
+	if n == 0 || fleet == nil || now.Sub(fleet.TS) > 3*s.cfg.Diagnostics.Inverters.PollInterval {
+		return n, 0
+	}
+	faults := 0
+	for _, inv := range fleet.Inverters {
+		if inv.PollOK && inv.Class == inverterFaultClass {
+			faults++
+		}
+	}
+	return n, faults
+}
+
+// WritePrecondition is one condition that must hold to turn writing on
+// (ems_sl_write_cutover.md §6, §12.6).
+type WritePrecondition struct {
+	ID     string `json:"id"`
+	OK     bool   `json:"ok"`
+	Label  string `json:"label"`
+	Actual string `json:"actual"`
+}
+
+// writePreconditions checks the live state against the cutover's
+// start conditions. Every one must hold.
+func (s *Service) writePreconditions(now time.Time) []WritePrecondition {
+	var out []WritePrecondition
+	add := func(id string, ok bool, label, actual string) {
+		out = append(out, WritePrecondition{ID: id, OK: ok, Label: label, Actual: actual})
+	}
+	add("mode", s.cfg.Control.Mode == ModeShadow, "режим контролера shadow", string(s.cfg.Control.Mode))
+	ov := s.override.Load()
+	add("override", !ov.activeAt(now), "немає локального override", map[bool]string{true: "діє override", false: "немає"}[ov.activeAt(now)])
+
+	tick := s.lastTick.Load()
+	if tick == nil || now.Sub(tick.TS) > 5*time.Second {
+		add("telemetry", false, "свіжа телеметрія", "немає")
+		return out
+	}
+	t := *tick
+	add("telemetry", t.DataQuality == QualityOK || t.DataQuality == QualityEstimated, "якість телеметрії ok", t.DataQuality)
+	for _, dev := range s.cfg.SmartLogger.Devices {
+		fresh, _ := s.hostFresh(now, dev.Host)
+		add("poll_"+string(dev.Role), fresh, "SmartLogger "+dev.Host+" на зв'язку", map[bool]string{true: "так", false: "ні"}[fresh])
+	}
+
+	words, ok := t.SLAlarmWords()
+	clear := ok
+	for _, w := range words {
+		clear = clear && w == 0
+	}
+	alarmActual := "не опитуються"
+	if ok {
+		alarmActual = strings.Join(slAlarmHex(words), " ")
+	}
+	add("alarms", clear, "слова аварій 50000… усі 0", alarmActual)
+	pcsOK := t.PCSShutdown != nil && !*t.PCSShutdown
+	pcsActual := "немає даних"
+	if t.PCSShutdown != nil {
+		pcsActual = fmt.Sprintf("40540=%v", map[bool]int{true: 1, false: 0}[*t.PCSShutdown])
+	}
+	add("pcs", pcsOK, "PCS не вимкнено (40540 = 0)", pcsActual)
+
+	for _, k := range s.controlModeKeys() {
+		v, has := t.Values[k]
+		actual := "не прочитано"
+		if has {
+			actual = fmt.Sprintf("%g", v)
+		}
+		add("control_mode_"+k, has && v == 4, "40737 = 4 ("+k+")", actual)
+	}
+
+	rated, hasRated := t.Values["pv_rated_kw"]
+	add("pv_rated", hasRated && rated > 0, "номінал СЕС 40396 прочитано", fmtKw(rated, hasRated))
+	add("soc", t.SocPercent != nil, "SOC відомий", fmtPtrPct(t.SocPercent))
+	add("ess_limits", t.ESSChargeMaxKw != nil && t.ESSDischargeMaxKw != nil, "40490/40492 відомі",
+		fmt.Sprintf("%s / %s", fmtPtrKw(t.ESSChargeMaxKw), fmtPtrKw(t.ESSDischargeMaxKw)))
+
+	capKw := s.exportCapKw(now)
+	add("export_cap", capKw > 0, "стеля експорту задана", fmtKw(capKw, capKw > 0))
+	limit := s.effectiveImportLimitKw(now)
+	add("import_limit", limit > 0, "ліміт імпорту заданий", fmtKw(limit, limit > 0))
+	if t.GridPowerKw != nil && limit > 0 {
+		add("import_now", *t.GridPowerKw < importStopShare*limit, "імпорт не біля ліміту", fmt.Sprintf("%.0f кВт", *t.GridPowerKw))
+	} else {
+		add("import_now", false, "потужність PCC 40505 відома", "немає")
+	}
+	low := lowVoltages(&t)
+	add("voltage", len(low) == 0 && hasVoltage(t), "мережа є, напруги в нормі", voltageActual(t, low))
+	if meter, has := t.Values["meter_active_power_kw"]; has && t.GridPowerKw != nil &&
+		math.Abs(meter) >= pccSignDeadbandKw && math.Abs(*t.GridPowerKw) >= pccSignDeadbandKw {
+		add("pcc_sign", meter**t.GridPowerKw < 0, "знак 40505 протилежний лічильнику 32278",
+			fmt.Sprintf("40505=%+.1f · 32278=%+.1f", *t.GridPowerKw, meter))
+	}
+	if m := s.manifest.Load(); m != nil && m.ActiveAt(now) {
+		add("manifest_seq", m.ManifestSeq > 0, "чинний manifest пронумерований", fmt.Sprintf("seq %d", m.ManifestSeq))
+	}
+	return out
+}
+
+// controlModeKeys are the 40737 readings expected on this topology.
+func (s *Service) controlModeKeys() []string {
+	var out []string
+	for _, d := range s.cfg.SmartLogger.Devices {
+		out = append(out, DeviceMetricKey(d.Role, "active_power_control_mode"))
+	}
+	return out
+}
+
+func hasVoltage(t Tick) bool {
+	for _, k := range []string{
+		"meter_phase_a_voltage_v", "grid_line_voltage_ab_v", "pv_grid_line_voltage_ab_v", "ess_grid_line_voltage_ab_v",
+	} {
+		if v, ok := t.Values[k]; ok && v > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func voltageActual(t Tick, low []string) string {
+	if len(low) > 0 {
+		return strings.Join(low, "; ")
+	}
+	if !hasVoltage(t) {
+		return "напруги не прочитано"
+	}
+	if v, ok := t.Values["meter_phase_a_voltage_v"]; ok {
+		return fmt.Sprintf("фаза A %.0f В", v)
+	}
+	return "ok"
+}
+
+func fmtKw(v float64, ok bool) string {
+	if !ok {
+		return "немає"
+	}
+	return fmt.Sprintf("%.0f кВт", v)
+}
+
+func fmtPtrKw(v *float64) string {
+	if v == nil {
+		return "—"
+	}
+	return fmt.Sprintf("%.0f кВт", *v)
+}
+
+func fmtPtrPct(v *float64) string {
+	if v == nil {
+		return "немає"
+	}
+	return fmt.Sprintf("%.1f %%", *v)
+}
+
+// WriteHealth is the write block of the health snapshot, for the cloud
+// console: is the IoT2050 writing, what, and what the loggers accepted.
+type WriteHealth struct {
+	Enabled            bool            `json:"enabled"`
+	Writer             string          `json:"writer"` // iot2050 | other
+	State              string          `json:"state"`
+	Reason             string          `json:"reason,omitempty"`
+	Gate               GateState       `json:"gate"`
+	Command            *WriteCommand   `json:"command,omitempty"`
+	Registers          []WriteFeedback `json:"registers,omitempty"`
+	AppliedManifestSeq int64           `json:"applied_manifest_seq,omitempty"`
+}
+
+func (s *Service) writeHealth() *WriteHealth {
+	h := &WriteHealth{
+		Enabled:            s.gate.Enabled(),
+		Writer:             "other",
+		State:              WriteOff,
+		Gate:               s.gate.State(),
+		AppliedManifestSeq: s.appliedSeq.Load(),
+	}
+	if h.Enabled {
+		h.Writer = "iot2050"
+		if c := s.writeCmd.Load(); c != nil {
+			cc := *c
+			h.Command = &cc
+			h.State, h.Reason = cc.State, cc.Reason
+		}
+		for _, reg := range s.configuredWriteRegs() {
+			if fb, ok := s.feedback(reg); ok {
+				h.Registers = append(h.Registers, fb)
+			}
+		}
+	}
+	return h
+}

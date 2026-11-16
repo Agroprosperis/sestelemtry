@@ -67,7 +67,7 @@ func TestLoadBalanceFallbackMarksEstimated(t *testing.T) {
 		"active_ess_power_kw":            50, // discharging
 		"grid_connected_active_power_kw": 30, // importing
 	}
-	tick := buildTickFromValues("ab", TopologySingle, 1, testTS, values, QualityOK)
+	tick := buildTickFromValues("ab", TopologySingle, 1, 1, testTS, values, QualityOK)
 	if tick.LoadPowerKw == nil || *tick.LoadPowerKw != 180 {
 		t.Fatalf("load = %v, want 180", tick.LoadPowerKw)
 	}
@@ -78,7 +78,7 @@ func TestLoadBalanceFallbackMarksEstimated(t *testing.T) {
 
 func TestEssSignFlip(t *testing.T) {
 	values := map[string]float64{"active_ess_power_kw": 75}
-	tick := buildTickFromValues("ze", TopologyDual, -1, testTS, values, QualityOK)
+	tick := buildTickFromValues("ze", TopologyDual, -1, 1, testTS, values, QualityOK)
 	if tick.ESSPowerKw == nil || *tick.ESSPowerKw != -75 {
 		t.Fatalf("ess = %v, want -75 after sign flip", tick.ESSPowerKw)
 	}
