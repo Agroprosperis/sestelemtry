@@ -192,10 +192,17 @@ func SaveCounterStitch(
 		}
 		// The pass replays the counter's whole history, so an episode it
 		// no longer finds must not linger; frozen stretches come from
-		// their own pass and stay.
+		// their own pass and stay. The ones it finds again are only
+		// upserted, so an announced fall is not mailed a second time.
+		found := make([]time.Time, 0, len(episodes))
+		for _, e := range episodes {
+			found = append(found, e.StartedAt)
+		}
 		if _, err := tx.Exec(ctx, `
-			DELETE FROM counter_episodes WHERE organization_id = $1 AND metric_key = $2 AND kind <> 'frozen'
-		`, organizationID, state.MetricKey); err != nil {
+			DELETE FROM counter_episodes
+			WHERE organization_id = $1 AND metric_key = $2 AND kind <> 'frozen'
+				AND started_at <> ALL($3::timestamptz[])
+		`, organizationID, state.MetricKey, found); err != nil {
 			return fmt.Errorf("storage: clear counter_episodes: %w", err)
 		}
 	}
