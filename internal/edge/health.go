@@ -183,10 +183,10 @@ func (s *Service) buildHealth(now time.Time) *HealthSnapshot {
 		}
 	}
 
-	// pcc_sign: 40505 is EMS +import/−export; meter 32278 is Huawei
-	// +export/−import. Opposite signs confirm the 40505 convention.
+	// pcc_sign: 40505 and the meter's 32278, each turned to "+ import"
+	// by its configured sign, must point the same way.
 	if tick != nil {
-		if c := pccSignCheck(tick); c != nil {
+		if c := pccSignCheck(tick, s.cfg.EffectiveGridSign(), s.cfg.EffectiveMeterSign()); c != nil {
 			add(*c)
 		}
 		if c := voltageCheck(tick); c != nil {
@@ -494,20 +494,31 @@ func (s *Service) hostFresh(now time.Time, host string) (bool, bool) {
 // pccSignDeadbandKw: below this both readings are noise, not a sign.
 const pccSignDeadbandKw = 5.0
 
-func pccSignCheck(tick *Tick) *HealthCheck {
+// pccSignCheck compares the raw 40505 and 32278 readings: with the
+// configured signs both must say import (or both export).
+func pccSignCheck(tick *Tick, gridSign, meterSign float64) *HealthCheck {
 	meter, okM := tick.Values["meter_active_power_kw"]
 	grid, okG := tick.Values["grid_connected_active_power_kw"]
 	if !okM || !okG {
 		return nil
 	}
 	actual := fmt.Sprintf("40505=%+.1f · 32278=%+.1f кВт", grid, meter)
+	expected := "протилежний 32278"
+	if gridSign*meterSign > 0 {
+		expected = "однаковий з 32278"
+	}
 	if math.Abs(grid) < pccSignDeadbandKw || math.Abs(meter) < pccSignDeadbandKw {
-		return &HealthCheck{ID: "pcc_sign", OK: true, Severity: CheckInfo, Label: "Знак PCC 40505", Expected: "протилежний 32278", Actual: actual, Detail: "обидва біля нуля — знак ще не звірений"}
+		return &HealthCheck{ID: "pcc_sign", OK: true, Severity: CheckInfo, Label: "Знак PCC 40505", Expected: expected, Actual: actual, Detail: "обидва біля нуля — знак ще не звірений"}
 	}
-	if grid*meter > 0 {
-		return &HealthCheck{ID: "pcc_sign", OK: false, Severity: CheckWarning, Label: "Знак PCC 40505", Expected: "протилежний 32278", Actual: actual, Detail: "однаковий знак — конвенція 40505 під питанням"}
+	if !pccSignsAgree(grid*gridSign, meter*meterSign) {
+		return &HealthCheck{ID: "pcc_sign", OK: false, Severity: CheckWarning, Label: "Знак PCC 40505", Expected: expected, Actual: actual, Detail: "знаки не відповідають grid_import_sign / meter_import_sign — звірити на об'єкті"}
 	}
-	return &HealthCheck{ID: "pcc_sign", OK: true, Severity: CheckOK, Label: "Знак PCC 40505", Expected: "протилежний 32278", Actual: actual}
+	return &HealthCheck{ID: "pcc_sign", OK: true, Severity: CheckOK, Label: "Знак PCC 40505", Expected: expected, Actual: actual}
+}
+
+// pccSignsAgree takes both readings already turned to "+ import".
+func pccSignsAgree(gridImportKw, meterImportKw float64) bool {
+	return gridImportKw*meterImportKw > 0
 }
 
 func voltageCheck(tick *Tick) *HealthCheck {

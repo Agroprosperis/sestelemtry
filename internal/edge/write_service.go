@@ -258,8 +258,9 @@ func (s *Service) writePreconditions(now time.Time) []WritePrecondition {
 	add("voltage", len(low) == 0 && hasVoltage(t), "мережа є, напруги в нормі", voltageActual(t, low))
 	if meter, has := t.Values["meter_active_power_kw"]; has && t.GridPowerKw != nil &&
 		math.Abs(meter) >= pccSignDeadbandKw && math.Abs(*t.GridPowerKw) >= pccSignDeadbandKw {
-		add("pcc_sign", meter**t.GridPowerKw < 0, "знак 40505 протилежний лічильнику 32278",
-			fmt.Sprintf("40505=%+.1f · 32278=%+.1f", *t.GridPowerKw, meter))
+		add("pcc_sign", pccSignsAgree(*t.GridPowerKw, meter*s.cfg.EffectiveMeterSign()),
+			"40505 і лічильник 32278 показують один напрям (grid_import_sign / meter_import_sign)",
+			fmt.Sprintf("імпорт за 40505 %+.1f · за 32278 %+.1f кВт", *t.GridPowerKw, meter*s.cfg.EffectiveMeterSign()))
 	}
 	if m := s.manifest.Load(); m != nil && m.ActiveAt(now) {
 		add("manifest_seq", m.ManifestSeq > 0, "чинний manifest пронумерований", fmt.Sprintf("seq %d", m.ManifestSeq))

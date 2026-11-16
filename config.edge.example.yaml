@@ -78,6 +78,9 @@ control:
 # 40505 sign: 1 = "+ import" as read (default). -1 only if the start-up
 # check against the meter's 32278 shows export reported as positive.
 # grid_import_sign: 1
+# 32278 sign for that check: -1 = the Huawei map, "+ export" (default);
+# 1 where the meter reports import as positive (ЖЕ).
+# meter_import_sign: -1
 
 # On-device web console (state, diagnostics, manifest view, emergency
 # override). LAN-only by network design; omit the section to keep the
