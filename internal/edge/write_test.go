@@ -539,6 +539,29 @@ func TestEnableNeedsConfirmationAndPreconditions(t *testing.T) {
 	}
 }
 
+// An active manifest's ceiling wins even when it has none; the device
+// config fills in only while no manifest is active.
+func TestExportCeilingManifestElseConfig(t *testing.T) {
+	cfg := zeCfg(t)
+	cfg.Limits.Grid.ExportCapKw = 850
+	s := writeService(t, cfg)
+	now := time.Now().UTC()
+	if got := s.exportCapKw(now); got != 850 {
+		t.Fatalf("no manifest: ceiling = %v, want the config's 850", got)
+	}
+	s.manifest.Store(zeManifest(now, 600))
+	if got := s.exportCapKw(now); got != 600 {
+		t.Fatalf("manifest 600: ceiling = %v", got)
+	}
+	s.manifest.Store(zeManifest(now, 0))
+	if got := s.exportCapKw(now); got != 0 {
+		t.Fatalf("manifest without a ceiling: %v, want 0 (no config fallback)", got)
+	}
+	if got := s.exportCapKw(now.Add(2 * time.Hour)); got != 850 {
+		t.Fatalf("expired manifest: ceiling = %v, want the config's 850", got)
+	}
+}
+
 // The 40505 cross-check follows the meter's configured sign: ze's meter
 // reports import as positive, as 40505 does.
 func TestPCCSignPreconditionFollowsMeterSign(t *testing.T) {

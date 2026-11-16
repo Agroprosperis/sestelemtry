@@ -51,8 +51,8 @@ type ControlInputs struct {
 	Now      time.Time
 	Tick     Tick
 	Decision Decision
-	// ExportCapKw (manifest only) and ImportLimitKw are the PCC limits
-	// in force. 0 = unknown.
+	// ExportCapKw/ImportLimitKw are the PCC limits in force (manifest,
+	// else device config). 0 = unknown.
 	ExportCapKw   float64
 	ImportLimitKw float64
 	// InverterCount/InverterFaults size the PV ceiling (1/N per fault).

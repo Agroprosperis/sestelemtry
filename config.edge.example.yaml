@@ -98,8 +98,9 @@ limits:
   grid:
     import_limit_kw: 947
     target_import_kw: 900
-    # The PCC export ceiling is not set here: it comes only in the
-    # manifest, from the site's «Налаштування» in the cloud.
+    # PCC export ceiling while no manifest is active. An active manifest
+    # (the site's «Налаштування» in the cloud) always wins.
+    # export_cap_kw: 850
   pv:
     rated_kw: 450
   bess:
