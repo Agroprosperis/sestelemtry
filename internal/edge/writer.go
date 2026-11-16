@@ -111,6 +111,7 @@ func regsFor(role DeviceRole) []writeReg {
 // .Session satisfies it; tests inject a fake.
 type registerSession interface {
 	WriteMultiple(ctx context.Context, start uint16, payload []byte) error
+	WriteSingle(ctx context.Context, addr, value uint16) error
 	ReadHolding(ctx context.Context, start, quantity uint16) ([]byte, error)
 	Close() error
 }
@@ -138,6 +139,9 @@ type WriteFeedback struct {
 	ReadbackKw *float64  `json:"readback_kw,omitempty"`
 	OK         bool      `json:"ok"`
 	Err        string    `json:"error,omitempty"`
+	// Tolerated: the PV logger refused with exception 4 while the sun is
+	// not in operation, the expected answer (handoff §9.1 п. 2).
+	Tolerated bool `json:"tolerated,omitempty"`
 }
 
 type writeFault struct {
@@ -157,6 +161,32 @@ func (s *Service) guardedWrite(ctx context.Context, w registerSession, reg write
 	return w.WriteMultiple(ctx, reg.Addr, payload)
 }
 
+// guardedWriteSingle is the only call of an FC06: the flag is checked
+// right before, and only 0 into 40196…40201 goes out.
+func (s *Service) guardedWriteSingle(ctx context.Context, w registerSession, addr, value uint16) error {
+	if !s.gate.Enabled() {
+		return errWriteOff
+	}
+	if !oneShotAddr(addr) || value != 0 {
+		return errNotWritable
+	}
+	return w.WriteSingle(ctx, addr, value)
+}
+
+// pvTolerated reports a PV logger refusal that is the expected answer:
+// exception 4 while the sun is not in operation (at night, or stopped
+// before the hand-over). The battery logger's refusals never are.
+func (s *Service) pvTolerated(reg writeReg, err error) bool {
+	if reg.Role != RolePV {
+		return false
+	}
+	if code, ok := modbusclient.ExceptionCode(err); !ok || code != 4 {
+		return false
+	}
+	t := s.lastTick.Load()
+	return t == nil || !pvRunningOn(*t)
+}
+
 // writeOne writes one value and reads the same register back.
 func (s *Service) writeOne(ctx context.Context, sess registerSession, dev Device, reg writeReg, kw float64) WriteFeedback {
 	fb := WriteFeedback{Register: reg.Name, Host: dev.Host, At: time.Now().UTC(), Kw: kw}
@@ -170,6 +200,9 @@ func (s *Service) writeOne(ctx context.Context, sess registerSession, dev Device
 	defer cancel()
 	if err := s.guardedWrite(wctx, sess, reg, payload); err != nil {
 		fb.Err = err.Error()
+		if s.pvTolerated(reg, err) {
+			fb.Err, fb.Tolerated = "exception 4: СЕС не в роботі", true
+		}
 		return fb
 	}
 	b, err := sess.ReadHolding(wctx, reg.Addr, 2)
@@ -197,10 +230,11 @@ func (s *Service) writeOne(ctx context.Context, sess registerSession, dev Device
 // readback. With the flag off it holds no connection at all. A failed
 // write or a readback that differs is reported to the core loop, which
 // puts the battery to 0 and turns writing off; it is not retried here.
-func (s *Service) runWriter(ctx context.Context, dev Device, regs []writeReg, every time.Duration, dial dialFunc) {
+func (s *Service) runWriter(ctx context.Context, dev Device, regs []writeReg, every time.Duration, dial dialFunc, jobs <-chan oneShotJob) {
 	t := time.NewTicker(every)
 	defer t.Stop()
 	var sess registerSession
+	var lastWrite time.Time
 	closeSess := func() {
 		if sess != nil {
 			_ = sess.Close()
@@ -208,47 +242,88 @@ func (s *Service) runWriter(ctx context.Context, dev Device, regs []writeReg, ev
 		}
 	}
 	defer closeSess()
+	ensure := func() bool {
+		if sess != nil {
+			return true
+		}
+		ns, err := dial(ctx, dev)
+		if err != nil {
+			if !errors.Is(err, context.Canceled) {
+				s.log.Error("edge_write_dial", "host", dev.Host, "err", err)
+				for _, reg := range regs {
+					s.storeFeedback(WriteFeedback{Register: reg.Name, Host: dev.Host, At: time.Now().UTC(), Err: "dial: " + err.Error()})
+				}
+			}
+			return false
+		}
+		sess = ns
+		return true
+	}
+	// Huawei takes a new command at most every 200 ms.
+	space := func() bool {
+		if wait := 250*time.Millisecond - time.Since(lastWrite); wait > 0 {
+			select {
+			case <-ctx.Done():
+				return false
+			case <-time.After(wait):
+			}
+		}
+		return true
+	}
 	for {
+		var job *oneShotJob
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
+		case j := <-jobs:
+			job = &j
+		}
+		if job != nil {
+			res := cmdResult{id: job.id, err: errWriteOff}
+			if s.gate.Enabled() && ensure() && space() {
+				wctx, cancel := context.WithTimeout(ctx, dev.RequestTimeout)
+				res.err = s.guardedWriteSingle(wctx, sess, job.addr, 0)
+				cancel()
+				lastWrite = time.Now()
+				if res.err != nil {
+					if _, refused := modbusclient.ExceptionCode(res.err); !refused {
+						closeSess()
+					}
+				}
+			} else if s.gate.Enabled() {
+				res.err = errors.New("немає зв'язку з логером " + dev.Host)
+			}
+			res.at = time.Now().UTC()
+			s.reportCommandResult(res)
+			continue
 		}
 		if !s.gate.Enabled() {
 			closeSess()
 			continue
 		}
 		cmd := s.currentWriteCommand(time.Now().UTC())
-		if sess == nil {
-			ns, err := dial(ctx, dev)
-			if err != nil {
-				if errors.Is(err, context.Canceled) {
-					return
-				}
-				s.log.Error("edge_write_dial", "host", dev.Host, "err", err)
-				for _, reg := range regs {
-					s.storeFeedback(WriteFeedback{Register: reg.Name, Host: dev.Host, At: time.Now().UTC(), Err: "dial: " + err.Error()})
-				}
-				continue
+		if !ensure() {
+			if errors.Is(ctx.Err(), context.Canceled) {
+				return
 			}
-			sess = ns
+			continue
 		}
-		for i, reg := range regs {
+		for _, reg := range regs {
 			kw, ok := cmd.valueFor(reg)
 			if !ok {
 				continue
 			}
-			if i > 0 {
-				// Huawei takes a new command at most every 200 ms.
-				select {
-				case <-ctx.Done():
-					return
-				case <-time.After(250 * time.Millisecond):
-				}
+			if !space() {
+				return
 			}
 			fb := s.writeOne(ctx, sess, dev, reg, kw)
+			lastWrite = time.Now()
 			s.storeFeedback(fb)
-			if fb.OK {
+			if reg.Role == RolePV {
+				s.notePVAnswer(fb)
+			}
+			if fb.OK || fb.Tolerated {
 				continue
 			}
 			if errors.Is(ctx.Err(), context.Canceled) {
@@ -261,6 +336,29 @@ func (s *Service) runWriter(ctx context.Context, dev Device, regs []writeReg, ev
 			closeSess()
 			break
 		}
+	}
+}
+
+// notePVAnswer logs the PV logger going from accepting to refusing (the
+// sun went to standby) and back, once per transition.
+func (s *Service) notePVAnswer(fb WriteFeedback) {
+	switch {
+	case fb.Tolerated && !s.pvRefusing.Swap(true):
+		s.pushEvent(Event{TS: fb.At, Severity: SevInfo, Code: EvPVWriteRefused,
+			Message: "логер СЕС не приймає " + fb.Register + " (exception 4): СЕС не в роботі — запис триває, УЗЕ не зупиняється",
+			Context: map[string]any{"register": fb.Register, "host": fb.Host}})
+	case fb.OK && s.pvRefusing.Swap(false):
+		s.pushEvent(Event{TS: fb.At, Severity: SevInfo, Code: EvPVWriteAccepted,
+			Message: "логер СЕС знову приймає " + fb.Register,
+			Context: map[string]any{"register": fb.Register, "host": fb.Host}})
+	}
+}
+
+func (s *Service) reportCommandResult(r cmdResult) {
+	select {
+	case s.cmdResults <- r:
+	default:
+		s.log.Error("edge_command_result_dropped", "command", r.id)
 	}
 }
 
@@ -316,7 +414,7 @@ func (s *Service) stoppingConfirmed(since time.Time) bool {
 			}
 		}
 		fb, ok := s.feedback(reg)
-		if !ok || !fb.OK || fb.At.Before(since) {
+		if !ok || !(fb.OK || fb.Tolerated) || fb.At.Before(since) {
 			return false
 		}
 		if reg.Addr == regESSPower.Addr && fb.Kw != 0 {

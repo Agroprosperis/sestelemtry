@@ -63,11 +63,24 @@ type Service struct {
 	writeRequests chan writeRequest
 	appliedSeq    atomic.Int64
 
+	// One-shot start/stop commands: the console asks the core loop, the
+	// core loop hands a job to the logger's writer, the writer reports
+	// the logger's answer back.
+	cmdMu       sync.Mutex
+	cmds        map[string]*CommandStatus
+	cmdRequests chan cmdRequest
+	cmdResults  chan cmdResult
+	cmdJobs     map[DeviceRole]chan oneShotJob
+	pvRefusing  atomic.Bool
+	sessView    atomic.Pointer[WriteEquipment]
+
 	// Core-loop state (no locks: touched only from the core loop).
 	lastManifestID   string
 	manifestExpired  bool
 	eventLastWritten map[string]time.Time
 	ctl              *Controller
+	sess             writeSession
+	tz               *time.Location
 }
 
 // writeRequest is a console action on the write flag, served by the
@@ -134,6 +147,13 @@ func Run(ctx context.Context, cfg *Config, log *slog.Logger, version string) err
 		ctl:              NewController(cfg.Control.Write),
 		writeFaults:      make(chan writeFault, 8),
 		writeRequests:    make(chan writeRequest),
+		cmds:             map[string]*CommandStatus{},
+		cmdRequests:      make(chan cmdRequest),
+		cmdResults:       make(chan cmdResult, 16),
+		cmdJobs:          map[DeviceRole]chan oneShotJob{},
+	}
+	for _, dev := range cfg.SmartLogger.Devices {
+		s.cmdJobs[dev.Role] = make(chan oneShotJob, 4)
 	}
 	if cfg.Uplink.Enabled {
 		s.client = NewUplinkClient(cfg.Uplink)
@@ -194,7 +214,10 @@ func Run(ctx context.Context, cfg *Config, log *slog.Logger, version string) err
 			every = min(cfg.Control.Write.PVInterval, cfg.Control.Write.ESSInterval)
 		}
 		wg.Add(1)
-		go func() { defer wg.Done(); s.runWriter(ctx, dev, regsFor(dev.Role), every, dialModbus) }()
+		go func() {
+			defer wg.Done()
+			s.runWriter(ctx, dev, regsFor(dev.Role), every, dialModbus, s.cmdJobs[dev.Role])
+		}()
 	}
 
 	log.Info("edge_start",
@@ -221,10 +244,29 @@ func Run(ctx context.Context, cfg *Config, log *slog.Logger, version string) err
 			s.onWriteFault(ctx, f)
 		case req := <-s.writeRequests:
 			req.reply <- s.onWriteRequest(ctx, time.Now().UTC(), req)
+		case req := <-s.cmdRequests:
+			req.reply <- s.onCommandRequest(ctx, time.Now().UTC(), req)
+		case res := <-s.cmdResults:
+			s.onCommandResult(ctx, res)
 		case now := <-t.C:
 			s.onTick(ctx, now.UTC())
 		}
 	}
+}
+
+// alarmWordKeys drops alarm words 7 and 8 for a firmware with the older
+// six-word map.
+func alarmWordKeys(keys []string, words int) []string {
+	if words != 6 {
+		return keys
+	}
+	out := make([]string, 0, len(keys))
+	for _, k := range keys {
+		if k != "sl_alarm_7" && k != "sl_alarm_8" {
+			out = append(out, k)
+		}
+	}
+	return out
 }
 
 // resolveDeviceEntries loads the register catalog and computes each
@@ -248,7 +290,7 @@ func resolveDeviceEntries(cfg *Config) (map[DeviceRole]deviceReads, error) {
 		if err != nil {
 			return nil, fmt.Errorf("edge: device %s (%s): %w", dev.Host, dev.Role, err)
 		}
-		optional, err := registers.Subset(resolved, DefaultOptionalMetricKeys(dev.Role))
+		optional, err := registers.Subset(resolved, alarmWordKeys(DefaultOptionalMetricKeys(dev.Role), cfg.SmartLogger.AlarmWords))
 		if err != nil {
 			return nil, fmt.Errorf("edge: device %s (%s) optional: %w", dev.Host, dev.Role, err)
 		}

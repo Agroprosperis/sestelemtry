@@ -15,6 +15,9 @@ register_catalog: registers/huawei_smartlogger.yaml
 smartlogger:
   topology: single_smartlogger      # single_smartlogger | dual_smartlogger
   poll_interval: 1s
+  # Alarm words by the loggers' firmware (cutover §6): 6 for the older
+  # map (50000…50005); default 8 (Issue 52), six if the logger refuses.
+  # alarm_words: 8
   devices:
     - role: all                     # single topology: one box covers PV + ESS
       host: ${EDGE_SL_HOST}         # set EDGE_SL_HOST in the env file; "mock" for tests

@@ -244,6 +244,17 @@ describe('StateTab write card', () => {
         reason: 'робота',
         gate: { ...gate, enabled: true, by: 'operator' },
         pin_set: true,
+        equipment: { ess: 'running', pv: 'not_running', ess_started: true, pv_started_by_test: false, pv_refusing: true },
+        commands: [
+          {
+            id: 'array_stop_ess', label: 'Зупинка масиву (логер УЗЕ)', register: 40201, host: '10.28.40.102', by: 'op',
+            sent_at: '2026-11-17T08:10:00Z', answer: 'accepted', state: 'confirmed', done_at: '2026-11-17T08:10:31Z',
+          },
+          {
+            id: 'ess_start', label: 'Пуск УЗЕ', register: 40199, host: '10.28.40.102', by: 'op',
+            sent_at: '2026-11-17T08:20:00Z', answer: 'accepted', state: 'waiting', live: { '40540': 1 },
+          },
+        ],
         command: {
           at: '2026-11-17T09:00:00Z',
           state: 'run',
@@ -272,6 +283,9 @@ describe('StateTab write card', () => {
 
     expect(screen.getByText('пише IoT2050')).toBeInTheDocument()
     expect(screen.getByText('задано')).toBeInTheDocument()
+    expect(screen.getByText(/запущена · пуск підтверджено/)).toBeInTheDocument()
+    expect(screen.getByText(/не в роботі · логер не приймає запис \(exception 4\)/)).toHaveClass('warn')
+    expect(screen.getByText(/Пуск УЗЕ · логер прийняв · чекає підтвердження/)).toHaveClass('warn')
     expect(screen.getByText(/керує IoT2050/)).toBeInTheDocument()
     expect(screen.getByText('40381 -100.0 кВт · 40378 600 кВт')).toBeInTheDocument()
     expect(screen.getByText('перша ненульова команда ≤ 100 кВт')).toBeInTheDocument()

@@ -36,6 +36,7 @@ func (s *Service) runLocalUI(ctx context.Context) {
 	mux.HandleFunc("/api/manifest", s.uiManifest)
 	mux.HandleFunc("/api/override", s.uiOverride)
 	mux.HandleFunc("/api/write", s.uiWrite)
+	mux.HandleFunc("/api/command", s.uiCommand)
 
 	srv := &http.Server{
 		Addr:              s.cfg.LocalUI.Listen,
@@ -287,6 +288,31 @@ func (s *Service) uiWrite(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+// uiCommand sends one start/stop button (POST {"command": "ess_start"}).
+// Only with writing on; the answer and the confirmation come through
+// GET /api/write.
+func (s *Service) uiCommand(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var body struct {
+		Command string `json:"command"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	reply := s.requestCommand(r.Context(), strings.TrimSpace(body.Command), "local-console "+r.RemoteAddr)
+	if !reply.OK {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		_ = json.NewEncoder(w).Encode(reply)
+		return
+	}
+	uiJSON(w, reply)
 }
 
 func uiWriteConflict(w http.ResponseWriter, reply writeReply) {

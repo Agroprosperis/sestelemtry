@@ -234,6 +234,8 @@
           <button class="btn" id="btn-write-stop">УЗЕ 0 кВт (стоп)</button>
           <button class="btn btn-primary" id="btn-write-disable">Вимкнути запис</button>
         </div>
+        <h3 style="margin:16px 0 6px;font-size:14px">Пуск і зупинка — разові команди, лише з увімкненим записом</h3>
+        <table class="data" id="cmd-table"></table>
         <p id="write-result" style="font-size:12px;color:var(--muted);margin-top:10px">Поки запис вимкнено, контролер лише читає: рішення віртуальні (<code>would_write_*</code>). Увімкнення — лише тут, людиною, з кодом об’єкта і PIN; після перезапуску сервісу запис завжди вимкнений. Стоп і вимкнення — без PIN.</p>
       </div>
 
@@ -620,6 +622,7 @@ async function refreshStatus() {
 
 const WRITE_STATES = {
   off: ['запис вимкнено', 'amber'],
+  await_start: ['IoT2050 пише · УЗЕ не запущена (0 кВт)', 'red'],
   hold: ['IoT2050 пише · утримання УЗЕ 0', 'red'],
   run: ['IoT2050 пише · робота', 'red'],
   stopped: ['IoT2050 пише · ЗУПИНКА (УЗЕ 0)', 'red'],
@@ -647,9 +650,82 @@ function renderWrite(w) {
       rows.push([esc(r.register) + ' · ' + esc(r.host), (r.ok ? '✅ ' : '❌ ') + 'записано ' + r.kw + ' кВт · readback ' + (r.readback_kw != null ? r.readback_kw + ' кВт' : '—') + ' · ' + fmtTime(r.at) + (r.error ? ' · ' + esc(r.error) : '')]);
     }
   }
+  const eq = w.equipment || {};
+  const ESS = { running: 'запущена', stopped: 'зупинена', unknown: 'невідомо' };
+  const PV = { running: 'у роботі', not_running: 'не в роботі', unknown: 'невідомо' };
+  rows.push(['УЗЕ', (ESS[eq.ess] || eq.ess || '—') + (eq.ess_started ? ' · пуск підтверджено в цьому записі' : '')]);
+  rows.push(['СЕС', (PV[eq.pv] || eq.pv || '—') + (eq.pv_started_by_test ? ' · запустив цей тест' : '') + (eq.pv_refusing ? ' · логер СЕС не приймає запис (exception 4)' : '')]);
   if (w.applied_manifest_seq) rows.push(['Застосований manifest', '№ ' + w.applied_manifest_seq]);
   $('write-table').innerHTML = rows.map(([k, v]) => '<tr><th>' + k + '</th><td>' + v + '</td></tr>').join('');
+  renderCommands(w);
 }
+
+const CMD_ROWS = [
+  { label: 'СЕС', start: 'pv_start', stop: 'pv_stop' },
+  { label: 'УЗЕ', start: 'ess_start', stop: 'ess_stop' },
+  { label: 'Масив логера СЕС', start: 'array_start_pv', stop: 'array_stop_pv' },
+  { label: 'Масив логера УЗЕ', start: 'array_start_ess', stop: 'array_stop_ess' },
+];
+const CMD_ANSWERS = {
+  pending: '⏳ чекаємо відповіді логера',
+  accepted: '✅ логер прийняв',
+  refused: '❌ відмова логера',
+  no_response: '❌ немає відповіді логера',
+  not_sent: '❌ не надіслано',
+};
+
+function cmdFeedback(c) {
+  if (!c) return '<span style="color:var(--muted)">—</span>';
+  let s = esc(c.label) + ' · ' + fmtTime(c.sent_at) + ' · ' + esc(c.by) + '<br>1) ' + (CMD_ANSWERS[c.answer] || esc(c.answer));
+  if (c.exception) s += ' (exception ' + c.exception + ')';
+  if (c.error && c.answer !== 'accepted') s += ' · ' + esc(c.error);
+  if (c.answer !== 'accepted') return s;
+  const live = Object.entries(c.live || {}).map(([k, v]) => k + '=' + v).join(', ') || '—';
+  if (c.state === 'waiting') {
+    const left = c.deadline ? Math.max(0, Math.round((new Date(c.deadline) - Date.now()) / 1000)) : 0;
+    s += '<br>2) ⏳ чекаємо підтвердження за станом: ' + Math.floor(left / 60) + ':' + String(left % 60).padStart(2, '0') + ' · ' + esc(live);
+  } else if (c.state === 'confirmed') {
+    s += '<br>2) ✅ підтверджено ' + fmtTime(c.done_at) + ' · ' + esc(live);
+  } else {
+    s += '<br>2) ❌ не підтверджено' + (c.note ? ' (' + esc(c.note) + ')' : ' за 3 хв') + ' · ' + esc(live);
+  }
+  return s;
+}
+
+function renderCommands(w) {
+  const byId = {};
+  for (const c of w.commands || []) byId[c.id] = c;
+  const on = !!w.enabled;
+  $('cmd-table').innerHTML = CMD_ROWS.map((r) => {
+    const last = [byId[r.start], byId[r.stop]].filter(Boolean).sort((a, b) => (a.sent_at < b.sent_at ? 1 : -1))[0];
+    const busy = last && last.state === 'waiting';
+    const dis = !on || busy ? ' disabled' : '';
+    return '<tr><th>' + r.label + '</th><td><div class="btn-row">' +
+      '<button class="btn" data-cmd="' + r.start + '"' + dis + '>Пуск</button>' +
+      '<button class="btn btn-danger" data-cmd="' + r.stop + '"' + dis + '>Зупинка</button></div>' +
+      '<div style="font-size:12px;margin-top:4px">' + cmdFeedback(last) + '</div></td></tr>';
+  }).join('');
+}
+
+$('cmd-table').onclick = async (e) => {
+  const b = e.target.closest('button[data-cmd]');
+  if (!b || b.disabled) return;
+  const what = b.textContent + ' · ' + b.closest('tr').querySelector('th').textContent;
+  if (!confirm('Надіслати «' + what + '»? Один запис у логер, без повтору.')) return;
+  b.disabled = true;
+  try {
+    const res = await fetch('/api/command', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ command: b.dataset.cmd }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok || !body.ok) $('write-result').textContent = 'Команду не надіслано: ' + (body.error || res.statusText);
+  } catch (err) {
+    $('write-result').textContent = 'Помилка: ' + err.message;
+  }
+  refreshStatus();
+};
 
 async function refreshWritePre() {
   try {
