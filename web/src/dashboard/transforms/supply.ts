@@ -51,8 +51,8 @@ export const SUPPLY_MODE_LABELS: Record<SupplyMode, string> = {
   unknown: 'Немає даних Encombi',
 }
 
-// DaySupplyBucket is one 5-minute bucket of the day's supply strip; mode
-// is null for a bucket still ahead of now or before the day's first
+// DaySupplyBucket is one 5-minute bucket of the day chart's supply mode;
+// mode is null for a bucket still ahead of now or before the day's first
 // Encombi reading.
 export type DaySupplyBucket = { t: number; time: string; mode: SupplyMode | null }
 
@@ -64,7 +64,7 @@ function slotOf(date: Date): number {
 
 // daySupplyModes reads each 5-minute bucket's mode from its last breaker,
 // power and voltage readings (aggregation=last). null for a site whose
-// Encombi reported nothing that day, so the chart draws no strip. Buckets
+// Encombi reported nothing that day, so the chart shades nothing. Buckets
 // before the day's first breaker reading have no mode, as the server
 // counts no supply mode before the controller's first sample; a silent
 // Encombi later in the day is unknown.

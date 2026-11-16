@@ -37,8 +37,8 @@ import type { SOCChartRow } from '../transforms/soc'
 import type { EnergySummary as Summary } from '../transforms/summary'
 import {
   GEN_POWER_KEY,
+  isOffgrid,
   SUPPLY_MODE_KEY,
-  SUPPLY_MODE_LABELS,
   supplySegments,
   type DaySupplyBucket,
   type SupplyMode,
@@ -54,8 +54,8 @@ type Props = {
   damSeries?: DAMChartRow[]
   socSeries?: SOCChartRow[]
   powerSeries?: PowerChartRow[]
-  // supplySeries is the day's supply mode per bucket, drawn as a strip
-  // along the bottom of the chart; null for a site without an Encombi.
+  // supplySeries is the day's supply mode per bucket; its hours without
+  // the grid shade the chart. null for a site without an Encombi.
   supplySeries?: DaySupplyBucket[] | null
   pvForecastSeries?: PvForecastHourlyRow[]
   // pvForecastWholeElevator marks the forecast series as the whole
@@ -103,12 +103,18 @@ const AI_REASON_KEY = 'ai_reason_text'
 const AI_LOAD_KEY = 'ai_load_kw'
 const AI_LOAD_LABEL = 'Робота в дешеві години (сценарій)'
 const GEN_POWER_LABEL = 'Потужність генератора'
-// SUPPLY_KEY is the strip's legend toggle, which leads the strip's own
-// row of mode colours.
-const SUPPLY_KEY = 'supply_strip'
-const SUPPLY_LABEL = 'Режим живлення:'
-// The strip's height, in percent of the plot, on its own 0..100 axis.
-const SUPPLY_STRIP_PCT = 4
+// The hours the site ran without the grid shade the whole plot, under the
+// grid lines; the grid, its normal state, stays unshaded. OFFGRID_KEY is
+// the shading's legend toggle, which leads its own row of colours.
+const OFFGRID_KEY = 'offgrid_shade'
+const OFFGRID_LEGEND = 'Фон — без мережі:'
+const OFFGRID_LABELS: Partial<Record<SupplyMode, string>> = {
+  generator: 'Генератор',
+  island: 'Острів (від УЗЕ)',
+  blackout: 'Без живлення',
+}
+const OFFGRID_OPACITY = 0.16
+const OFFGRID_Z_INDEX = -150
 // A generator that never gave more than this all day draws no series.
 const GEN_SHOWN_KW = 0.5
 
@@ -270,12 +276,15 @@ export function EnergyChart({
     const v = r[GEN_POWER_KEY]
     return typeof v === 'number' && v > GEN_SHOWN_KW
   })
-  const supplyStrip = useMemo(() => (supplySeries ? supplySegments(supplySeries) : []), [supplySeries])
-  const hasSupply = supplyStrip.length > 0
-  const supplyModes = useMemo(() => {
-    const seen = new Set(supplyStrip.map((s) => s.mode))
-    return (Object.keys(SUPPLY_MODE_LABELS) as SupplyMode[]).filter((m) => seen.has(m))
-  }, [supplyStrip])
+  const offgridBands = useMemo(
+    () => (supplySeries ? supplySegments(supplySeries).filter((s) => isOffgrid(s.mode)) : []),
+    [supplySeries],
+  )
+  const hasOffgrid = offgridBands.length > 0
+  const offgridModes = useMemo(() => {
+    const seen = new Set(offgridBands.map((s) => s.mode))
+    return (Object.keys(OFFGRID_LABELS) as SupplyMode[]).filter((m) => seen.has(m))
+  }, [offgridBands])
   const hasPvForecast = (pvForecastSeries ?? []).length > 0
   const hasAiPlan = aiPlanHasDispatch(aiPlan ?? null)
   const hasAiLoad = aiPlanHasLoad(aiPlan ?? null)
@@ -376,35 +385,35 @@ export function EnergyChart({
             )
           })}
         </ul>
-        {hasSupply && (
-          <ul className="chart-legend chart-legend--supply" aria-label="Смуга режимів живлення">
+        {hasOffgrid && (
+          <ul className="chart-legend chart-legend--supply" aria-label="Години без мережі">
             <li>
               <button
                 type="button"
-                className={`chart-legend-item${hiddenSeries.has(SUPPLY_KEY) ? ' chart-legend-item--hidden' : ''}`}
-                aria-pressed={hiddenSeries.has(SUPPLY_KEY)}
+                className={`chart-legend-item${hiddenSeries.has(OFFGRID_KEY) ? ' chart-legend-item--hidden' : ''}`}
+                aria-pressed={hiddenSeries.has(OFFGRID_KEY)}
                 title={
-                  hiddenSeries.has(SUPPLY_KEY)
-                    ? 'Показати смугу режимів'
-                    : 'Смуга внизу графіка: звідки живився об’єкт кожні 5 хвилин. Натисніть, щоб сховати'
+                  hiddenSeries.has(OFFGRID_KEY)
+                    ? 'Показати години без мережі'
+                    : 'Фоном зафарбовано години, коли об’єкт був без мережі. Натисніть, щоб сховати'
                 }
-                onClick={() => toggleSeries(SUPPLY_KEY)}
+                onClick={() => toggleSeries(OFFGRID_KEY)}
               >
-                <span className="chart-legend-label">{SUPPLY_LABEL}</span>
+                <span className="chart-legend-label">{OFFGRID_LEGEND}</span>
               </button>
             </li>
-            {!hiddenSeries.has(SUPPLY_KEY) &&
-              supplyModes.map((m) => (
+            {!hiddenSeries.has(OFFGRID_KEY) &&
+              offgridModes.map((m) => (
                 <li key={m} className="chart-legend-item chart-legend-item--static">
                   <span className="chart-legend-swatch" style={{ background: SUPPLY_MODE_COLORS[m] }} />
-                  <span className="chart-legend-label">{SUPPLY_MODE_LABELS[m]}</span>
+                  <span className="chart-legend-label">{OFFGRID_LABELS[m]}</span>
                 </li>
               ))}
           </ul>
         )}
       </>
     ),
-    [dayLegendItems, hiddenSeries, toggleSeries, hasSupply, supplyModes],
+    [dayLegendItems, hiddenSeries, toggleSeries, hasOffgrid, offgridModes],
   )
 
   const dayTickFormatter = useCallback((v: unknown): string => {
@@ -502,20 +511,20 @@ export function EnergyChart({
                       }}
                     />
                   ))}
-                {hasSupply &&
-                  !hiddenSeries.has(SUPPLY_KEY) &&
-                  supplyStrip.map((s, i) => (
+                {hasOffgrid &&
+                  !hiddenSeries.has(OFFGRID_KEY) &&
+                  offgridBands.map((s, i) => (
                     <ReferenceArea
-                      key={`supply-${i}`}
+                      key={`offgrid-${i}`}
                       yAxisId="supply"
                       x1={s.x1}
                       x2={s.x2}
                       y1={0}
-                      y2={SUPPLY_STRIP_PCT}
+                      y2={100}
                       fill={SUPPLY_MODE_COLORS[s.mode]}
-                      fillOpacity={s.mode === 'grid' ? 0.35 : 0.85}
+                      fillOpacity={OFFGRID_OPACITY}
                       stroke="none"
-                      ifOverflow="visible"
+                      zIndex={OFFGRID_Z_INDEX}
                     />
                   ))}
                 <ReferenceLine y={0} yAxisId="power" stroke={chrome.zero} />
