@@ -85,6 +85,7 @@ type EconomicsGenDay struct {
 	MinutesBlackout   int
 	MinutesTransition int
 	MinutesUnknown    int
+	EffectOffgrid     float64
 }
 
 // genDayColumns are economics_daily's generator columns, in the order of
@@ -93,6 +94,7 @@ var genDayColumns = []string{
 	"gen_kwh", "gen_to_load_kwh", "gen_to_ess_kwh", "load_offgrid_kwh",
 	"gen_fuel_cost_uah", "gen_fuel_l", "gen_fuel_method", "expense_gen_charge_uah",
 	"minutes_generator", "minutes_island", "minutes_blackout", "minutes_transition", "minutes_unknown",
+	"effect_offgrid_uah",
 }
 
 func (g EconomicsGenDay) values() []any {
@@ -100,6 +102,7 @@ func (g EconomicsGenDay) values() []any {
 		g.GenKwh, g.GenToLoad, g.GenToEss, g.LoadOffgrid,
 		g.FuelCost, g.FuelL, g.FuelMethod, g.ExpenseGenCharge,
 		g.MinutesGenerator, g.MinutesIsland, g.MinutesBlackout, g.MinutesTransition, g.MinutesUnknown,
+		g.EffectOffgrid,
 	}
 }
 
@@ -108,12 +111,13 @@ func (g *EconomicsGenDay) scanTargets() []any {
 		&g.GenKwh, &g.GenToLoad, &g.GenToEss, &g.LoadOffgrid,
 		&g.FuelCost, &g.FuelL, &g.FuelMethod, &g.ExpenseGenCharge,
 		&g.MinutesGenerator, &g.MinutesIsland, &g.MinutesBlackout, &g.MinutesTransition, &g.MinutesUnknown,
+		&g.EffectOffgrid,
 	}
 }
 
 // economicsGenSchema adds the generator columns in place, so rows written
 // before them read as a day without generator data. Mirrored by
-// migrations/025_generator_economics.sql.
+// migrations/025_generator_economics.sql and 026_generator_effect_offgrid.sql.
 func economicsGenSchema() []string {
 	add := func(table string, cols []string) []string {
 		var out []string

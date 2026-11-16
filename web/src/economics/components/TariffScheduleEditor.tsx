@@ -6,7 +6,7 @@ import {
   saveTariffScheduleVersion,
   type TariffScheduleVersion,
 } from '../orgTariffsClient'
-import type { Tariffs } from '../tariffs'
+import { fuelCostUah, fuelSet, type Tariffs } from '../tariffs'
 
 function formatEffectiveFrom(iso: string): { primary: string; secondary?: string } {
   if (iso === EPOCH_EFFECTIVE_FROM) {
@@ -40,6 +40,20 @@ function formatCapex(uah: number): string {
   if (!Number.isFinite(uah) || uah <= 0) return '—'
   if (uah >= 1_000_000) return `${UK_MILLIONS.format(uah / 1_000_000)} млн`
   return UK_NUMBER.format(Math.round(uah))
+}
+
+// formatFuel is a version's generator fuel as its computed cost: «24,75
+// грн/кВт·год» or «1 000 грн/год»; «—» while the fuel is not priced.
+function formatFuel(t: Tariffs): string {
+  if (!fuelSet(t)) return '—'
+  return `${formatNumber(Math.round(fuelCostUah(t) * 100) / 100)} грн/${t.genFuelMethod === 'per_hour' ? 'год' : 'кВт·год'}`
+}
+
+function fuelTitle(t: Tariffs): string | undefined {
+  if (!fuelSet(t)) return undefined
+  return t.genFuelMethod === 'per_hour'
+    ? `${formatNumber(t.genFuelPriceUahPerL)} грн/л × ${formatNumber(t.genFuelConsumptionLPerH)} л/год`
+    : `${formatNumber(t.genFuelPriceUahPerL)} грн/л × ${formatNumber(t.genFuelConsumptionLPerKwh)} л/кВт·год`
 }
 
 const CAPEX_TIP =
@@ -272,6 +286,10 @@ export function TariffScheduleEditor({
                   </span>
                   <small>грн</small>
                 </th>
+                <th scope="col" className="num">
+                  Пальне
+                  <small>вартість</small>
+                </th>
                 {!readOnly && <th scope="col" className="actions" aria-label="Дії" />}
               </tr>
             </thead>
@@ -309,6 +327,9 @@ export function TariffScheduleEditor({
                       {v.tariffs.roundtripEfficiency > 0 ? formatNumber(v.tariffs.roundtripEfficiency) : 'емпір.'}
                     </td>
                     <td className="num">{formatCapex(v.tariffs.capexUah)}</td>
+                    <td className="num" title={fuelTitle(v.tariffs)}>
+                      {formatFuel(v.tariffs)}
+                    </td>
                     {!readOnly && (
                       <td className="actions">
                         <button

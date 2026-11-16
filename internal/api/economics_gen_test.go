@@ -82,7 +82,7 @@ func TestGenHourStorageRoundTrip(t *testing.T) {
 	}
 
 	day := economics.StoredDay{OrganizationID: "ke", Day: start, Totals: economics.DailyTotals{GenTotals: economics.GenTotals{
-		GenKwh: 260, GenFuelCost: 3900, GenFuelMethod: economics.GenFuelPerKwh, ExpenseGenCharge: 750,
+		GenKwh: 260, GenFuelCost: 3900, GenFuelMethod: economics.GenFuelPerKwh, ExpenseGenCharge: 750, EffectOffgrid: 150,
 		SupplyMinutes: economics.SupplyMinutes{Generator: 150, Island: 30},
 	}}}
 	if got := storageToDailyTotals(dailyToStorage(day)); got.GenTotals != day.Totals.GenTotals {

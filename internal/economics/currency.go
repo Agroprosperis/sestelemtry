@@ -293,6 +293,7 @@ func scaleDailyTotals(t DailyTotals, f float64) DailyTotals {
 	t.EssCostBasisUahEod *= f
 	t.GenFuelCost *= f
 	t.ExpenseGenCharge *= f
+	t.EffectOffgrid *= f
 	return t
 }
 

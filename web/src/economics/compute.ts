@@ -189,14 +189,20 @@ export type DailyTotals = {
   expenseGenCharge: number
   expenseTotal: number
   ebitda: number
-  // Generator sums: genKwh over every hour with data, the split and fuel
-  // over the hours counted with the generator.
+  // Generator sums: genKwh and the supply minutes over every hour with
+  // data, the split, fuel and off-grid money over the hours counted with
+  // the generator. baselineOffgrid is B_off, what the load without the
+  // grid would have cost on the generator alone; effectOffgrid the effect
+  // of the counted hours that spent minutes without the grid.
   genKwh: number
   genToLoad: number
   genToEss: number
   loadOffgrid: number
   genFuelCost: number
   genFuelL: number
+  baselineOffgrid: number
+  effectOffgrid: number
+  supplyMinutes: SupplyMinutes
   // The whole PV yield valued at the export price of the hour that
   // produced it: what a bare plant with no battery and no on-site load
   // would have earned selling everything to the grid. A yardstick, not
@@ -231,6 +237,50 @@ export type DailyTotals = {
   essAvgCostBasisUahPerKwhEod: number
   essResidualKwhEod: number
   essCostBasisUahEod: number
+}
+
+// The self-consumption revenue legs of one priced hour as the server
+// books them. Off the grid, solar and battery displace diesel, so the kWh
+// of an hour counted with the generator take its valuation instead of
+// the import price.
+export function revenuePvSelfOf(row: HourEconomicsRow): number {
+  const imp = row.economics.importPriceUahPerKwh
+  const gen = row.gen
+  if (gen?.accounted) return (row.economics.pvToLoad - gen.pvToLoadOffgrid) * imp + gen.pvOffgridValueUah
+  return row.economics.pvToLoad * imp
+}
+
+export function revenueEssSelfOf(row: HourEconomicsRow): number {
+  const imp = row.economics.importPriceUahPerKwh
+  const gen = row.gen
+  if (gen?.accounted) return (row.flow.essToLoad - gen.essToLoadOffgrid) * imp + gen.essOffgridValueUah
+  return row.flow.essToLoad * imp
+}
+
+// expenseGenChargeOf is the fuel an hour's generator charge of the
+// battery cost.
+export function expenseGenChargeOf(row: HourEconomicsRow): number {
+  return row.gen?.accounted ? row.gen.chargeCostUah : 0
+}
+
+// baselineOffgridOf is an hour's B_off: the server's baseline less its
+// load on the grid at the import price.
+export function baselineOffgridOf(row: HourEconomicsRow): number {
+  const gen = row.gen
+  if (!gen?.accounted) return 0
+  return row.economics.baselineCost - (row.economics.load - gen.loadOffgrid) * row.economics.importPriceUahPerKwh
+}
+
+export function offgridMinutes(m: SupplyMinutes): number {
+  return m.generator + m.island + m.blackout
+}
+
+function addMinutes(acc: SupplyMinutes, m: SupplyMinutes) {
+  acc.generator += m.generator
+  acc.island += m.island
+  acc.blackout += m.blackout
+  acc.transition += m.transition
+  acc.unknown += m.unknown
 }
 
 export function dailyTotals(rows: Array<HourEconomicsRow | null>): DailyTotals {
@@ -271,6 +321,9 @@ export function dailyTotals(rows: Array<HourEconomicsRow | null>): DailyTotals {
     loadOffgrid: 0,
     genFuelCost: 0,
     genFuelL: 0,
+    baselineOffgrid: 0,
+    effectOffgrid: 0,
+    supplyMinutes: { generator: 0, island: 0, blackout: 0, transition: 0, unknown: 0 },
     pvExportPotential: 0,
     essWithdrawnCostUah: 0,
     essRealizedProfitUah: 0,
@@ -285,7 +338,10 @@ export function dailyTotals(rows: Array<HourEconomicsRow | null>): DailyTotals {
   let exportPriceUahSum = 0
   for (const row of rows) {
     if (!row) continue
-    acc.genKwh += row.gen?.genKwh ?? 0
+    if (row.gen) {
+      acc.genKwh += row.gen.genKwh
+      addMinutes(acc.supplyMinutes, row.gen.minutes)
+    }
     if (row.rdnUahPerKwh === null) {
       acc.hoursMissingPrice++
       continue
@@ -314,21 +370,18 @@ export function dailyTotals(rows: Array<HourEconomicsRow | null>): DailyTotals {
     acc.revenuePvExport += row.economics.pvToGrid * exportPrice
     acc.revenueEssExport += row.flow.essToGrid * exportPrice
     acc.expenseGridCharge += row.flow.gridToEss * importPrice
+    acc.revenuePvSelf += revenuePvSelfOf(row)
+    acc.revenueEssSelf += revenueEssSelfOf(row)
     const gen = row.gen
     if (gen?.accounted) {
-      acc.revenuePvSelf +=
-        (row.economics.pvToLoad - gen.pvToLoadOffgrid) * importPrice + gen.pvOffgridValueUah
-      acc.revenueEssSelf +=
-        (row.flow.essToLoad - gen.essToLoadOffgrid) * importPrice + gen.essOffgridValueUah
       acc.expenseGenCharge += gen.chargeCostUah
       acc.genToLoad += gen.genToLoad
       acc.genToEss += gen.genToEss
       acc.loadOffgrid += gen.loadOffgrid
       acc.genFuelCost += gen.fuelCostUah
       acc.genFuelL += gen.fuelL
-    } else {
-      acc.revenuePvSelf += row.economics.pvToLoad * importPrice
-      acc.revenueEssSelf += row.flow.essToLoad * importPrice
+      acc.baselineOffgrid += baselineOffgridOf(row)
+      if (offgridMinutes(gen.minutes) > 0) acc.effectOffgrid += row.economics.effect
     }
     acc.pvExportPotential += row.flow.pv * exportPrice
 
@@ -523,10 +576,20 @@ export type HourEconomicsRow = {
 // solar and battery displace diesel rather than import, so the day's
 // revenue legs take pvOffgridValueUah / essOffgridValueUah for the
 // *Offgrid kWh, and the generator's charge of the battery is an expense.
+// SupplyMinutes are an hour's or a day's minutes by supply mode; the
+// minutes on the grid are not counted.
+export type SupplyMinutes = {
+  generator: number
+  island: number
+  blackout: number
+  transition: number
+  unknown: number
+}
+
 export type HourGen = {
   genKwh: number
   estimated: boolean
-  minutes: { generator: number; island: number; blackout: number; transition: number; unknown: number }
+  minutes: SupplyMinutes
   accounted: boolean
   genToLoad: number
   genToEss: number

@@ -95,6 +95,10 @@ describe('generator economics in the browser', () => {
     expect(t.loadOffgrid).toBeCloseTo(270, 9)
     expect(t.genFuelCost).toBeCloseTo(3900, 9)
     expect(t.genFuelL).toBeCloseTo(78, 9)
+    expect(t.effectOffgrid).toBeCloseTo(-750 + 450 + 450, 9)
+    expect(t.supplyMinutes).toEqual({ generator: 150, island: 30, blackout: 0, transition: 0, unknown: 0 })
+    // B_off: the off-grid load at c = 15 грн/кВт·год (270 kWh).
+    expect(t.baselineOffgrid).toBeCloseTo(270 * 15, 9)
   })
 
   it('keeps a day without generator data as before', () => {

@@ -2,7 +2,8 @@ import type { ReactNode } from 'react'
 import type { EconomicsPortfolioResponse, EconomicsPortfolioSite, EconomicsPortfolioTrendMonth } from '../../api'
 import { formatOrganizationLabel } from '../../dashboard/config'
 import { OptimumInfo } from '../monthly/EconomicsMonthlyView'
-import { useMoney } from '../currency'
+import { useMoney, type Money } from '../currency'
+import { hasRollupGen } from '../generatorText'
 import { formatMonthTitle, formatMwh, formatMwhNumber, formatPercent, formatPeriodTitle, formatYearTitle } from '../monthly/format'
 import type { EconomicsPortfolioData } from '../useEconomicsPortfolioData'
 import { portfolioRoce, ROCE_TIP, siteRoce } from './roce'
@@ -181,6 +182,7 @@ function PortfolioBody({
   const totals = portfolio.totals
   const withData = sites.filter((s) => s.has_data)
   const maxTotal = Math.max(...withData.map(compareTotal), 1)
+  const withGen = sites.some(hasRollupGen)
 
   return (
     <>
@@ -212,6 +214,14 @@ function PortfolioBody({
           info="Потенційний результат періоду: фактична EBITDA плюс обидва резерви, якби їх забрали повністю."
           good
         />
+        {withGen && (
+          <SummaryCard
+            label="Пальне генераторів"
+            value={money.format(totals.gen_fuel_cost_uah ?? 0)}
+            sub={`${litresFmt.format(totals.gen_fuel_l ?? 0)} л · ефект годин без мережі ${money.format(totals.effect_offgrid_uah ?? 0)}`}
+            info="Вартість пального генераторів за тарифами об'єктів і ефект годин, коли об'єкти працювали без мережі: скільки пального заощадили СЕС і УЗЕ."
+          />
+        )}
       </div>
 
       <div className="economics-portfolio-legend">
@@ -280,6 +290,7 @@ function PortfolioBody({
               <th>Разом резерв</th>
               <th>СЕС</th>
               <th>Захоплення УЗЕ</th>
+              {withGen && <th>Пальне</th>}
             </tr>
           </thead>
           <tbody>
@@ -303,9 +314,10 @@ function PortfolioBody({
                       <td>{money.format(s.action_reserve_uah)}</td>
                       <td>{formatMwh(s.pv_kwh)}</td>
                       <td>{formatPercent(captured)}</td>
+                      {withGen && <td>{siteFuel(s, money)}</td>}
                     </>
                   ) : (
-                    <td colSpan={7} className="economics-portfolio-empty-cell">немає даних</td>
+                    <td colSpan={withGen ? 8 : 7} className="economics-portfolio-empty-cell">немає даних</td>
                   )}
                 </tr>
               )
@@ -319,6 +331,7 @@ function PortfolioBody({
               <td>{money.format(totals.action_reserve_uah)}</td>
               <td>{formatMwh(totals.pv_kwh)}</td>
               <td>—</td>
+              {withGen && <td>{siteFuel(totals, money)}</td>}
             </tr>
           </tbody>
         </table>
@@ -327,6 +340,16 @@ function PortfolioBody({
       {portfolio.trend.length > 0 ? <PortfolioTrend months={portfolio.trend} /> : null}
     </>
   )
+}
+
+const litresFmt = new Intl.NumberFormat('uk-UA', { maximumFractionDigits: 0 })
+
+// siteFuel is a site's fuel cost, «—» while the generator ran with no fuel
+// priced or did not run.
+function siteFuel(s: EconomicsPortfolioSite, money: Money): string {
+  const cost = s.gen_fuel_cost_uah ?? 0
+  if (cost > 0) return money.format(cost)
+  return hasRollupGen(s) ? 'не задано' : '—'
 }
 
 // shortMonth turns "YYYY-MM" into "MM.YY" for compact axis labels.
