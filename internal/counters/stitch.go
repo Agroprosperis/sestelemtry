@@ -71,6 +71,9 @@ const (
 	// every second, such a step looks impossibly fast unless it is
 	// measured from when the reading settled.
 	CoarseUpdate = 15 * time.Minute
+	// StaleTolKwh is how close a reading has to land on the level an open
+	// fall left to be that stale reading again (see onStaleLevel).
+	StaleTolKwh = 0.05
 )
 
 // ForwardLimitKwh is the largest forward step a counter can make in dt.
@@ -260,7 +263,7 @@ func Run(st State, steps []Step) Result {
 		switch {
 		case d < -DropTolKwh:
 			st.onFall(&res, s, -d)
-		case d > 0 && st.pending() > 0 && (d > ForwardLimitKwh(dt) || d >= st.pending()/2):
+		case d > 0 && st.pending() > 0 && (d > ForwardLimitKwh(dt) || d >= st.pending()/2) && !st.onStaleLevel(s):
 			st.onReturn(&res, s, d)
 		case d > ForwardLimitKwh(dt):
 			st.onJump(&res, s, d)
@@ -268,6 +271,22 @@ func Run(st State, steps []Step) Result {
 	}
 	res.State = st
 	return res
+}
+
+// onStaleLevel reports a jump back onto the very reading an open fall left
+// while the counter has metered at least DropTolKwh since that fall: the
+// register serving a stale value again — a replaced meter the logger
+// still lists (Поділля, 63291.2 kWh) — not the counter coming back. A
+// counter that really comes back lands above that reading by what it
+// metered meanwhile; one that read zero all along has metered nothing
+// since. The jump is then a seam whose fall back makes it a spike.
+func (st *State) onStaleLevel(s Step) bool {
+	for _, f := range st.Falls {
+		if math.Abs(s.Value-f.Before) <= StaleTolKwh && s.Prev-f.After >= DropTolKwh {
+			return true
+		}
+	}
+	return false
 }
 
 // onFall bridges a drop. One that undoes the latest unexplained jump
