@@ -37,8 +37,9 @@ export const AI_PLAN_LOAD_COLOR = '#d97706'
 // diagram draws its flow in the same hue.
 export const GEN_POWER_COLOR = '#c2410c'
 
-// The supply strip under the day chart: the grid and the generator keep
-// their series colours, the island is the battery's blue.
+// The supply modes: the grid and the generator keep their series colours,
+// the island is the battery's blue. The day chart shades its hours
+// without the grid in them.
 export const SUPPLY_MODE_COLORS: Record<SupplyMode, string> = {
   grid: '#9ca3af',
   generator: GEN_POWER_COLOR,
