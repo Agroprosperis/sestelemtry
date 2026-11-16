@@ -141,6 +141,23 @@ func manualBlocks(m dispatch.Model, start time.Time, ver storage.DispatchVersion
 	return out
 }
 
+// pccExportCeiling is the edge's hard PCC export ceiling: the site's
+// own from «Налаштування» (export regime × contract, capped by the
+// technical PCC limit), lowered to the desk cap when the operator set
+// one. Blocking export or clearing the desk cap stops battery sales
+// (export_allowed) but does not lift the ceiling for PV. 0 = the site
+// has no regime yet: the edge then refuses to turn writing on.
+func pccExportCeiling(env *dispatchEnv, cfg dispatch.Constraints) float64 {
+	if env.exportCeiling == nil {
+		return 0
+	}
+	c := *env.exportCeiling
+	if op := cfg.EffectiveExportCap(); op > 0 && op < c {
+		c = op
+	}
+	return c
+}
+
 // buildDispatchManifest turns a simulated plan into manifest-lite (the
 // edge follows plan.intervals[].ess_kw, a manual block first) and the
 // run record. Pure.
@@ -176,7 +193,7 @@ func buildDispatchManifest(env *dispatchEnv, m dispatch.Model, res dispatch.Resu
 		doc.GridLimits.TargetImportKw = env.params.GridTargetKw
 	}
 	doc.GridLimits.PvRatedKw = env.params.PvRatedKw
-	doc.GridLimits.ExportCapKw = cfg.EffectiveExportCap()
+	doc.GridLimits.ExportCapKw = pccExportCeiling(env, cfg)
 	doc.SocPolicy.MinEconomicPct = cfg.ReservePct
 	doc.SocPolicy.MaxEconomicPct = env.site.SocMaxPct
 	doc.ManualCommands = manualBlocks(m, env.start, ver)

@@ -155,13 +155,14 @@ func (s *Service) requestWrite(ctx context.Context, action, by, confirm string) 
 	}
 }
 
-// exportCapKw is the PCC export ceiling in force: the manifest's, else
-// the device config's.
+// exportCapKw is the PCC export ceiling in force. It comes only from the
+// active manifest (the site's «Налаштування» in the cloud), never from
+// the device config; 0 = none.
 func (s *Service) exportCapKw(now time.Time) float64 {
-	if m := s.manifest.Load(); m != nil && m.ActiveAt(now) && m.GridLimits.ExportCapKw > 0 {
+	if m := s.manifest.Load(); m != nil && m.ActiveAt(now) {
 		return m.GridLimits.ExportCapKw
 	}
-	return s.cfg.Limits.Grid.ExportCapKw
+	return 0
 }
 
 // inverterCounts sizes the PV ceiling: configured inverters and those in
@@ -246,7 +247,7 @@ func (s *Service) writePreconditions(now time.Time) []WritePrecondition {
 		fmt.Sprintf("%s / %s", fmtPtrKw(t.ESSChargeMaxKw), fmtPtrKw(t.ESSDischargeMaxKw)))
 
 	capKw := s.exportCapKw(now)
-	add("export_cap", capKw > 0, "стеля експорту задана", fmtKw(capKw, capKw > 0))
+	add("export_cap", capKw > 0, "стеля відпуску в manifest («Налаштування» → режим відпуску)", fmtKw(capKw, capKw > 0))
 	limit := s.effectiveImportLimitKw(now)
 	add("import_limit", limit > 0, "ліміт імпорту заданий", fmtKw(limit, limit > 0))
 	if t.GridPowerKw != nil && limit > 0 {

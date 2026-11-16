@@ -57,8 +57,9 @@ type edgeManifestDoc struct {
 		ImportLimitKw  float64 `json:"import_limit_kw,omitempty"`
 		TargetImportKw float64 `json:"target_import_kw,omitempty"`
 		PvRatedKw      float64 `json:"pv_rated_kw,omitempty"`
-		// ExportCapKw is the PCC export ceiling of the desk constraints
-		// (active_consumer_export_power_cap.md); absent = not set.
+		// ExportCapKw is the hard PCC export ceiling: the site's from
+		// «Налаштування», or the desk cap when lower
+		// (active_consumer_export_power_cap.md); absent = no regime.
 		ExportCapKw float64 `json:"export_cap_kw,omitempty"`
 	} `json:"grid_limits"`
 	SocPolicy struct {
