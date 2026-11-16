@@ -143,18 +143,11 @@ func (r *Runner) recheckOffgrid(ctx context.Context, org string, until time.Time
 	return changed, nil
 }
 
-// dropoutSettle is how long a counter has to go without falling again
-// before its open dropouts count as resets (counters.KindReset).
-// resetMoveKwh is how far it has to have metered past its last fall.
-const (
-	dropoutSettle = 14 * 24 * time.Hour
-	resetMoveKwh  = 1.0
-)
-
 // settleDropouts reclassifies as resets the open dropouts of every
-// counter that has not fallen for dropoutSettle and kept metering since,
-// and returns the days whose flags that changes: they flagged every day
-// after their start.
+// counter that has not fallen for counters.DropoutSettle and kept
+// metering since, and returns the days whose flags that changes: they
+// flagged every day after their start. The stitcher settles the falls
+// in its state the same way at the counter's next step.
 func (r *Runner) settleDropouts(ctx context.Context, org string, until time.Time) ([]Span, error) {
 	open, err := storage.OpenCounterEpisodes(ctx, r.Pool, org, string(counters.KindDropout))
 	if err != nil {
@@ -177,9 +170,9 @@ func (r *Runner) settleDropouts(ctx context.Context, org string, until time.Time
 }
 
 // resetsOf picks the open dropouts (oldest first) that count as resets:
-// those of a counter whose newest fall is dropoutSettle old and that has
-// metered resetMoveKwh past it since. They come back closed at their
-// start, as KindReset.
+// those of a counter whose newest fall is counters.DropoutSettle old and
+// that has metered counters.ResetMoveKwh past it since. They come back
+// closed at their start, as KindReset.
 func resetsOf(open []storage.CounterEpisode, until time.Time, maxSince func(metric string, since time.Time) (float64, bool, error)) ([]storage.CounterEpisode, error) {
 	newest := map[string]storage.CounterEpisode{}
 	for _, e := range open {
@@ -189,14 +182,14 @@ func resetsOf(open []storage.CounterEpisode, until time.Time, maxSince func(metr
 	}
 	settled := map[string]bool{}
 	for metric, last := range newest {
-		if until.Sub(last.StartedAt) < dropoutSettle {
+		if until.Sub(last.StartedAt) < counters.DropoutSettle {
 			continue
 		}
 		top, ok, err := maxSince(metric, last.StartedAt.Add(time.Hour))
 		if err != nil {
 			return nil, err
 		}
-		settled[metric] = ok && top-last.ValueAfter >= resetMoveKwh
+		settled[metric] = ok && top-last.ValueAfter >= counters.ResetMoveKwh
 	}
 	var out []storage.CounterEpisode
 	for _, e := range open {
@@ -326,7 +319,8 @@ func (r *Runner) stitch(ctx context.Context, org, metric string, st counters.Sta
 			next = until
 		}
 		rows, err := storage.CounterStepCandidates(ctx, r.Pool, org, metric, at, next,
-			counters.DropTolKwh, counters.CandidateFloorKwh, counters.MaxPowerKw, counters.SlackKwh, counters.CoarseUpdate)
+			counters.DropTolKwh, counters.CandidateFloorKwh, counters.MaxPowerKw, counters.SlackKwh, counters.CoarseUpdate,
+			st.StaleLevels(), counters.StaleTolKwh)
 		if err != nil {
 			return nil, err
 		}
@@ -375,7 +369,8 @@ func (r *Runner) stitch(ctx context.Context, org, metric string, st counters.Sta
 // on a ramp; one carried over from an earlier pass and closed flat only
 // adds the step at its end. An episode flags every day it covers; one
 // carried over and closed in this pass only stops flagging the days
-// after its end.
+// after its end. A settled fall keeps its offset and only stops
+// flagging the days after its start.
 func changeSpans(segments []counters.Segment, episodes []counters.Episode, from, until time.Time) []Span {
 	var out []Span
 	for _, g := range segments {
@@ -390,6 +385,8 @@ func changeSpans(segments []counters.Segment, episodes []counters.Episode, from,
 	}
 	for _, e := range episodes {
 		switch {
+		case e.Kind == counters.KindReset:
+			out = append(out, Span{From: e.Start, To: until, FlagsOnly: true})
 		case e.Start.Before(from) && !e.End.IsZero():
 			out = append(out, Span{From: e.End, To: until})
 		case e.End.IsZero():

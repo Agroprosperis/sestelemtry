@@ -74,6 +74,13 @@ const (
 	// StaleTolKwh is how close a reading has to land on the level an open
 	// fall left to be that stale reading again (see onStaleLevel).
 	StaleTolKwh = 0.05
+	// DropoutSettle is how long a counter has to go without falling again
+	// before its open falls count as resets (KindReset); ResetMoveKwh is
+	// how far it has to have metered past the last of them.
+	DropoutSettle = 14 * 24 * time.Hour
+	ResetMoveKwh  = 1.0
+	// maxResets bounds the settled falls a State keeps for onStaleLevel.
+	maxResets = 8
 )
 
 // ForwardLimitKwh is the largest forward step a counter can make in dt.
@@ -162,9 +169,10 @@ const (
 	KindOffgrid Kind = "offgrid"
 	// KindReset: a dropout the counter never came back from while it
 	// kept metering from its new level — a device replaced, restarted or
-	// moved to another logger. The step stays bridged; the runner
-	// reclassifies the dropout, closed at its start, and it flags no day
-	// and sends no email.
+	// moved to another logger. The step stays bridged; the stitcher
+	// settles the fall at its next step (see settle) and the runner
+	// reclassifies the stored dropout without waiting for one, closed at
+	// its start. It flags no day and sends no email.
 	KindReset Kind = "reset"
 	// KindSeam: a forward jump nothing explains, removed.
 	KindSeam Kind = "seam"
@@ -210,10 +218,14 @@ type jump struct {
 // State carries the stitcher from one Run to the next. The zero value
 // starts an uncorrected counter.
 type State struct {
-	// Base is the permanent part of the offset: the seams removed.
+	// Base is the permanent part of the offset: the seams removed and
+	// the falls settled as resets.
 	Base  float64 `json:"base"`
 	Falls []fall  `json:"falls,omitempty"`
-	Jump  *jump   `json:"jump,omitempty"`
+	// Resets are the latest falls settled as resets, kept for the stale
+	// readings they left.
+	Resets []fall `json:"resets,omitempty"`
+	Jump   *jump  `json:"jump,omitempty"`
 	// Open is the segment in force; its Start is zero before the first
 	// discontinuity.
 	Open Segment `json:"open"`
@@ -229,6 +241,19 @@ func (s *State) pending() float64 {
 
 // Offset is the correction currently in force.
 func (s *State) Offset() float64 { return s.Base + s.pending() }
+
+// StaleLevels lists the readings a stale register would jump back onto:
+// the ones the open and the settled falls left.
+func (s *State) StaleLevels() []float64 {
+	out := make([]float64, 0, len(s.Falls)+len(s.Resets))
+	for _, f := range s.Falls {
+		out = append(out, f.Before)
+	}
+	for _, f := range s.Resets {
+		out = append(out, f.Before)
+	}
+	return out
+}
 
 // OpenSince is when the oldest unreturned fall happened; zero when the
 // counter is whole.
@@ -258,11 +283,14 @@ func Run(st State, steps []Step) Result {
 		if st.Jump != nil && s.Time.Sub(st.Jump.At) > SpikeWindow {
 			st.Jump = nil
 		}
+		st.settle(&res, s)
 		d := s.Value - s.Prev
 		dt := s.Duration()
 		switch {
 		case d < -DropTolKwh:
 			st.onFall(&res, s, -d)
+		case d >= DropTolKwh && st.onStaleLevel(s):
+			st.onJump(&res, s, d)
 		case d > 0 && st.pending() > 0 && (d > ForwardLimitKwh(dt) || d >= st.pending()/2) && !st.onStaleLevel(s):
 			st.onReturn(&res, s, d)
 		case d > ForwardLimitKwh(dt):
@@ -273,20 +301,49 @@ func Run(st State, steps []Step) Result {
 	return res
 }
 
-// onStaleLevel reports a jump back onto the very reading an open fall left
-// while the counter has metered at least DropTolKwh since that fall: the
-// register serving a stale value again — a replaced meter the logger
-// still lists (Поділля, 63291.2 kWh) — not the counter coming back. A
-// counter that really comes back lands above that reading by what it
-// metered meanwhile; one that read zero all along has metered nothing
-// since. The jump is then a seam whose fall back makes it a spike.
+// onStaleLevel reports a jump back onto the very reading an open or a
+// settled fall left while the counter has metered at least DropTolKwh
+// since that fall: the register serving a stale value again — a
+// replaced meter the logger still lists (Поділля, 63291.2 kWh import,
+// 334.63 kWh export) — not the counter coming back. A counter that
+// really comes back lands above that reading by what it metered
+// meanwhile; one that read zero all along has metered nothing since.
+// The jump is then a seam whose fall back makes it a spike, however
+// small: the export register sits a few dozen kWh under its stale
+// reading, well inside what it could meter over a quiet night.
 func (st *State) onStaleLevel(s Step) bool {
-	for _, f := range st.Falls {
-		if math.Abs(s.Value-f.Before) <= StaleTolKwh && s.Prev-f.After >= DropTolKwh {
-			return true
+	for _, list := range [][]fall{st.Falls, st.Resets} {
+		for _, f := range list {
+			if math.Abs(s.Value-f.Before) <= StaleTolKwh && s.Prev-f.After >= DropTolKwh {
+				return true
+			}
 		}
 	}
 	return false
+}
+
+// settle turns the open falls into resets once the counter has gone
+// DropoutSettle without falling again and metered past the last one:
+// what fell is not coming back, so a later step up — energy metered
+// over a collector gap — is not taken for its return. The offset stays.
+func (st *State) settle(res *Result, s Step) {
+	n := len(st.Falls)
+	if n == 0 {
+		return
+	}
+	last := st.Falls[n-1]
+	if s.Time.Sub(last.At) < DropoutSettle || s.Prev-last.After < ResetMoveKwh {
+		return
+	}
+	for _, f := range st.Falls {
+		st.Base += f.Kwh
+		res.addEpisode(Episode{Kind: KindReset, Start: f.At, End: f.At, Before: f.Before, After: f.After})
+	}
+	st.Resets = append(st.Resets, st.Falls...)
+	if len(st.Resets) > maxResets {
+		st.Resets = st.Resets[len(st.Resets)-maxResets:]
+	}
+	st.Falls = nil
 }
 
 // onFall bridges a drop. One that undoes the latest unexplained jump
