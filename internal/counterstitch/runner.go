@@ -245,6 +245,7 @@ func (r *Runner) Sync(ctx context.Context, org string) ([]Span, error) {
 	}
 
 	var changed []Span
+	var earliest time.Time
 	for _, metric := range counters.Metrics {
 		prev, ok := states[metric]
 		replace := hasRebuild || !ok
@@ -259,6 +260,9 @@ func (r *Runner) Sync(ctx context.Context, org string) ([]Span, error) {
 				continue
 			}
 			from = first
+			if earliest.IsZero() || first.Before(earliest) {
+				earliest = first
+			}
 		} else if err := json.Unmarshal(prev.State, &st); err != nil {
 			return nil, fmt.Errorf("counter state %s/%s: %w", org, metric, err)
 		}
@@ -296,7 +300,14 @@ func (r *Runner) Sync(ctx context.Context, org string) ([]Span, error) {
 	}
 
 	if hasRebuild {
-		changed = append(changed, Span{From: rebuild.ChangedFrom, To: until})
+		// A request made from the command line asks from the epoch; the
+		// days before the organization's first reading have nothing to
+		// recompute.
+		from := rebuild.ChangedFrom
+		if from.Before(earliest) {
+			from = earliest
+		}
+		changed = append(changed, Span{From: from, To: until})
 		if err := storage.ClearCounterRebuild(ctx, r.Pool, org, rebuild); err != nil {
 			return nil, err
 		}

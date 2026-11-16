@@ -190,6 +190,14 @@ func SaveCounterStitch(
 		`, organizationID, state.MetricKey); err != nil {
 			return fmt.Errorf("storage: clear counter_corrections: %w", err)
 		}
+		// The pass replays the counter's whole history, so an episode it
+		// no longer finds must not linger; frozen stretches come from
+		// their own pass and stay.
+		if _, err := tx.Exec(ctx, `
+			DELETE FROM counter_episodes WHERE organization_id = $1 AND metric_key = $2 AND kind <> 'frozen'
+		`, organizationID, state.MetricKey); err != nil {
+			return fmt.Errorf("storage: clear counter_episodes: %w", err)
+		}
 	}
 	for _, g := range segments {
 		if _, err := tx.Exec(ctx, `
