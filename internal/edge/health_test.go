@@ -375,6 +375,28 @@ func TestHealthPCCSignSameWarns(t *testing.T) {
 	}
 }
 
+// ze's meter reports import as positive: with meter_import_sign 1 the
+// same signs are the agreement and opposite ones the warning.
+func TestHealthPCCSignFollowsMeterSign(t *testing.T) {
+	cfg := testCfg()
+	cfg.MeterImportSign = 1
+	for _, tc := range []struct {
+		meter float64
+		ok    bool
+	}{{+1278.1, true}, {-1278.1, false}} {
+		tick := testTick(map[string]float64{
+			"active_pv_power_kw": 0, "load_power_kw": 475, "soc_percent": 80,
+			"grid_connected_active_power_kw": 1275.3,
+			"meter_active_power_kw":          tc.meter,
+		}, QualityOK)
+		s := healthTestService(cfg, &tick, nil)
+		c := findCheck(t, s.buildHealth(testTS), "pcc_sign")
+		if c == nil || c.OK != tc.ok || c.Expected != "однаковий з 32278" {
+			t.Fatalf("meter %+.1f: pcc_sign = %+v, want ok=%v", tc.meter, c, tc.ok)
+		}
+	}
+}
+
 func TestHealthVoltageLowAlarms(t *testing.T) {
 	tick := testTick(map[string]float64{
 		"active_pv_power_kw": 100, "load_power_kw": 100, "soc_percent": 60,

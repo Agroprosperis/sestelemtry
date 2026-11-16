@@ -520,6 +520,39 @@ func TestEnableNeedsConfirmationAndPreconditions(t *testing.T) {
 	}
 }
 
+// The 40505 cross-check follows the meter's configured sign: ze's meter
+// reports import as positive, as 40505 does.
+func TestPCCSignPreconditionFollowsMeterSign(t *testing.T) {
+	pccOK := func(cfg *Config, meter float64) (bool, bool) {
+		s := writeService(t, cfg)
+		now := time.Now().UTC()
+		tick := controlTick(map[string]float64{"grid_connected_active_power_kw": 1275.3, "meter_active_power_kw": meter})
+		tick.TS = now
+		s.lastTick.Store(&tick)
+		for _, p := range s.writePreconditions(now) {
+			if p.ID == "pcc_sign" {
+				return p.OK, true
+			}
+		}
+		return false, false
+	}
+	huawei := zeCfg(t)
+	if ok, found := pccOK(huawei, -1278.1); !found || !ok {
+		t.Fatalf("Huawei map, opposite signs: ok=%v found=%v", ok, found)
+	}
+	if ok, _ := pccOK(huawei, +1278.1); ok {
+		t.Fatal("Huawei map, same signs passed")
+	}
+	ze := zeCfg(t)
+	ze.MeterImportSign = 1
+	if ok, _ := pccOK(ze, +1278.1); !ok {
+		t.Fatal("meter_import_sign 1, same signs failed")
+	}
+	if ok, _ := pccOK(ze, -1278.1); ok {
+		t.Fatal("meter_import_sign 1, opposite signs passed")
+	}
+}
+
 // Turning off writes the safe values, waits for the readback, then drops
 // the flag; without a readback it drops it after the timeout.
 func TestDisableWaitsForTheSafeReadback(t *testing.T) {

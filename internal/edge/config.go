@@ -245,6 +245,11 @@ type Config struct {
 	// to -1 only when the start-up check against the meter's 32278
 	// shows the logger reports export as positive (cutover §12.6 п. 3).
 	GridImportSign int `yaml:"grid_import_sign"`
+	// MeterImportSign turns the meter's 32278 into "+ import" for the
+	// 40505 cross-check. 0 = the Huawei map (-1, "+ export"); 1 where
+	// the meter reports import as positive (ze, read 2026-11-16 at
+	// night while charging: 40505 +1275, 32278 +1278 kW).
+	MeterImportSign int `yaml:"meter_import_sign"`
 }
 
 // DefaultMetricKeys returns the per-role register whitelist from the
@@ -542,6 +547,11 @@ func (c *Config) validate() error {
 	default:
 		return fmt.Errorf("edge config: grid_import_sign must be 1 or -1, got %d", c.GridImportSign)
 	}
+	switch c.MeterImportSign {
+	case 0, 1, -1:
+	default:
+		return fmt.Errorf("edge config: meter_import_sign must be 1 or -1, got %d", c.MeterImportSign)
+	}
 
 	sl := c.SmartLogger
 	switch sl.Topology {
@@ -620,4 +630,12 @@ func (c *Config) EffectiveGridSign() float64 {
 		return -1
 	}
 	return 1
+}
+
+// EffectiveMeterSign returns +1 or -1 (default -1, the Huawei map).
+func (c *Config) EffectiveMeterSign() float64 {
+	if c.MeterImportSign == 1 {
+		return 1
+	}
+	return -1
 }
