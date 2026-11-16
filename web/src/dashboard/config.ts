@@ -36,6 +36,17 @@ export const ECONOMIC_GROUPS: Record<string, readonly string[]> = {
   'de-all': ['de', 'de1'],
 }
 
+// SHARED_GENERATOR_GROUPS are the groups whose sites share one generator
+// (economics.Group.SharedGenerator on the server): the generator is
+// counted on the group's day, its fuel priced in the first member's
+// tariffs.
+const SHARED_GENERATOR_GROUPS: readonly string[] = ['de-all']
+
+// sharedGeneratorGroup is the group whose generator a site shares, or null.
+export function sharedGeneratorGroup(organizationID: string): string | null {
+  return SHARED_GENERATOR_GROUPS.find((g) => ECONOMIC_GROUPS[g]?.includes(organizationID)) ?? null
+}
+
 // SYSTEM_SITE_ORDER is how «Система» stacks a group's sites, top to
 // bottom; a group missing here keeps its ECONOMIC_GROUPS order.
 const SYSTEM_SITE_ORDER: Record<string, readonly string[]> = {

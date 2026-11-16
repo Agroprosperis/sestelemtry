@@ -103,6 +103,9 @@ type Service struct {
 	// daemon interval). GetDay no longer gates the open-day cache on
 	// it — a stored non-final row is always served.
 	freshTodayWindow time.Duration
+	// groupGenErr reports a failed shared-generator group day
+	// (SetGroupGenErrorLog).
+	groupGenErr func(groupID, date string, err error)
 }
 
 // NewService wires the economics service to a Backend.
@@ -225,6 +228,9 @@ func (s *Service) ComputeDay(ctx context.Context, orgID, date, tz string) (Store
 	}
 	if err := s.backend.SaveDay(ctx, day); err != nil {
 		return StoredDay{}, fmt.Errorf("save day: %w", err)
+	}
+	if shared {
+		s.refreshGroupGen(ctx, orgID, dayStart, loc.String())
 	}
 	return day, nil
 }

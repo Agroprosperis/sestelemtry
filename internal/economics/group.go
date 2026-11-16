@@ -16,6 +16,10 @@ type Group struct {
 	ID      string
 	Name    string
 	Members []GroupMember
+	// SharedGenerator: the sites share one generator, read by every
+	// site's controller from one meter. Its energy and fuel are counted
+	// on the group's day, from the first member (groupgen.go).
+	SharedGenerator bool
 }
 
 // GroupMember is one site of a Group. Label tells its УЗЕ cycles and
@@ -37,6 +41,7 @@ var Groups = []Group{{
 		{ID: "de", Label: "Т2"},
 		{ID: "de1", Label: "Т1", From: "2026-09-24"},
 	},
+	SharedGenerator: true,
 }}
 
 // GroupByID finds one of Groups.
@@ -266,6 +271,19 @@ func (b *groupBackend) LoadDay(ctx context.Context, orgID string, day time.Time,
 	if len(days) == 0 {
 		return StoredDay{}, false, nil
 	}
+	if g.SharedGenerator && len(days) > 1 {
+		computed := make([]time.Time, len(days))
+		for i, d := range days {
+			computed[i] = d.ComputedAt
+		}
+		gd, ok, err := b.inner.LoadDay(ctx, g.ID, day, tz)
+		if err != nil {
+			return StoredDay{}, false, err
+		}
+		if ok && freshGroupDay(gd.ComputedAt, computed) {
+			return gd, true, nil
+		}
+	}
 	return mergeDays(g.ID, days), true, nil
 }
 
@@ -274,6 +292,32 @@ func (b *groupBackend) LoadDailyRange(ctx context.Context, orgID string, from, t
 	if !ok {
 		return b.inner.LoadDailyRange(ctx, orgID, from, to)
 	}
+	byDay, err := b.memberDays(ctx, g, from, to)
+	if err != nil {
+		return nil, err
+	}
+	stored, err := b.freshGroupDays(ctx, g, from, to, byDay)
+	if err != nil {
+		return nil, err
+	}
+	keys := make([]string, 0, len(byDay))
+	for k := range byDay {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	out := make([]DailyRecord, 0, len(keys))
+	for _, k := range keys {
+		if r, ok := stored[k]; ok {
+			out = append(out, r)
+			continue
+		}
+		out = append(out, mergeDailyRecords(byDay[k]))
+	}
+	return out, nil
+}
+
+// memberDays loads the group's members' own daily records by civil date.
+func (b *groupBackend) memberDays(ctx context.Context, g Group, from, to time.Time) (map[string][]DailyRecord, error) {
 	byDay := map[string][]DailyRecord{}
 	for _, m := range g.Members {
 		recs, err := b.inner.LoadDailyRange(ctx, m.ID, from, to)
@@ -285,16 +329,50 @@ func (b *groupBackend) LoadDailyRange(ctx context.Context, orgID string, from, t
 			byDay[key] = append(byDay[key], r)
 		}
 	}
-	keys := make([]string, 0, len(byDay))
-	for k := range byDay {
-		keys = append(keys, k)
+	return byDay, nil
+}
+
+// freshGroupDays are a shared-generator group's stored days over the
+// span that are newer than each of their members' (byDay), by date.
+func (b *groupBackend) freshGroupDays(ctx context.Context, g Group, from, to time.Time, byDay map[string][]DailyRecord) (map[string]DailyRecord, error) {
+	out := map[string]DailyRecord{}
+	if !g.SharedGenerator {
+		return out, nil
 	}
-	sort.Strings(keys)
-	out := make([]DailyRecord, 0, len(keys))
-	for _, k := range keys {
-		out = append(out, mergeDailyRecords(byDay[k]))
+	recs, err := b.inner.LoadDailyRange(ctx, g.ID, from, to)
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range recs {
+		key := r.Day.Format("2006-01-02")
+		members := byDay[key]
+		if len(members) < 2 {
+			continue
+		}
+		computed := make([]time.Time, len(members))
+		for i, m := range members {
+			computed[i] = m.ComputedAt
+		}
+		if freshGroupDay(r.ComputedAt, computed) {
+			out[key] = r
+		}
 	}
 	return out, nil
+}
+
+// freshGroupDay reports a stored group day computed after every one of
+// its members' days: a member recomputed since supersedes it until the
+// group's day is redone.
+func freshGroupDay(group time.Time, members []time.Time) bool {
+	if group.IsZero() {
+		return false
+	}
+	for _, m := range members {
+		if group.Before(m) {
+			return false
+		}
+	}
+	return true
 }
 
 func (b *groupBackend) LoadHourlyRange(ctx context.Context, orgID string, from, to time.Time) ([]HourlyRecord, error) {
@@ -318,6 +396,27 @@ func (b *groupBackend) LoadHourlyRange(ctx context.Context, orgID string, from, 
 			}
 		}
 	}
+	if g.SharedGenerator {
+		byDay, err := b.memberDays(ctx, g, from, to)
+		if err != nil {
+			return nil, err
+		}
+		stored, err := b.freshGroupDays(ctx, g, from, to, byDay)
+		if err != nil {
+			return nil, err
+		}
+		if len(stored) > 0 {
+			recs, err := b.inner.LoadHourlyRange(ctx, g.ID, from, to)
+			if err != nil {
+				return nil, err
+			}
+			for _, r := range recs {
+				if _, ok := stored[r.HourStart.In(loc).Format("2006-01-02")]; ok {
+					byHour[r.HourStart.Unix()] = r
+				}
+			}
+		}
+	}
 	out := make([]HourlyRecord, 0, len(byHour))
 	for _, r := range byHour {
 		out = append(out, r)
@@ -326,12 +425,43 @@ func (b *groupBackend) LoadHourlyRange(ctx context.Context, orgID string, from, 
 	return out, nil
 }
 
-// SumEbitdaBefore of a group counts each member from the day it joins.
+// SumEbitdaBefore of a group counts each member from the day it joins,
+// and a shared generator's group day in place of its members' sum.
 func (b *groupBackend) SumEbitdaBefore(ctx context.Context, orgID string, before time.Time) (float64, int, error) {
 	g, ok := b.group(orgID)
 	if !ok {
 		return b.inner.SumEbitdaBefore(ctx, orgID, before)
 	}
+	sum, months, err := b.membersEbitdaBefore(ctx, g, before)
+	if err != nil || !g.SharedGenerator {
+		return sum, months, err
+	}
+	last := before.AddDate(0, 0, -1)
+	recs, err := b.inner.LoadDailyRange(ctx, g.ID, time.Time{}, last)
+	if err != nil {
+		return 0, 0, err
+	}
+	if len(recs) == 0 {
+		return sum, months, nil
+	}
+	byDay, err := b.memberDays(ctx, g, recs[0].Day, last)
+	if err != nil {
+		return 0, 0, err
+	}
+	stored, err := b.freshGroupDays(ctx, g, recs[0].Day, last, byDay)
+	if err != nil {
+		return 0, 0, err
+	}
+	for key, r := range stored {
+		sum += r.Totals.Ebitda
+		for _, m := range byDay[key] {
+			sum -= m.Totals.Ebitda
+		}
+	}
+	return sum, months, nil
+}
+
+func (b *groupBackend) membersEbitdaBefore(ctx context.Context, g Group, before time.Time) (float64, int, error) {
 	var sum float64
 	var months int
 	for _, m := range g.Members {
@@ -562,6 +692,12 @@ func (s *Service) groupDay(ctx context.Context, g Group, date, tz string) (Store
 	if len(days) == 0 {
 		return StoredDay{OrganizationID: g.ID, Day: dayStart, Tz: loc.String(), Rows: make([]*HourRow, 24)}, nil
 	}
+	// A shared generator's stored group day, when it is current.
+	if g.SharedGenerator && len(days) > 1 {
+		if gd, ok, err := s.backend.LoadDay(ctx, g.ID, dayStart, loc.String()); err == nil && ok {
+			return gd, nil
+		}
+	}
 	return mergeDays(g.ID, days), nil
 }
 
@@ -638,8 +774,8 @@ func mergeDays(orgID string, days []StoredDay) StoredDay {
 			}
 			if out.Rows[h] == nil {
 				row := *r
-				// The members share one generator: until the group is
-				// computed as one, its hour carries none of it.
+				// The members' generator data is one generator's seen by
+				// each: the group's comes from groupGenDay.
 				row.GenKwh, row.GenEstimated, row.SupplyMinutes = 0, false, SupplyMinutes{}
 				out.Rows[h] = &row
 				continue

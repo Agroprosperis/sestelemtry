@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { refreshDAMPrices, type FxWindow } from '../api'
 import { useAccess } from '../auth/authContext'
-import { ECONOMIC_GROUPS, energyFloorFor } from '../dashboard/config'
+import { ECONOMIC_GROUPS, energyFloorFor, formatOrganizationLabel, sharedGeneratorGroup } from '../dashboard/config'
 import { useOrganizationParam } from '../dashboard/hooks/useOrganizationParam'
 import { ModeTopBar, type TopBarMenuItem } from '../shell/ModeTopBar'
 import { navigateView, TARIFFS_PARAM } from '../shell/navigation'
@@ -204,6 +204,8 @@ export function EconomicsPage() {
     groups: true,
   })
   const groupMembers = ECONOMIC_GROUPS[organizationID]
+  // A site of a group sharing a generator: the generator is on the group's day.
+  const sharedGroup = groupMembers ? null : sharedGeneratorGroup(organizationID)
   const access = useAccess()
   const canEdit = access.can('economics.write', organizationID)
   const [date, setDate] = useState<string>(readDateFromUrl)
@@ -538,6 +540,7 @@ export function EconomicsPage() {
             tariffsError={tariffsError}
             readOnly={!canEdit}
             onClose={closeTariffs}
+            onOrganizationChange={onOrganizationChange}
           />
         )}
 
@@ -681,8 +684,24 @@ export function EconomicsPage() {
 
             {!data.error && !data.loading && data.qualityFlags.includes('gen_shared') && (
               <section className="economics-banner" role="status">
-                Генератор спільний для Т1 і Т2. Поки елеватор не рахується з ним як одне ціле, години генератора
-                тут рахуються без пального, за звичайними формулами.
+                {sharedGroup ? (
+                  <>
+                    Спільний генератор — див. {formatOrganizationLabel(sharedGroup)}. Тут години без мережі пораховані
+                    без генератора й пального; генератор, пальне й ефект цих годин — у звіті елеватора.{' '}
+                    <button
+                      type="button"
+                      className="economics-banner-action"
+                      onClick={() => onOrganizationChange(sharedGroup)}
+                    >
+                      Відкрити елеватор
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    Генератор ще не перерахований для елеватора як одного цілого: години з ним пораховані без
+                    пального.
+                  </>
+                )}
               </section>
             )}
 

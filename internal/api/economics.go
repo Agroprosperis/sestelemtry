@@ -171,6 +171,16 @@ func (b *economicsBackend) SaveDay(ctx context.Context, day economics.StoredDay)
 	return b.store.SaveEconomicsDaily(ctx, dailyToStorage(day))
 }
 
+// DeleteDay drops a stored day (economics.DayDeleter).
+func (b *economicsBackend) DeleteDay(ctx context.Context, orgID string, dayStart time.Time) error {
+	return b.store.DeleteEconomicsDay(ctx, orgID, dayStart, dayStart.AddDate(0, 0, 1))
+}
+
+// GroupGenFlows walks a group's sites together (economics.GroupGenFlowSource).
+func (b *economicsBackend) GroupGenFlows(ctx context.Context, siteIDs []string, dayStart time.Time) ([]*economics.GenFlowRow, error) {
+	return b.h.groupGenFlows(ctx, siteIDs, dayStart)
+}
+
 func (b *economicsBackend) LoadDay(ctx context.Context, orgID string, dayStart time.Time, tz string) (economics.StoredDay, bool, error) {
 	daily, ok, err := b.store.GetEconomicsDaily(ctx, orgID, dayStart)
 	if err != nil {
