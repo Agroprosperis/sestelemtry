@@ -1294,6 +1294,10 @@ type EconomicsPortfolioSite struct {
 	GridImportKwh      float64 `json:"grid_import_kwh"`
 	GridExportKwh      float64 `json:"grid_export_kwh"`
 	EssNetUah          float64 `json:"ess_net_uah"`
+	// EssCapturedShare is the УЗЕ fact over its optimum, the share the
+	// object's month and year show (0 without an optimum, and on the
+	// total row).
+	EssCapturedShare float64 `json:"ess_captured_share"`
 	// CapexUah is the invested capital standing at the end of the
 	// period (0 when the tariffs carry none); with MonthsWithData it
 	// gives the object's ROCE the way the economics page's card does.
@@ -1391,6 +1395,7 @@ func portfolioSiteFromTotals(id, name string, t economics.MonthlyTotals, hasData
 		GridImportKwh:      t.GridImport,
 		GridExportKwh:      t.GridExport,
 		EssNetUah:          t.EssNet,
+		EssCapturedShare:   t.EssCapturedShare,
 		EconomicsGenTotals: genTotalsToJSON(t.GenTotals),
 	}
 }

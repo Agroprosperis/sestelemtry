@@ -1268,6 +1268,9 @@ export type EconomicsPortfolioSite = EconomicsGenTotalsApi & {
   grid_import_kwh: number
   grid_export_kwh: number
   ess_net_uah: number
+  // УЗЕ fact over its optimum, the share the object's month and year
+  // show (0 without an optimum and on the totals row).
+  ess_captured_share: number
   // Invested capital at the end of the period (0 = none in the tariffs)
   // and the months it is annualised over — the ROCE inputs. On the
   // totals row capex_uah sums the objects that have data and CAPEX.

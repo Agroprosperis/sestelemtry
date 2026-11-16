@@ -20,6 +20,7 @@ function site(over: Partial<EconomicsPortfolioSite>): EconomicsPortfolioSite {
     grid_import_kwh: 0,
     grid_export_kwh: 0,
     ess_net_uah: 0,
+    ess_captured_share: 0,
     ...over,
   }
 }

@@ -295,8 +295,6 @@ function PortfolioBody({
           </thead>
           <tbody>
             {sites.map((s) => {
-              const captured =
-                s.bess_reserve_uah + s.ess_net_uah > 0 ? s.ess_net_uah / (s.bess_reserve_uah + s.ess_net_uah) : 0
               return (
                 <tr key={s.id} className={s.has_data ? undefined : 'economics-portfolio-empty'}>
                   <td className="economics-month-table-left">
@@ -313,7 +311,7 @@ function PortfolioBody({
                       <td>{money.format(s.bess_reserve_uah)}</td>
                       <td>{money.format(s.action_reserve_uah)}</td>
                       <td>{formatMwh(s.pv_kwh)}</td>
-                      <td>{formatPercent(captured)}</td>
+                      <td>{formatPercent(s.ess_captured_share)}</td>
                       {withGen && <td>{siteFuel(s, money)}</td>}
                     </>
                   ) : (

@@ -308,6 +308,44 @@ func TestChatMonthToolLeavesMoneyToEconomics(t *testing.T) {
 	}
 }
 
+// A negative УЗЕ fact is explained by what the battery's discharge was
+// worth against what its charge and wear cost, and at which prices.
+func TestChatMonthToolSplitsTheUzeResult(t *testing.T) {
+	loc, err := time.LoadLocation(chatTZ)
+	if err != nil {
+		t.Skip("tzdata unavailable")
+	}
+	h, _ := authTestHandlers(t, nil)
+	// 100 kWh discharged into the load at 12 ₴; 120 kWh charged from the
+	// grid at 13 ₴ and 10 kWh from PV that would have sold at 2 ₴; wear 30 ₴.
+	record := economics.DailyRecord{Day: time.Date(2026, 3, 10, 0, 0, 0, 0, loc), IsFinal: true, Totals: economics.DailyTotals{
+		EssNet: -410, Effect: -410, RevenueEssSelf: 1200, ExpenseGridCharge: 1560, EssDegradationCost: 30,
+		EssCharged: 130, EssDischarged: 100, GridToEss: 120, PVToEss: 10, EssToLoad: 100, HoursWithData: 24,
+	}}
+	h.SetEconomicsService(economics.NewService(portfolioBackend{days: map[string][]economics.DailyRecord{"ze": {record}}}))
+	req := principalRequest(&auth.Principal{UserID: 1, Grants: []auth.Grant{{Role: auth.RoleCEO, OrganizationID: "ze"}}})
+	res, _, err := chatTool(t, h.chatTools(req, "ze", loc), "economics_month").Call(context.Background(), json.RawMessage(`{"month":"2026-03"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `"ess":{"discharge_uah_per_kwh":12,"discharge_value_uah":1200,"grid_charge_cost_uah":1560,` +
+		`"grid_charge_uah_per_kwh":13,"other_charge_uah":20,"wear_uah":30}`
+	if out := aichat.Compact(res); !strings.Contains(out, want) {
+		t.Errorf("month = %s, want %s", out, want)
+	}
+}
+
+// The portfolio's «Захоплення УЗЕ» is the object's fact over its optimum,
+// the share its month shows, for the page and the assistant alike.
+func TestPortfolioRowCarriesTheMonthsCapturedShare(t *testing.T) {
+	row := portfolioSiteFromTotals("de-all", "Елеватор", economics.MonthlyTotals{
+		EssNet: -17598, EssFact: -21265, EssOptimum: 56857, EssReserve: 78122, EssCapturedShare: -21265.0 / 56857,
+	}, true)
+	if row.EssCapturedShare != -21265.0/56857 || chatPortfolioSiteOf(row).EssCapturedShare != row.EssCapturedShare {
+		t.Errorf("captured share = %v (assistant %v), want the month's %v", row.EssCapturedShare, chatPortfolioSiteOf(row).EssCapturedShare, -21265.0/56857)
+	}
+}
+
 // The load split must read like the analytics summary card
 // (transforms/summary.ts): grid first, then the battery, PV the rest.
 func TestChatEnergyBalanceMatchesTheSummaryCard(t *testing.T) {

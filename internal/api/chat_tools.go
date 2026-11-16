@@ -556,8 +556,43 @@ type chatPeriodMoney struct {
 	EssOptimumUah      float64                `json:"ess_optimum_uah"`
 	EssReserveUah      float64                `json:"ess_reserve_uah"`
 	EssCapturedShare   float64                `json:"ess_captured_share"`
+	Ess                *chatEssSplit          `json:"ess,omitempty"`
 	BestDay            *EconomicsMonthExtreme `json:"best_day,omitempty"`
 	WorstDay           *EconomicsMonthExtreme `json:"worst_day,omitempty"`
+}
+
+// chatEssSplit is what ess_net_uah is made of: the worth of the battery's
+// discharge against the cost of its charge and wear, and the prices
+// behind them.
+type chatEssSplit struct {
+	DischargeValueUah   float64  `json:"discharge_value_uah"`
+	GridChargeCostUah   float64  `json:"grid_charge_cost_uah"`
+	WearUah             float64  `json:"wear_uah"`
+	OtherChargeUah      float64  `json:"other_charge_uah"`
+	DischargeUahPerKwh  *float64 `json:"discharge_uah_per_kwh,omitempty"`
+	GridChargeUahPerKwh *float64 `json:"grid_charge_uah_per_kwh,omitempty"`
+}
+
+func chatEssSplitOf(t EconomicsMonthlyTotals) *chatEssSplit {
+	if t.EssChargedKwh == 0 && t.EssDischargedKwh == 0 {
+		return nil
+	}
+	value := t.RevenueEssSelfUah + t.RevenueEssExportUah
+	out := &chatEssSplit{
+		DischargeValueUah: value,
+		GridChargeCostUah: t.ExpenseGridChargeUah,
+		WearUah:           t.EssDegradationCostUah,
+		OtherChargeUah:    value - t.ExpenseGridChargeUah - t.EssDegradationCostUah - t.EssNetUah,
+	}
+	if t.EssDischargedKwh > 0 {
+		v := value / t.EssDischargedKwh
+		out.DischargeUahPerKwh = &v
+	}
+	if t.GridToEssKwh > 0 {
+		v := t.ExpenseGridChargeUah / t.GridToEssKwh
+		out.GridChargeUahPerKwh = &v
+	}
+	return out
 }
 
 func chatEnergyOfDay(t economics.DailyTotals) chatEnergy {
@@ -602,6 +637,7 @@ func chatMoneyOfPeriod(t EconomicsMonthlyTotals) *chatPeriodMoney {
 		EssOptimumUah:      t.EssOptimumUah,
 		EssReserveUah:      max(0, t.EssReserveUah),
 		EssCapturedShare:   t.EssCapturedShare,
+		Ess:                chatEssSplitOf(t),
 	}
 	if t.BestDay.Date != "" {
 		best := t.BestDay
@@ -617,7 +653,14 @@ func chatMoneyOfPeriod(t EconomicsMonthlyTotals) *chatPeriodMoney {
 const chatMoneyNote = " Гривні (money, *_uah) є лише для ролей з доступом до режиму «Економіка»."
 
 const chatReserveNote = " schedule_reserve_uah — резерв графіка робіт (перенести гнучке денне навантаження на години, коли СЕС іде в мережу), " +
-	"ess_reserve_uah — резерв таймінгу УЗЕ (оптимум мінус факт); так само їх рахує панель «Економіка», більший із двох — головний резерв."
+	"ess_reserve_uah — резерв таймінгу УЗЕ (оптимум мінус факт); так само їх рахує панель «Економіка», більший із двох — головний резерв." +
+	" ess_captured_share — захоплення УЗЕ (ess_fact_uah ÷ ess_optimum_uah, частка: 0,25 = 25 %)." +
+	" money.ess розкладає ess_net_uah: discharge_value_uah — цінність розряду, grid_charge_cost_uah — заряд з мережі, wear_uah — знос, " +
+	"other_charge_uah — решта вартості заряду (енергія СЕС за втраченим експортом, пальне генератора); discharge_uah_per_kwh і " +
+	"grid_charge_uah_per_kwh — середня цінність кВт·год розряду і ціна кВт·год заряду з мережі. ess_fact_uah — той самий результат " +
+	"без аномальних годин УЗЕ, тож може трохи відрізнятися. Від'ємний факт чи низьке захоплення пояснюй цими цінами, а коли саме батарея " +
+	"заряджалась і розряджалась — дивись погодинно в economics_day за дні з найбільшим зарядом чи найгіршим ефектом " +
+	"(ess_charged_kwh і ess_discharged_kwh проти rdn_uah_per_kwh)."
 
 type chatEconomicsHour struct {
 	Hour             int      `json:"hour"`
@@ -1253,6 +1296,7 @@ type chatPortfolioSite struct {
 	ScheduleReserveUah float64 `json:"schedule_reserve_uah"`
 	EssReserveUah      float64 `json:"ess_reserve_uah"`
 	ActionReserveUah   float64 `json:"action_reserve_uah"`
+	EssCapturedShare   float64 `json:"ess_captured_share"`
 	EssDataOk          bool    `json:"ess_data_ok"`
 	PvKwh              float64 `json:"pv_kwh"`
 	LoadKwh            float64 `json:"load_kwh"`
@@ -1267,8 +1311,8 @@ func chatPortfolioSiteOf(s EconomicsPortfolioSite) chatPortfolioSite {
 		ID: s.ID, Name: s.Name, HasData: s.HasData, MonthsWithData: s.MonthsWithData,
 		EffectUah: s.EffectUah, EbitdaUah: s.EbitdaUah,
 		ScheduleReserveUah: s.ScheduleReserveUah, EssReserveUah: s.BessReserveUah, ActionReserveUah: s.ActionReserveUah,
-		EssDataOk: s.BessDataOk,
-		PvKwh:     s.PvKwh, LoadKwh: s.LoadKwh, GridImportKwh: s.GridImportKwh, GridExportKwh: s.GridExportKwh,
+		EssCapturedShare: s.EssCapturedShare, EssDataOk: s.BessDataOk,
+		PvKwh: s.PvKwh, LoadKwh: s.LoadKwh, GridImportKwh: s.GridImportKwh, GridExportKwh: s.GridExportKwh,
 		GenKwh: s.GenKwh, GenFuelCostUah: s.GenFuelCostUah,
 	}
 }
@@ -1281,6 +1325,7 @@ func (h *Handlers) chatPortfolioTool(loc *time.Location, visible func(org string
 		Description: "Зведення по всіх об'єктах, економіку яких бачить користувач (не лише поточний), як на сторінці портфеля, за місяць (YYYY-MM) " +
 			"або календарний рік (YYYY): ефект проєкту й EBITDA (₴), резерв графіка робіт і резерв таймінгу УЗЕ, сумарний резерв (action_reserve_uah), " +
 			"енергія (кВт·год). Об'єкти відсортовані за сумарним резервом, без даних — у кінці; total — підсумок портфеля. " +
+			"ess_captured_share — колонка «Захоплення УЗЕ» (частка, 0,25 = 25 %; у total не рахується). " +
 			"ess_data_ok=false — частину годин УЗЕ виключено як аномальні. " +
 			"gen_kwh і gen_fuel_cost_uah — енергія дизель-генератора й вартість пального, лише в об'єктів, де він працював.",
 		Parameters: chatPeriodSchema,
