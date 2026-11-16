@@ -171,6 +171,11 @@ func (b *economicsBackend) SaveDay(ctx context.Context, day economics.StoredDay)
 	return b.store.SaveEconomicsDaily(ctx, dailyToStorage(day))
 }
 
+// SaveDayFlags replaces a stored day's quality flags (economics.DayFlagsSaver).
+func (b *economicsBackend) SaveDayFlags(ctx context.Context, orgID string, day time.Time, flags []string) error {
+	return storage.UpdateEconomicsDailyFlags(ctx, b.store.pool, orgID, day, flags)
+}
+
 // DeleteDay drops a stored day (economics.DayDeleter).
 func (b *economicsBackend) DeleteDay(ctx context.Context, orgID string, dayStart time.Time) error {
 	return b.store.DeleteEconomicsDay(ctx, orgID, dayStart, dayStart.AddDate(0, 0, 1))

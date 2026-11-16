@@ -606,6 +606,24 @@ func UpsertEconomicsDaily(ctx context.Context, pool *pgxpool.Pool, r EconomicsDa
 	return nil
 }
 
+// UpdateEconomicsDailyFlags replaces a stored day's quality flags and
+// nothing else.
+func UpdateEconomicsDailyFlags(ctx context.Context, pool *pgxpool.Pool, organizationID string, day time.Time, flags []string) error {
+	if pool == nil {
+		return fmt.Errorf("storage: nil pool")
+	}
+	if flags == nil {
+		flags = []string{}
+	}
+	if _, err := pool.Exec(ctx, `
+		UPDATE economics_daily SET quality_flags = $3
+		WHERE organization_id = $1 AND day = $2::date
+	`, organizationID, day, flags); err != nil {
+		return fmt.Errorf("storage: update economics daily flags: %w", err)
+	}
+	return nil
+}
+
 // DeleteEconomicsDay drops an organization's stored day: its hours in
 // [dayStart, dayEnd) and its daily summary for dayStart's date.
 func DeleteEconomicsDay(ctx context.Context, pool *pgxpool.Pool, organizationID string, dayStart, dayEnd time.Time) error {

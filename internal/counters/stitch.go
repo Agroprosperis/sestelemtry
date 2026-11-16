@@ -157,6 +157,12 @@ const (
 	// The stitcher emits it as a dropout and bridges it as one; the
 	// runner reclassifies it, and it flags no day and sends no email.
 	KindOffgrid Kind = "offgrid"
+	// KindReset: a dropout the counter never came back from while it
+	// kept metering from its new level — a device replaced, restarted or
+	// moved to another logger. The step stays bridged; the runner
+	// reclassifies the dropout, closed at its start, and it flags no day
+	// and sends no email.
+	KindReset Kind = "reset"
 	// KindSeam: a forward jump nothing explains, removed.
 	KindSeam Kind = "seam"
 	// KindSpike: a seam cancelled by a matching fall soon after.
@@ -383,6 +389,29 @@ type DaySpan struct {
 // still; the registers resolve 0.01 kWh.
 const frozenMoveKwh = 0.05
 
+// Still reports a day the counter stood still through, with at least
+// minSamples readings.
+func (d DaySpan) Still(minSamples int64) bool {
+	return d.Samples >= minSamples && math.Abs(d.Last-d.First) < frozenMoveKwh
+}
+
+// StillUntil is the end of the stretch of still days starting on start:
+// the day after its last one, or the day after start when start itself
+// did not stand still or is not among days.
+func StillUntil(days []DaySpan, start time.Time, minSamples int64) time.Time {
+	end := start.AddDate(0, 0, 1)
+	for _, d := range days {
+		if d.Day.Before(start) {
+			continue
+		}
+		if !d.Day.Equal(end.AddDate(0, 0, -1)) || !d.Still(minSamples) {
+			break
+		}
+		end = d.Day.AddDate(0, 0, 1)
+	}
+	return end
+}
+
 // FrozenEpisodes groups runs of at least minDays consecutive days (in
 // order, one per civil day) on which the counter did not move although
 // at least minSamples readings arrived. A run that reaches the last day
@@ -406,7 +435,7 @@ func FrozenEpisodes(days []DaySpan, minDays int, minSamples int64, openEnd bool)
 		out = append(out, ep)
 	}
 	for i, d := range days {
-		still := d.Samples >= minSamples && math.Abs(d.Last-d.First) < frozenMoveKwh
+		still := d.Still(minSamples)
 		contiguous := start >= 0 && days[i-1].Day.AddDate(0, 0, 1).Equal(d.Day)
 		switch {
 		case still && start >= 0 && contiguous:
