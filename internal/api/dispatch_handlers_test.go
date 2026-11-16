@@ -35,6 +35,38 @@ func dispatchTestEnv(t *testing.T) *dispatchEnv {
 
 func kwp(v float64) *float64 { return &v }
 
+// The edge's hard export ceiling is the site's «Налаштування» whatever
+// the stored desk version says; only a lower desk cap lowers it.
+func TestManifestExportCeilingFromSettings(t *testing.T) {
+	env := dispatchTestEnv(t)
+	for _, tc := range []struct {
+		name string
+		cfg  dispatch.Constraints
+		want float64
+	}{
+		{"desk cap cleared", dispatch.Constraints{ReservePct: 20, ImportCapKw: 1700}, 850},
+		{"export blocked", dispatch.Constraints{ReservePct: 20, ImportCapKw: 1700, BlockExport: true, ExportCapKw: kwp(500)}, 850},
+		{"lower desk cap", dispatch.Constraints{ReservePct: 20, ImportCapKw: 1700, EssSale: true, ExportCapKw: kwp(500)}, 500},
+		{"desk cap at the ceiling", dispatch.Constraints{ReservePct: 20, ImportCapKw: 1700, EssSale: true, ExportCapKw: kwp(850)}, 850},
+	} {
+		m := dispatch.Model{Loads: make([]*float64, 24), Commands: make([]*dispatch.Command, 24), Cfg: sanitizeConstraints(env, tc.cfg)}
+		res, err := dispatch.Simulate(env.inputs, m)
+		if err != nil {
+			t.Fatal(err)
+		}
+		doc, _ := buildDispatchManifest(env, m, res, storage.DispatchVersion{Version: 5})
+		if doc.GridLimits.ExportCapKw != tc.want {
+			t.Fatalf("%s: export_cap_kw = %v, want %v", tc.name, doc.GridLimits.ExportCapKw, tc.want)
+		}
+	}
+	env.exportCeiling = nil
+	m := dispatch.Model{Loads: make([]*float64, 24), Commands: make([]*dispatch.Command, 24), Cfg: sanitizeConstraints(env, env.defaults)}
+	res, _ := dispatch.Simulate(env.inputs, m)
+	if doc, _ := buildDispatchManifest(env, m, res, storage.DispatchVersion{}); doc.GridLimits.ExportCapKw != 0 {
+		t.Fatalf("no export regime: export_cap_kw = %v, want none", doc.GridLimits.ExportCapKw)
+	}
+}
+
 func TestDispatchStoredModelRoundTrip(t *testing.T) {
 	start := time.Date(2026, 10, 7, 18, 0, 0, 0, time.UTC)
 	m := dispatch.Model{Loads: make([]*float64, 24), Commands: make([]*dispatch.Command, 24), Cfg: dispatch.Constraints{ReservePct: 25}}

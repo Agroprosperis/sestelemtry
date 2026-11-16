@@ -76,7 +76,7 @@ func zeCfg(t *testing.T) *Config {
 		Manifest: ManifestConfig{CachePath: filepath.Join(t.TempDir(), "active_manifest.json")},
 		Control:  ControlConfig{Mode: ModeShadow, Preset: PresetSelfConsumption, Interval: time.Second},
 		Limits: Limits{
-			Grid: GridLimits{ImportLimitKw: 1700, TargetImportKw: 1600, ExportCapKw: 850},
+			Grid: GridLimits{ImportLimitKw: 1700, TargetImportKw: 1600},
 			Bess: BessLimits{SocMinEconomicPct: 20, SocMaxEconomicPct: 90},
 		},
 	}
@@ -127,8 +127,15 @@ func TestExampleConfigLoads(t *testing.T) {
 		w.PVInterval != 2*time.Second || w.ESSInterval != 3*time.Second || w.StatePath == "" {
 		t.Fatalf("write config = %+v", w)
 	}
-	if cfg.Limits.Grid.ExportCapKw <= 0 {
-		t.Fatalf("export cap = %v", cfg.Limits.Grid.ExportCapKw)
+}
+
+// zeManifest is an active, numbered manifest carrying ze's ceiling from
+// the cloud's «Налаштування».
+func zeManifest(now time.Time, exportCapKw float64) *Manifest {
+	return &Manifest{
+		ManifestID: "ze-test", SiteID: "ze", Mode: ModeShadow, Preset: PresetSelfConsumption, ManifestSeq: 1,
+		ValidFrom: now.Add(-time.Hour), ValidUntil: now.Add(time.Hour),
+		GridLimits: ManifestGridLimits{ImportLimitKw: 1700, TargetImportKw: 1600, ExportCapKw: exportCapKw},
 	}
 }
 
@@ -514,9 +521,21 @@ func TestEnableNeedsConfirmationAndPreconditions(t *testing.T) {
 		t.Fatalf("PCS shutdown enabled writing: %+v", r)
 	}
 	s.lastTick.Store(&tick)
+	// No ceiling from the cloud: the device config has none to offer.
+	if r := s.onWriteRequest(ctx, now, writeRequest{action: "enable", by: "t", confirm: "ze"}); r.OK || s.gate.Enabled() {
+		t.Fatalf("enabled without an export ceiling in the manifest: %+v", r)
+	}
+	s.manifest.Store(zeManifest(now, 0))
+	if r := s.onWriteRequest(ctx, now, writeRequest{action: "enable", by: "t", confirm: "ze"}); r.OK || s.gate.Enabled() {
+		t.Fatalf("enabled with a manifest that has no ceiling: %+v", r)
+	}
+	s.manifest.Store(zeManifest(now, 850))
 	r := s.onWriteRequest(ctx, now, writeRequest{action: "enable", by: "t", confirm: "ze"})
 	if !r.OK || !s.gate.Enabled() || s.ctl.State() != WriteHold {
 		t.Fatalf("enable: %+v, gate %v, state %s", r, s.gate.Enabled(), s.ctl.State())
+	}
+	if got := s.exportCapKw(now); got != 850 {
+		t.Fatalf("export ceiling = %v, want the manifest's 850", got)
 	}
 }
 

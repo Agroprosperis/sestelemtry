@@ -66,7 +66,8 @@ type ManifestGridLimits struct {
 	TargetImportKw float64 `json:"target_import_kw,omitempty"`
 	PvRatedKw      float64 `json:"pv_rated_kw,omitempty"`
 	// ExportCapKw is the site's PCC export ceiling
-	// (active_consumer_export_power_cap.md; ЖЕ 850). 0 = not set here.
+	// (active_consumer_export_power_cap.md; ЖЕ 850), the only source of
+	// it on the edge. 0 = not set.
 	ExportCapKw float64 `json:"export_cap_kw,omitempty"`
 }
 

@@ -169,9 +169,6 @@ func (l LocalUIConfig) On() bool { return l.Enabled == nil || *l.Enabled }
 type GridLimits struct {
 	ImportLimitKw  float64 `yaml:"import_limit_kw"`
 	TargetImportKw float64 `yaml:"target_import_kw"`
-	// ExportCapKw is the PCC export ceiling until a manifest carries one
-	// (ЖЕ 850 = 50 % of 1 700). Writing cannot be turned on without it.
-	ExportCapKw float64 `yaml:"export_cap_kw"`
 }
 
 type PVLimits struct {
@@ -538,9 +535,6 @@ func (c *Config) validate() error {
 		// The logger drops to its timeout schedule after ~300 s without a
 		// command; rewriting must stay well inside it.
 		return fmt.Errorf("edge config: control.write intervals must be at most 1m")
-	}
-	if c.Limits.Grid.ExportCapKw < 0 {
-		return fmt.Errorf("edge config: limits.grid.export_cap_kw must not be negative")
 	}
 	switch c.GridImportSign {
 	case 0, 1, -1:
