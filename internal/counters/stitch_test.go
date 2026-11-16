@@ -307,3 +307,51 @@ func TestFrozenEpisodes(t *testing.T) {
 		t.Fatalf("second should be open: %+v", eps[1])
 	}
 }
+
+// Поділля: the import meter was replaced and the logger still lists the
+// old one, so its last reading (63291.2 kWh) comes back for minutes now
+// and then over the new meter's ~37000. The replacement stays an open
+// fall; each visit of the stale reading is a spike that credits what the
+// new meter counted meanwhile, and opens no dropout.
+func TestStaleLevelAboveOpenFall(t *testing.T) {
+	steps := []Step{
+		step(0, 63291.2, time.Second, 35790.5),
+		step(96*time.Hour, 37030.9, 96*time.Hour+time.Second, 63291.2),
+		step(96*time.Hour+20*time.Minute, 63291.2, 96*time.Hour+20*time.Minute+time.Second, 37040.0),
+	}
+	res := Run(State{}, steps)
+	var spikes, dropouts int
+	for _, e := range res.Episodes {
+		switch e.Kind {
+		case KindSpike:
+			spikes++
+			near(t, "credited across the stale visit", e.GapKwh, 9.1)
+		case KindDropout:
+			dropouts++
+			if !e.End.IsZero() {
+				t.Fatalf("the replacement fall closed: %+v", e)
+			}
+		}
+	}
+	if spikes != 1 || dropouts != 1 {
+		t.Fatalf("episodes = %+v", res.Episodes)
+	}
+	before := corrected(res.Segments, at(96*time.Hour), 37030.9)
+	after := corrected(res.Segments, at(96*time.Hour+20*time.Minute+time.Second), 37040.0)
+	near(t, "energy across the visit", after-before, 9.1)
+	near(t, "the replacement still bridged", res.State.Offset(), 63291.2-35790.5)
+}
+
+// A grid meter that reads zero through an outage and comes back to its
+// reading before it is a return, not a stale level: it metered nothing.
+func TestOutageReturnToSameReading(t *testing.T) {
+	steps := []Step{
+		step(0, 315617.5, time.Second, 0),
+		step(10*time.Hour, 0, 10*time.Hour+time.Second, 315617.5),
+	}
+	res := Run(State{}, steps)
+	if len(res.Episodes) != 1 || res.Episodes[0].Kind != KindDropout || res.Episodes[0].End.IsZero() {
+		t.Fatalf("episodes = %+v", res.Episodes)
+	}
+	near(t, "offset", res.State.Offset(), 0)
+}
