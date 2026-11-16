@@ -30,7 +30,13 @@ type edgeManifestDoc struct {
 	IssuedAt      time.Time `json:"issued_at"`
 	ValidFrom     time.Time `json:"valid_from"`
 	ValidUntil    time.Time `json:"valid_until"`
+	// ManifestSeq grows strictly with every stored document of the site;
+	// the edge rejects one that is not newer (ems_sl_write_cutover.md §4).
+	// Assigned at publication, outside the content id.
+	ManifestSeq int64 `json:"manifest_seq,omitempty"`
 
+	// Mode stays shadow and WriteEnabled false: writing is the device's
+	// own flag, which a manifest cannot set.
 	Mode         string `json:"mode"`
 	WriteEnabled bool   `json:"write_enabled"`
 	Preset       string `json:"preset"`
@@ -51,6 +57,9 @@ type edgeManifestDoc struct {
 		ImportLimitKw  float64 `json:"import_limit_kw,omitempty"`
 		TargetImportKw float64 `json:"target_import_kw,omitempty"`
 		PvRatedKw      float64 `json:"pv_rated_kw,omitempty"`
+		// ExportCapKw is the PCC export ceiling of the desk constraints
+		// (active_consumer_export_power_cap.md); absent = not set.
+		ExportCapKw float64 `json:"export_cap_kw,omitempty"`
 	} `json:"grid_limits"`
 	SocPolicy struct {
 		MinEconomicPct float64 `json:"min_economic_pct,omitempty"`
@@ -58,6 +67,22 @@ type edgeManifestDoc struct {
 	} `json:"soc_policy"`
 
 	Plan *edgePlanDoc `json:"plan,omitempty"`
+	// ManualCommands are the confirmed desk blocks, delivered whether or
+	// not a load is entered: the edge carries them out from its live
+	// readings (spec-remarks manifest_manual_commands.md §1).
+	ManualCommands []edgeManualCommand `json:"manual_commands,omitempty"`
+}
+
+// edgeManualCommand mirrors internal/edge.ManualCommand.
+type edgeManualCommand struct {
+	ID          string    `json:"command_id"`
+	Type        string    `json:"type"`
+	Value       float64   `json:"value,omitempty"`
+	Direction   string    `json:"direction,omitempty"`
+	From        time.Time `json:"from"`
+	Until       time.Time `json:"until"`
+	ConfirmedBy string    `json:"confirmed_by,omitempty"`
+	ConfirmedAt time.Time `json:"confirmed_at,omitempty"`
 }
 
 type edgePlanDoc struct {
@@ -167,14 +192,15 @@ func edgeManifestID(siteID string, horizonEnd time.Time, doc edgeManifestDoc) st
 	// never reaches the edge (live bug 2026-09-04 — export_allowed
 	// flipped, id stayed, publish no-oped until the plan changed).
 	hashable := struct {
-		SiteID        string       `json:"site_id"`
-		Preset        string       `json:"preset"`
-		ExportAllowed bool         `json:"export_allowed"`
-		Plan          *edgePlanDoc `json:"plan"`
-		Limits        any          `json:"limits"`
-		GridLimits    any          `json:"grid_limits"`
-		SocPolicy     any          `json:"soc_policy"`
-	}{siteID, doc.Preset, doc.ExportAllowed, doc.Plan, doc.Limits, doc.GridLimits, doc.SocPolicy}
+		SiteID         string              `json:"site_id"`
+		Preset         string              `json:"preset"`
+		ExportAllowed  bool                `json:"export_allowed"`
+		Plan           *edgePlanDoc        `json:"plan"`
+		Limits         any                 `json:"limits"`
+		GridLimits     any                 `json:"grid_limits"`
+		SocPolicy      any                 `json:"soc_policy"`
+		ManualCommands []edgeManualCommand `json:"manual_commands"`
+	}{siteID, doc.Preset, doc.ExportAllowed, doc.Plan, doc.Limits, doc.GridLimits, doc.SocPolicy, doc.ManualCommands}
 	raw, _ := json.Marshal(hashable)
 	sum := sha256.Sum256(raw)
 	return fmt.Sprintf("%s-%s-%s", siteID, horizonEnd.Format("20060102"), hex.EncodeToString(sum[:])[:8])

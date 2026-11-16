@@ -169,6 +169,38 @@ export type InverterHealth = {
   ts: string
 }
 
+/** One SmartLogger register the IoT2050 wrote, with its readback. */
+export type EdgeWriteRegister = {
+  register: string
+  host: string
+  at: string
+  kw: number
+  raw: number
+  readback_kw?: number
+  ok: boolean
+  error?: string
+}
+
+/** The device write flag and what goes into the loggers (cutover §4, §8). */
+export type EdgeWriteHealth = {
+  enabled: boolean
+  writer: 'iot2050' | 'other'
+  state: 'off' | 'hold' | 'run' | 'stopped' | 'stopping'
+  reason?: string
+  gate: { enabled: boolean; at: string; by: string; reason?: string }
+  command?: {
+    at: string
+    state: string
+    ess_kw: number
+    pv_limit_kw: number
+    pv_known: boolean
+    reason: string
+    clamps?: string[]
+  }
+  registers?: EdgeWriteRegister[]
+  applied_manifest_seq?: number
+}
+
 export type EdgeHealth = {
   ts: string
   ok: boolean
@@ -176,6 +208,7 @@ export type EdgeHealth = {
   bess?: BessHealth
   inverters?: InverterHealth[]
   alarms?: { words: string[] }
+  write?: EdgeWriteHealth
 }
 
 export type EdgeSiteStatus = {

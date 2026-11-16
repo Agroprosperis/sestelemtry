@@ -53,10 +53,35 @@ type Service struct {
 	lastInverters atomic.Pointer[inverterFleet] // written by the 51xxx poller
 	events        chan Event                    // core-loop event channel (console sends too)
 
+	// Write path (ems_sl_write_cutover.md). The gate is the device flag;
+	// the writers read writeCmd and report what they wrote in writeFB.
+	gate          *WriteGate
+	writeCmd      atomic.Pointer[WriteCommand]
+	writeFB       sync.Map // register name → WriteFeedback
+	writeFaults   chan writeFault
+	writeRequests chan writeRequest
+	appliedSeq    atomic.Int64
+
 	// Core-loop state (no locks: touched only from the core loop).
 	lastManifestID   string
 	manifestExpired  bool
 	eventLastWritten map[string]time.Time
+	ctl              *Controller
+}
+
+// writeRequest is a console action on the write flag, served by the
+// core loop so the controller stays single-threaded.
+type writeRequest struct {
+	action  string // enable | stop | disable
+	by      string
+	confirm string
+	reply   chan writeReply
+}
+
+type writeReply struct {
+	OK            bool                `json:"ok"`
+	Error         string              `json:"error,omitempty"`
+	Preconditions []WritePrecondition `json:"preconditions,omitempty"`
 }
 
 // overrideState is the local emergency override (spec ems_ui_edge_vs
@@ -86,6 +111,12 @@ func Run(ctx context.Context, cfg *Config, log *slog.Logger, version string) err
 	}
 	defer bb.Close()
 
+	// The write flag always comes up off (WriteGate).
+	gate, gateEv, err := OpenWriteGate(cfg.Control.Write.StatePath, time.Now())
+	if err != nil {
+		return err
+	}
+
 	s := &Service{
 		cfg:              cfg,
 		log:              log,
@@ -94,9 +125,16 @@ func Run(ctx context.Context, cfg *Config, log *slog.Logger, version string) err
 		norm:             NewNormalizer(cfg),
 		startedAt:        time.Now(),
 		eventLastWritten: map[string]time.Time{},
+		gate:             gate,
+		ctl:              NewController(cfg.Control.Write),
+		writeFaults:      make(chan writeFault, 8),
+		writeRequests:    make(chan writeRequest),
 	}
 	if cfg.Uplink.Enabled {
 		s.client = NewUplinkClient(cfg.Uplink)
+	}
+	if gateEv != nil {
+		s.writeEventDeduped(ctx, *gateEv)
 	}
 
 	// A cached manifest survives reboots and cloud outages: the engine
@@ -105,6 +143,7 @@ func Run(ctx context.Context, cfg *Config, log *slog.Logger, version string) err
 		log.Warn("edge_manifest_cache", "err", err)
 	} else if m != nil {
 		s.manifest.Store(m)
+		s.appliedSeq.Store(m.ManifestSeq)
 		log.Info("edge_manifest_cache_loaded", "manifest_id", m.ManifestID, "valid_until", m.ValidUntil)
 	}
 
@@ -139,6 +178,19 @@ func Run(ctx context.Context, cfg *Config, log *slog.Logger, version string) err
 		wg.Add(1)
 		go func() { defer wg.Done(); s.runLocalUI(ctx) }()
 	}
+	// One writer per logger; idle and unconnected while the flag is off.
+	for _, dev := range cfg.SmartLogger.Devices {
+		dev := dev
+		every := cfg.Control.Write.ESSInterval
+		switch dev.Role {
+		case RolePV:
+			every = cfg.Control.Write.PVInterval
+		case RoleAll:
+			every = min(cfg.Control.Write.PVInterval, cfg.Control.Write.ESSInterval)
+		}
+		wg.Add(1)
+		go func() { defer wg.Done(); s.runWriter(ctx, dev, regsFor(dev.Role), every, dialModbus) }()
+	}
 
 	log.Info("edge_start",
 		"site_id", cfg.SiteID, "edge_id", cfg.Edge.EdgeID,
@@ -160,6 +212,10 @@ func Run(ctx context.Context, cfg *Config, log *slog.Logger, version string) err
 			s.devPollOK.Store(r.host, r.at.Unix())
 		case ev := <-events:
 			s.writeEventDeduped(ctx, ev)
+		case f := <-s.writeFaults:
+			s.onWriteFault(ctx, f)
+		case req := <-s.writeRequests:
+			req.reply <- s.onWriteRequest(ctx, time.Now().UTC(), req)
 		case now := <-t.C:
 			s.onTick(ctx, now.UTC())
 		}
@@ -241,7 +297,10 @@ func (s *Service) onTick(ctx context.Context, now time.Time) {
 		s.writeEventDeduped(ctx, Event{
 			TS: now, Severity: SevInfo, Code: EvManifestApplied,
 			Message: "manifest applied: " + cur.ManifestID,
-			Context: map[string]any{"manifest_id": cur.ManifestID, "valid_until": cur.ValidUntil},
+			Context: map[string]any{
+				"manifest_id": cur.ManifestID, "valid_until": cur.ValidUntil,
+				"manifest_seq": cur.ManifestSeq, "manual_commands": len(cur.ManualCommands),
+			},
 		})
 	}
 	if cur != nil && !cur.ActiveAt(now) && !s.manifestExpired {
@@ -266,11 +325,17 @@ func (s *Service) onTick(ctx context.Context, now time.Time) {
 		})
 	}
 
-	if s.cfg.Control.Mode != ModeShadow {
+	if s.cfg.Control.Mode != ModeShadow || (ov.activeAt(now) && ov.Mode == "monitor") {
+		// Telemetry only, no decisions. Writing never starts in monitor
+		// mode; should the console's monitor override land while it is
+		// on, the battery is held at 0.
+		if s.gate.Enabled() {
+			hold := Decision{TS: now, Mode: s.cfg.Control.Mode, ReasonCode: "monitor_hold", Rationale: "монітор — УЗЕ 0"}
+			s.stepWrite(ctx, now, tick, &hold)
+		} else {
+			s.stepWrite(ctx, now, tick, nil)
+		}
 		return
-	}
-	if ov.activeAt(now) && ov.Mode == "monitor" {
-		return // monitor override: telemetry only, no decisions
 	}
 	effective := cur
 	if ov.activeAt(now) && ov.Mode == "fallback_safe" {
@@ -288,6 +353,7 @@ func (s *Service) onTick(ctx context.Context, now time.Time) {
 	if ov.activeAt(now) {
 		decision.PlanSource = "override"
 	}
+	s.stepWrite(ctx, now, tick, &decision)
 	s.lastDecision.Store(&decision)
 	if err := s.bb.WriteDecision(ctx, decision); err != nil {
 		s.log.Error("edge_blackbox_decision", "err", err)
@@ -472,19 +538,26 @@ func (s *Service) runManifestFetcher(ctx context.Context, events chan<- Event) {
 		if m == nil || m.ManifestID == curID {
 			continue
 		}
-		if err := m.ValidateForEdge(s.cfg.SiteID); err != nil {
+		err = m.ValidateForEdge(s.cfg.SiteID)
+		if err == nil {
+			err = m.AcceptAfter(s.appliedSeq.Load(), s.gate.Enabled())
+		}
+		if err != nil {
 			emitEvent(ctx, events, Event{
 				TS: time.Now().UTC(), Severity: SevWarning, Code: EvManifestRejected,
 				Message: err.Error(),
-				Context: map[string]any{"manifest_id": m.ManifestID},
+				Context: map[string]any{"manifest_id": m.ManifestID, "manifest_seq": m.ManifestSeq},
 			})
 			continue
 		}
 		if err := saveManifestCache(s.cfg.Manifest.CachePath, m); err != nil {
 			s.log.Error("edge_manifest_cache_write", "err", err)
 		}
+		if m.ManifestSeq > 0 {
+			s.appliedSeq.Store(m.ManifestSeq)
+		}
 		s.manifest.Store(m)
-		s.log.Info("edge_manifest_new", "manifest_id", m.ManifestID, "valid_until", m.ValidUntil)
+		s.log.Info("edge_manifest_new", "manifest_id", m.ManifestID, "manifest_seq", m.ManifestSeq, "valid_until", m.ValidUntil)
 	}
 }
 

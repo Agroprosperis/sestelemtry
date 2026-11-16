@@ -217,6 +217,25 @@
         </div>
       </div>
 
+      <div class="card" id="write-card">
+        <div class="btn-row" style="justify-content:space-between;margin-bottom:12px;flex-wrap:wrap">
+          <h2 style="margin:0">Запис у SmartLogger</h2>
+          <span class="badge amber" id="write-badge">запис вимкнено</span>
+        </div>
+        <table class="data" id="write-table"></table>
+        <details style="margin-top:10px">
+          <summary style="cursor:pointer">Передумови увімкнення</summary>
+          <table class="data" id="write-pre"></table>
+        </details>
+        <div class="btn-row" style="margin-top:12px;flex-wrap:wrap">
+          <input type="text" id="write-confirm" placeholder="код об'єкта для підтвердження" style="max-width:220px">
+          <button class="btn btn-danger" id="btn-write-enable">Увімкнути запис</button>
+          <button class="btn" id="btn-write-stop">УЗЕ 0 кВт (стоп)</button>
+          <button class="btn btn-primary" id="btn-write-disable">Вимкнути запис</button>
+        </div>
+        <p id="write-result" style="font-size:12px;color:var(--muted);margin-top:10px">Поки запис вимкнено, контролер лише читає: рішення віртуальні (<code>would_write_*</code>). Увімкнення — лише тут, людиною; після перезапуску сервісу запис завжди вимкнений.</p>
+      </div>
+
       <div class="grid2">
         <div class="card">
           <h2>Здоровʼя пристрою</h2>
@@ -225,7 +244,7 @@
         <div class="card">
           <h2>SmartLogger</h2>
           <table class="data" id="sl-table"></table>
-          <p style="font-size:12px;color:var(--muted);margin:12px 0 0">Write у SL: <span class="badge amber">shadow (вимкнено)</span> — рішення лише віртуальні (<code>would_write_*</code>).</p>
+          <p style="font-size:12px;color:var(--muted);margin:12px 0 0">Write у SL: <span class="badge amber" id="write-line">запис вимкнено</span></p>
         </div>
       </div>
 
@@ -271,7 +290,7 @@
 
     <section class="panel" id="panel-override">
       <div class="info-box warn">
-        <strong>Emergency override.</strong> Діє локально до TTL: <code>fallback_safe</code> — двигун ігнорує manifest і працює за безпечним пресетом (без арбітражу, без заряду з мережі); <code>monitor</code> — лише телеметрія, без рішень. Повний ручний погодинний розклад зʼявиться на етапі керованого запису (MVP-3).
+        <strong>Emergency override.</strong> Діє локально до TTL: <code>fallback_safe</code> — двигун ігнорує manifest і працює за безпечним пресетом (без арбітражу, без заряду з мережі); <code>monitor</code> — лише телеметрія, без рішень (якщо запис увімкнено — УЗЕ тримається на 0). Ручні команди — у хмарному пульті; запис — картка «Запис у SmartLogger» на вкладці «Стан».
       </div>
       <div class="grid2">
         <div class="card">
@@ -592,10 +611,93 @@ async function refreshStatus() {
   try {
     const st = await (await fetch('/api/status')).json();
     renderStatus(st);
+    renderWrite(st.write);
   } catch (e) {
     setChip('chip-proc', 'немає звʼязку', 'err');
   }
 }
+
+const WRITE_STATES = {
+  off: ['запис вимкнено', 'amber'],
+  hold: ['IoT2050 пише · утримання УЗЕ 0', 'red'],
+  run: ['IoT2050 пише · робота', 'red'],
+  stopped: ['IoT2050 пише · ЗУПИНКА (УЗЕ 0)', 'red'],
+  stopping: ['вимикання запису…', 'amber'],
+};
+
+function renderWrite(w) {
+  if (!w) return;
+  const [label, cls] = WRITE_STATES[w.enabled ? (w.state || 'hold') : 'off'] || [w.state, 'gray'];
+  $('write-badge').className = 'badge ' + cls;
+  $('write-badge').textContent = label;
+  $('write-line').className = 'badge ' + cls;
+  $('write-line').textContent = label;
+  const g = w.gate || {};
+  const c = w.command || {};
+  const rows = [
+    ['Прапорець', (w.enabled ? 'увімкнено' : 'вимкнено') + (g.at ? ' · ' + fmtTime(g.at) + ' · ' + esc(g.by || '') : '') + (g.reason ? ' · ' + esc(g.reason) : '')],
+    ['Хто пише', w.writer === 'iot2050' ? 'IoT2050' : 'не IoT2050 (Encombi або ніхто)'],
+  ];
+  if (w.enabled) {
+    rows.push(['Причина', esc(w.reason || '—')]);
+    rows.push(['Команда', '40381 = ' + (c.ess_kw != null ? c.ess_kw : '—') + ' кВт · 40378 = ' + (c.pv_known ? c.pv_limit_kw + ' кВт' : 'не пишеться (40396 невідомий)')]);
+    if ((c.clamps || []).length) rows.push(['Обмеження', esc(c.clamps.join('; '))]);
+    for (const r of w.registers || []) {
+      rows.push([esc(r.register) + ' · ' + esc(r.host), (r.ok ? '✅ ' : '❌ ') + 'записано ' + r.kw + ' кВт · readback ' + (r.readback_kw != null ? r.readback_kw + ' кВт' : '—') + ' · ' + fmtTime(r.at) + (r.error ? ' · ' + esc(r.error) : '')]);
+    }
+  }
+  if (w.applied_manifest_seq) rows.push(['Застосований manifest', '№ ' + w.applied_manifest_seq]);
+  $('write-table').innerHTML = rows.map(([k, v]) => '<tr><th>' + k + '</th><td>' + v + '</td></tr>').join('');
+}
+
+async function refreshWritePre() {
+  try {
+    const body = await (await fetch('/api/write')).json();
+    $('write-pre').innerHTML = (body.preconditions || []).map((p) =>
+      '<tr><th>' + (p.ok ? '✅ ' : '❌ ') + esc(p.label) + '</th><td>' + esc(p.actual || '') + '</td></tr>').join('');
+  } catch (e) { /* the status poll reports the outage */ }
+}
+
+async function postWrite(action, confirm) {
+  const res = await fetch('/api/write', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, confirm }),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok || !body.ok) {
+    const failed = (body.preconditions || []).filter((p) => !p.ok).map((p) => p.label + ': ' + p.actual);
+    throw new Error((body.error || res.statusText) + (failed.length ? ' — ' + failed.join('; ') : ''));
+  }
+  return body;
+}
+
+$('btn-write-enable').onclick = async () => {
+  const code = $('write-confirm').value.trim();
+  if (!code) { $('write-result').textContent = 'Введіть код об’єкта для підтвердження.'; return; }
+  if (!confirm('Увімкнути запис IoT2050 у SmartLogger? Перед цим адресу Encombi має бути знято з обох логерів.')) return;
+  try {
+    await postWrite('enable', code);
+    $('write-confirm').value = '';
+    $('write-result').textContent = 'Запис увімкнено: УЗЕ утримується на 0, далі — команди.';
+    refreshStatus(); refreshWritePre();
+  } catch (e) { $('write-result').textContent = 'Не увімкнено: ' + e.message; refreshWritePre(); }
+};
+$('btn-write-stop').onclick = async () => {
+  try {
+    await postWrite('stop');
+    $('write-result').textContent = 'Зупинка: УЗЕ 0 кВт, СЕС на номіналі. Далі — «Вимкнути запис» і повернення Encombi.';
+    refreshStatus();
+  } catch (e) { $('write-result').textContent = 'Помилка: ' + e.message; }
+};
+$('btn-write-disable').onclick = async () => {
+  if (!confirm('Вимкнути запис? IoT2050 запише УЗЕ 0 і СЕС на номіналі, дочекається readback і зупиниться.')) return;
+  try {
+    await postWrite('disable');
+    $('write-result').textContent = 'Вимикання: безпечні уставки, readback, потім прапорець знімається. Поверніть адресу Encombi.';
+    refreshStatus();
+  } catch (e) { $('write-result').textContent = 'Помилка: ' + e.message; }
+};
 
 async function refreshManifestPanel() {
   try {
@@ -611,7 +713,9 @@ async function refreshManifestPanel() {
       ['Версія', '<code>' + esc(m.manifest_id || '—') + '</code>'],
       ['Режим', esc(m.mode || '—') + ' · <code>' + esc(m.preset || '—') + '</code>'],
       ['Дійсний', fmtTime(m.valid_from) + ' → ' + fmtTime(m.valid_until)],
-      ['Write на SL', '<span class="badge amber">shadow</span>'],
+      ['Write на SL', (lastStatus && lastStatus.write_enabled) ? '<span class="badge red">IoT2050 пише</span>' : '<span class="badge amber">вимкнено (прапорець на пристрої)</span>'],
+      ['Ручні команди', String((m.manual_commands || []).length)],
+      ['Номер версії', String(m.manifest_seq || '—')],
       ['Ліміт УЗЕ', '±' + ((m.limits || {}).ess_discharge_max_kw || '—') + ' кВт'],
       ['SOC політика', ((m.soc_policy || {}).min_economic_pct || '—') + '–' + ((m.soc_policy || {}).max_economic_pct || '—') + '%'],
       ['План', intervals.length + ' інтервалів · load: ' + esc(plan.load_source || '—')],
@@ -745,7 +849,9 @@ const initPanel = (location.hash || '#status').replace('#', '') || 'status';
 if (['status', 'diag', 'override', 'manifest'].includes(initPanel)) showPanel(initPanel);
 refreshStatus();
 refreshManifestPanel();
+refreshWritePre();
 setInterval(refreshStatus, 2000);
+setInterval(() => { if (document.querySelector('#panel-status.active')) refreshWritePre(); }, 5000);
 setInterval(() => { if (document.querySelector('#panel-diag.active')) refreshLogs(); }, 5000);
 setInterval(() => { if (document.querySelector('#panel-manifest.active')) refreshManifestPanel(); }, 30000);
 </script>

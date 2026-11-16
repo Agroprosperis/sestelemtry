@@ -1,10 +1,11 @@
 // Command edge is the EMS edge controller for the on-site Siemens
-// IOT2050: SmartLogger telemetry at 1 s, SQLite black box, shadow
-// control (virtual dispatch, no SmartLogger writes) and batch uplink
-// to the central sestelemetry API.
+// IOT2050: SmartLogger telemetry at 1 s, SQLite black box, the dispatch
+// engine and batch uplink to the central sestelemetry API.
 //
-// MVP-0..2 per ems-spec docs/specs/ems_mvp_edge_shadow_spec.md.
-// Writing to registers 40378/40381 is NOT implemented in this build.
+// It writes 40378/40381 (and 0 to 40384/40386) only while the device's
+// own write flag is on (ems-spec docs/specs/ems_sl_write_cutover.md).
+// The flag is off by default and after every restart, never comes from
+// the cloud, and is turned on only by a person on the local console.
 package main
 
 import (

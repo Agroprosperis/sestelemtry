@@ -31,8 +31,14 @@ type Manifest struct {
 	IssuedAt      time.Time `json:"issued_at"`
 	ValidFrom     time.Time `json:"valid_from"`
 	ValidUntil    time.Time `json:"valid_until"`
+	// ManifestSeq grows strictly with every published document of the
+	// site (ems_sl_write_cutover.md §4); the edge rejects one that is not
+	// newer than the applied. 0 = an older cloud that does not number.
+	ManifestSeq int64 `json:"manifest_seq,omitempty"`
 
-	Mode         Mode   `json:"mode"`
+	Mode Mode `json:"mode"`
+	// WriteEnabled is informational: writing is the device's own flag,
+	// so a manifest asking for it is rejected.
 	WriteEnabled bool   `json:"write_enabled"`
 	Preset       string `json:"preset"`
 	// ExportAllowed lets the plan discharge past the local deficit
@@ -45,6 +51,9 @@ type Manifest struct {
 	SocPolicy  SocPolicy          `json:"soc_policy"`
 
 	Plan *Plan `json:"plan,omitempty"`
+	// ManualCommands are the operator's confirmed desk blocks; while one
+	// is in force the plan is not used.
+	ManualCommands []ManualCommand `json:"manual_commands,omitempty"`
 }
 
 type ManifestLimits struct {
@@ -56,6 +65,9 @@ type ManifestGridLimits struct {
 	ImportLimitKw  float64 `json:"import_limit_kw,omitempty"`
 	TargetImportKw float64 `json:"target_import_kw,omitempty"`
 	PvRatedKw      float64 `json:"pv_rated_kw,omitempty"`
+	// ExportCapKw is the site's PCC export ceiling
+	// (active_consumer_export_power_cap.md; ЖЕ 850). 0 = not set here.
+	ExportCapKw float64 `json:"export_cap_kw,omitempty"`
 }
 
 type SocPolicy struct {
@@ -120,23 +132,45 @@ func (m *Manifest) ActiveAt(t time.Time) bool {
 	return true
 }
 
-// ValidateForEdge is the MVP hard gate: this build has no SmartLogger
-// write path, so any manifest requesting writes or an auto mode is
-// rejected outright rather than partially obeyed.
+// ValidateForEdge rejects a manifest outright rather than obeying part
+// of it. Writing is the device's own flag, so a manifest asking for it
+// is refused, as is any mode beyond monitor|shadow.
 func (m *Manifest) ValidateForEdge(siteID string) error {
 	if m.SiteID != siteID {
 		return fmt.Errorf("manifest: site_id %q does not match this edge (%q)", m.SiteID, siteID)
 	}
 	if m.WriteEnabled {
-		return fmt.Errorf("manifest: write_enabled=true rejected — MVP build has no write path (MVP-3 gate)")
+		return fmt.Errorf("manifest: write_enabled=true rejected — writing is switched on only on the device")
 	}
 	switch m.Mode {
 	case ModeMonitor, ModeShadow:
 	default:
-		return fmt.Errorf("manifest: mode %q rejected — MVP supports monitor|shadow only", m.Mode)
+		return fmt.Errorf("manifest: mode %q rejected — supported: monitor|shadow", m.Mode)
 	}
 	if m.ManifestID == "" {
 		return fmt.Errorf("manifest: manifest_id is required")
+	}
+	if m.ManifestSeq < 0 {
+		return fmt.Errorf("manifest: manifest_seq %d is negative", m.ManifestSeq)
+	}
+	if m.GridLimits.ExportCapKw < 0 || m.Limits.EssChargeMaxKw < 0 || m.Limits.EssDischargeMaxKw < 0 {
+		return fmt.Errorf("manifest: negative limit")
+	}
+	if p := m.SocPolicy; p.MinEconomicPct < 0 || p.MaxEconomicPct > 100 ||
+		(p.MaxEconomicPct > 0 && p.MinEconomicPct >= p.MaxEconomicPct) {
+		return fmt.Errorf("manifest: SOC policy %v…%v%% out of range", p.MinEconomicPct, p.MaxEconomicPct)
+	}
+	return validateManualCommands(m.ManualCommands)
+}
+
+// AcceptAfter checks a validated manifest against the one applied: the
+// number must grow, and while writing is on it must be there at all.
+func (m *Manifest) AcceptAfter(appliedSeq int64, writing bool) error {
+	if writing && m.ManifestSeq == 0 {
+		return fmt.Errorf("manifest: unnumbered manifest rejected while writing is on")
+	}
+	if m.ManifestSeq > 0 && appliedSeq > 0 && m.ManifestSeq <= appliedSeq {
+		return fmt.Errorf("manifest: manifest_seq %d is not newer than applied %d", m.ManifestSeq, appliedSeq)
 	}
 	return nil
 }

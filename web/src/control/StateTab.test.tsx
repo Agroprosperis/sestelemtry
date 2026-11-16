@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import type { EdgeHealth, EdgeSiteStatus } from './controlClient'
 import { REASON_LABELS } from './decisionLabels'
@@ -212,5 +212,69 @@ describe('StateTab diagnostics panels', () => {
 
     expect(screen.getByText('УЗЕ (BESS)')).toBeInTheDocument()
     expect(screen.queryByText('Інвертори')).not.toBeInTheDocument()
+  })
+})
+
+describe('StateTab write card', () => {
+  const gate = { enabled: false, at: '2026-11-17T08:00:00Z', by: 'edge', reason: 'стан після перезапуску' }
+
+  it('says the IoT2050 does not write while the device flag is off', () => {
+    const health: EdgeHealth = {
+      ...fullHealth,
+      write: { enabled: false, writer: 'other', state: 'off', gate, applied_manifest_seq: 1763366400000 },
+    }
+    render(<StateTab site="ze" status={statusWith(health)} />)
+
+    expect(screen.getByText('Запис у SmartLogger')).toBeInTheDocument()
+    expect(screen.getByText('IoT2050 не пише')).toBeInTheDocument()
+    expect(screen.getByText('Encombi або ніхто')).toBeInTheDocument()
+    expect(screen.getByText('№ 1763366400000')).toBeInTheDocument()
+    expect(screen.getByText(/керує Encombi \(shadow\)/)).toBeInTheDocument()
+    expect(screen.queryByText('Команда')).not.toBeInTheDocument()
+  })
+
+  it('shows the command and readbacks while the IoT2050 writes', () => {
+    const health: EdgeHealth = {
+      ...fullHealth,
+      write: {
+        enabled: true,
+        writer: 'iot2050',
+        state: 'run',
+        reason: 'робота',
+        gate: { ...gate, enabled: true, by: 'operator' },
+        command: {
+          at: '2026-11-17T09:00:00Z',
+          state: 'run',
+          ess_kw: -100,
+          pv_limit_kw: 600,
+          pv_known: true,
+          reason: 'self_consumption',
+          clamps: ['перша ненульова команда ≤ 100 кВт'],
+        },
+        registers: [
+          { register: '40381', host: '10.28.40.102', at: '2026-11-17T09:00:00Z', kw: -100, raw: -1000, readback_kw: -100, ok: true },
+          {
+            register: '40378',
+            host: '10.28.40.101',
+            at: '2026-11-17T09:00:00Z',
+            kw: 600,
+            raw: 6000,
+            readback_kw: 590,
+            ok: false,
+            error: 'readback не збігся із записаним',
+          },
+        ],
+      },
+    }
+    render(<StateTab site="ze" status={statusWith(health)} />)
+
+    expect(screen.getByText('пише IoT2050')).toBeInTheDocument()
+    expect(screen.getByText(/керує IoT2050/)).toBeInTheDocument()
+    expect(screen.getByText('40381 -100.0 кВт · 40378 600 кВт')).toBeInTheDocument()
+    expect(screen.getByText('перша ненульова команда ≤ 100 кВт')).toBeInTheDocument()
+    expect(screen.getByText('-100.0 кВт → -100.0 кВт')).toBeInTheDocument()
+    expect(screen.getByText(/600\.0 кВт → 590\.0 кВт · readback не збігся/)).toHaveClass('err')
+    const card = within(screen.getByText('Запис у SmartLogger').closest('section')!)
+    expect(card.getByText('0x0 0x0010 0x0 0x0 0x0 0x0')).toHaveClass('err')
   })
 })

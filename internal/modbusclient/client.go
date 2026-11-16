@@ -74,6 +74,20 @@ func (s *Session) ReadHoldingUnit(ctx context.Context, unitID byte, start, quant
 	return s.client.ReadHoldingRegisters(ctx, start, quantity)
 }
 
+// WriteMultiple performs an FC16 write of len(payload)/2 registers from
+// start. Callers own every safety decision: this only puts the bytes on
+// the wire.
+func (s *Session) WriteMultiple(ctx context.Context, start uint16, payload []byte) error {
+	if len(payload) == 0 || len(payload)%2 != 0 {
+		return fmt.Errorf("modbusclient: write payload must be whole registers, got %d bytes", len(payload))
+	}
+	if s != nil && s.mock {
+		return nil
+	}
+	_, err := s.client.WriteMultipleRegisters(ctx, start, uint16(len(payload)/2), payload)
+	return err
+}
+
 // ExceptionCode returns the Modbus exception code when err is an
 // exception response: the device answered and refused the request, so
 // the TCP stream is intact (unlike a timeout or I/O error).
