@@ -56,7 +56,7 @@ describe('GeneratorSection', () => {
       meter_kwh: 1234.5,
       meter_at: '2026-11-16T09:59:55Z',
       meter_alive: true,
-      sw_version: 1.23,
+      sw_version: 1805,
       last_run_at: '2026-11-15T18:40:00Z',
     })
     render(<GeneratorSection organizationID="ke" canSeeFuel />)
@@ -69,6 +69,7 @@ describe('GeneratorSection', () => {
     expect(screen.getByText(/1\s?234,5 кВт·год/)).toBeInTheDocument()
     expect(screen.getByText('На зв’язку')).toBeInTheDocument()
     expect(screen.getByText('10.24.40.239')).toBeInTheDocument()
+    expect(screen.getByText('1805')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Розклад тарифів' }))
     expect(navigate).toHaveBeenCalledWith('ke')
