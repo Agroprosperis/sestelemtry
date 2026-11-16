@@ -42,6 +42,9 @@ type GenFlowRow struct {
 	GenKwh    float64
 	Estimated bool
 	Minutes   SupplyMinutes
+	// Partial marks a group's hour in which a site stayed on the grid
+	// while another was off it: the hour is never wholly off the grid.
+	Partial bool
 
 	PVToEss       float64
 	GenToEss      float64
@@ -66,8 +69,15 @@ func (g *GenFlowRow) active() bool {
 	return g != nil && (g.GenKwh > 0 || g.Minutes.Offgrid() > 0)
 }
 
+// whollyOffgrid reports an hour spent entirely without the grid, by every
+// site of it.
+func whollyOffgrid(m SupplyMinutes, partial bool) bool {
+	return m.Offgrid() >= 60 && !partial
+}
+
 // genAccounting is the rule a day of an organization counts the generator
-// by: fuel priced in the day's tariff and a generator of its own.
+// by: fuel priced in the day's tariff and a generator of its own. A
+// shared generator is counted on its group's day (groupgen.go).
 func genAccounting(t Tariffs, orgID string) bool {
 	return t.FuelSet() && !sharedGenerator(orgID)
 }
@@ -85,18 +95,12 @@ func (s *Service) GenAccounting(ctx context.Context, orgID string, day time.Time
 }
 
 // sharedGenerator reports whether the organization's generator is shared
-// with another site of its economic group (Дубовʼязівський's Т1 and Т2
-// read one meter). Until the group is computed as one (PR B3) such a
-// site keeps today's formulas.
+// with the other sites of its economic group (Дубовʼязівський's Т1 and
+// Т2 read one meter). Such a site keeps today's formulas; the generator
+// is counted on the group's day.
 func sharedGenerator(orgID string) bool {
-	for _, g := range Groups {
-		for _, m := range g.Members {
-			if m.ID == orgID {
-				return true
-			}
-		}
-	}
-	return false
+	_, ok := sharedGenGroupOf(orgID)
+	return ok
 }
 
 // genFlags marks a day's generator data. Without generator accounting it
@@ -203,6 +207,8 @@ type GenFlows struct {
 	EssToLoadIsland  float64
 
 	Minutes SupplyMinutes
+	// Partial is GenFlowRow.Partial: a group's site stayed on the grid.
+	Partial bool
 }
 
 // genFlowsFromCounters is essFlowsFromCounters for an hour counted with
@@ -218,7 +224,7 @@ func genFlowsFromCounters(
 ) (f HourFlows, offgridImport float64) {
 	const eps = 1e-9
 	g := a.Gen
-	if g.Minutes.Offgrid() >= 60 {
+	if whollyOffgrid(g.Minutes, g.Partial) {
 		offgridImport = math.Max(gridImport, 0)
 		gridImport, gridExport = 0, 0
 	}
@@ -291,6 +297,7 @@ func genFlowsFromCounters(
 		PVToLoadIsland:   g.PVToLoadIsland,
 		EssToLoadIsland:  math.Min(essToLoadIsland, f.EssToLoad),
 		Minutes:          g.Minutes,
+		Partial:          g.Partial,
 	}
 	return f, offgridImport
 }
@@ -308,7 +315,7 @@ type offgridParts struct {
 
 func offgridPartsOf(e HourEconomics, flow HourFlows) offgridParts {
 	g := flow.Gen
-	if g.Minutes.Offgrid() >= 60 {
+	if whollyOffgrid(g.Minutes, g.Partial) {
 		return offgridParts{
 			load:      math.Min(g.GenToLoad+e.PVToLoad+flow.EssToLoad, e.Load),
 			pvToLoad:  e.PVToLoad,

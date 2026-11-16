@@ -63,58 +63,94 @@ type GenResult struct {
 //
 // ess_to_load / ess_to_grid follow Allocate's rule on that appliances.
 func AllocateGen(prev, curr Sample, g GenWindow, opts Options) GenResult {
-	opts = opts.WithDefaults()
-	res := GenResult{Mode: g.Mode, GenKwh: math.Max(g.GenKwh, 0)}
-	skip := func(format string, args ...any) GenResult {
-		res.Skipped = true
-		res.Warnings = append(res.Warnings, fmt.Sprintf(format, args...))
-		return res
+	d, reason := genIntervalDeltas(prev, curr, g.Mode.Offgrid(), opts)
+	if reason != "" {
+		return GenResult{Mode: g.Mode, GenKwh: math.Max(g.GenKwh, 0), Skipped: true, Warnings: []string{reason}}
 	}
+	return allocateGenDeltas(d, g)
+}
 
+// genDeltas are one interval's accumulator deltas as AllocateGen checks
+// them. Without the grid Import and Export are zero and what the grid
+// meter claimed is kept in OffgridImport / OffgridExport.
+type genDeltas struct {
+	PV, Charged, Discharged      float64
+	Import, Export               float64
+	OffgridImport, OffgridExport float64
+}
+
+// add sums another site's deltas of the same window in.
+func (d *genDeltas) add(o genDeltas) {
+	d.PV += o.PV
+	d.Charged += o.Charged
+	d.Discharged += o.Discharged
+	d.Import += o.Import
+	d.Export += o.Export
+	d.OffgridImport += o.OffgridImport
+	d.OffgridExport += o.OffgridExport
+}
+
+// genIntervalDeltas checks (prev, curr] the way AllocateGen does and
+// returns its deltas; reason is set when the interval is rejected.
+func genIntervalDeltas(prev, curr Sample, offgrid bool, opts Options) (genDeltas, string) {
+	opts = opts.WithDefaults()
+	var d genDeltas
 	dt := curr.Timestamp.Sub(prev.Timestamp).Seconds()
 	if bad, reason := validateInterval(dt, opts); bad {
-		return skip("interval rejected: %s", reason)
+		return d, "interval rejected: " + reason
 	}
 	pv, ok, why := counterDelta(prev.AccumulatedPVYieldKwh, curr.AccumulatedPVYieldKwh, "pv_yield")
 	if !ok {
-		return skip("%s", why)
+		return d, why
 	}
 	chg, ok, why := counterDelta(prev.TotalESSChargedKwh, curr.TotalESSChargedKwh, "ess_charged")
 	if !ok {
-		return skip("%s", why)
+		return d, why
 	}
 	dis, ok, why := counterDelta(prev.TotalESSDischargedKwh, curr.TotalESSDischargedKwh, "ess_discharged")
 	if !ok {
-		return skip("%s", why)
+		return d, why
 	}
 	imp, impOK, impWhy := counterDelta(prev.AccumulatedPurchasedKwh, curr.AccumulatedPurchasedKwh, "grid_import")
 	exp, expOK, expWhy := counterDelta(prev.AccumulatedSoldKwh, curr.AccumulatedSoldKwh, "grid_export")
-	if g.Mode.Offgrid() {
+	if offgrid {
 		if impOK {
-			res.OffgridImportKwh = imp
+			d.OffgridImport = imp
 		}
 		if expOK {
-			res.OffgridExportKwh = exp
+			d.OffgridExport = exp
 		}
 		imp, exp = 0, 0
 	} else {
 		if !impOK {
-			return skip("%s", impWhy)
+			return d, impWhy
 		}
 		if !expOK {
-			return skip("%s", expWhy)
+			return d, expWhy
 		}
 		if maxKwh := maxGridStepKw * dt / 3600; imp > maxKwh || exp > maxKwh {
-			return skip("grid meter step over %.0fs (import %g, export %g kWh)", dt, imp, exp)
+			return d, fmt.Sprintf("grid meter step over %.0fs (import %g, export %g kWh)", dt, imp, exp)
 		}
 	}
 	if opts.MaxEssPowerKw > 0 {
 		maxKwh := opts.MaxEssPowerKw * dt / 3600
 		if chg > maxKwh || dis > maxKwh {
-			return skip("ess counter step over %.0fs (charged %g, discharged %g kWh)", dt, chg, dis)
+			return d, fmt.Sprintf("ess counter step over %.0fs (charged %g, discharged %g kWh)", dt, chg, dis)
 		}
 	}
+	d.PV, d.Charged, d.Discharged, d.Import, d.Export = pv, chg, dis, imp, exp
+	return d, ""
+}
 
+// allocateGenDeltas is AllocateGen's split of checked deltas.
+func allocateGenDeltas(d genDeltas, g GenWindow) GenResult {
+	res := GenResult{
+		Mode:             g.Mode,
+		GenKwh:           math.Max(g.GenKwh, 0),
+		OffgridImportKwh: d.OffgridImport,
+		OffgridExportKwh: d.OffgridExport,
+	}
+	pv, chg, dis, imp, exp := d.PV, d.Charged, d.Discharged, d.Import, d.Export
 	G := res.GenKwh
 	appliances := math.Max(pv+imp+dis+G-exp-chg, 0)
 	pvToEss := math.Min(chg, math.Max(pv-appliances, 0))

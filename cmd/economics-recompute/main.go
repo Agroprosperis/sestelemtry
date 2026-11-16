@@ -124,6 +124,9 @@ func main() {
 	}
 	h.SetEnergyFlowOrgs(toEnergyFlowOrgs(cfg.Organizations, catalogs))
 	svc := economics.NewService(api.NewEconomicsBackend(h, store))
+	svc.SetGroupGenErrorLog(func(groupID, date string, err error) {
+		log.Warn("economics_group_gen_failed", "group_id", groupID, "date", date, "err", err)
+	})
 
 	orgs := orgIDs(cfg)
 	tzName := tz.String()

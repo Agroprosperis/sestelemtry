@@ -187,3 +187,26 @@ func generatorHourRows(dayStart time.Time, hour int) []EnergyFlowRawRow {
 		EnergyFlowRawRow{Time: dayStart.Add(time.Duration(hour+1) * time.Hour), MetricKey: energyflow.SrcAccumulatedGenEnergyKwh, Value: 331300, DeviceHost: "10.24.40.239"},
 	)
 }
+
+// Дубовʼязівський: both sites read the one generator meter. Walked as a
+// group, the hour on the generator counts its 300 kWh and its 60
+// minutes once, not once per site.
+func TestGroupGenFlowsCountGeneratorOnce(t *testing.T) {
+	dayStart := time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC)
+	rows := append(syntheticDayRows(dayStart), generatorHourRows(dayStart, 18)...)
+	h := NewHandlers(&mockStore{flowSources: rows}, "*")
+	got, err := h.groupGenFlows(context.Background(), []string{"de", "de1"}, dayStart)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := got[18]
+	if r == nil || r.GenKwh != 300 || r.Minutes.Generator < 59 || r.Minutes.Generator > 61 || r.Partial {
+		t.Fatalf("hour 18 = %+v", r)
+	}
+	if split := r.GenToLoad + r.GenToEss; math.Abs(split-300) > 1 {
+		t.Fatalf("generator split %g over both sites, want the 300 kWh once", split)
+	}
+	if got[10] != nil && (got[10].GenKwh != 0 || got[10].Minutes.Offgrid() != 0) {
+		t.Fatalf("hour 10 on the grid = %+v", got[10])
+	}
+}

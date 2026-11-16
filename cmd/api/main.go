@@ -418,6 +418,9 @@ func main() {
 	// the economics_hourly / economics_daily tables. Groups (one
 	// elevator over several loggers) read as their members added up.
 	econSvc := economics.NewService(economics.InGroups(api.NewEconomicsBackend(svc, store), economics.Groups))
+	econSvc.SetGroupGenErrorLog(func(groupID, date string, err error) {
+		log.Warn("economics_group_gen_failed", "group_id", groupID, "date", date, "err", err)
+	})
 	// When the economics-recompute daemon is enabled it keeps the
 	// current (non-final) day warm in economics_daily. Let the
 	// read-through serve that cache while it is fresh (2x the daemon's

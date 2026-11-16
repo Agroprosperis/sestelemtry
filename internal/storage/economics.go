@@ -606,6 +606,26 @@ func UpsertEconomicsDaily(ctx context.Context, pool *pgxpool.Pool, r EconomicsDa
 	return nil
 }
 
+// DeleteEconomicsDay drops an organization's stored day: its hours in
+// [dayStart, dayEnd) and its daily summary for dayStart's date.
+func DeleteEconomicsDay(ctx context.Context, pool *pgxpool.Pool, organizationID string, dayStart, dayEnd time.Time) error {
+	if pool == nil {
+		return fmt.Errorf("storage: nil pool")
+	}
+	if _, err := pool.Exec(ctx, `
+		DELETE FROM economics_hourly
+		WHERE organization_id = $1 AND hour_start >= $2 AND hour_start < $3
+	`, organizationID, dayStart, dayEnd); err != nil {
+		return fmt.Errorf("storage: delete economics hourly: %w", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		DELETE FROM economics_daily WHERE organization_id = $1 AND day = $2::date
+	`, organizationID, dayStart); err != nil {
+		return fmt.Errorf("storage: delete economics daily: %w", err)
+	}
+	return nil
+}
+
 // GetEconomicsDaily returns the per-day summary for (org, day). The bool
 // is false when no row exists.
 func GetEconomicsDaily(ctx context.Context, pool *pgxpool.Pool, organizationID string, day time.Time) (EconomicsDailyRow, bool, error) {

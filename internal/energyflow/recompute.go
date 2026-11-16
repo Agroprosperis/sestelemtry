@@ -115,21 +115,71 @@ func IterateIntervals(rows []RawSample, opts Options, cb IntervalCallback, stats
 // interval spanning several windows gets their generator energy summed
 // and the mode of its last window.
 func IterateIntervalsWithGen(rows []RawSample, tl *GenTimeline, opts Options, cb IntervalCallback, genCb GenIntervalCallback, stats *RecomputeResult) {
-	// Historical compute must tolerate hours-long gaps caused by
-	// collector outages, so callers who pass MaxGapSeconds=0 actually
-	// mean "disable the guard entirely". Allocate() re-runs
-	// WithDefaults() internally and would otherwise rewrite a zero
-	// back to the spec default (5 s), erasing every real counter
-	// delta that accumulated across an outage. Translate the zero
-	// into a very large explicit cap that survives WithDefaults
-	// and is effectively unlimited for any realistic window.
+	opts = walkOptions(opts)
+	const maxWarnings = 32
+	appendWarning := func(s string) {
+		if stats == nil {
+			return
+		}
+		if len(stats.Warnings) >= maxWarnings {
+			return
+		}
+		stats.Warnings = append(stats.Warnings, s)
+	}
+	walkWindows(rows, opts, stats, func(prevEnd, end time.Time, prev, curr Sample) {
+		if genCb != nil {
+			if w, ok := tl.Window(end); ok {
+				w.GenKwh = tl.GenBetween(prevEnd, end)
+				gr := AllocateGen(prev, curr, w, opts)
+				if gr.Skipped {
+					if stats != nil {
+						stats.GenSkippedIntervals++
+					}
+				} else {
+					if stats != nil {
+						stats.GenIntervals++
+					}
+					genCb(end, gr)
+				}
+			}
+		}
+		out := Allocate(prev, curr, opts)
+		for _, w := range out.Warnings {
+			appendWarning(w)
+		}
+		if out.Skipped {
+			if stats != nil {
+				stats.SkippedIntervals++
+			}
+			return
+		}
+		if cb != nil {
+			cb(curr.Timestamp, out)
+		}
+	})
+}
+
+// walkOptions are the options of a historical walk. Historical compute
+// must tolerate hours-long gaps caused by collector outages, so callers
+// who pass MaxGapSeconds=0 actually mean "disable the guard entirely".
+// Allocate() re-runs WithDefaults() internally and would otherwise
+// rewrite a zero back to the spec default (5 s), erasing every real
+// counter delta that accumulated across an outage. The zero becomes a
+// very large explicit cap that survives WithDefaults and is effectively
+// unlimited for any realistic window.
+func walkOptions(opts Options) Options {
 	const noGapCap = 365 * 24 * 3600
 	if opts.MaxGapSeconds == 0 {
 		opts.MaxGapSeconds = noGapCap
 	}
-	opts = opts.WithDefaults()
-	allocOpts := opts
+	return opts.WithDefaults()
+}
 
+// walkWindows folds rows into allocation windows (the latest reading per
+// role in each) and calls cb for every pair of consecutive windows that
+// merge into a full Sample, with both window ends. A window that does not
+// merge is dropped without breaking the chain.
+func walkWindows(rows []RawSample, opts Options, stats *RecomputeResult, cb func(prevEnd, end time.Time, prev, curr Sample)) {
 	if len(rows) < 2 {
 		return
 	}
@@ -195,17 +245,6 @@ func IterateIntervalsWithGen(rows []RawSample, tl *GenTimeline, opts Options, cb
 	}
 	sort.Slice(bucketEnds, func(i, j int) bool { return bucketEnds[i] < bucketEnds[j] })
 
-	const maxWarnings = 32
-	appendWarning := func(s string) {
-		if stats == nil {
-			return
-		}
-		if len(stats.Warnings) >= maxWarnings {
-			return
-		}
-		stats.Warnings = append(stats.Warnings, s)
-	}
-
 	var prev *Sample
 	var prevEnd time.Time
 	for _, key := range bucketEnds {
@@ -220,49 +259,12 @@ func IterateIntervalsWithGen(rows []RawSample, tl *GenTimeline, opts Options, cb
 			}
 			continue
 		}
-		if prev == nil {
-			prev = &Sample{}
-			*prev = sample
-			prevEnd = b.end
-			continue
+		if prev != nil {
+			cb(prevEnd, b.end, *prev, sample)
 		}
-
-		if genCb != nil {
-			if w, ok := tl.Window(b.end); ok {
-				w.GenKwh = tl.GenBetween(prevEnd, b.end)
-				gr := AllocateGen(*prev, sample, w, allocOpts)
-				if gr.Skipped {
-					if stats != nil {
-						stats.GenSkippedIntervals++
-					}
-				} else {
-					if stats != nil {
-						stats.GenIntervals++
-					}
-					genCb(b.end, gr)
-				}
-			}
-		}
-		prevEnd = b.end
-
-		out := Allocate(*prev, sample, allocOpts)
-		for _, w := range out.Warnings {
-			appendWarning(w)
-		}
-		if out.Skipped {
-			if stats != nil {
-				stats.SkippedIntervals++
-			}
-			next := sample
-			prev = &next
-			continue
-		}
-		if cb != nil {
-			cb(sample.Timestamp, out)
-		}
-
 		next := sample
 		prev = &next
+		prevEnd = b.end
 	}
 }
 

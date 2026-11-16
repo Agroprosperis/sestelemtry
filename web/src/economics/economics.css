@@ -400,6 +400,22 @@
   color: var(--text-secondary);
 }
 
+/* The fields of the «Генератор» block; disabled for a site whose shared
+   generator another site's tariffs price. */
+.economics-tariffs-gen-fields {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.economics-tariffs-gen-shared {
+  margin: 0 0 12px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
 .economics-tariff-schedule {
   margin-top: 20px;
   padding: 16px;

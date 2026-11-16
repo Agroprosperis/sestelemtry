@@ -86,4 +86,23 @@ describe('GeneratorFuelFields', () => {
     expect(screen.getByText(/навантаження 200 кВт/)).toBeInTheDocument()
     expect(screen.getByText(/Лише генератор — 4 000 грн/)).toBeInTheDocument()
   })
+
+  it('shows a shared generator read-only, with the way to the tariffs that price it', () => {
+    mockedMonthly.mockResolvedValue(monthWithLoad([]))
+    const onOpen = vi.fn()
+    render(
+      <GeneratorFuelFields
+        tariffs={{ ...DEFAULT_TARIFFS, genFuelPriceUahPerL: 82.5, genFuelConsumptionLPerKwh: 0.3 }}
+        onChange={vi.fn()}
+        organizationID="de1"
+        date="2026-11-16"
+        sharedFrom={{ label: "Дубов'язівський Т2", onOpen }}
+      />,
+    )
+    for (const input of screen.getAllByRole('spinbutton')) expect(input).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'за годину роботи' })).toBeDisabled()
+    expect(screen.queryByText(/Приклад: година без мережі/)).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: "Тарифи Дубов'язівський Т2" }))
+    expect(onOpen).toHaveBeenCalled()
+  })
 })

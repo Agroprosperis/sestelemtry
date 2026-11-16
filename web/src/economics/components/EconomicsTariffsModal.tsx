@@ -1,5 +1,5 @@
 import { useEffect, useId, useState } from 'react'
-import { formatOrganizationLabel } from '../../dashboard/config'
+import { ECONOMIC_GROUPS, formatOrganizationLabel, sharedGeneratorGroup } from '../../dashboard/config'
 import { DEFAULT_TARIFFS, type Tariffs } from '../tariffs'
 import { useOrgTariffs, type OrgTariffsStatus } from '../useOrgTariffs'
 import { GeneratorFuelFields } from './GeneratorFuelFields'
@@ -18,6 +18,9 @@ type Props = {
   // organizationID being the one shown.
   members?: readonly string[]
   onMemberChange?: (next: string) => void
+  // onOrganizationChange shows another organization's form, for the
+  // shared generator priced in another site's tariffs.
+  onOrganizationChange?: (next: string) => void
 }
 
 function statusLabel(status: OrgTariffsStatus): string {
@@ -157,8 +160,16 @@ export function EconomicsTariffsModal({
   onClose,
   members,
   onMemberChange,
+  onOrganizationChange,
 }: Props) {
   const update = (patch: Partial<Tariffs>) => onTariffsChange({ ...tariffs, ...patch })
+  const sharedGroup = sharedGeneratorGroup(organizationID)
+  const fuelOwner = sharedGroup ? ECONOMIC_GROUPS[sharedGroup][0] : null
+  const openFuelOwner = members?.includes(fuelOwner ?? '') ? onMemberChange : onOrganizationChange
+  const sharedFrom =
+    fuelOwner && fuelOwner !== organizationID && openFuelOwner
+      ? { label: formatOrganizationLabel(fuelOwner), onOpen: () => openFuelOwner(fuelOwner) }
+      : undefined
   const statusText = statusLabel(tariffsStatus)
   const statusTitle = tariffsStatus === 'error' && tariffsError ? tariffsError : undefined
 
@@ -342,7 +353,13 @@ export function EconomicsTariffsModal({
               </button>
             )}
           </div>
-          <GeneratorFuelFields tariffs={tariffs} onChange={update} organizationID={organizationID} date={date} />
+          <GeneratorFuelFields
+            tariffs={tariffs}
+            onChange={update}
+            organizationID={organizationID}
+            date={date}
+            sharedFrom={sharedFrom}
+          />
           <TariffScheduleEditor
             key={organizationID}
             organizationID={organizationID}

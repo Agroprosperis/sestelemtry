@@ -69,11 +69,15 @@ export function GeneratorFuelFields({
   onChange,
   organizationID,
   date,
+  sharedFrom,
 }: {
   tariffs: Tariffs
   onChange: (patch: Partial<Tariffs>) => void
   organizationID: string
   date: string
+  // sharedFrom is set for a site whose generator another site's tariffs
+  // price: the block is shown read-only with a way to that site's form.
+  sharedFrom?: { label: string; onOpen: () => void }
 }) {
   const headingId = useId()
   const perHour = tariffs.genFuelMethod === 'per_hour'
@@ -85,6 +89,15 @@ export function GeneratorFuelFields({
   return (
     <section className="economics-tariffs-gen" aria-labelledby={headingId}>
       <h3 id={headingId}>Генератор</h3>
+      {sharedFrom && (
+        <p className="economics-tariffs-gen-shared">
+          Генератор спільний: пальне задається в тарифах {sharedFrom.label}, тут лише для перегляду.{' '}
+          <button type="button" className="economics-banner-action" onClick={sharedFrom.onOpen}>
+            Тарифи {sharedFrom.label}
+          </button>
+        </p>
+      )}
+      <fieldset className="economics-tariffs-gen-fields" disabled={sharedFrom !== undefined}>
       <div className="economics-tariffs-grid">
         <FuelField
           label="Ціна пального"
@@ -157,7 +170,8 @@ export function GeneratorFuelFields({
           </span>
         </div>
       </div>
-      {set ? (
+      </fieldset>
+      {sharedFrom ? null : set ? (
         <p className="economics-tariffs-gen-example">
           Приклад: година без мережі, навантаження {uahFmt.format(loadKw)} кВт.
           <br />

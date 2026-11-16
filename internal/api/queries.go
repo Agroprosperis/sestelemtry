@@ -1210,6 +1210,11 @@ func (s *Store) SaveEconomicsDaily(ctx context.Context, row storage.EconomicsDai
 	return storage.UpsertEconomicsDaily(ctx, s.pool, row)
 }
 
+// DeleteEconomicsDay drops a stored economics day.
+func (s *Store) DeleteEconomicsDay(ctx context.Context, organizationID string, dayStart, dayEnd time.Time) error {
+	return storage.DeleteEconomicsDay(ctx, s.pool, organizationID, dayStart, dayEnd)
+}
+
 // GetEconomicsHourly returns persisted per-hour rows for [from, to).
 func (s *Store) GetEconomicsHourly(ctx context.Context, organizationID string, from, to time.Time) ([]storage.EconomicsHourlyRow, error) {
 	return storage.GetEconomicsHourly(ctx, s.pool, organizationID, from, to)
