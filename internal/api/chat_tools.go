@@ -77,11 +77,15 @@ func (h *Handlers) chatTools(r *http.Request, org string, loc *time.Location) []
 		tools = append(tools, perSite(func(site string) aichat.Tool { return h.chatPassportTool(site, loc) }))
 	}
 	if h.economics != nil {
+		var gen chatGen
+		if money || full {
+			gen = h.chatGenOf(r.Context(), org)
+		}
 		if money {
-			tools = append(tools, h.chatEconomicsDayTool(org, loc))
+			tools = append(tools, h.chatEconomicsDayTool(org, loc, gen))
 		}
 		if money || full {
-			tools = append(tools, h.chatEconomicsMonthTool(org, loc, money), h.chatEconomicsYearTool(org, money))
+			tools = append(tools, h.chatEconomicsMonthTool(org, loc, money, gen), h.chatEconomicsYearTool(org, money, gen))
 		}
 		if can(auth.PermAnalyticsDay, auth.PermEconomicsRead) {
 			tools = append(tools, h.chatUzePlanTool(org, loc, money))
@@ -353,6 +357,8 @@ type chatEnergy struct {
 	GridToEssKwh     float64 `json:"grid_to_ess_kwh"`
 	EssToLoadKwh     float64 `json:"ess_to_load_kwh"`
 	EssToGridKwh     float64 `json:"ess_to_grid_kwh"`
+
+	Generator *chatGenEnergy `json:"generator,omitempty"`
 }
 
 // chatMoney is the UAH side, only for a role that reads economics.
@@ -366,6 +372,105 @@ type chatMoney struct {
 	ExpenseTotalUah         float64 `json:"expense_total_uah"`
 	AvgImportPriceUahPerKwh float64 `json:"avg_import_price_uah_per_kwh"`
 	AvgExportPriceUahPerKwh float64 `json:"avg_export_price_uah_per_kwh"`
+
+	Generator *chatGenMoney `json:"generator,omitempty"`
+}
+
+// chatGenEnergy is the generator's part of a period in kWh and minutes
+// (ems-spec generator handoff §4.6); nil for a period without generator
+// data.
+type chatGenEnergy struct {
+	GenKwh           float64 `json:"gen_kwh"`
+	GenToLoadKwh     float64 `json:"gen_to_load_kwh"`
+	GenToEssKwh      float64 `json:"gen_to_ess_kwh"`
+	LoadOffgridKwh   float64 `json:"load_offgrid_kwh"`
+	MinutesGenerator int     `json:"minutes_generator"`
+	MinutesIsland    int     `json:"minutes_island"`
+	MinutesBlackout  int     `json:"minutes_blackout"`
+}
+
+// chatGenMoney is its fuel and the effect of the hours without the grid.
+// The litres come from the fuel tariff, so they go with the money.
+type chatGenMoney struct {
+	GenFuelCostUah      float64 `json:"gen_fuel_cost_uah"`
+	GenFuelL            float64 `json:"gen_fuel_l"`
+	GenFuelMethod       string  `json:"gen_fuel_method,omitempty"`
+	EffectOffgridUah    float64 `json:"effect_offgrid_uah"`
+	ExpenseGenChargeUah float64 `json:"expense_gen_charge_uah"`
+}
+
+func chatGenEnergyOf(g EconomicsGenTotals) *chatGenEnergy {
+	if g.GenKwh == 0 && g.LoadOffgridKwh == 0 && g.MinutesGenerator+g.MinutesIsland+g.MinutesBlackout == 0 {
+		return nil
+	}
+	return &chatGenEnergy{
+		GenKwh: g.GenKwh, GenToLoadKwh: g.GenToLoadKwh, GenToEssKwh: g.GenToEssKwh, LoadOffgridKwh: g.LoadOffgridKwh,
+		MinutesGenerator: g.MinutesGenerator, MinutesIsland: g.MinutesIsland, MinutesBlackout: g.MinutesBlackout,
+	}
+}
+
+func chatGenMoneyOf(g EconomicsGenTotals) *chatGenMoney {
+	if g.GenFuelCostUah == 0 && g.GenFuelL == 0 && g.EffectOffgridUah == 0 && g.ExpenseGenChargeUah == 0 {
+		return nil
+	}
+	return &chatGenMoney{
+		GenFuelCostUah: g.GenFuelCostUah, GenFuelL: g.GenFuelL, GenFuelMethod: g.GenFuelMethod,
+		EffectOffgridUah: g.EffectOffgridUah, ExpenseGenChargeUah: g.ExpenseGenChargeUah,
+	}
+}
+
+// chatGen is what the economics tools tell the model about org's
+// generator: whether org (or a site of its group) has generator data,
+// and the name of the group that counts a generator org shares.
+type chatGen struct {
+	on     bool
+	shared string
+}
+
+func (h *Handlers) chatGenOf(ctx context.Context, org string) chatGen {
+	ids := []string{org}
+	if g, ok := h.economicGroup(org); ok {
+		ids = g.MemberIDs()
+	}
+	var out chatGen
+	for _, id := range ids {
+		if !h.genSince(ctx, id).IsZero() {
+			out.on = true
+			break
+		}
+	}
+	if g, ok := h.groupOfMember(org); ok && g.SharedGenerator && out.on {
+		out.shared = g.Name
+	}
+	return out
+}
+
+// note describes the generator fields to a tool whose money shows when
+// money: rows says which of them the tool's rows carry, fuelRows what
+// they add where the fuel shows. Empty for an object without a
+// generator, whose results never have them.
+func (g chatGen) note(money bool, rows, fuelRows string) string {
+	if !g.on {
+		return ""
+	}
+	if money && g.shared == "" {
+		rows += fuelRows
+	}
+	s := " energy.generator — дизель-генератор, лише за періоди з його даними: gen_kwh — енергія за його лічильником, " +
+		"з неї gen_to_load_kwh — на навантаження і gen_to_ess_kwh — на заряд УЗЕ; load_offgrid_kwh — навантаження без мережі; " +
+		"minutes_generator, minutes_island, minutes_blackout — хвилини від генератора, без мережі від УЗЕ (острів) і знеструмлено. " +
+		rows + "."
+	switch {
+	case g.shared != "":
+		return s + " Генератор спільний для майданчиків об'єкта «" + g.shared + "»: тут лише його енергія й хвилини (позначка gen_shared), " +
+			"а пальне й ефект годин без мережі рахуються для всього об'єкта."
+	case !money:
+		return s + " Пальне (гривні й літри) — теж лише для ролей з доступом до режиму «Економіка»."
+	}
+	return s + " money.generator — пальне за тарифом: gen_fuel_cost_uah, gen_fuel_l і gen_fuel_method (per_kwh — л/кВт·год, " +
+		"per_hour — л/год, mixed — у періоді обидва); effect_offgrid_uah — ефект годин без мережі, де енергію СЕС і УЗЕ оцінено " +
+		"вартістю дизеля, який вона заміщує; expense_gen_charge_uah — пальне на заряд УЗЕ від генератора. Позначка gen_cost_missing — " +
+		"ціну пального на день не задано, і години з генератором пораховано звичайними формулами, без пального."
 }
 
 // chatPeriodMoney adds the month/year levers of the economics AI panel:
@@ -388,6 +493,7 @@ func chatEnergyOfDay(t economics.DailyTotals) chatEnergy {
 		EssChargedKwh: t.EssCharged, EssDischargedKwh: t.EssDischarged,
 		PvToLoadKwh: t.PVToLoad, PvToEssKwh: t.PVToEss, PvToGridKwh: t.PVToGrid,
 		GridToLoadKwh: t.GridToLoad, GridToEssKwh: t.GridToEss, EssToLoadKwh: t.EssToLoad, EssToGridKwh: t.EssToGrid,
+		Generator: chatGenEnergyOf(genTotalsToJSON(t.GenTotals)),
 	}
 }
 
@@ -396,6 +502,7 @@ func chatMoneyOfDay(t economics.DailyTotals) chatMoney {
 		EffectUah: t.Effect, BaselineCostUah: t.BaselineCost, ActualCostUah: t.ActualCost, EssNetUah: t.EssNet,
 		EbitdaUah: t.Ebitda, RevenueTotalUah: t.RevenueTotal, ExpenseTotalUah: t.ExpenseTotal,
 		AvgImportPriceUahPerKwh: t.AvgImportPrice, AvgExportPriceUahPerKwh: t.AvgExportPrice,
+		Generator: chatGenMoneyOf(genTotalsToJSON(t.GenTotals)),
 	}
 }
 
@@ -405,6 +512,7 @@ func chatEnergyOfPeriod(t EconomicsMonthlyTotals) chatEnergy {
 		EssChargedKwh: t.EssChargedKwh, EssDischargedKwh: t.EssDischargedKwh,
 		PvToLoadKwh: t.PvToLoadKwh, PvToEssKwh: t.PvToEssKwh, PvToGridKwh: t.PvToGridKwh,
 		GridToLoadKwh: t.GridToLoadKwh, GridToEssKwh: t.GridToEssKwh, EssToLoadKwh: t.EssToLoadKwh, EssToGridKwh: t.EssToGridKwh,
+		Generator: chatGenEnergyOf(t.EconomicsGenTotals),
 	}
 }
 
@@ -414,6 +522,7 @@ func chatMoneyOfPeriod(t EconomicsMonthlyTotals) *chatPeriodMoney {
 			EffectUah: t.EffectUah, BaselineCostUah: t.BaselineCostUah, ActualCostUah: t.ActualCostUah, EssNetUah: t.EssNetUah,
 			EbitdaUah: t.EbitdaUah, RevenueTotalUah: t.RevenueTotalUah, ExpenseTotalUah: t.ExpenseTotalUah,
 			AvgImportPriceUahPerKwh: t.AvgImportPriceUahPerKwh, AvgExportPriceUahPerKwh: t.AvgExportPriceUahPerKwh,
+			Generator: chatGenMoneyOf(t.EconomicsGenTotals),
 		},
 		ScheduleReserveUah: min(t.PvToGridKwh, t.GridToLoadKwh) * max(0, t.AvgImportPriceUahPerKwh-t.AvgExportPriceUahPerKwh),
 		EssFactUah:         t.EssFactUah,
@@ -447,6 +556,13 @@ type chatEconomicsHour struct {
 	EssChargedKwh    float64  `json:"ess_charged_kwh"`
 	EssDischargedKwh float64  `json:"ess_discharged_kwh"`
 	EffectUah        float64  `json:"effect_uah"`
+
+	GenKwh           float64 `json:"gen_kwh,omitempty"`
+	MinutesGenerator int     `json:"minutes_generator,omitempty"`
+	MinutesIsland    int     `json:"minutes_island,omitempty"`
+	MinutesBlackout  int     `json:"minutes_blackout,omitempty"`
+	GenFuelCostUah   float64 `json:"gen_fuel_cost_uah,omitempty"`
+	GenFuelL         float64 `json:"gen_fuel_l,omitempty"`
 }
 
 type chatEconomicsDay struct {
@@ -461,12 +577,13 @@ type chatEconomicsDay struct {
 	Hours             []chatEconomicsHour `json:"hours"`
 }
 
-func (h *Handlers) chatEconomicsDayTool(org string, loc *time.Location) aichat.Tool {
+func (h *Handlers) chatEconomicsDayTool(org string, loc *time.Location, gen chatGen) aichat.Tool {
 	return aichat.Tool{
 		Name: "economics_day",
 		Description: "Економіка однієї київської доби, як у звіті дня режиму «Економіка»: енергія за потоками (кВт·год), " +
 			"ефект проєкту проти сценарію без СЕС і УЗЕ, вартість, EBITDA, середні ціни (₴) і погодинна розбивка (hour — година початку, 0–23). " +
-			"is_final=false — день ще не завершено; quality_flags — діагностика неточних лічильників.",
+			"is_final=false — день ще не завершено; quality_flags — діагностика неточних лічильників." +
+			gen.note(true, "Години з генератором мають gen_kwh і хвилини", ", а також gen_fuel_cost_uah і gen_fuel_l"),
 		Parameters: chatDaySchema,
 		Status:     func(raw json.RawMessage) string { return "Читаю економіку дня" + chatDayStatus(raw) },
 		Call: func(ctx context.Context, raw json.RawMessage) (any, aichat.Source, error) {
@@ -501,6 +618,8 @@ func (h *Handlers) chatEconomicsDayTool(org string, loc *time.Location) aichat.T
 					Hour: hr.Hour, RdnUahPerKwh: hr.RdnUahPerKwh, PvKwh: hr.PvKwh, LoadKwh: hr.LoadKwh,
 					GridImportKwh: hr.GridImportKwh, GridExportKwh: hr.GridExportKwh,
 					EssChargedKwh: hr.EssChargedKwh, EssDischargedKwh: hr.EssDischargedKwh, EffectUah: hr.EffectUah,
+					GenKwh: hr.GenKwh, MinutesGenerator: hr.MinutesGenerator, MinutesIsland: hr.MinutesIsland,
+					MinutesBlackout: hr.MinutesBlackout, GenFuelCostUah: hr.GenFuelCostUah, GenFuelL: hr.GenFuelL,
 				})
 			}
 			if len(out.Hours) == 0 {
@@ -528,6 +647,12 @@ type chatMonthDay struct {
 	EffectUah        *float64 `json:"effect_uah,omitempty"`
 	EssReserveUah    *float64 `json:"ess_reserve_uah,omitempty"`
 	QualityFlags     []string `json:"quality_flags,omitempty"`
+
+	GenKwh           float64  `json:"gen_kwh,omitempty"`
+	MinutesGenerator int      `json:"minutes_generator,omitempty"`
+	MinutesIsland    int      `json:"minutes_island,omitempty"`
+	MinutesBlackout  int      `json:"minutes_blackout,omitempty"`
+	GenFuelCostUah   *float64 `json:"gen_fuel_cost_uah,omitempty"`
 }
 
 type chatEconomicsMonth struct {
@@ -542,7 +667,7 @@ type chatEconomicsMonth struct {
 	Days              []chatMonthDay   `json:"days"`
 }
 
-func (h *Handlers) chatEconomicsMonthTool(org string, loc *time.Location, money bool) aichat.Tool {
+func (h *Handlers) chatEconomicsMonthTool(org string, loc *time.Location, money bool, gen chatGen) aichat.Tool {
 	desc := "Підсумок календарного місяця, як у місячному звіті режиму «Економіка»: енергія за потоками (кВт·год) і рядок на кожен день з даними. " +
 		"days_expected — дні місяця, що вже минули (разом із сьогодні); days_with_data менше за нього — частина днів без даних або ще не порахована; " +
 		"flagged_days — дні з неточними лічильниками."
@@ -551,6 +676,7 @@ func (h *Handlers) chatEconomicsMonthTool(org string, loc *time.Location, money 
 	} else {
 		desc += chatMoneyNote
 	}
+	desc += gen.note(money, "Дні з генератором мають gen_kwh і хвилини", ", а також gen_fuel_cost_uah")
 	return aichat.Tool{
 		Name:        "economics_month",
 		Description: desc,
@@ -601,10 +727,14 @@ func (h *Handlers) chatEconomicsMonthTool(org string, loc *time.Location, money 
 					GridImportKwh: j.GridImportKwh, GridExportKwh: j.GridExportKwh,
 					EssChargedKwh: j.EssChargedKwh, EssDischargedKwh: j.EssDischargedKwh,
 					RdnAvgUahPerKwh: j.RdnAvgUahPerKwh, QualityFlags: j.QualityFlags,
+					GenKwh: j.GenKwh, MinutesGenerator: j.MinutesGenerator, MinutesIsland: j.MinutesIsland, MinutesBlackout: j.MinutesBlackout,
 				}
 				if money {
 					effect, reserve := j.EffectUah, max(0, j.EssReserveUah)
 					day.EffectUah, day.EssReserveUah = &effect, &reserve
+					if fuel := j.GenFuelCostUah; fuel != 0 {
+						day.GenFuelCostUah = &fuel
+					}
 				}
 				out.Days = append(out.Days, day)
 			}
@@ -626,6 +756,10 @@ type chatYearMonth struct {
 	EffectUah        *float64 `json:"effect_uah,omitempty"`
 	EbitdaUah        *float64 `json:"ebitda_uah,omitempty"`
 	EssReserveUah    *float64 `json:"ess_reserve_uah,omitempty"`
+
+	GenKwh           float64  `json:"gen_kwh,omitempty"`
+	MinutesGenerator int      `json:"minutes_generator,omitempty"`
+	GenFuelCostUah   *float64 `json:"gen_fuel_cost_uah,omitempty"`
 }
 
 type chatEconomicsYear struct {
@@ -636,13 +770,14 @@ type chatEconomicsYear struct {
 	Months         []chatYearMonth  `json:"months"`
 }
 
-func (h *Handlers) chatEconomicsYearTool(org string, money bool) aichat.Tool {
+func (h *Handlers) chatEconomicsYearTool(org string, money bool, gen chatGen) aichat.Tool {
 	desc := "Підсумок календарного року, як у річному звіті режиму «Економіка»: енергія за потоками (кВт·год) за рік і помісячно."
 	if money {
 		desc += " money — ефект проєкту, EBITDA, витрати, середні ціни (₴)." + chatReserveNote
 	} else {
 		desc += chatMoneyNote
 	}
+	desc += gen.note(money, "Місяці з генератором мають gen_kwh і minutes_generator", ", а також gen_fuel_cost_uah")
 	return aichat.Tool{
 		Name:        "economics_year",
 		Description: desc,
@@ -693,10 +828,14 @@ func (h *Handlers) chatEconomicsYearTool(org string, money bool) aichat.Tool {
 					Month: m.Month, DaysWithData: t.DaysWithData, PvKwh: t.PvKwh, LoadKwh: t.LoadKwh,
 					GridImportKwh: t.GridImportKwh, GridExportKwh: t.GridExportKwh,
 					EssChargedKwh: t.EssChargedKwh, EssDischargedKwh: t.EssDischargedKwh,
+					GenKwh: t.GenKwh, MinutesGenerator: t.MinutesGenerator,
 				}
 				if money {
 					effect, ebitda, reserve := t.EffectUah, t.EbitdaUah, max(0, t.EssReserveUah)
 					row.EffectUah, row.EbitdaUah, row.EssReserveUah = &effect, &ebitda, &reserve
+					if fuel := t.GenFuelCostUah; fuel != 0 {
+						row.GenFuelCostUah = &fuel
+					}
 				}
 				out.Months = append(out.Months, row)
 			}
