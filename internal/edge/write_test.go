@@ -74,7 +74,8 @@ func zeCfg(t *testing.T) *Config {
 		},
 		Edge:     EdgeIdentity{EdgeID: "iot2050-ze-test"},
 		Manifest: ManifestConfig{CachePath: filepath.Join(t.TempDir(), "active_manifest.json")},
-		Control:  ControlConfig{Mode: ModeShadow, Preset: PresetSelfConsumption, Interval: time.Second},
+		// PinPath defaults next to the write flag, in the same temp dir.
+		Control: ControlConfig{Mode: ModeShadow, Preset: PresetSelfConsumption, Interval: time.Second},
 		Limits: Limits{
 			Grid: GridLimits{ImportLimitKw: 1700, TargetImportKw: 1600},
 			Bess: BessLimits{SocMinEconomicPct: 20, SocMaxEconomicPct: 90},
@@ -102,7 +103,9 @@ func writeService(t *testing.T, cfg *Config) *Service {
 	t.Cleanup(func() { _ = bb.Close() })
 	return &Service{
 		cfg: cfg, log: slog.Default(), bb: bb, gate: gate, ctl: NewController(cfg.Control.Write),
-		writeFaults: make(chan writeFault, 8), eventLastWritten: map[string]time.Time{},
+		pin:         &pinGate{path: cfg.Control.Write.PinPath},
+		writeFaults: make(chan writeFault, 8), writeRequests: make(chan writeRequest), events: make(chan Event, 8),
+		eventLastWritten: map[string]time.Time{},
 	}
 }
 
@@ -511,26 +514,40 @@ func TestEnableNeedsConfirmationAndPreconditions(t *testing.T) {
 		s.devPollOK.Store(d.Host, now.Unix())
 	}
 	ctx := context.Background()
-	if r := s.onWriteRequest(ctx, now, writeRequest{action: "enable", by: "t", confirm: "ab"}); r.OK || s.gate.Enabled() {
+	enable := func(confirm string, pinOK bool) writeReply {
+		return s.onWriteRequest(ctx, now, writeRequest{action: "enable", by: "t", confirm: confirm, pinOK: pinOK})
+	}
+	s.manifest.Store(zeManifest(now, 850))
+	if r := enable("ze", true); r.OK || s.gate.Enabled() || !failed(r, "pin") {
+		t.Fatalf("enabled without a PIN on the device: %+v", r)
+	}
+	if err := SetWritePin(s.cfg.Control.Write.PinPath, "246813", now); err != nil {
+		t.Fatal(err)
+	}
+	s.manifest.Store(nil)
+	if r := enable("ab", true); r.OK || s.gate.Enabled() {
 		t.Fatalf("wrong confirmation enabled writing: %+v", r)
+	}
+	if r := enable("ze", false); r.OK || s.gate.Enabled() || r.Error != "потрібен PIN" {
+		t.Fatalf("enabled without a matched PIN: %+v", r)
 	}
 	broken := controlTick(map[string]float64{"pcs_shutdown": 1})
 	broken.TS = now
 	s.lastTick.Store(&broken)
-	if r := s.onWriteRequest(ctx, now, writeRequest{action: "enable", by: "t", confirm: "ze"}); r.OK || s.gate.Enabled() {
+	if r := enable("ze", true); r.OK || s.gate.Enabled() {
 		t.Fatalf("PCS shutdown enabled writing: %+v", r)
 	}
 	s.lastTick.Store(&tick)
 	// No ceiling from the cloud: the device config has none to offer.
-	if r := s.onWriteRequest(ctx, now, writeRequest{action: "enable", by: "t", confirm: "ze"}); r.OK || s.gate.Enabled() {
+	if r := enable("ze", true); r.OK || s.gate.Enabled() || !failed(r, "export_cap") {
 		t.Fatalf("enabled without an export ceiling in the manifest: %+v", r)
 	}
 	s.manifest.Store(zeManifest(now, 0))
-	if r := s.onWriteRequest(ctx, now, writeRequest{action: "enable", by: "t", confirm: "ze"}); r.OK || s.gate.Enabled() {
+	if r := enable("ze", true); r.OK || s.gate.Enabled() || !failed(r, "export_cap") {
 		t.Fatalf("enabled with a manifest that has no ceiling: %+v", r)
 	}
 	s.manifest.Store(zeManifest(now, 850))
-	r := s.onWriteRequest(ctx, now, writeRequest{action: "enable", by: "t", confirm: "ze"})
+	r := enable("ze", true)
 	if !r.OK || !s.gate.Enabled() || s.ctl.State() != WriteHold {
 		t.Fatalf("enable: %+v, gate %v, state %s", r, s.gate.Enabled(), s.ctl.State())
 	}

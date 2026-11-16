@@ -68,6 +68,7 @@ control:
   # console and always off after a restart. Defaults shown.
   write:
     # state_path: /var/lib/ems-edge/write_gate.json  # default: next to the manifest cache
+    # pin_path: /var/lib/ems-edge/write_pin.json     # default: next to the write flag; set with -set-write-pin
     initial_hold: 15m               # battery at 0 kW after writing is turned on
     first_command_max_kw: 100       # until the battery has followed one command
     soc_min_pct: 20                 # hard SOC window of every written command

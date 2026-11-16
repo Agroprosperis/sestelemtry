@@ -56,6 +56,7 @@ type Service struct {
 	// Write path (ems_sl_write_cutover.md). The gate is the device flag;
 	// the writers read writeCmd and report what they wrote in writeFB.
 	gate          *WriteGate
+	pin           *pinGate
 	writeCmd      atomic.Pointer[WriteCommand]
 	writeFB       sync.Map // register name → WriteFeedback
 	writeFaults   chan writeFault
@@ -75,7 +76,10 @@ type writeRequest struct {
 	action  string // enable | stop | disable
 	by      string
 	confirm string
-	reply   chan writeReply
+	// pinOK is set by the console handler after the PIN matched; the
+	// hash runs there, not in the core loop.
+	pinOK bool
+	reply chan writeReply
 }
 
 type writeReply struct {
@@ -126,6 +130,7 @@ func Run(ctx context.Context, cfg *Config, log *slog.Logger, version string) err
 		startedAt:        time.Now(),
 		eventLastWritten: map[string]time.Time{},
 		gate:             gate,
+		pin:              &pinGate{path: cfg.Control.Write.PinPath},
 		ctl:              NewController(cfg.Control.Write),
 		writeFaults:      make(chan writeFault, 8),
 		writeRequests:    make(chan writeRequest),

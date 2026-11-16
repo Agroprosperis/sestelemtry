@@ -188,6 +188,8 @@ export type EdgeWriteHealth = {
   state: 'off' | 'hold' | 'run' | 'stopped' | 'stopping'
   reason?: string
   gate: { enabled: boolean; at: string; by: string; reason?: string }
+  /** The PIN that turns writing on is set on the device. */
+  pin_set?: boolean
   command?: {
     at: string
     state: string

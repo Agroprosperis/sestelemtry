@@ -18,6 +18,7 @@ const (
 	EvWriteFault          = "WRITE_FAULT"
 	EvManualClamped       = "MANUAL_COMMAND_CLAMPED"
 	EvWriteOffAfterReboot = "WRITE_OFF_AFTER_RESTART"
+	EvWriteDenied         = "WRITE_ENABLE_DENIED"
 )
 
 // WriteGate is the device-local write flag (ems_sl_write_cutover.md §4,
