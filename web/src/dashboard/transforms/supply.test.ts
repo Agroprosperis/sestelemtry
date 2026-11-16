@@ -50,14 +50,29 @@ describe('daySupplyModes', () => {
       point('grid_breakers_on_bits', at(10, 10), 0),
       point('gen_breakers_on_bits', at(10, 10), 0),
       point('gen_bus_voltage_a_v', at(10, 10), 231),
+      point('grid_breakers_on_bits', at(10, 20), 1),
+      point('gen_breakers_on_bits', at(10, 20), 0),
     ]
-    const buckets = daySupplyModes(points, anchor, new Date(2026, 10, 15, 10, 12))!
+    const buckets = daySupplyModes(points, anchor, new Date(2026, 10, 15, 10, 27))!
     const mode = (time: string) => buckets.find((b) => b.time === time)?.mode
     expect(mode('10:00')).toBe('grid')
     expect(mode('10:05')).toBe('generator')
     expect(mode('10:10')).toBe('island')
-    expect(mode('09:55')).toBe('unknown')
-    expect(mode('10:15')).toBeNull()
+    expect(mode('10:15')).toBe('unknown')
+    expect(mode('10:20')).toBe('grid')
+    expect(mode('10:30')).toBeNull()
+  })
+
+  it('has no mode before the Encombi first reports', () => {
+    // KE on 15.11: the controller started at 22:30, on the generator.
+    const points = [
+      point('grid_breakers_on_bits', at(22, 30), 0),
+      point('gen_breakers_on_bits', at(22, 30), 1),
+    ]
+    const buckets = daySupplyModes(points, anchor, now)!
+    expect(buckets.find((b) => b.time === '22:25')?.mode).toBeNull()
+    expect(buckets.find((b) => b.time === '00:00')?.mode).toBeNull()
+    expect(buckets.find((b) => b.time === '22:30')?.mode).toBe('generator')
   })
 })
 

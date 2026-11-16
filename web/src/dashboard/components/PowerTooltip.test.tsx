@@ -204,7 +204,7 @@ describe('PowerTooltip with a generator', () => {
     }).map((e) => ({ ...e, payload: row }))
     render(<PowerTooltip active label="10:00" payload={payload} />)
     expect(screen.getByText('Живлення')).toBeInTheDocument()
-    expect(screen.getByText('Генератор', { selector: '.energy-tooltip-value' })).toBeInTheDocument()
+    expect(screen.getByText('Від генератора', { selector: '.energy-tooltip-value' })).toBeInTheDocument()
     expect(screen.getByText('Мережі немає')).toBeInTheDocument()
     expect(screen.getByText('60 kW')).toBeInTheDocument()
   })

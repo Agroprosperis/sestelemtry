@@ -43,16 +43,17 @@ export function supplyModeOf(r: {
 }
 
 export const SUPPLY_MODE_LABELS: Record<SupplyMode, string> = {
-  grid: 'Мережа',
-  generator: 'Генератор',
+  grid: 'Від мережі',
+  generator: 'Від генератора',
   island: 'Острів (від УЗЕ)',
   blackout: 'Без живлення',
-  transition: 'Перехід',
-  unknown: 'Невідомо',
+  transition: 'Перемикання',
+  unknown: 'Немає даних Encombi',
 }
 
 // DaySupplyBucket is one 5-minute bucket of the day's supply strip; mode
-// is null for a bucket still ahead of now.
+// is null for a bucket still ahead of now or before the day's first
+// Encombi reading.
 export type DaySupplyBucket = { t: number; time: string; mode: SupplyMode | null }
 
 function slotOf(date: Date): number {
@@ -63,7 +64,10 @@ function slotOf(date: Date): number {
 
 // daySupplyModes reads each 5-minute bucket's mode from its last breaker,
 // power and voltage readings (aggregation=last). null for a site whose
-// Encombi reported nothing that day, so the chart draws no strip.
+// Encombi reported nothing that day, so the chart draws no strip. Buckets
+// before the day's first breaker reading have no mode, as the server
+// counts no supply mode before the controller's first sample; a silent
+// Encombi later in the day is unknown.
 export function daySupplyModes(points: TimeseriesPoint[], anchor: Date, now: Date = new Date()): DaySupplyBucket[] | null {
   const byKey = new Map<string, Map<number, number>>()
   for (const p of points) {
@@ -79,12 +83,15 @@ export function daySupplyModes(points: TimeseriesPoint[], anchor: Date, now: Dat
   }
   if (!byKey.has(GRID_BITS_KEY) && !byKey.has(GEN_BITS_KEY)) return null
   const cutoff = slotOf(now)
+  const first = Math.min(
+    ...[GRID_BITS_KEY, GEN_BITS_KEY].flatMap((key) => Array.from(byKey.get(key)?.keys() ?? [])),
+  )
   const read = (key: string, t: number) => byKey.get(key)?.get(t) ?? null
   return timelineBuckets('day', anchor).map(({ t, label }) => ({
     t,
     time: label,
     mode:
-      t > cutoff
+      t > cutoff || t < first
         ? null
         : supplyModeOf({
             gridBits: read(GRID_BITS_KEY, t),

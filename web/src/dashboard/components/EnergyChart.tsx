@@ -102,10 +102,11 @@ const AI_REASON_KEY = 'ai_reason_text'
 // up to one balance of the plant.
 const AI_LOAD_KEY = 'ai_load_kw'
 const AI_LOAD_LABEL = 'Робота в дешеві години (сценарій)'
-const GEN_POWER_LABEL = 'Генератор'
-// SUPPLY_KEY is the strip's legend toggle.
+const GEN_POWER_LABEL = 'Потужність генератора'
+// SUPPLY_KEY is the strip's legend toggle, which leads the strip's own
+// row of mode colours.
 const SUPPLY_KEY = 'supply_strip'
-const SUPPLY_LABEL = 'Режим живлення'
+const SUPPLY_LABEL = 'Режим живлення:'
 // The strip's height, in percent of the plot, on its own 0..100 axis.
 const SUPPLY_STRIP_PCT = 4
 // A generator that never gave more than this all day draws no series.
@@ -350,11 +351,8 @@ export function EnergyChart({
     if (hasAiPlan) {
       items.push({ id: AI_SOC_KEY, label: aiSocLabel, color: chrome.socPlan })
     }
-    if (hasSupply) {
-      items.push({ id: SUPPLY_KEY, label: SUPPLY_LABEL, color: SUPPLY_MODE_COLORS.generator })
-    }
     return items
-  }, [hasSoc, hasGen, hasSupply, hasPvForecast, pvForecastName, hasAiPlan, hasAiLoad, aiEssLabel, aiSocLabel, chrome.soc, chrome.socPlan])
+  }, [hasSoc, hasGen, hasPvForecast, pvForecastName, hasAiPlan, hasAiLoad, aiEssLabel, aiSocLabel, chrome.soc, chrome.socPlan])
 
   const renderDayLegend = useCallback(
     () => (
@@ -378,14 +376,30 @@ export function EnergyChart({
             )
           })}
         </ul>
-        {hasSupply && !hiddenSeries.has(SUPPLY_KEY) && (
+        {hasSupply && (
           <ul className="chart-legend chart-legend--supply" aria-label="Смуга режимів живлення">
-            {supplyModes.map((m) => (
-              <li key={m} className="chart-legend-item chart-legend-item--static">
-                <span className="chart-legend-swatch" style={{ background: SUPPLY_MODE_COLORS[m] }} />
-                <span className="chart-legend-label">{SUPPLY_MODE_LABELS[m]}</span>
-              </li>
-            ))}
+            <li>
+              <button
+                type="button"
+                className={`chart-legend-item${hiddenSeries.has(SUPPLY_KEY) ? ' chart-legend-item--hidden' : ''}`}
+                aria-pressed={hiddenSeries.has(SUPPLY_KEY)}
+                title={
+                  hiddenSeries.has(SUPPLY_KEY)
+                    ? 'Показати смугу режимів'
+                    : 'Смуга внизу графіка: звідки живився об’єкт кожні 5 хвилин. Натисніть, щоб сховати'
+                }
+                onClick={() => toggleSeries(SUPPLY_KEY)}
+              >
+                <span className="chart-legend-label">{SUPPLY_LABEL}</span>
+              </button>
+            </li>
+            {!hiddenSeries.has(SUPPLY_KEY) &&
+              supplyModes.map((m) => (
+                <li key={m} className="chart-legend-item chart-legend-item--static">
+                  <span className="chart-legend-swatch" style={{ background: SUPPLY_MODE_COLORS[m] }} />
+                  <span className="chart-legend-label">{SUPPLY_MODE_LABELS[m]}</span>
+                </li>
+              ))}
           </ul>
         )}
       </>
