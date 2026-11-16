@@ -221,12 +221,13 @@ describe('StateTab write card', () => {
   it('says the IoT2050 does not write while the device flag is off', () => {
     const health: EdgeHealth = {
       ...fullHealth,
-      write: { enabled: false, writer: 'other', state: 'off', gate, applied_manifest_seq: 1763366400000 },
+      write: { enabled: false, writer: 'other', state: 'off', gate, pin_set: false, applied_manifest_seq: 1763366400000 },
     }
     render(<StateTab site="ze" status={statusWith(health)} />)
 
     expect(screen.getByText('Запис у SmartLogger')).toBeInTheDocument()
     expect(screen.getByText('IoT2050 не пише')).toBeInTheDocument()
+    expect(screen.getByText('не задано — увімкнення неможливе')).toHaveClass('warn')
     expect(screen.getByText('Encombi або ніхто')).toBeInTheDocument()
     expect(screen.getByText('№ 1763366400000')).toBeInTheDocument()
     expect(screen.getByText(/керує Encombi \(shadow\)/)).toBeInTheDocument()
@@ -242,6 +243,7 @@ describe('StateTab write card', () => {
         state: 'run',
         reason: 'робота',
         gate: { ...gate, enabled: true, by: 'operator' },
+        pin_set: true,
         command: {
           at: '2026-11-17T09:00:00Z',
           state: 'run',
@@ -269,6 +271,7 @@ describe('StateTab write card', () => {
     render(<StateTab site="ze" status={statusWith(health)} />)
 
     expect(screen.getByText('пише IoT2050')).toBeInTheDocument()
+    expect(screen.getByText('задано')).toBeInTheDocument()
     expect(screen.getByText(/керує IoT2050/)).toBeInTheDocument()
     expect(screen.getByText('40381 -100.0 кВт · 40378 600 кВт')).toBeInTheDocument()
     expect(screen.getByText('перша ненульова команда ≤ 100 кВт')).toBeInTheDocument()

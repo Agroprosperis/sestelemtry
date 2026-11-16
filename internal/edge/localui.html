@@ -229,11 +229,12 @@
         </details>
         <div class="btn-row" style="margin-top:12px;flex-wrap:wrap">
           <input type="text" id="write-confirm" placeholder="код об'єкта для підтвердження" style="max-width:220px">
+          <input type="password" id="write-pin" placeholder="PIN" autocomplete="off" inputmode="numeric" style="max-width:140px">
           <button class="btn btn-danger" id="btn-write-enable">Увімкнути запис</button>
           <button class="btn" id="btn-write-stop">УЗЕ 0 кВт (стоп)</button>
           <button class="btn btn-primary" id="btn-write-disable">Вимкнути запис</button>
         </div>
-        <p id="write-result" style="font-size:12px;color:var(--muted);margin-top:10px">Поки запис вимкнено, контролер лише читає: рішення віртуальні (<code>would_write_*</code>). Увімкнення — лише тут, людиною; після перезапуску сервісу запис завжди вимкнений.</p>
+        <p id="write-result" style="font-size:12px;color:var(--muted);margin-top:10px">Поки запис вимкнено, контролер лише читає: рішення віртуальні (<code>would_write_*</code>). Увімкнення — лише тут, людиною, з кодом об’єкта і PIN; після перезапуску сервісу запис завжди вимкнений. Стоп і вимкнення — без PIN.</p>
       </div>
 
       <div class="grid2">
@@ -658,11 +659,11 @@ async function refreshWritePre() {
   } catch (e) { /* the status poll reports the outage */ }
 }
 
-async function postWrite(action, confirm) {
+async function postWrite(action, confirm, pin) {
   const res = await fetch('/api/write', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action, confirm }),
+    body: JSON.stringify({ action, confirm, pin }),
   });
   const body = await res.json().catch(() => ({}));
   if (!res.ok || !body.ok) {
@@ -674,14 +675,17 @@ async function postWrite(action, confirm) {
 
 $('btn-write-enable').onclick = async () => {
   const code = $('write-confirm').value.trim();
+  const pin = $('write-pin').value;
   if (!code) { $('write-result').textContent = 'Введіть код об’єкта для підтвердження.'; return; }
-  if (!confirm('Увімкнути запис IoT2050 у SmartLogger? Перед цим адресу Encombi має бути знято з обох логерів.')) return;
+  if (!pin) { $('write-result').textContent = 'Введіть PIN.'; return; }
+  if (!confirm('Увімкнути запис IoT2050 у SmartLogger? Перед цим адресу Encombi має бути знято з обох логерів.')) { $('write-pin').value = ''; return; }
   try {
-    await postWrite('enable', code);
+    await postWrite('enable', code, pin);
     $('write-confirm').value = '';
     $('write-result').textContent = 'Запис увімкнено: УЗЕ утримується на 0, далі — команди.';
     refreshStatus(); refreshWritePre();
   } catch (e) { $('write-result').textContent = 'Не увімкнено: ' + e.message; refreshWritePre(); }
+  finally { $('write-pin').value = ''; }
 };
 $('btn-write-stop').onclick = async () => {
   try {

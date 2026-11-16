@@ -277,6 +277,14 @@ function WriteCard({ write, alarms }: { write: EdgeWriteHealth; alarms?: string[
             {write.gate?.reason ? ` · ${write.gate.reason}` : ''}
           </span>
         </div>
+        {write.pin_set != null && (
+          <div className="ctl-row">
+            <span className="k">PIN на пристрої</span>
+            <span className={'v ' + (write.pin_set ? 'muted' : 'warn')}>
+              {write.pin_set ? 'задано' : 'не задано — увімкнення неможливе'}
+            </span>
+          </div>
+        )}
         {on && write.reason && (
           <div className="ctl-row">
             <span className="k">Причина</span>

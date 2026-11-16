@@ -106,6 +106,9 @@ func (s *Service) onWriteRequest(ctx context.Context, now time.Time, req writeRe
 		if strings.TrimSpace(req.confirm) != s.cfg.SiteID {
 			return writeReply{Error: fmt.Sprintf("для підтвердження введіть код об'єкта (%s)", s.cfg.SiteID)}
 		}
+		if !req.pinOK {
+			return writeReply{Error: "потрібен PIN"}
+		}
 		pre := s.writePreconditions(now)
 		for _, p := range pre {
 			if !p.OK {
@@ -137,9 +140,10 @@ func (s *Service) onWriteRequest(ctx context.Context, now time.Time, req writeRe
 	return writeReply{Error: "action must be enable, stop or disable"}
 }
 
-// requestWrite hands a console action to the core loop.
-func (s *Service) requestWrite(ctx context.Context, action, by, confirm string) writeReply {
-	req := writeRequest{action: action, by: by, confirm: confirm, reply: make(chan writeReply, 1)}
+// requestWrite hands a console action to the core loop. pinOK only
+// after the caller matched the PIN.
+func (s *Service) requestWrite(ctx context.Context, action, by, confirm string, pinOK bool) writeReply {
+	req := writeRequest{action: action, by: by, confirm: confirm, pinOK: pinOK, reply: make(chan writeReply, 1)}
 	select {
 	case s.writeRequests <- req:
 	case <-ctx.Done():
@@ -199,6 +203,8 @@ func (s *Service) writePreconditions(now time.Time) []WritePrecondition {
 		out = append(out, WritePrecondition{ID: id, OK: ok, Label: label, Actual: actual})
 	}
 	add("mode", s.cfg.Control.Mode == ModeShadow, "режим контролера shadow", string(s.cfg.Control.Mode))
+	pinSet := s.pin.isSet()
+	add("pin", pinSet, "PIN задано на пристрої (ems-edge -set-write-pin)", map[bool]string{true: "так", false: "ні"}[pinSet])
 	ov := s.override.Load()
 	add("override", !ov.activeAt(now), "немає локального override", map[bool]string{true: "діє override", false: "немає"}[ov.activeAt(now)])
 
@@ -331,6 +337,7 @@ type WriteHealth struct {
 	State              string          `json:"state"`
 	Reason             string          `json:"reason,omitempty"`
 	Gate               GateState       `json:"gate"`
+	PinSet             bool            `json:"pin_set"`
 	Command            *WriteCommand   `json:"command,omitempty"`
 	Registers          []WriteFeedback `json:"registers,omitempty"`
 	AppliedManifestSeq int64           `json:"applied_manifest_seq,omitempty"`
@@ -342,6 +349,7 @@ func (s *Service) writeHealth() *WriteHealth {
 		Writer:             "other",
 		State:              WriteOff,
 		Gate:               s.gate.State(),
+		PinSet:             s.pin.isSet(),
 		AppliedManifestSeq: s.appliedSeq.Load(),
 	}
 	if h.Enabled {

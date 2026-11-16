@@ -5,7 +5,8 @@
 // It writes 40378/40381 (and 0 to 40384/40386) only while the device's
 // own write flag is on (ems-spec docs/specs/ems_sl_write_cutover.md).
 // The flag is off by default and after every restart, never comes from
-// the cloud, and is turned on only by a person on the local console.
+// the cloud, and is turned on only by a person on the local console
+// with the PIN set on the device (-set-write-pin).
 package main
 
 import (
@@ -30,10 +31,18 @@ func main() {
 	replayOut := flag.String("replay-out", "control_decisions.csv", "replay mode: output CSV for shadow decisions")
 	replayManifest := flag.String("replay-manifest", "", "replay mode: optional manifest-lite JSON (plan/preset/limits)")
 	showVersion := flag.Bool("version", false, "print version and exit")
+	setPin := flag.Bool("set-write-pin", false, "set the PIN that turns SmartLogger writing on (asked twice) and exit")
 	flag.Parse()
 
 	if *showVersion {
 		fmt.Println(version)
+		return
+	}
+	if *setPin {
+		if err := runSetWritePin(*configPath); err != nil {
+			fmt.Fprintln(os.Stderr, "PIN не збережено:", err)
+			os.Exit(1)
+		}
 		return
 	}
 

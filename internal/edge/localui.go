@@ -4,6 +4,7 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"strconv"
@@ -251,23 +252,47 @@ func (s *Service) uiWrite(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			Action  string `json:"action"`
 			Confirm string `json:"confirm"`
+			Pin     string `json:"pin"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
 			return
 		}
+		action := strings.TrimSpace(body.Action)
 		by := "local-console " + r.RemoteAddr
-		reply := s.requestWrite(r.Context(), strings.TrimSpace(body.Action), by, body.Confirm)
+		pinOK := false
+		if action == "enable" {
+			now := time.Now().UTC()
+			locked, err := s.pin.check(body.Pin, now)
+			if err != nil {
+				if errors.Is(err, errPinWrong) {
+					sev := SevWarning
+					if locked {
+						sev = SevAlarm
+					}
+					s.pushEvent(Event{TS: now, Severity: sev, Code: EvWriteDenied,
+						Message: "увімкнення запису відхилено: " + err.Error() + " (" + by + ")"})
+				}
+				uiWriteConflict(w, writeReply{Error: err.Error()})
+				return
+			}
+			pinOK = true
+		}
+		reply := s.requestWrite(r.Context(), action, by, body.Confirm, pinOK)
 		if !reply.OK {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusConflict)
-			_ = json.NewEncoder(w).Encode(reply)
+			uiWriteConflict(w, reply)
 			return
 		}
 		uiJSON(w, reply)
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+func uiWriteConflict(w http.ResponseWriter, reply writeReply) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusConflict)
+	_ = json.NewEncoder(w).Encode(reply)
 }
 
 // pushEvent hands an event to the core loop without blocking the HTTP
