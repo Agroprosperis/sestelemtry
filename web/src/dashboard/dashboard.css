@@ -1816,17 +1816,6 @@
   flex: 0 0 auto;
 }
 
-/* The supply strip's key: one line of colours under the series legend. */
-.chart-legend--supply {
-  margin-top: 4px;
-  font-size: 11px;
-  color: var(--text-muted);
-}
-
-.chart-legend-item--static {
-  cursor: default;
-}
-
 .energy-tooltip {
   background: var(--bg-elevated);
   backdrop-filter: blur(6px);

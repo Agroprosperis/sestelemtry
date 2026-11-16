@@ -1,5 +1,4 @@
 import type { MetricKey } from './metrics'
-import type { SupplyMode } from './transforms/supply'
 
 const FALLBACK_COLOR = '#8b5cf6'
 
@@ -36,15 +35,3 @@ export const AI_PLAN_LOAD_COLOR = '#d97706'
 // The generator is burnt orange, apart from the load's amber; the live
 // diagram draws its flow in the same hue.
 export const GEN_POWER_COLOR = '#c2410c'
-
-// The supply modes: the grid and the generator keep their series colours,
-// the island is the battery's blue. The day chart shades its hours
-// without the grid in them.
-export const SUPPLY_MODE_COLORS: Record<SupplyMode, string> = {
-  grid: '#9ca3af',
-  generator: GEN_POWER_COLOR,
-  island: '#2563eb',
-  blackout: '#dc2626',
-  transition: '#a855f7',
-  unknown: '#cbd5e1',
-}

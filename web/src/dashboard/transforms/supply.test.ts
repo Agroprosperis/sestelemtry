@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { TimeseriesPoint } from '../../types'
-import { daySupplyModes, supplyModeOf, supplySegments, type DaySupplyBucket } from './supply'
+import { daySupplyModes, supplyModeOf } from './supply'
 
 describe('supplyModeOf', () => {
   const base = { gridBits: 0, genBits: 0, genKw: 0, busV: 0 }
@@ -73,21 +73,5 @@ describe('daySupplyModes', () => {
     expect(buckets.find((b) => b.time === '22:25')?.mode).toBeNull()
     expect(buckets.find((b) => b.time === '00:00')?.mode).toBeNull()
     expect(buckets.find((b) => b.time === '22:30')?.mode).toBe('generator')
-  })
-})
-
-describe('supplySegments', () => {
-  it('merges runs of one mode and skips empty buckets', () => {
-    const buckets: DaySupplyBucket[] = [
-      { t: 0, time: '10:00', mode: 'grid' },
-      { t: 1, time: '10:05', mode: 'grid' },
-      { t: 2, time: '10:10', mode: 'generator' },
-      { t: 3, time: '10:15', mode: 'generator' },
-      { t: 4, time: '10:20', mode: null },
-    ]
-    expect(supplySegments(buckets)).toEqual([
-      { x1: '10:00', x2: '10:10', mode: 'grid' },
-      { x1: '10:10', x2: '10:20', mode: 'generator' },
-    ])
   })
 })
