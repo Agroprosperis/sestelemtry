@@ -544,7 +544,9 @@ function describeBalance(a: LiveAllocation): { kw: string; text: string } {
     case 'generator':
       return { kw: `${formatChartNumber(a.genKw)} kW`, text: 'Від генератора' }
     case 'island':
-      return { kw: `${formatChartNumber(a.essState === 'discharging' ? a.essKw : 0)} kW`, text: 'Острів: живлення від УЗЕ' }
+      // The battery forms the island while СЕС may still cover the load
+      // and charge it, so the hub gives the load it keeps up.
+      return { kw: `${formatChartNumber(a.loadKw)} kW`, text: 'Острів: живлення від УЗЕ' }
     case 'blackout':
       return { kw: '—', text: 'Без живлення' }
   }

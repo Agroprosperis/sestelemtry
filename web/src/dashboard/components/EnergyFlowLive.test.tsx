@@ -126,15 +126,17 @@ describe('EnergyFlowLive', () => {
   })
 
   it('captions the hub by the supply mode', () => {
+    // The KE island of 16.11: СЕС covers the load and charges the battery.
     const island = buildAllocation({
-      active_pv_power_kw: 0,
-      active_ess_power_kw: 40,
+      active_pv_power_kw: 207.6,
+      active_ess_power_kw: -110,
       grid_breakers_on_bits: 0,
       gen_breakers_on_bits: 0,
-      gen_bus_voltage_a_v: 230,
+      gen_bus_voltage_a_v: 232,
     })
-    const { rerender } = render(<EnergyFlowLive allocation={island} />)
+    const { container, rerender } = render(<EnergyFlowLive allocation={island} />)
     expect(screen.getByText('Острів: живлення від УЗЕ')).toBeInTheDocument()
+    expect(container.querySelector('.energy-flow-live-hub')).toHaveTextContent('97.6 kW')
 
     const blackout = buildAllocation({
       active_pv_power_kw: 0,

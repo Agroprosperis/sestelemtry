@@ -221,7 +221,7 @@ export function GeneratorSection({ organizationID, canSeeFuel }: { organizationI
             </div>
             <div>
               <dt>Версія ПЗ</dt>
-              <dd>{data.sw_version != null ? formatNumber(data.sw_version, 2) : '—'}</dd>
+              <dd>{data.sw_version != null ? String(data.sw_version) : '—'}</dd>
             </div>
             <div>
               <dt>Останні дані</dt>
