@@ -9,7 +9,14 @@ import { EnergyChart } from '../dashboard/components/EnergyChart'
 import { WeatherCard } from '../dashboard/components/WeatherCard'
 import { useDashboardData } from '../dashboard/hooks/useDashboardData'
 import { useGridVoltage } from '../dashboard/hooks/useGridVoltage'
-import type { BessHealth, EdgeSiteStatus, EdgeWriteHealth, HealthCheck, InverterHealth } from './controlClient'
+import type {
+  BessHealth,
+  EdgeSiteStatus,
+  EdgeWriteCommand,
+  EdgeWriteHealth,
+  HealthCheck,
+  InverterHealth,
+} from './controlClient'
 import { PLAN_SOURCE_LABELS, REASON_LABELS } from './decisionLabels'
 import { appliedAnnotation, manifestPlanToUzePlan } from './manifestPlan'
 
@@ -243,20 +250,50 @@ const BESS_CLASS_SEV: Record<string, string> = {
 
 const WRITE_STATE_LABELS: Record<EdgeWriteHealth['state'], string> = {
   off: 'запис вимкнено',
+  await_start: 'УЗЕ не запущена: 0 кВт',
   hold: 'утримання: УЗЕ 0 кВт',
   run: 'робота',
   stopped: 'зупинка: УЗЕ 0 кВт',
   stopping: 'вимикання запису',
 }
 
+const ESS_LABELS = { running: 'запущена', stopped: 'зупинена', unknown: 'невідомо' } as const
+const PV_LABELS = { running: 'у роботі', not_running: 'не в роботі', unknown: 'невідомо' } as const
+const ANSWER_LABELS: Record<EdgeWriteCommand['answer'], string> = {
+  pending: 'чекає відповіді логера',
+  accepted: 'логер прийняв',
+  refused: 'відмова логера',
+  no_response: 'немає відповіді логера',
+  not_sent: 'не надіслано',
+}
+const CMD_STATE_LABELS: Record<EdgeWriteCommand['state'], string> = {
+  waiting: 'чекає підтвердження',
+  confirmed: 'підтверджено',
+  not_confirmed: 'не підтверджено',
+  failed: 'не виконано',
+}
+
+function fmtClock(iso?: string): string {
+  if (!iso) return ''
+  return new Date(iso).toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' })
+}
+
+// The last start/stop button pressed on the device console.
+function lastCommand(cmds?: EdgeWriteCommand[]): EdgeWriteCommand | undefined {
+  return [...(cmds ?? [])].sort((a, b) => (a.sent_at < b.sent_at ? 1 : -1))[0]
+}
+
 // WriteCard — the device write flag (ems_sl_write_cutover.md §4, §8): who
 // writes the loggers, what went out and what they read back. It only
-// shows the flag; turning it on is the device console's.
+// shows the flag and the start/stop state; the buttons are the device
+// console's.
 function WriteCard({ write, alarms }: { write: EdgeWriteHealth; alarms?: string[] }) {
   const on = write.enabled
   const state = on ? write.state : 'off'
   const sev = !on ? 'plain' : state === 'stopped' ? 'err' : 'warn'
   const cmd = write.command
+  const eq = write.equipment
+  const last = lastCommand(write.commands)
   return (
     <section className="ctl-card">
       <h2>Запис у SmartLogger</h2>
@@ -289,6 +326,36 @@ function WriteCard({ write, alarms }: { write: EdgeWriteHealth; alarms?: string[
           <div className="ctl-row">
             <span className="k">Причина</span>
             <span className={'v ' + (state === 'stopped' ? 'err' : 'muted')}>{write.reason}</span>
+          </div>
+        )}
+        {eq && (
+          <>
+            <div className="ctl-row">
+              <span className="k">УЗЕ</span>
+              <span className="v">
+                {ESS_LABELS[eq.ess] ?? eq.ess}
+                {eq.ess_started ? ' · пуск підтверджено' : ''}
+              </span>
+            </div>
+            <div className="ctl-row">
+              <span className="k">СЕС</span>
+              <span className={'v ' + (eq.pv_refusing ? 'warn' : '')}>
+                {PV_LABELS[eq.pv] ?? eq.pv}
+                {eq.pv_started_by_test ? ' · запустив тест' : ''}
+                {eq.pv_refusing ? ' · логер не приймає запис (exception 4)' : ''}
+              </span>
+            </div>
+          </>
+        )}
+        {last && (
+          <div className="ctl-row">
+            <span className="k">Остання команда</span>
+            <span className={'v ' + (last.state === 'confirmed' ? 'ok' : last.state === 'waiting' ? 'warn' : 'err')}>
+              {last.label} · {ANSWER_LABELS[last.answer] ?? last.answer}
+              {last.exception ? ` (exception ${last.exception})` : ''}
+              {last.answer === 'accepted' ? ` · ${CMD_STATE_LABELS[last.state] ?? last.state}` : ''}
+              {last.done_at ? ` ${fmtClock(last.done_at)}` : ''}
+            </span>
           </div>
         )}
         {on && cmd && (

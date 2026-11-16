@@ -88,6 +88,16 @@ func (s *Session) WriteMultiple(ctx context.Context, start uint16, payload []byt
 	return err
 }
 
+// WriteSingle performs an FC06 write of one register. Callers own every
+// safety decision.
+func (s *Session) WriteSingle(ctx context.Context, addr, value uint16) error {
+	if s != nil && s.mock {
+		return nil
+	}
+	_, err := s.client.WriteSingleRegister(ctx, addr, value)
+	return err
+}
+
 // ExceptionCode returns the Modbus exception code when err is an
 // exception response: the device answered and refused the request, so
 // the TCP stream is intact (unlike a timeout or I/O error).

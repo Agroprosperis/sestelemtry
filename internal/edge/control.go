@@ -9,11 +9,12 @@ import (
 
 // Write states of the controller.
 const (
-	WriteOff      = "off"      // flag off: nothing is written
-	WriteHold     = "hold"     // just turned on: battery 0, PV at its rating
-	WriteRun      = "run"      // the engine's commands go out
-	WriteStopped  = "stopped"  // a stop latched: battery 0, PV at its rating
-	WriteStopping = "stopping" // turning off: safe values, then the flag drops
+	WriteOff        = "off"         // flag off: nothing is written
+	WriteAwaitStart = "await_start" // flag on, the battery not started yet: 0 kW
+	WriteHold       = "hold"        // battery start confirmed: 0 kW for the hold
+	WriteRun        = "run"         // the engine's commands go out
+	WriteStopped    = "stopped"     // a stop latched: battery 0, PV at its rating
+	WriteStopping   = "stopping"    // turning off: safe values, then the flag drops
 )
 
 // Thresholds of the stops (ems_sl_write_cutover.md §9, §12.3, §12.4).
@@ -75,6 +76,11 @@ type Controller struct {
 	since      time.Time
 	reason     string
 	stoppingAt time.Time
+	// essStarted: a battery start was confirmed in this write session
+	// (cutover 04.11.2026 §4). stopAuto: the latched stop came from a
+	// check, not from the operator's «0 кВт».
+	essStarted bool
+	stopAuto   bool
 
 	firstConfirmed bool
 	followSince    time.Time
@@ -98,23 +104,42 @@ func (c *Controller) Since() time.Time {
 	return c.since
 }
 
-// Start enters the hold after the flag went on.
+// Start waits for the battery start after the flag went on: the
+// battery was stopped before the hand-over, so only 0 kW goes out.
 func (c *Controller) Start(now time.Time) {
 	*c = Controller{cfg: c.cfg, lastPVRatedKw: c.lastPVRatedKw}
-	c.state, c.since, c.reason = WriteHold, now, "запис увімкнено — УЗЕ на нулі"
+	c.state, c.since, c.reason = WriteAwaitStart, now, "запис увімкнено — УЗЕ не запущена, уставка 0"
 }
+
+// ESSStarted enters the hold once the battery start is confirmed; the
+// hold is counted from here, not from turning writing on.
+func (c *Controller) ESSStarted(now time.Time) {
+	if c.state != WriteAwaitStart {
+		return
+	}
+	c.essStarted = true
+	c.state, c.since, c.reason = WriteHold, now, "пуск УЗЕ підтверджено — утримання на 0"
+}
+
+// ESSStartedInSession reports a confirmed battery start since writing
+// went on.
+func (c *Controller) ESSStartedInSession() bool { return c.essStarted }
+
+// StopAuto reports that the latched stop came from a check.
+func (c *Controller) StopAuto() bool { return c.state == WriteStopped && c.stopAuto }
 
 // Off forgets everything once the flag is off.
 func (c *Controller) Off() {
 	*c = Controller{cfg: c.cfg, state: WriteOff, lastPVRatedKw: c.lastPVRatedKw}
 }
 
-// Stop latches a stop: from now on only safe values go out.
-func (c *Controller) Stop(now time.Time, reason string) (Event, bool) {
+// Stop latches a stop: from now on only safe values go out. auto marks
+// a stop from a check (it also stops what the test started).
+func (c *Controller) Stop(now time.Time, reason string, auto bool) (Event, bool) {
 	if c.state == WriteOff || c.state == WriteStopped || c.state == WriteStopping {
 		return Event{}, false
 	}
-	c.state, c.since, c.reason = WriteStopped, now, reason
+	c.state, c.since, c.reason, c.stopAuto = WriteStopped, now, reason, auto
 	return Event{
 		TS: now, Severity: SevAlarm, Code: EvWriteStop,
 		Message: "зупинка запису: " + reason + " — УЗЕ 0 кВт, СЕС на номіналі",
@@ -159,9 +184,9 @@ func (c *Controller) Step(in ControlInputs) (WriteCommand, []Event) {
 	if c.state == WriteHold && in.Now.Sub(c.since) >= c.cfg.InitialHold {
 		c.state, c.since, c.reason = WriteRun, in.Now, "робота"
 	}
-	if c.state == WriteHold || c.state == WriteRun {
+	if c.state == WriteAwaitStart || c.state == WriteHold || c.state == WriteRun {
 		if reason := c.checkStops(in); reason != "" {
-			if ev, ok := c.Stop(in.Now, reason); ok {
+			if ev, ok := c.Stop(in.Now, reason, true); ok {
 				events = append(events, ev)
 			}
 		}
@@ -173,7 +198,7 @@ func (c *Controller) Step(in ControlInputs) (WriteCommand, []Event) {
 		cmd.PVLimitKw, cmd.PVKnown = c.pvCeiling(in, &cmd.Clamps)
 		cmd.ESSKw = c.essCommand(in, &cmd.Clamps)
 		cmd.Reason = in.Decision.ReasonCode
-	case WriteHold:
+	case WriteAwaitStart, WriteHold:
 		cmd.PVLimitKw, cmd.PVKnown = c.pvCeiling(in, &cmd.Clamps)
 	default:
 		// Stopped or turning off: battery 0, PV on its rating (§12.4).
@@ -305,8 +330,9 @@ func (c *Controller) checkStops(in ControlInputs) string {
 			}
 		}
 	}
-	if t.PCSShutdown != nil && *t.PCSShutdown {
-		return "PCS вимкнено (40540)"
+	// Before the confirmed start a stopped PCS is the expected state.
+	if c.essStarted && t.PCSShutdown != nil && *t.PCSShutdown {
+		return "УЗЕ знову зупинилась після пуску (40540)"
 	}
 	if mode, bad := controlModeOff(t); bad {
 		return "режим керування 40737 = " + mode + ", має бути 4"

@@ -19,23 +19,9 @@ func (s *Service) stepWrite(ctx context.Context, now time.Time, tick Tick, d *De
 		s.writeCmd.Store(nil)
 		return
 	}
-	if s.ctl.State() == WriteStopping {
-		since := s.ctl.StoppingSince()
-		confirmed := s.stoppingConfirmed(since)
-		if confirmed || s.ctl.StoppingTimedOut(now) {
-			reason := s.ctl.Reason()
-			if !confirmed {
-				reason += " (readback безпечних уставок не підтверджено)"
-			}
-			ev, err := s.gate.Disable("edge", reason, now)
-			if err != nil {
-				s.log.Error("edge_write_gate_persist", "err", err)
-			}
-			s.writeEventDeduped(ctx, ev)
-			s.ctl.Off()
-			s.writeCmd.Store(nil)
-			return
-		}
+	s.updateCommands(ctx, now, tick)
+	if s.ctl.State() == WriteStopping && s.advanceStopping(ctx, now, tick) {
+		return
 	}
 	decision := Decision{TS: now, ReasonCode: "no_decision"}
 	if d != nil {
@@ -55,6 +41,9 @@ func (s *Service) stepWrite(ctx context.Context, now time.Time, tick Tick, d *De
 	for _, ev := range evs {
 		s.writeEventDeduped(ctx, ev)
 	}
+	s.sendAutoStops(ctx, now, tick)
+	s.checkDaytimePV(ctx, now, tick)
+	s.sessView.Store(&WriteEquipment{ESSStarted: s.ctl.ESSStartedInSession(), PVStartedByTest: s.sess.pvStartedByTest})
 	if d == nil {
 		return
 	}
@@ -93,7 +82,15 @@ func (s *Service) onWriteFault(ctx context.Context, f writeFault) {
 		TS: f.at, Severity: SevAlarm, Code: EvWriteFault,
 		Message: "відмова запису: " + f.msg + " — УЗЕ 0 кВт, запис вимикається",
 	})
-	s.ctl.BeginStopping(f.at, "відмова запису: "+f.msg)
+	s.beginStopping(f.at, "відмова запису: "+f.msg, false)
+}
+
+// beginStopping starts turning writing off. byOperator: the battery is
+// stopped whatever happened before (cutover §7 step 5); on a fault only
+// if the test started it.
+func (s *Service) beginStopping(now time.Time, reason string, byOperator bool) {
+	s.sess.disableByOperator, s.sess.stopPhase, s.sess.stopNotes = byOperator, "", nil
+	s.ctl.BeginStopping(now, reason)
 }
 
 // onWriteRequest serves a console action in the core loop.
@@ -119,6 +116,11 @@ func (s *Service) onWriteRequest(ctx context.Context, now time.Time, req writeRe
 		if err != nil {
 			return writeReply{Error: err.Error(), Preconditions: pre}
 		}
+		var tick Tick
+		if t := s.lastTick.Load(); t != nil {
+			tick = *t
+		}
+		s.beginWriteSession(tick)
 		s.ctl.Start(now)
 		s.writeEventDeduped(ctx, ev)
 		return writeReply{OK: true, Preconditions: pre}
@@ -126,7 +128,7 @@ func (s *Service) onWriteRequest(ctx context.Context, now time.Time, req writeRe
 		if !s.gate.Enabled() {
 			return writeReply{Error: "запис не ввімкнено"}
 		}
-		if ev, ok := s.ctl.Stop(now, "оператор: УЗЕ 0 кВт ("+req.by+")"); ok {
+		if ev, ok := s.ctl.Stop(now, "оператор: УЗЕ 0 кВт ("+req.by+")", false); ok {
 			s.writeEventDeduped(ctx, ev)
 		}
 		return writeReply{OK: true}
@@ -134,7 +136,10 @@ func (s *Service) onWriteRequest(ctx context.Context, now time.Time, req writeRe
 		if !s.gate.Enabled() {
 			return writeReply{Error: "запис не ввімкнено"}
 		}
-		s.ctl.BeginStopping(now, "вимкнено оператором ("+req.by+")")
+		if s.ctl.State() == WriteStopping {
+			return writeReply{Error: "запис уже вимикається: УЗЕ 0, зупинка УЗЕ, потім прапорець"}
+		}
+		s.beginStopping(now, "вимкнено оператором ("+req.by+")", true)
 		return writeReply{OK: true}
 	}
 	return writeReply{Error: "action must be enable, stop or disable"}
@@ -156,6 +161,24 @@ func (s *Service) requestWrite(ctx context.Context, action, by, confirm string, 
 		return r
 	case <-ctx.Done():
 		return writeReply{Error: ctx.Err().Error()}
+	}
+}
+
+// requestCommand hands a start/stop button to the core loop.
+func (s *Service) requestCommand(ctx context.Context, id, by string) cmdReply {
+	req := cmdRequest{id: id, by: by, reply: make(chan cmdReply, 1)}
+	select {
+	case s.cmdRequests <- req:
+	case <-ctx.Done():
+		return cmdReply{Error: ctx.Err().Error()}
+	case <-time.After(5 * time.Second):
+		return cmdReply{Error: "сервіс не відповів"}
+	}
+	select {
+	case r := <-req.reply:
+		return r
+	case <-ctx.Done():
+		return cmdReply{Error: ctx.Err().Error()}
 	}
 }
 
@@ -230,12 +253,13 @@ func (s *Service) writePreconditions(now time.Time) []WritePrecondition {
 		alarmActual = strings.Join(slAlarmHex(words), " ")
 	}
 	add("alarms", clear, "слова аварій 50000… усі 0", alarmActual)
-	pcsOK := t.PCSShutdown != nil && !*t.PCSShutdown
+	// Cutover 04.11.2026 §6, §7 step 2: the installers stop the battery
+	// before the hand-over; the test starts it with «Пуск УЗЕ».
 	pcsActual := "немає даних"
 	if t.PCSShutdown != nil {
 		pcsActual = fmt.Sprintf("40540=%v", map[bool]int{true: 1, false: 0}[*t.PCSShutdown])
 	}
-	add("pcs", pcsOK, "PCS не вимкнено (40540 = 0)", pcsActual)
+	add("ess_stopped", essStoppedOn(t), "УЗЕ зупинена до стику (40540 ≠ 0)", pcsActual)
 
 	for _, k := range s.controlModeKeys() {
 		v, has := t.Values[k]
@@ -246,8 +270,15 @@ func (s *Service) writePreconditions(now time.Time) []WritePrecondition {
 		add("control_mode_"+k, has && v == 4, "40737 = 4 ("+k+")", actual)
 	}
 
+	// A stopped sun may read 0 here; its ceiling is written once 40396 is
+	// read after «Пуск СЕС».
 	rated, hasRated := t.Values["pv_rated_kw"]
-	add("pv_rated", hasRated && rated > 0, "номінал СЕС 40396 прочитано", fmtKw(rated, hasRated))
+	ratedOK := (hasRated && rated > 0) || !pvRunningOn(t)
+	ratedActual := fmtKw(rated, hasRated)
+	if !(hasRated && rated > 0) && ratedOK {
+		ratedActual += " (СЕС не в роботі)"
+	}
+	add("pv_rated", ratedOK, "номінал СЕС 40396 прочитано, якщо СЕС у роботі", ratedActual)
 	add("soc", t.SocPercent != nil, "SOC відомий", fmtPtrPct(t.SocPercent))
 	add("ess_limits", t.ESSChargeMaxKw != nil && t.ESSDischargeMaxKw != nil, "40490/40492 відомі",
 		fmt.Sprintf("%s / %s", fmtPtrKw(t.ESSChargeMaxKw), fmtPtrKw(t.ESSDischargeMaxKw)))
@@ -341,6 +372,8 @@ type WriteHealth struct {
 	Command            *WriteCommand   `json:"command,omitempty"`
 	Registers          []WriteFeedback `json:"registers,omitempty"`
 	AppliedManifestSeq int64           `json:"applied_manifest_seq,omitempty"`
+	Equipment          *WriteEquipment `json:"equipment,omitempty"`
+	Commands           []CommandStatus `json:"commands,omitempty"`
 }
 
 func (s *Service) writeHealth() *WriteHealth {
@@ -351,6 +384,8 @@ func (s *Service) writeHealth() *WriteHealth {
 		Gate:               s.gate.State(),
 		PinSet:             s.pin.isSet(),
 		AppliedManifestSeq: s.appliedSeq.Load(),
+		Equipment:          s.equipmentView(s.lastTick.Load()),
+		Commands:           s.commandStatuses(),
 	}
 	if h.Enabled {
 		h.Writer = "iot2050"

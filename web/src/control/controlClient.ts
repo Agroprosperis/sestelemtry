@@ -181,11 +181,28 @@ export type EdgeWriteRegister = {
   error?: string
 }
 
+/** One start/stop button on the device console and its two-stage feedback. */
+export type EdgeWriteCommand = {
+  id: string
+  label: string
+  register: number
+  host: string
+  by: string
+  sent_at: string
+  answer: 'pending' | 'accepted' | 'refused' | 'no_response' | 'not_sent'
+  exception?: number
+  error?: string
+  state: 'waiting' | 'confirmed' | 'not_confirmed' | 'failed'
+  done_at?: string
+  live?: Record<string, number>
+  note?: string
+}
+
 /** The device write flag and what goes into the loggers (cutover §4, §8). */
 export type EdgeWriteHealth = {
   enabled: boolean
   writer: 'iot2050' | 'other'
-  state: 'off' | 'hold' | 'run' | 'stopped' | 'stopping'
+  state: 'off' | 'await_start' | 'hold' | 'run' | 'stopped' | 'stopping'
   reason?: string
   gate: { enabled: boolean; at: string; by: string; reason?: string }
   /** The PIN that turns writing on is set on the device. */
@@ -201,6 +218,14 @@ export type EdgeWriteHealth = {
   }
   registers?: EdgeWriteRegister[]
   applied_manifest_seq?: number
+  equipment?: {
+    ess: 'running' | 'stopped' | 'unknown'
+    pv: 'running' | 'not_running' | 'unknown'
+    ess_started: boolean
+    pv_started_by_test: boolean
+    pv_refusing: boolean
+  }
+  commands?: EdgeWriteCommand[]
 }
 
 export type EdgeHealth = {

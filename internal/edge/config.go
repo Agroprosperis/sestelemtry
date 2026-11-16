@@ -83,6 +83,11 @@ type SmartLogger struct {
 	Topology     Topology      `yaml:"topology"`
 	PollInterval time.Duration `yaml:"poll_interval"`
 	Devices      []Device      `yaml:"devices"`
+	// AlarmWords is how many alarm words to read, chosen before the test
+	// from the loggers' firmware (cutover §6): 6 = the older map
+	// (50000…50005); 0 or 8 = Issue 52 (…50007), falling back to six if
+	// the logger refuses the last two.
+	AlarmWords int `yaml:"alarm_words"`
 }
 
 type EdgeIdentity struct {
@@ -576,6 +581,11 @@ func (c *Config) validate() error {
 	case 0, 1, -1:
 	default:
 		return fmt.Errorf("edge config: meter_import_sign must be 1 or -1, got %d", c.MeterImportSign)
+	}
+	switch c.SmartLogger.AlarmWords {
+	case 0, 6, 8:
+	default:
+		return fmt.Errorf("edge config: smartlogger.alarm_words must be 6 or 8, got %d", c.SmartLogger.AlarmWords)
 	}
 
 	sl := c.SmartLogger

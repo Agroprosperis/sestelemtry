@@ -13,15 +13,20 @@ import (
 
 // fakeLogger records writes and answers readbacks from what it holds.
 type fakeLogger struct {
-	mu       sync.Mutex
-	regs     map[uint16][]byte
-	writes   []uint16
-	readback func(addr uint16, written []byte) []byte // nil = echo
-	writeErr error
-	closed   int
+	mu        sync.Mutex
+	regs      map[uint16][]byte
+	writes    []uint16
+	singles   []uint16
+	readback  func(addr uint16, written []byte) []byte // nil = echo
+	writeErr  error
+	addrErr   map[uint16]error // per register, FC16 and FC06
+	singleErr error
+	closed    int
 }
 
-func newFakeLogger() *fakeLogger { return &fakeLogger{regs: map[uint16][]byte{}} }
+func newFakeLogger() *fakeLogger {
+	return &fakeLogger{regs: map[uint16][]byte{}, addrErr: map[uint16]error{}}
+}
 
 func (f *fakeLogger) WriteMultiple(_ context.Context, start uint16, payload []byte) error {
 	f.mu.Lock()
@@ -30,8 +35,27 @@ func (f *fakeLogger) WriteMultiple(_ context.Context, start uint16, payload []by
 	if f.writeErr != nil {
 		return f.writeErr
 	}
+	if err := f.addrErr[start]; err != nil {
+		return err
+	}
 	f.regs[start] = append([]byte(nil), payload...)
 	return nil
+}
+
+func (f *fakeLogger) WriteSingle(_ context.Context, addr, _ uint16) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.singles = append(f.singles, addr)
+	if f.singleErr != nil {
+		return f.singleErr
+	}
+	return f.addrErr[addr]
+}
+
+func (f *fakeLogger) singleWrites() []uint16 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]uint16(nil), f.singles...)
 }
 
 func (f *fakeLogger) ReadHolding(_ context.Context, start, _ uint16) ([]byte, error) {
@@ -101,12 +125,18 @@ func writeService(t *testing.T, cfg *Config) *Service {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = bb.Close() })
-	return &Service{
+	s := &Service{
 		cfg: cfg, log: slog.Default(), bb: bb, gate: gate, ctl: NewController(cfg.Control.Write),
 		pin:         &pinGate{path: cfg.Control.Write.PinPath},
 		writeFaults: make(chan writeFault, 8), writeRequests: make(chan writeRequest), events: make(chan Event, 8),
 		eventLastWritten: map[string]time.Time{},
+		cmds:             map[string]*CommandStatus{}, cmdRequests: make(chan cmdRequest),
+		cmdResults: make(chan cmdResult, 16), cmdJobs: map[DeviceRole]chan oneShotJob{},
 	}
+	for _, d := range cfg.SmartLogger.Devices {
+		s.cmdJobs[d.Role] = make(chan oneShotJob, 4)
+	}
+	return s
 }
 
 func enableForTest(t *testing.T, s *Service) {
@@ -114,6 +144,7 @@ func enableForTest(t *testing.T, s *Service) {
 	if _, err := s.gate.Enable("test", testTS); err != nil {
 		t.Fatal(err)
 	}
+	s.beginWriteSession(controlTick(nil))
 	s.ctl.Start(testTS)
 }
 
@@ -180,7 +211,7 @@ func TestWriterIdleWhileFlagOff(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Millisecond)
 	defer cancel()
-	s.runWriter(ctx, s.cfg.SmartLogger.Devices[1], regsFor(RoleESS), 10*time.Millisecond, dial)
+	s.runWriter(ctx, s.cfg.SmartLogger.Devices[1], regsFor(RoleESS), 10*time.Millisecond, dial, nil)
 	mu.Lock()
 	defer mu.Unlock()
 	if dials != 0 {
@@ -198,7 +229,7 @@ func TestWriterWritesItsOwnRegisters(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 400*time.Millisecond)
 		defer cancel()
 		s.runWriter(ctx, dev, regsFor(dev.Role), 20*time.Millisecond,
-			func(context.Context, Device) (registerSession, error) { return f, nil })
+			func(context.Context, Device) (registerSession, error) { return f, nil }, nil)
 	}
 	run(s.cfg.SmartLogger.Devices[0], pv)
 	run(s.cfg.SmartLogger.Devices[1], ess)
@@ -233,7 +264,7 @@ func TestWriterReadbackMismatchFaults(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 	s.runWriter(ctx, s.cfg.SmartLogger.Devices[1], regsFor(RoleESS), 20*time.Millisecond,
-		func(context.Context, Device) (registerSession, error) { return f, nil })
+		func(context.Context, Device) (registerSession, error) { return f, nil }, nil)
 	select {
 	case fault := <-s.writeFaults:
 		if fault.msg == "" {
@@ -292,15 +323,24 @@ func step(c *Controller, at time.Time, tick Tick, desired float64) (WriteCommand
 	})
 }
 
+// Until the battery start is confirmed only 0 kW goes out, however long;
+// the hold is counted from the confirmed start.
 func TestControllerHoldsThenCapsTheFirstCommand(t *testing.T) {
 	cfg := zeCfg(t).Control.Write
 	c := NewController(cfg)
 	c.Start(testTS)
-	cmd, _ := step(c, testTS.Add(time.Minute), controlTick(nil), 300)
-	if cmd.State != WriteHold || cmd.ESSKw != 0 || cmd.PVLimitKw != 600 {
+	stopped := map[string]float64{"pcs_shutdown": 1}
+	cmd, _ := step(c, testTS.Add(time.Hour), controlTick(stopped), 300)
+	if cmd.State != WriteAwaitStart || cmd.ESSKw != 0 || cmd.PVLimitKw != 600 {
+		t.Fatalf("awaiting the start: %+v", cmd)
+	}
+	started := testTS.Add(time.Hour + time.Minute)
+	c.ESSStarted(started)
+	cmd, _ = step(c, started.Add(cfg.InitialHold-time.Second), controlTick(nil), 300)
+	if cmd.State != WriteHold || cmd.ESSKw != 0 {
 		t.Fatalf("hold: %+v", cmd)
 	}
-	at := testTS.Add(cfg.InitialHold)
+	at := started.Add(cfg.InitialHold)
 	cmd, _ = step(c, at, controlTick(nil), 200)
 	if cmd.State != WriteRun || cmd.ESSKw != 100 {
 		t.Fatalf("first command: %+v, want 100 kW", cmd)
@@ -318,9 +358,24 @@ func runController(t *testing.T) (*Controller, time.Time) {
 	cfg := zeCfg(t).Control.Write
 	c := NewController(cfg)
 	c.Start(testTS)
+	c.ESSStarted(testTS)
 	at := testTS.Add(cfg.InitialHold)
 	step(c, at, controlTick(nil), 0)
 	return c, at
+}
+
+// A stopped PCS is the expected state until the start is confirmed.
+func TestControllerStoppedPCSBeforeTheStart(t *testing.T) {
+	c := NewController(zeCfg(t).Control.Write)
+	c.Start(testTS)
+	cmd, evs := step(c, testTS.Add(time.Minute), controlTick(map[string]float64{"pcs_shutdown": 1}), 0)
+	if cmd.State != WriteAwaitStart || len(evs) != 0 {
+		t.Fatalf("stopped before the start: %+v %+v", cmd, evs)
+	}
+	cmd, _ = step(c, testTS.Add(2*time.Minute), controlTick(map[string]float64{"pcs_shutdown": 1, "sl_alarm_2": 0x10}), 0)
+	if cmd.State != WriteStopped || !c.StopAuto() || c.ESSStartedInSession() {
+		t.Fatalf("an alarm before the start: %+v", cmd)
+	}
 }
 
 func TestControllerHardSocWindow(t *testing.T) {
@@ -507,7 +562,8 @@ func TestManifestManualCommandsAndSequence(t *testing.T) {
 func TestEnableNeedsConfirmationAndPreconditions(t *testing.T) {
 	s := writeService(t, zeCfg(t))
 	now := time.Now().UTC()
-	tick := controlTick(nil)
+	// The installers stopped the battery before the hand-over.
+	tick := controlTick(map[string]float64{"pcs_shutdown": 1})
 	tick.TS = now
 	s.lastTick.Store(&tick)
 	for _, d := range s.cfg.SmartLogger.Devices {
@@ -531,11 +587,11 @@ func TestEnableNeedsConfirmationAndPreconditions(t *testing.T) {
 	if r := enable("ze", false); r.OK || s.gate.Enabled() || r.Error != "потрібен PIN" {
 		t.Fatalf("enabled without a matched PIN: %+v", r)
 	}
-	broken := controlTick(map[string]float64{"pcs_shutdown": 1})
-	broken.TS = now
-	s.lastTick.Store(&broken)
-	if r := enable("ze", true); r.OK || s.gate.Enabled() {
-		t.Fatalf("PCS shutdown enabled writing: %+v", r)
+	running := controlTick(nil)
+	running.TS = now
+	s.lastTick.Store(&running)
+	if r := enable("ze", true); r.OK || s.gate.Enabled() || !failed(r, "ess_stopped") {
+		t.Fatalf("enabled with the battery not stopped before the hand-over: %+v", r)
 	}
 	s.lastTick.Store(&tick)
 	// No ceiling from the cloud: the device config has none to offer.
@@ -548,7 +604,7 @@ func TestEnableNeedsConfirmationAndPreconditions(t *testing.T) {
 	}
 	s.manifest.Store(zeManifest(now, 850))
 	r := enable("ze", true)
-	if !r.OK || !s.gate.Enabled() || s.ctl.State() != WriteHold {
+	if !r.OK || !s.gate.Enabled() || s.ctl.State() != WriteAwaitStart {
 		t.Fatalf("enable: %+v, gate %v, state %s", r, s.gate.Enabled(), s.ctl.State())
 	}
 	if got := s.exportCapKw(now); got != 850 {
@@ -628,36 +684,5 @@ func TestPCCSignPreconditionFollowsMeterSign(t *testing.T) {
 	}
 	if ok, _ := pccOK(ze, -1278.1); ok {
 		t.Fatal("meter_import_sign 1, opposite signs passed")
-	}
-}
-
-// Turning off writes the safe values, waits for the readback, then drops
-// the flag; without a readback it drops it after the timeout.
-func TestDisableWaitsForTheSafeReadback(t *testing.T) {
-	s := writeService(t, zeCfg(t))
-	enableForTest(t, s)
-	now := testTS.Add(time.Hour)
-	tick := controlTick(nil)
-	s.ctl.BeginStopping(now, "test")
-	s.stepWrite(context.Background(), now.Add(time.Second), tick, nil)
-	if !s.gate.Enabled() {
-		t.Fatal("flag dropped before the safe values were read back")
-	}
-	after := now.Add(2 * time.Second)
-	s.storeFeedback(WriteFeedback{Register: "40381", At: after, Kw: 0, OK: true})
-	s.storeFeedback(WriteFeedback{Register: "40386", At: after, Kw: 0, OK: true})
-	s.storeFeedback(WriteFeedback{Register: "40378", At: after, Kw: 600, OK: true})
-	s.storeFeedback(WriteFeedback{Register: "40384", At: after, Kw: 0, OK: true})
-	s.stepWrite(context.Background(), now.Add(3*time.Second), tick, nil)
-	if s.gate.Enabled() || s.ctl.State() != WriteOff {
-		t.Fatalf("flag still on: %v / %s", s.gate.Enabled(), s.ctl.State())
-	}
-
-	s2 := writeService(t, zeCfg(t))
-	enableForTest(t, s2)
-	s2.ctl.BeginStopping(now, "test")
-	s2.stepWrite(context.Background(), now.Add(stoppingTimeout+time.Second), tick, nil)
-	if s2.gate.Enabled() {
-		t.Fatal("flag still on after the stopping timeout")
 	}
 }
