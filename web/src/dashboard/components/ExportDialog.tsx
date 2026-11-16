@@ -71,6 +71,11 @@ const COLUMN_OPTIONS: Array<{ id: keyof CustomExportColumns; label: string; hint
     hint: 'СЕС / УЗЕ / мережа / навантаження. Беремо last-sample у бакеті',
   },
   {
+    id: 'gen',
+    label: 'Генератор',
+    hint: 'Енергія (kWh), потужність, завантаження, вимикачі, напруга шини й режим живлення (Encombi)',
+  },
+  {
     id: 'device',
     label: 'Час пристрою (epoch s)',
     hint: 'Локальний годинник SmartLogger — для діагностики дрейфу',
@@ -135,6 +140,7 @@ export function ExportDialog({ organizationID, initialAnchor, onClose }: Props) 
     price: true,
     soc: false,
     power: false,
+    gen: false,
     device: false,
     forecast: false,
   })

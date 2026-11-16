@@ -27,6 +27,13 @@ var DefaultDashboardMetrics = []string{
 	"accumulated_electricity_sold_kwh",
 	"accumulated_power_consumption_kwh",
 	"total_power_supply_from_grid_kwh",
+	// The generator of a site with an Encombi: the live diagram's node and
+	// supply mode (handoff §4.1, §5.1). A site without one has no rows.
+	energyflow.SrcActiveGenPowerKw,
+	"gen_loading_pct",
+	energyflow.SrcGenBreakersOnBits,
+	energyflow.SrcGridBreakersOnBits,
+	energyflow.SrcGenBusVoltageAV,
 }
 
 type DashboardMetric struct {
@@ -198,15 +205,25 @@ type EnergyFlowTotals struct {
 }
 
 // EnergyFlowGenTotals is the generator part of a period's flows, present
-// once the generator gave energy or the economics count it. Accounted
-// says the four flows above are the generator-aware split, which the
-// economics use for the hours the generator ran or the site was off the
-// grid; gen_to_* are set only then.
+// once the generator gave energy, the site was off the grid or the
+// economics count the generator. Accounted says the four flows above are
+// the generator-aware split, which the economics use for the hours the
+// generator ran or the site was off the grid; gen_to_* are set only then.
+// The minutes are the period's time on the generator, in island and
+// without supply.
 type EnergyFlowGenTotals struct {
-	GenKwh       float64 `json:"gen_kwh"`
-	GenToLoadKwh float64 `json:"gen_to_load_kwh"`
-	GenToESSKwh  float64 `json:"gen_to_ess_kwh"`
-	Accounted    bool    `json:"accounted,omitempty"`
+	GenKwh           float64 `json:"gen_kwh"`
+	GenToLoadKwh     float64 `json:"gen_to_load_kwh"`
+	GenToESSKwh      float64 `json:"gen_to_ess_kwh"`
+	Accounted        bool    `json:"accounted,omitempty"`
+	MinutesGenerator int     `json:"minutes_generator,omitempty"`
+	MinutesIsland    int     `json:"minutes_island,omitempty"`
+	MinutesBlackout  int     `json:"minutes_blackout,omitempty"`
+}
+
+// offgridMinutes is the period's time without the grid.
+func (g EnergyFlowGenTotals) offgridMinutes() int {
+	return g.MinutesGenerator + g.MinutesIsland + g.MinutesBlackout
 }
 
 // Where a response's `flows` came from. Day-sized windows run the

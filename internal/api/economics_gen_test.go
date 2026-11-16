@@ -102,6 +102,16 @@ func TestFlowTotalsFromDailySums(t *testing.T) {
 	if got.Gen == nil || !got.Gen.Accounted {
 		t.Fatalf("counted: %+v", got.Gen)
 	}
+	// An island or a blackout without a running generator still gets
+	// the block, for its time off the grid.
+	got = flowTotalsFromDailySums(storage.EnergyFlowDailySums{MinutesIsland: 40, MinutesBlackout: 5})
+	if got.Gen == nil || got.Gen.GenKwh != 0 || got.Gen.MinutesIsland != 40 || got.Gen.MinutesBlackout != 5 {
+		t.Fatalf("time off the grid: %+v", got.Gen)
+	}
+	got = flowTotalsFromDailySums(storage.EnergyFlowDailySums{GenKwh: 90, MinutesGenerator: 75})
+	if got.Gen == nil || got.Gen.MinutesGenerator != 75 {
+		t.Fatalf("minutes on the generator: %+v", got.Gen)
+	}
 }
 
 // fuelBackend is an economics backend whose every day prices the fuel.
@@ -137,6 +147,9 @@ func TestEnergySummaryGenLive(t *testing.T) {
 	}
 	if got.Gen == nil || got.Gen.GenKwh != 300 || got.Gen.Accounted || got.Gen.GenToLoadKwh != 0 {
 		t.Fatalf("gen block = %+v", got.Gen)
+	}
+	if got.Gen.MinutesGenerator < 59 || got.Gen.MinutesGenerator > 61 || got.Gen.MinutesIsland != 0 {
+		t.Fatalf("minutes = %+v, want the hour on the generator", got.Gen)
 	}
 
 	h.SetEconomicsService(economics.NewService(fuelBackend{}))

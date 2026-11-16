@@ -1,9 +1,11 @@
 import { ExplainButton } from '../../chat/ExplainButton'
+import { formatDuration } from '../../economics/generatorText'
 import type { RegisterMeta } from '../../types'
 import { useCssVar } from '../../theme/useChartChrome'
+import { GEN_POWER_COLOR } from '../colors'
 import { formatPeriodLabel } from '../format'
 import type { RangePreset } from '../range'
-import type { EnergyFlows } from '../transforms/flows'
+import type { EnergyFlows, EnergyFlowsGen } from '../transforms/flows'
 import { PV_FORECAST_WHOLE_ELEVATOR_NOTE } from '../transforms/pvForecast'
 import { LoadingSpinner } from './LoadingSpinner'
 import { ModbusAddr } from './ModbusAddr'
@@ -292,6 +294,7 @@ export function DailySummaryNarrative({
     (acc, s) => acc + s.valueKwh,
     0,
   )
+  const gen = flows.gen
   const consumptionSegments = [
     {
       name: 'Від СЕС та УЗЕ',
@@ -303,9 +306,12 @@ export function DailySummaryNarrative({
       valueKwh: flows.gridToLoadKwh,
       color: '#3b82f6',
     },
+    // The generator's share is known only for hours counted with it.
+    ...(gen?.accounted
+      ? [{ name: 'Від генератора', valueKwh: gen.genToLoadKwh, color: GEN_POWER_COLOR }]
+      : []),
   ]
-  const consumptionTotal =
-    consumptionSegments[0].valueKwh + consumptionSegments[1].valueKwh
+  const consumptionTotal = consumptionSegments.reduce((acc, s) => acc + s.valueKwh, 0)
   const forecastSummary =
     !flowsLoaded || pvForecastLoading
       ? `прогноз ${PLACEHOLDER}`
@@ -385,6 +391,43 @@ export function DailySummaryNarrative({
         segments={consumptionSegments}
         hasData={flowsLoaded}
       />
+      {gen && <GeneratorSummary gen={gen} hasData={flowsLoaded} />}
     </section>
+  )
+}
+
+// GeneratorSummary is the period's generator block: its energy, where the
+// energy went, and how long the site ran without the grid.
+function GeneratorSummary({ gen, hasData }: { gen: EnergyFlowsGen; hasData: boolean }) {
+  const show = (text: string) => (hasData ? text : PLACEHOLDER)
+  const rows: Array<{ name: string; value: string }> = [
+    { name: 'На живлення приладів', value: gen.accounted ? show(formatEnergyUk(gen.genToLoadKwh)) : '—' },
+    { name: 'На заряд УЗЕ', value: gen.accounted ? show(formatEnergyUk(gen.genToEssKwh)) : '—' },
+    { name: 'На генераторі', value: show(formatDuration(gen.minutesGenerator)) },
+    { name: 'Острів (від УЗЕ)', value: show(formatDuration(gen.minutesIsland)) },
+    { name: 'Без живлення', value: show(formatDuration(gen.minutesBlackout)) },
+  ]
+  return (
+    <div className="summary-segbar summary-gen" aria-label="Генератор за період">
+      <div className="summary-segbar-head">
+        <span>Генератор</span>
+        <strong>{show(formatEnergyUk(gen.genKwh))}</strong>
+      </div>
+      <ul className="summary-segbar-list">
+        {rows.map((r) => (
+          <li key={r.name}>
+            <span className="summary-segbar-row">
+              <span className="summary-segbar-name">{r.name}</span>
+            </span>
+            <span className="summary-segbar-value">{r.value}</span>
+          </li>
+        ))}
+      </ul>
+      {!gen.accounted && gen.genKwh > 0 && (
+        <p className="summary-coverage-note">
+          Куди пішла енергія генератора, видно після того, як години з ним пораховані в економіці.
+        </p>
+      )}
+    </div>
   )
 }

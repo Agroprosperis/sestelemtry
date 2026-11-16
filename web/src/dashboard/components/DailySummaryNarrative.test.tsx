@@ -111,4 +111,51 @@ describe('DailySummaryNarrative', () => {
     )
     expect(screen.getByText(/Прогноз відомий за 18 з 31 днів/)).toBeInTheDocument()
   })
+
+  it('adds the generator to the consumption and sums its time off the grid', () => {
+    render(
+      <DailySummaryNarrative
+        flows={{
+          ...makeFlows(),
+          gen: {
+            genKwh: 120,
+            genToLoadKwh: 100,
+            genToEssKwh: 20,
+            accounted: true,
+            minutesGenerator: 95,
+            minutesIsland: 30,
+            minutesBlackout: 0,
+          },
+        }}
+        preset="day"
+        anchor={anchor}
+        debug={false}
+        registers={null}
+        pvForecastTotal={null}
+        flowsLoaded
+      />,
+    )
+    expect(screen.getByText('Від генератора')).toBeInTheDocument()
+    const block = screen.getByLabelText('Генератор за період')
+    expect(block).toHaveTextContent('120 кВт·год')
+    expect(block).toHaveTextContent('1 год 35 хв')
+    expect(block).toHaveTextContent('30 хв')
+    expect(block).toHaveTextContent('Без живлення0 хв')
+  })
+
+  it('has no generator block for a site without one', () => {
+    render(
+      <DailySummaryNarrative
+        flows={makeFlows()}
+        preset="day"
+        anchor={anchor}
+        debug={false}
+        registers={null}
+        pvForecastTotal={null}
+        flowsLoaded
+      />,
+    )
+    expect(screen.queryByLabelText('Генератор за період')).toBeNull()
+    expect(screen.queryByText('Від генератора')).toBeNull()
+  })
 })

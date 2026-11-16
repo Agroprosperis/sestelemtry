@@ -20,6 +20,7 @@ import { endOfPeriod, rangeParams, startOfPeriod, type RangePreset } from '../ra
 import { energyBucketDeltaRows, type EnergyRow } from '../transforms/buckets'
 import { damChartRows, type DAMChartRow } from '../transforms/dam'
 import { powerChartRows, type PowerChartRow } from '../transforms/power'
+import { daySupplyModes, GEN_POWER_KEY, SUPPLY_METRIC_KEYS, type DaySupplyBucket } from '../transforms/supply'
 import { type PvForecastHourlyRow } from '../transforms/pvForecast'
 import { socChartRows, type SOCChartRow } from '../transforms/soc'
 import { flowsFromTotals, EMPTY_FLOWS, type EnergyFlows } from '../transforms/flows'
@@ -159,6 +160,9 @@ export type DashboardData = {
   damSeries: DAMChartRow[]
   socSeries: SOCChartRow[]
   powerSeries: PowerChartRow[]
+  // supplySeries is the day's supply mode per 5-minute bucket, null for a
+  // site without an Encombi (or off the day preset).
+  supplySeries: DaySupplyBucket[] | null
   pvForecastSeries: PvForecastHourlyRow[]
   // pvForecastTotal is the planned generation for the period on
   // screen, in kWh. The day preset sums the hourly forecast it already
@@ -248,6 +252,7 @@ export function useDashboardData(input: {
   const [damSeries, setDamSeries] = useState<DAMChartRow[]>([])
   const [socSeries, setSocSeries] = useState<SOCChartRow[]>([])
   const [powerSeries, setPowerSeries] = useState<PowerChartRow[]>([])
+  const [supplySeries, setSupplySeries] = useState<DaySupplyBucket[] | null>(null)
   const [loading, setLoading] = useState(true)
   const [cardsLoading, setCardsLoading] = useState(true)
   const [flowsSpinning, setFlowsSpinning] = useState(false)
@@ -503,7 +508,9 @@ export function useDashboardData(input: {
             ? fetchTimeseries(
                 {
                   organizationID,
-                  metricKeys: DAY_POWER_FETCH_METRIC_KEYS,
+                  // The generator's power and the supply-mode readings
+                  // come back empty for a site without an Encombi.
+                  metricKeys: [...DAY_POWER_FETCH_METRIC_KEYS, ...SUPPLY_METRIC_KEYS],
                   ...rangeParams('day', anchorDate, now),
                   aggregation: 'last',
                 },
@@ -557,6 +564,8 @@ export function useDashboardData(input: {
         setEnergySeries(series)
         setEnergySummary(summary)
         setSocSeries(soc ? socChartRows(soc.points, 'day', anchorDate) : [])
+        const supply = power ? daySupplyModes(power.points, anchorDate, now) : null
+        setSupplySeries(supply)
         // On the day preset, reconstruct the power lines from the cumulative
         // energy deltas (already fetched as `energy`) for any bucket lacking
         // an instantaneous sample — that is how archive-only days, which have
@@ -566,10 +575,11 @@ export function useDashboardData(input: {
           power
             ? powerChartRows(
                 power.points,
-                DAY_POWER_METRIC_KEYS,
+                [...DAY_POWER_METRIC_KEYS, GEN_POWER_KEY],
                 anchorDate,
                 now,
                 energy.points,
+                supply,
               )
             : [],
         )
@@ -803,6 +813,7 @@ export function useDashboardData(input: {
     damSeries,
     socSeries,
     powerSeries,
+    supplySeries,
     pvForecastSeries,
     pvForecastTotal,
     pvForecastLoading,

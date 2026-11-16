@@ -62,6 +62,7 @@ export function DashboardSite({
     damSeries,
     socSeries,
     powerSeries,
+    supplySeries,
     pvForecastSeries,
     pvForecastTotal,
     pvForecastLoading,
@@ -162,6 +163,7 @@ export function DashboardSite({
           damSeries={damSeries}
           socSeries={socSeries}
           powerSeries={powerSeries}
+          supplySeries={supplySeries}
           pvForecastSeries={pvForecastSeries}
           pvForecastWholeElevator={pvForecastWholeElevator}
           aiPlan={aiPlan}

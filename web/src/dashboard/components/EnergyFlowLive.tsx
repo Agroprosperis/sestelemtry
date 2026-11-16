@@ -3,6 +3,7 @@ import {
   BatteryCharging,
   BatteryFull,
   Buildings,
+  Engine,
   Lightning,
   Sun,
   SunDim,
@@ -14,9 +15,11 @@ import { formatGridVoltage, gridVoltageTitle, type GridVoltage } from '../transf
 import type {
   LiveAllocation,
   LiveEssState,
+  LiveGenState,
   LiveGridState,
   LiveLoadState,
   LivePvState,
+  SupplyMode,
 } from '../transforms/liveAllocation'
 import { ModbusAddr } from './ModbusAddr'
 
@@ -47,7 +50,7 @@ import { ModbusAddr } from './ModbusAddr'
 // faster — bounded so a 0.1 kW trickle still moves visibly and
 // a 50 kW surge doesn't blur into a solid line.
 
-type EdgeId = 'pv' | 'load' | 'ess' | 'grid'
+type EdgeId = 'pv' | 'load' | 'ess' | 'grid' | 'gen'
 
 type EdgeShape = {
   // d is the cubic bezier from the corner-card-side anchor toward
@@ -66,7 +69,19 @@ type EdgeShape = {
 //   ESS  right=300,  Y=360
 //   Grid left =700,  Y=360
 // Hub anchors at left=440 / right=560, top=230 / bottom=270.
-const EDGE_SHAPES: Record<EdgeId, EdgeShape> = {
+// The generator node sits under the hub on the wide stage, where the
+// bottom row leaves room between УЗЕ and Мережа, and at the left edge
+// between СЕС and УЗЕ on the compact one.
+const GEN_EDGE_WIDE: EdgeShape = {
+  d: 'M 500 400 C 500 360, 500 330, 500 290',
+  dReverse: 'M 500 290 C 500 330, 500 360, 500 400',
+}
+const GEN_EDGE_COMPACT: EdgeShape = {
+  d: 'M 300 250 C 360 250, 380 250, 440 250',
+  dReverse: 'M 440 250 C 380 250, 360 250, 300 250',
+}
+
+const EDGE_SHAPES: Record<Exclude<EdgeId, 'gen'>, EdgeShape> = {
   pv: {
     d: 'M 300 140 C 360 140, 380 230, 440 230',
     dReverse: 'M 440 230 C 380 230, 360 140, 300 140',
@@ -92,6 +107,7 @@ const COLORS = {
   essDischarge: '#22c55e',
   gridImport: '#f59e0b',
   gridExport: '#22c55e',
+  gen: '#c2410c',
 }
 
 // IDLE_OPACITY and the marching-speed bounds keep the diagram
@@ -137,14 +153,29 @@ type EdgeRender = {
   speedSec: number
 }
 
-function buildEdges(allocation: LiveAllocation, idle: string): EdgeRender[] {
+function buildEdges(allocation: LiveAllocation, idle: string, compact: boolean): EdgeRender[] {
   const pvActive = allocation.pvState !== 'idle'
   const loadActive = allocation.loadState !== 'idle'
   const essActive = allocation.essState !== 'idle'
   const gridActive =
     allocation.gridState === 'importing' ||
     allocation.gridState === 'exporting'
+  const genActive = allocation.genState === 'running'
+  const gen: EdgeRender[] =
+    allocation.genState === null
+      ? []
+      : [
+          {
+            id: 'gen',
+            // The generator only ever feeds the hub.
+            d: (compact ? GEN_EDGE_COMPACT : GEN_EDGE_WIDE).d,
+            color: genActive ? COLORS.gen : idle,
+            active: genActive,
+            speedSec: clampSpeed(allocation.genKw),
+          },
+        ]
   return [
+    ...gen,
     {
       id: 'pv',
       // PV always feeds inward when generating; the corner→hub
@@ -251,11 +282,12 @@ export function EnergyFlowLive({
       ? null
       : Math.max(0, Math.floor((now - allocation.observedAt.getTime()) / 1000))
 
-  const edges = buildEdges(allocation, idle)
+  const isCompact = variant === 'compact'
+
+  const edges = buildEdges(allocation, idle, isCompact)
 
   const balanceLabel = describeBalance(allocation)
-
-  const isCompact = variant === 'compact'
+  const hasGen = allocation.genState !== null
 
   const header = !isCompact && (
     <header className="energy-flow-live-header">
@@ -279,7 +311,7 @@ export function EnergyFlowLive({
   const body = (
     <>
       {header}
-      <div className="energy-flow-live-stage">
+      <div className={`energy-flow-live-stage${hasGen ? ' has-gen' : ''}`}>
         <svg
           viewBox="0 0 1000 500"
           className="energy-flow-live-svg"
@@ -410,6 +442,7 @@ export function EnergyFlowLive({
           kw={
             allocation.gridState === 'unavailable' ? null : allocation.gridKw
           }
+          kwText={allocation.gridState === 'offline' ? 'Мережі немає' : undefined}
           status={
             allocation.gridState === 'importing'
               ? 'Імпорт'
@@ -417,7 +450,9 @@ export function EnergyFlowLive({
                 ? 'Експорт'
                 : allocation.gridState === 'unavailable'
                   ? 'Немає даних'
-                  : 'Очікує'
+                  : allocation.gridState === 'offline'
+                    ? offgridStatus(allocation.supplyMode)
+                    : 'Очікує'
           }
           active={
             allocation.gridState === 'importing' ||
@@ -434,6 +469,26 @@ export function EnergyFlowLive({
             ) : null
           }
         />
+        {allocation.genState !== null && (
+          <NodeCard
+            variant="gen"
+            state={allocation.genState}
+            icon={
+              <Engine
+                size={ICON_SIZE}
+                weight="duotone"
+                color={allocation.genState === 'running' ? COLORS.gen : idle}
+              />
+            }
+            title="Генератор"
+            kw={allocation.genState === 'stale' ? null : allocation.genKw}
+            status={genStatus(allocation.genState, allocation.genLoadingPct)}
+            active={allocation.genState === 'running'}
+            debug={debug}
+            registers={registers}
+            metricKeys={['active_gen_power_kw', 'gen_loading_pct']}
+          />
+        )}
 
         <div
           className={`energy-flow-live-hub${
@@ -484,8 +539,23 @@ export function EnergyFlowLive({
 // jolt the surrounding bezier paths each render.
 function describeBalance(a: LiveAllocation): { kw: string; text: string } {
   if (a.status === 'no_data') return { kw: '--', text: 'без даних' }
+  // Without the grid the hub says what feeds the site (handoff §5.1).
+  switch (a.supplyMode) {
+    case 'generator':
+      return { kw: `${formatChartNumber(a.genKw)} kW`, text: 'Від генератора' }
+    case 'island':
+      return { kw: `${formatChartNumber(a.essState === 'discharging' ? a.essKw : 0)} kW`, text: 'Острів: живлення від УЗЕ' }
+    case 'blackout':
+      return { kw: '—', text: 'Без живлення' }
+  }
   if (a.gridState === 'unavailable') {
-    return { kw: '—', text: 'мережа недоступна' }
+    return { kw: '—', text: a.supplyMode === 'unknown' ? 'Стан генератора невідомий' : 'мережа недоступна' }
+  }
+  if (a.supplyMode === 'unknown') {
+    const net = a.netExportKw
+    const kw =
+      net > 0.05 ? `+${formatChartNumber(net)} kW` : net < -0.05 ? `−${formatChartNumber(Math.abs(net))} kW` : '0 kW'
+    return { kw, text: 'Стан генератора невідомий' }
   }
   if (a.netExportKw > 0.05) {
     return {
@@ -502,16 +572,44 @@ function describeBalance(a: LiveAllocation): { kw: string; text: string } {
   return { kw: '0 kW', text: 'без обміну' }
 }
 
+// offgridStatus is the grid node's status line while the site runs
+// without the grid.
+function offgridStatus(mode: SupplyMode | null): string {
+  switch (mode) {
+    case 'generator':
+      return 'Живлення від генератора'
+    case 'island':
+      return 'Живлення від УЗЕ'
+    default:
+      return 'Без живлення'
+  }
+}
+
+function genStatus(state: LiveGenState, loadingPct: number | null): string {
+  switch (state) {
+    case 'running':
+      return loadingPct !== null && Number.isFinite(loadingPct)
+        ? `Працює · ${Math.round(loadingPct)}%`
+        : 'Працює'
+    case 'idle':
+      return 'Очікує'
+    default:
+      return 'Немає даних'
+  }
+}
+
 type NodeCardProps = {
   variant: EdgeId
   // state drives the data-state attribute so CSS can paint a
   // tinted background per active mode (PV generating, ESS
   // charging vs discharging, grid importing vs exporting). Idle
   // states fall through to the neutral surface.
-  state: LivePvState | LiveLoadState | LiveEssState | LiveGridState
+  state: LivePvState | LiveLoadState | LiveEssState | LiveGridState | LiveGenState
   icon: React.ReactNode
   title: string
   kw: number | null
+  // kwText replaces the kW reading with a word (the grid without the grid).
+  kwText?: string
   status: string
   active: boolean
   soc?: number | null
@@ -535,6 +633,7 @@ function NodeCard({
   icon,
   title,
   kw,
+  kwText,
   status,
   active,
   soc,
@@ -544,7 +643,7 @@ function NodeCard({
   metricKeys,
   aside,
 }: NodeCardProps) {
-  const kwLabel = formatKw(kw)
+  const kwLabel = kwText ?? formatKw(kw)
   return (
     <div
       className={`energy-flow-live-node energy-flow-live-node--${variant}${

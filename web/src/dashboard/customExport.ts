@@ -5,6 +5,13 @@ import {
 } from '../api'
 import type { TimeseriesPoint } from '../types'
 import { pvForecastRows } from './transforms/pvForecast'
+import {
+  BUS_VOLTAGE_KEY,
+  GEN_BITS_KEY,
+  GEN_POWER_KEY,
+  GRID_BITS_KEY,
+  supplyModeOf,
+} from './transforms/supply'
 
 export type ExportTable = {
   headers: string[]
@@ -65,6 +72,20 @@ export const FLOW_EXPORT_METRICS = [
   'ess_to_grid_kwh',
 ] as const
 
+// The generator columns of a site with an Encombi: its energy counter
+// (aggregation=delta) and its state at the end of each bucket
+// (aggregation=last), from which GEN_SUPPLY_MODE_COLUMN is derived the way
+// the dashboard does it (generator handoff §4.1).
+export const GEN_ENERGY_EXPORT_METRICS = ['accumulated_gen_energy_kwh'] as const
+export const GEN_STATE_EXPORT_METRICS = [
+  GEN_POWER_KEY,
+  'gen_loading_pct',
+  GEN_BITS_KEY,
+  GRID_BITS_KEY,
+  BUS_VOLTAGE_KEY,
+] as const
+export const GEN_SUPPLY_MODE_COLUMN = 'supply_mode'
+
 export type CustomExportColumns = {
   energy: boolean
   price: boolean
@@ -73,6 +94,8 @@ export type CustomExportColumns = {
   forecast: boolean
   device: boolean
   flow: boolean
+  // gen is optional so callers that predate the generator keep compiling.
+  gen?: boolean
 }
 
 // Bucket sizes offered by the export dialog. `raw` is special: it
@@ -219,6 +242,13 @@ export async function fetchCustomExportData(input: CustomExportInput): Promise<E
   if (columns.price) headers.push('dam_price_uah_per_mwh')
   if (columns.soc) headers.push(header('soc_percent'))
   if (columns.power) headers.push(...POWER_EXPORT_METRICS.map(header))
+  if (columns.gen) {
+    headers.push(
+      ...GEN_ENERGY_EXPORT_METRICS.map(header),
+      ...GEN_STATE_EXPORT_METRICS.map(header),
+      GEN_SUPPLY_MODE_COLUMN,
+    )
+  }
   if (columns.device) headers.push(...DEVICE_EXPORT_METRICS.map(header))
   if (columns.forecast) headers.push('planned_ac_kw_forecast')
 
@@ -238,9 +268,17 @@ export async function fetchCustomExportData(input: CustomExportInput): Promise<E
 
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || undefined
 
-  const energyKeys = columns.energy ? [...ENERGY_EXPORT_METRICS] : []
+  // The generator's counter rides with the energy request and its state
+  // with the power one, so the group costs no extra round trips.
+  const energyKeys = [
+    ...(columns.energy ? ENERGY_EXPORT_METRICS : []),
+    ...(columns.gen ? GEN_ENERGY_EXPORT_METRICS : []),
+  ]
   const flowKeys = columns.flow ? [...FLOW_EXPORT_METRICS] : []
-  const powerKeys = columns.power ? [...POWER_EXPORT_METRICS] : []
+  const powerKeys = [
+    ...(columns.power ? POWER_EXPORT_METRICS : []),
+    ...(columns.gen ? GEN_STATE_EXPORT_METRICS : []),
+  ]
   const deviceKeys = columns.device ? [...DEVICE_EXPORT_METRICS] : []
 
   const energyP = energyKeys.length
@@ -460,6 +498,21 @@ export async function fetchCustomExportData(input: CustomExportInput): Promise<E
         row[header(key)] = typeof v === 'number' && Number.isFinite(v) ? v : null
       }
     }
+    if (columns.gen) {
+      const value = (key: string) => {
+        const v = valuesByKeyByTime.get(key)?.get(t)
+        return typeof v === 'number' && Number.isFinite(v) ? v : null
+      }
+      for (const key of [...GEN_ENERGY_EXPORT_METRICS, ...GEN_STATE_EXPORT_METRICS]) {
+        row[header(key)] = value(key)
+      }
+      const gridBits = value(GRID_BITS_KEY)
+      const genBits = value(GEN_BITS_KEY)
+      row[GEN_SUPPLY_MODE_COLUMN] =
+        gridBits === null && genBits === null
+          ? null
+          : supplyModeOf({ gridBits, genBits, genKw: value(GEN_POWER_KEY), busV: value(BUS_VOLTAGE_KEY) })
+    }
     if (columns.device) {
       for (const key of DEVICE_EXPORT_METRICS) {
         const v = valuesByKeyByTime.get(key)?.get(t)
@@ -522,6 +575,7 @@ export function rawExportMetricKeys(columns: CustomExportColumns): string[] {
   if (columns.flow) keys.push(...FLOW_EXPORT_METRICS)
   if (columns.soc) keys.push('soc_percent')
   if (columns.power) keys.push(...POWER_EXPORT_METRICS)
+  if (columns.gen) keys.push(...GEN_ENERGY_EXPORT_METRICS, ...GEN_STATE_EXPORT_METRICS)
   if (columns.device) keys.push(...DEVICE_EXPORT_METRICS)
   if (keys.length > 0 && !keys.includes('local_time_epoch_s')) {
     keys.push('local_time_epoch_s')

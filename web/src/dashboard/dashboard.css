@@ -452,6 +452,13 @@
   margin-top: 8px;
 }
 
+/* The generator block closes the period card, set off from the energy
+   splits above. */
+.summary-gen {
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+}
+
 .summary-segbar-head {
   display: flex;
   justify-content: space-between;
@@ -1385,6 +1392,29 @@
   border-color: var(--warn-peach);
 }
 
+/* The generator of a site with an Encombi: under the hub on the wide
+   stage, at the left edge between СЕС and УЗЕ on the compact one. The
+   wide stage grows a little so the node clears the hub. */
+.energy-flow-live-stage.has-gen {
+  min-height: 260px;
+}
+
+.energy-flow-live-node--gen {
+  bottom: 3%;
+  left: 50%;
+  transform: translateX(-50%);
+  border-color: var(--warn-peach);
+}
+
+.energy-flow-live-node--gen[data-state="running"] {
+  background: linear-gradient(135deg, var(--warn-bg) 0%, var(--bg-elevated) 70%);
+}
+
+.energy-flow-live-node--grid[data-state="offline"] .energy-flow-live-node-kw {
+  font-size: 13px;
+  color: var(--text-subtle);
+}
+
 /* Tinted gradient surfaces per active state. They give each
    active card a distinct, colour-coded glow so the diagram
    scans at a glance — PV blue, ESS blue/green for charge/
@@ -1615,6 +1645,28 @@
   font-size: 9px;
 }
 
+/* A site with a generator gets a taller compact stage, so the fifth node
+   fits between СЕС and УЗЕ. */
+.energy-flow-live-card.is-compact .energy-flow-live-stage.has-gen {
+  aspect-ratio: 1 / 1;
+  max-height: 400px;
+}
+
+.energy-flow-live-card.is-compact .energy-flow-live-node--gen {
+  top: 50%;
+  bottom: auto;
+  left: 2%;
+  width: 30%;
+  transform: translateY(-50%);
+}
+
+/* The supply-mode captions are longer than the import/export ones: they
+   may wrap to two lines inside the hub's fixed height. */
+.energy-flow-live-stage.has-gen .energy-flow-live-hub-balance-text {
+  white-space: normal;
+  line-height: 1.15;
+}
+
 
 .dam-card {
   margin-top: 14px;
@@ -1762,6 +1814,17 @@
   height: 10px;
   border-radius: 2px;
   flex: 0 0 auto;
+}
+
+/* The supply strip's key: one line of colours under the series legend. */
+.chart-legend--supply {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.chart-legend-item--static {
+  cursor: default;
 }
 
 .energy-tooltip {

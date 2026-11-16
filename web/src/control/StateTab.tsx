@@ -44,6 +44,7 @@ export function StateTab({ site, status }: Props) {
     damSeries,
     socSeries,
     powerSeries,
+    supplySeries,
     pvForecastSeries,
     loading,
     cardsLoading,
@@ -203,6 +204,7 @@ export function StateTab({ site, status }: Props) {
           damSeries={damSeries}
           socSeries={socSeries}
           powerSeries={powerSeries}
+          supplySeries={supplySeries}
           pvForecastSeries={pvForecastSeries}
           aiPlan={manifestPlan}
           planOverlay={{
