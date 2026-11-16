@@ -44,6 +44,17 @@ func TestResetsOf(t *testing.T) {
 	}
 }
 
+// Поділля's replaced import meter, settled by a pass on 16.11: the
+// offset stays, the days since 07.09 only lose their flag.
+func TestChangeSpansReset(t *testing.T) {
+	from, until := day("2026-11-16"), day("2026-11-17")
+	eps := []counters.Episode{{Kind: counters.KindReset, Start: day("2026-09-07"), End: day("2026-09-07")}}
+	got := changeSpans(nil, eps, from, until)
+	if len(got) != 1 || !got[0].FlagsOnly || !got[0].From.Equal(day("2026-09-07")) || !got[0].To.Equal(until) {
+		t.Fatalf("spans = %+v", got)
+	}
+}
+
 // Кролевець's import stood still on 07.11 and was stored open while 08.11
 // was today; it metered again on 08.11. The stretch closes after 07.11.
 func TestStaleFrozen(t *testing.T) {

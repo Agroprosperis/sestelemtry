@@ -342,6 +342,83 @@ func TestStaleLevelAboveOpenFall(t *testing.T) {
 	near(t, "the replacement still bridged", res.State.Offset(), 63291.2-35790.5)
 }
 
+// staleVisit is the Поділля export register jumping from 302.91 kWh,
+// held through the night, onto the replaced meter's 334.63 kWh and
+// back four minutes later.
+func staleVisit(at0 time.Duration) []Step {
+	return []Step{
+		{PrevTime: at(at0), Prev: 302.91, Time: at(at0 + time.Second), Value: 334.63, Settled: at(at0 - 8*time.Hour)},
+		step(at0+4*time.Minute, 334.63, at0+4*time.Minute+time.Second, 302.91),
+	}
+}
+
+func kinds(eps []Episode) map[Kind]int {
+	out := map[Kind]int{}
+	for _, e := range eps {
+		out[e.Kind]++
+	}
+	return out
+}
+
+// A stale visit a few dozen kWh up is well inside what the register
+// could meter since its reading settled; it is a spike all the same.
+func TestSmallStaleJumpIsSpike(t *testing.T) {
+	steps := append([]Step{step(0, 334.63, time.Second, 164.86)}, staleVisit(48*time.Hour)...)
+	res := Run(State{}, steps)
+	if k := kinds(res.Episodes); k[KindSpike] != 1 || k[KindDropout] != 1 || len(res.Episodes) != 2 {
+		t.Fatalf("episodes = %+v", res.Episodes)
+	}
+	before := corrected(res.Segments, at(48*time.Hour), 302.91)
+	after := corrected(res.Segments, at(48*time.Hour+4*time.Minute+time.Second), 302.91)
+	near(t, "energy across the visit", after-before, 0)
+	near(t, "the replacement still bridged", res.State.Offset(), 334.63-164.86)
+}
+
+// A fall the counter has metered past for DropoutSettle is settled: a
+// collector gap's worth of energy after it is metering, not its return.
+func TestSettledFallIsNotReturned(t *testing.T) {
+	gapAt := 20 * 24 * time.Hour
+	steps := []Step{
+		step(0, 334.63, time.Second, 164.86),
+		step(gapAt, 2096.77, gapAt+10*time.Hour, 2693.34),
+	}
+	res := Run(State{}, steps)
+	if len(res.Episodes) != 1 || res.Episodes[0].Kind != KindReset || !res.Episodes[0].End.Equal(res.Episodes[0].Start) {
+		t.Fatalf("episodes = %+v", res.Episodes)
+	}
+	before := corrected(res.Segments, at(gapAt), 2096.77)
+	after := corrected(res.Segments, at(gapAt+10*time.Hour), 2693.34)
+	near(t, "energy across the gap", after-before, 2693.34-2096.77)
+	near(t, "the replacement still bridged", res.State.Offset(), 334.63-164.86)
+	if len(res.State.Falls) != 0 || len(res.State.Resets) != 1 {
+		t.Fatalf("state = %+v", res.State)
+	}
+}
+
+// The settled fall still marks its stale reading.
+func TestStaleVisitAfterSettle(t *testing.T) {
+	steps := append([]Step{step(0, 334.63, time.Second, 164.86)}, staleVisit(20*24*time.Hour)...)
+	res := Run(State{}, steps)
+	if k := kinds(res.Episodes); k[KindSpike] != 1 || k[KindReset] != 1 || len(res.Episodes) != 2 {
+		t.Fatalf("episodes = %+v", res.Episodes)
+	}
+	near(t, "offset", res.State.Offset(), 334.63-164.86)
+}
+
+// A counter that read zero for weeks has not metered past its fall, so
+// coming back is still a return.
+func TestLongOutageStillReturns(t *testing.T) {
+	steps := []Step{
+		step(0, 315617.5, time.Second, 0),
+		step(20*24*time.Hour, 0, 20*24*time.Hour+time.Second, 315617.5),
+	}
+	res := Run(State{}, steps)
+	if len(res.Episodes) != 1 || res.Episodes[0].Kind != KindDropout || res.Episodes[0].End.IsZero() {
+		t.Fatalf("episodes = %+v", res.Episodes)
+	}
+	near(t, "offset", res.State.Offset(), 0)
+}
+
 // A grid meter that reads zero through an outage and comes back to its
 // reading before it is a return, not a stale level: it metered nothing.
 func TestOutageReturnToSameReading(t *testing.T) {

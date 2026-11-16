@@ -293,14 +293,17 @@ func FirstSampleTime(ctx context.Context, pool *pgxpool.Pool, organizationID, me
 
 // CounterStepCandidates returns the transitions of one counter inside
 // [from, to) that the stitcher has to look at: every backward step
-// beyond dropTolKwh, every forward step of at least floorKwh, and every
-// forward step faster than maxPowerKw (plus slackKwh). A step's time is
-// the longer of the gap since the previous sample and the time the
-// previous reading had been held, capped at coarseUpdate — registers
-// that publish minutes of metering at once are not discontinuities.
-// The scan reads coarseUpdate back from `from` (plus the sample before
-// that) so steps on the window edge are measured the same way.
-// Everything else is ordinary metering and stays in the database.
+// beyond dropTolKwh, every forward step of at least floorKwh, every
+// forward step faster than maxPowerKw (plus slackKwh), and every
+// forward step beyond dropTolKwh that lands within staleTolKwh of a
+// stale level — one of staleLevels, or the reading before a fall inside
+// the scan. A step's time is the longer of the gap since the previous
+// sample and the time the previous reading had been held, capped at
+// coarseUpdate — registers that publish minutes of metering at once are
+// not discontinuities. The scan reads coarseUpdate back from `from`
+// (plus the sample before that) so steps on the window edge are
+// measured the same way. Everything else is ordinary metering and stays
+// in the database.
 func CounterStepCandidates(
 	ctx context.Context,
 	pool *pgxpool.Pool,
@@ -308,8 +311,12 @@ func CounterStepCandidates(
 	from, to time.Time,
 	dropTolKwh, floorKwh, maxPowerKw, slackKwh float64,
 	coarseUpdate time.Duration,
+	staleLevels []float64, staleTolKwh float64,
 ) ([]CounterStep, error) {
 	lead := from.Add(-coarseUpdate)
+	if staleLevels == nil {
+		staleLevels = []float64{}
+	}
 	rows, err := pool.Query(ctx, `
 		WITH win AS (
 			(
@@ -341,6 +348,11 @@ func CounterStepCandidates(
 					ORDER BY time, value ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
 				) AS settled_at
 			FROM lagged
+		),
+		stale AS (
+			SELECT unnest($11::float8[]) AS level
+			UNION ALL
+			SELECT prev_value FROM lagged WHERE value - prev_value < -$5::float8
 		)
 		SELECT prev_time, prev_value, time, value, COALESCE(settled_at, prev_time)
 		FROM settled
@@ -353,10 +365,14 @@ func CounterStepCandidates(
 					EXTRACT(epoch FROM (time - prev_time)),
 					LEAST(EXTRACT(epoch FROM (time - COALESCE(settled_at, prev_time))), $10::float8)
 				) / 3600.0 + $8::float8
+				OR (
+					value - prev_value >= $5::float8
+					AND EXISTS (SELECT 1 FROM stale WHERE abs(settled.value - stale.level) <= $12::float8)
+				)
 			)
 		ORDER BY time, value
 	`, organizationID, metricKey, from.UTC(), to.UTC(), dropTolKwh, floorKwh, maxPowerKw, slackKwh,
-		lead.UTC(), coarseUpdate.Seconds())
+		lead.UTC(), coarseUpdate.Seconds(), staleLevels, staleTolKwh)
 	if err != nil {
 		return nil, fmt.Errorf("storage: counter step scan: %w", err)
 	}
