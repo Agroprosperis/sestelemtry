@@ -539,6 +539,25 @@ func TestEnableNeedsConfirmationAndPreconditions(t *testing.T) {
 	}
 }
 
+// A manifest cached by an older build has no number and lost the new
+// fields: the same id comes again in full and replaces it.
+func TestManifestRefetchAfterOldCache(t *testing.T) {
+	old := &Manifest{ManifestID: "ze-1"}
+	if manifestETag(old) != "" || manifestETag(nil) != "" {
+		t.Fatal("an unnumbered or missing manifest must be fetched in full")
+	}
+	fresh := &Manifest{ManifestID: "ze-1", ManifestSeq: 42, GridLimits: ManifestGridLimits{ExportCapKw: 850}}
+	if sameManifest(fresh, old) || sameManifest(fresh, nil) {
+		t.Fatal("the numbered copy must replace the old cache")
+	}
+	if manifestETag(fresh) != "ze-1" || !sameManifest(&Manifest{ManifestID: "ze-1", ManifestSeq: 42}, fresh) {
+		t.Fatal("an applied numbered manifest must be skipped")
+	}
+	if !sameManifest(&Manifest{ManifestID: "ze-1"}, &Manifest{ManifestID: "ze-1"}) {
+		t.Fatal("an unnumbering cloud's unchanged manifest must be skipped")
+	}
+}
+
 // An active manifest's ceiling wins even when it has none; the device
 // config fills in only while no manifest is active.
 func TestExportCeilingManifestElseConfig(t *testing.T) {

@@ -526,16 +526,12 @@ func (s *Service) runManifestFetcher(ctx context.Context, events chan<- Event) {
 		case <-t.C:
 		}
 		cur := s.manifest.Load()
-		curID := ""
-		if cur != nil {
-			curID = cur.ManifestID
-		}
-		m, err := s.client.FetchManifest(ctx, s.cfg.SiteID, curID)
+		m, err := s.client.FetchManifest(ctx, s.cfg.SiteID, manifestETag(cur))
 		if err != nil {
 			s.log.Warn("edge_manifest_fetch", "err", err)
 			continue
 		}
-		if m == nil || m.ManifestID == curID {
+		if m == nil || sameManifest(m, cur) {
 			continue
 		}
 		err = m.ValidateForEdge(s.cfg.SiteID)
@@ -559,6 +555,22 @@ func (s *Service) runManifestFetcher(ctx context.Context, events chan<- Event) {
 		s.manifest.Store(m)
 		s.log.Info("edge_manifest_new", "manifest_id", m.ManifestID, "manifest_seq", m.ManifestSeq, "valid_until", m.ValidUntil)
 	}
+}
+
+// manifestETag is the fetcher's If-None-Match. A manifest without a
+// number came from an older build's cache, which dropped the fields it
+// did not know (manifest_seq, export_cap_kw, manual_commands), or from
+// a cloud that does not number: it is fetched in full instead.
+func manifestETag(cur *Manifest) string {
+	if cur == nil || cur.ManifestSeq == 0 {
+		return ""
+	}
+	return cur.ManifestID
+}
+
+// sameManifest reports that m is the manifest already applied.
+func sameManifest(m, cur *Manifest) bool {
+	return cur != nil && m.ManifestID == cur.ManifestID && m.ManifestSeq == cur.ManifestSeq
 }
 
 func (s *Service) runMaintenance(ctx context.Context) {
