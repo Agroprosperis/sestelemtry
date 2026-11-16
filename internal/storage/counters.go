@@ -421,6 +421,39 @@ func CounterEpisodesInRange(ctx context.Context, pool *pgxpool.Pool, organizatio
 	return scanCounterEpisodes(rows)
 }
 
+// CounterEpisodesSince returns the organization's episodes of one kind,
+// every counter, that started or ended at or after since.
+func CounterEpisodesSince(ctx context.Context, pool *pgxpool.Pool, organizationID, kind string, since time.Time) ([]CounterEpisode, error) {
+	rows, err := pool.Query(ctx, `
+		SELECT `+counterEpisodeColumns+`
+		FROM counter_episodes
+		WHERE organization_id = $1 AND kind = $2 AND (started_at >= $3 OR ended_at >= $3)
+		ORDER BY started_at
+	`, organizationID, kind, since.UTC())
+	if err != nil {
+		return nil, fmt.Errorf("storage: query counter_episodes: %w", err)
+	}
+	return scanCounterEpisodes(rows)
+}
+
+// OffgridBetween reports a grid-breaker reading of 0 from the
+// organization's generator controller inside [from, to]: the site was off
+// the grid then (generator handoff §4.1).
+func OffgridBetween(ctx context.Context, pool *pgxpool.Pool, organizationID string, from, to time.Time) (bool, error) {
+	var found bool
+	err := pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM telemetry_samples
+			WHERE organization_id = $1 AND metric_key = 'grid_breakers_on_bits'
+				AND time >= $2 AND time <= $3 AND value = 0
+		)
+	`, organizationID, from.UTC(), to.UTC()).Scan(&found)
+	if err != nil {
+		return false, fmt.Errorf("storage: query off-grid readings: %w", err)
+	}
+	return found, nil
+}
+
 // CounterEpisodesOfKind returns the organization's episodes of one kind
 // for one counter that start inside [from, to).
 func CounterEpisodesOfKind(ctx context.Context, pool *pgxpool.Pool, organizationID, metricKey, kind string, from, to time.Time) ([]CounterEpisode, error) {

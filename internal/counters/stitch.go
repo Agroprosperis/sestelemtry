@@ -150,6 +150,13 @@ const (
 	// KindDropout: the counter fell — a device left the sum or its
 	// reading went stale. Open until the counter returns.
 	KindDropout Kind = "dropout"
+	// KindOffgrid: a dropout the site's outage explains — it began while
+	// the site was off the grid, or ended as the grid came back. Without
+	// the grid the SmartLogger has no grid reading to give, and its
+	// devices may restart at the switchover (generator handoff §4.3).
+	// The stitcher emits it as a dropout and bridges it as one; the
+	// runner reclassifies it, and it flags no day and sends no email.
+	KindOffgrid Kind = "offgrid"
 	// KindSeam: a forward jump nothing explains, removed.
 	KindSeam Kind = "seam"
 	// KindSpike: a seam cancelled by a matching fall soon after.
