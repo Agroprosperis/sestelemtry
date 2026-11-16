@@ -46,7 +46,7 @@ export const SUPPLY_MODE_LABELS: Record<SupplyMode, string> = {
   grid: 'Від мережі',
   generator: 'Від генератора',
   island: 'Острів (від УЗЕ)',
-  blackout: 'Без живлення',
+  blackout: 'Знеструмлено (ні мережі, ні генератора)',
   transition: 'Перемикання',
   unknown: 'Немає даних Encombi',
 }
@@ -64,7 +64,7 @@ function slotOf(date: Date): number {
 
 // daySupplyModes reads each 5-minute bucket's mode from its last breaker,
 // power and voltage readings (aggregation=last). null for a site whose
-// Encombi reported nothing that day, so the chart shades nothing. Buckets
+// Encombi reported nothing that day. Buckets
 // before the day's first breaker reading have no mode, as the server
 // counts no supply mode before the controller's first sample; a silent
 // Encombi later in the day is unknown.
@@ -100,22 +100,4 @@ export function daySupplyModes(points: TimeseriesPoint[], anchor: Date, now: Dat
             busV: read(BUS_VOLTAGE_KEY, t),
           }),
   }))
-}
-
-// SupplySegment is a run of buckets with one mode, x1..x2 being the
-// chart's category labels of its first bucket and of the bucket after it.
-export type SupplySegment = { x1: string; x2: string; mode: SupplyMode }
-
-export function supplySegments(buckets: DaySupplyBucket[]): SupplySegment[] {
-  const out: SupplySegment[] = []
-  for (let i = 0; i < buckets.length; i++) {
-    const mode = buckets[i].mode
-    if (mode === null) continue
-    let j = i
-    while (j + 1 < buckets.length && buckets[j + 1].mode === mode) j++
-    const end = j + 1 < buckets.length ? buckets[j + 1].time : buckets[j].time
-    out.push({ x1: buckets[i].time, x2: end, mode })
-    i = j
-  }
-  return out
 }
