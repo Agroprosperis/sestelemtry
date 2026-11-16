@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -134,12 +135,80 @@ func (r *Runner) recheckOffgrid(ctx context.Context, org string, until time.Time
 		if !end.IsZero() {
 			to = end
 		}
-		changed = append(changed, Span{From: e.StartedAt, To: to})
+		changed = append(changed, Span{From: e.StartedAt, To: to, FlagsOnly: true})
 	}
 	if err := storage.UpsertCounterEpisodes(ctx, r.Pool, org, write); err != nil {
 		return nil, err
 	}
 	return changed, nil
+}
+
+// dropoutSettle is how long a counter has to go without falling again
+// before its open dropouts count as resets (counters.KindReset).
+// resetMoveKwh is how far it has to have metered past its last fall.
+const (
+	dropoutSettle = 14 * 24 * time.Hour
+	resetMoveKwh  = 1.0
+)
+
+// settleDropouts reclassifies as resets the open dropouts of every
+// counter that has not fallen for dropoutSettle and kept metering since,
+// and returns the days whose flags that changes: they flagged every day
+// after their start.
+func (r *Runner) settleDropouts(ctx context.Context, org string, until time.Time) ([]Span, error) {
+	open, err := storage.OpenCounterEpisodes(ctx, r.Pool, org, string(counters.KindDropout))
+	if err != nil {
+		return nil, err
+	}
+	resets, err := resetsOf(open, until, func(metric string, since time.Time) (float64, bool, error) {
+		return storage.CounterMaxSince(ctx, r.Pool, org, metric, since)
+	})
+	if err != nil {
+		return nil, err
+	}
+	changed := make([]Span, 0, len(resets))
+	for _, e := range resets {
+		changed = append(changed, Span{From: e.StartedAt, To: until, FlagsOnly: true})
+	}
+	if err := storage.UpsertCounterEpisodes(ctx, r.Pool, org, resets); err != nil {
+		return nil, err
+	}
+	return changed, nil
+}
+
+// resetsOf picks the open dropouts (oldest first) that count as resets:
+// those of a counter whose newest fall is dropoutSettle old and that has
+// metered resetMoveKwh past it since. They come back closed at their
+// start, as KindReset.
+func resetsOf(open []storage.CounterEpisode, until time.Time, maxSince func(metric string, since time.Time) (float64, bool, error)) ([]storage.CounterEpisode, error) {
+	newest := map[string]storage.CounterEpisode{}
+	for _, e := range open {
+		if n, ok := newest[e.MetricKey]; !ok || e.StartedAt.After(n.StartedAt) {
+			newest[e.MetricKey] = e
+		}
+	}
+	settled := map[string]bool{}
+	for metric, last := range newest {
+		if until.Sub(last.StartedAt) < dropoutSettle {
+			continue
+		}
+		top, ok, err := maxSince(metric, last.StartedAt.Add(time.Hour))
+		if err != nil {
+			return nil, err
+		}
+		settled[metric] = ok && top-last.ValueAfter >= resetMoveKwh
+	}
+	var out []storage.CounterEpisode
+	for _, e := range open {
+		if !settled[e.MetricKey] {
+			continue
+		}
+		e.Kind = string(counters.KindReset)
+		start := e.StartedAt
+		e.EndedAt = &start
+		out = append(out, e)
+	}
+	return out, nil
 }
 
 func (r *Runner) now() time.Time {
@@ -154,6 +223,9 @@ func (r *Runner) now() time.Time {
 type Span struct {
 	From time.Time
 	To   time.Time
+	// FlagsOnly: only the days' counter flags changed, not their readings
+	// (an episode's kind or end), so the days need no recompute.
+	FlagsOnly bool
 }
 
 // Sync brings the organization's corrections and episodes up to date
@@ -205,6 +277,11 @@ func (r *Runner) Sync(ctx context.Context, org string) ([]Span, error) {
 	}
 
 	spans, err := r.recheckOffgrid(ctx, org, until)
+	if err != nil {
+		return nil, err
+	}
+	changed = append(changed, spans...)
+	spans, err = r.settleDropouts(ctx, org, until)
 	if err != nil {
 		return nil, err
 	}
@@ -349,39 +426,62 @@ func (r *Runner) syncFrozen(ctx context.Context, org string, until time.Time, fu
 		}
 		openEnd := spans[len(spans)-1].Day.Equal(today)
 		found := counters.FrozenEpisodes(spans, rule.minDays, frozenMinSamples, openEnd)
-		if len(found) == 0 {
-			continue
-		}
-		dropouts, err := storage.CounterEpisodesOfKind(ctx, r.Pool, org, rule.metric, string(counters.KindDropout), time.Time{}, to)
-		if err != nil {
-			return nil, err
-		}
-		outages, err := storage.CounterEpisodesOfKind(ctx, r.Pool, org, rule.metric, string(counters.KindOffgrid), time.Time{}, to)
-		if err != nil {
-			return nil, err
-		}
-		dropouts = append(dropouts, outages...)
 		stored, err := storage.CounterEpisodesOfKind(ctx, r.Pool, org, rule.metric, string(counters.KindFrozen), from, to)
 		if err != nil {
 			return nil, err
 		}
-		var write []counters.Episode
-		for _, ep := range found {
-			if insideDropout(ep, dropouts, until) || unchanged(ep, stored) {
-				continue
+		write := staleFrozen(stored, found, spans)
+		for _, ep := range write {
+			changed = append(changed, Span{From: ep.End, To: until, FlagsOnly: true})
+		}
+		if len(found) > 0 {
+			dropouts, err := storage.CounterEpisodesOfKind(ctx, r.Pool, org, rule.metric, string(counters.KindDropout), time.Time{}, to)
+			if err != nil {
+				return nil, err
 			}
-			write = append(write, ep)
-			end := ep.End
-			if end.IsZero() {
-				end = until
+			outages, err := storage.CounterEpisodesOfKind(ctx, r.Pool, org, rule.metric, string(counters.KindOffgrid), time.Time{}, to)
+			if err != nil {
+				return nil, err
 			}
-			changed = append(changed, Span{From: ep.Start, To: end})
+			dropouts = append(dropouts, outages...)
+			for _, ep := range found {
+				if insideDropout(ep, dropouts, until) || unchanged(ep, stored) {
+					continue
+				}
+				write = append(write, ep)
+				end := ep.End
+				if end.IsZero() {
+					end = until
+				}
+				changed = append(changed, Span{From: ep.Start, To: end, FlagsOnly: true})
+			}
 		}
 		if err := storage.UpsertCounterEpisodes(ctx, r.Pool, org, toStoredEpisodes(org, rule.metric, write)); err != nil {
 			return nil, err
 		}
 	}
 	return changed, nil
+}
+
+// staleFrozen closes the stored open frozen stretches the pass no longer
+// finds. A stretch reaching into a partly-read today is stored open; once
+// the counter moves that day, the stretch is shorter than the rule and
+// is not found again, so it is closed where the counter stood still.
+func staleFrozen(stored []storage.CounterEpisode, found []counters.Episode, days []counters.DaySpan) []counters.Episode {
+	var out []counters.Episode
+	for _, s := range stored {
+		if s.EndedAt != nil || slices.ContainsFunc(found, func(f counters.Episode) bool { return f.Start.Equal(s.StartedAt) }) {
+			continue
+		}
+		out = append(out, counters.Episode{
+			Kind:   counters.KindFrozen,
+			Start:  s.StartedAt,
+			End:    counters.StillUntil(days, s.StartedAt, frozenMinSamples),
+			Before: s.ValueBefore,
+			After:  s.ValueAfter,
+		})
+	}
+	return out
 }
 
 // insideDropout reports whether a frozen stretch overlaps a dropout of

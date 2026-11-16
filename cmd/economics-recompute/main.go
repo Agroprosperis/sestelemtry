@@ -419,7 +419,32 @@ func (h *healer) drain(ctx context.Context) {
 func (h *healer) heal(ctx context.Context, org string, spans []counterstitch.Span) {
 	now := time.Now().In(h.tz)
 	yesterday := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, h.tz).AddDate(0, 0, -1)
-	for _, r := range dayRanges(spans, h.tz, yesterday) {
+	var data, flags []counterstitch.Span
+	for _, s := range spans {
+		if s.FlagsOnly {
+			flags = append(flags, s)
+		} else {
+			data = append(data, s)
+		}
+	}
+	// Days whose counter flags alone changed get just those, however far
+	// back they reach: a reset clears months of them.
+	for _, r := range dayRanges(flags, h.tz, yesterday) {
+		start := time.Now()
+		n, err := h.svc.RefreshCounterFlags(ctx, org, r[0], r[1], h.tzName)
+		if err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			h.log.Error("counter_flags_refresh_failed", "organization_id", org,
+				"from", r[0].Format("2006-01-02"), "to", r[1].Format("2006-01-02"), "err", err)
+			continue
+		}
+		h.log.Info("counter_flags_refresh_ok", "organization_id", org,
+			"from", r[0].Format("2006-01-02"), "to", r[1].Format("2006-01-02"),
+			"days_changed", n, "duration_ms", time.Since(start).Milliseconds())
+	}
+	for _, r := range dayRanges(data, h.tz, yesterday) {
 		fromStr, toStr := r[0].Format("2006-01-02"), r[1].Format("2006-01-02")
 		start := time.Now()
 		res, err := h.svc.RecomputeRange(ctx, org, fromStr, toStr, h.tzName, nil)

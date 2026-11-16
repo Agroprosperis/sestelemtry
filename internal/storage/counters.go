@@ -436,6 +436,38 @@ func CounterEpisodesSince(ctx context.Context, pool *pgxpool.Pool, organizationI
 	return scanCounterEpisodes(rows)
 }
 
+// OpenCounterEpisodes returns the organization's open episodes of one
+// kind, every counter, oldest first.
+func OpenCounterEpisodes(ctx context.Context, pool *pgxpool.Pool, organizationID, kind string) ([]CounterEpisode, error) {
+	rows, err := pool.Query(ctx, `
+		SELECT `+counterEpisodeColumns+`
+		FROM counter_episodes
+		WHERE organization_id = $1 AND kind = $2 AND ended_at IS NULL
+		ORDER BY started_at
+	`, organizationID, kind)
+	if err != nil {
+		return nil, fmt.Errorf("storage: query counter_episodes: %w", err)
+	}
+	return scanCounterEpisodes(rows)
+}
+
+// CounterMaxSince is the highest raw reading of one counter after since;
+// false when there is none.
+func CounterMaxSince(ctx context.Context, pool *pgxpool.Pool, organizationID, metricKey string, since time.Time) (float64, bool, error) {
+	var v *float64
+	err := pool.QueryRow(ctx, `
+		SELECT max(value) FROM telemetry_samples
+		WHERE organization_id = $1 AND metric_key = $2 AND time > $3
+	`, organizationID, metricKey, since.UTC()).Scan(&v)
+	if err != nil {
+		return 0, false, fmt.Errorf("storage: query counter max: %w", err)
+	}
+	if v == nil {
+		return 0, false, nil
+	}
+	return *v, true, nil
+}
+
 // OffgridBetween reports a grid-breaker reading of 0 from the
 // organization's generator controller inside [from, to]: the site was off
 // the grid then (generator handoff §4.1).
