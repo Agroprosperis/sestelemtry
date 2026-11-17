@@ -189,7 +189,7 @@ func (s *Service) buildHealth(now time.Time) *HealthSnapshot {
 		if c := pccSignCheck(tick, s.cfg.EffectiveGridSign(), s.cfg.EffectiveMeterSign()); c != nil {
 			add(*c)
 		}
-		if c := voltageCheck(tick); c != nil {
+		if c := voltageCheck(tick, s.hasPCCMeter()); c != nil {
 			add(*c)
 		}
 		if c := controlModeCheck(tick); c != nil {
@@ -524,7 +524,9 @@ func pccSignsAgree(gridImportKw, meterImportKw float64) bool {
 	return gridImportKw*meterImportKw > 0
 }
 
-func voltageCheck(tick *Tick) *HealthCheck {
+// voltageCheck: pccMeter says the PCC meter is polled, so the grid at
+// the PCC needs its phases; the loggers' lines alone do not prove it.
+func voltageCheck(tick *Tick, pccMeter bool) *HealthCheck {
 	type group struct {
 		label string
 		keys  [3]string
@@ -544,7 +546,7 @@ func voltageCheck(tick *Tick) *HealthCheck {
 		{"СЕС", lineKeys("pv_"), 350, true},
 		{"УЗЕ", lineKeys("ess_"), 350, true},
 	}
-	silent := pccMeterSilent(tick)
+	silent := pccMeterSilent(tick) && busLive(tick)
 	var seen, idle, low []string
 	for _, g := range groups {
 		if silent && g.label == "фази" {
@@ -580,17 +582,21 @@ func voltageCheck(tick *Tick) *HealthCheck {
 		return nil
 	}
 	const expected = "фаза ≥200 В, лінія ≥350 В"
+	const unconfirmed = "мережу в точці приєднання не підтверджено; лінійні напруги логерів: "
 	if silent {
-		actual := "лічильник PCC не відповідає (фази 0 В)"
+		actual := "лічильник PCC не відповідає"
 		if len(low) > 0 {
 			actual += "; " + strings.Join(low, "; ")
 		}
-		return &HealthCheck{ID: "grid_voltage", OK: false, Severity: CheckAlarm, Label: "Напруга мережі", Expected: expected, Actual: actual, Detail: "логери бачать мережу: " + strings.Join(seen, " · ")}
+		return &HealthCheck{ID: "grid_voltage", OK: false, Severity: CheckAlarm, Label: "Напруга мережі", Expected: expected, Actual: actual, Detail: unconfirmed + strings.Join(seen, " · ")}
 	}
 	if len(low) > 0 {
 		return &HealthCheck{ID: "grid_voltage", OK: false, Severity: CheckAlarm, Label: "Напруга мережі", Expected: expected, Actual: strings.Join(low, "; ")}
 	}
 	actual := strings.Join(append(seen, idle...), " · ")
+	if pccMeter && !meterPhasesRead(tick) {
+		return &HealthCheck{ID: "grid_voltage", OK: false, Severity: CheckWarning, Label: "Напруга мережі", Expected: expected, Actual: "фази лічильника PCC не прочитано", Detail: unconfirmed + actual}
+	}
 	if len(seen) == 0 {
 		return &HealthCheck{ID: "grid_voltage", OK: true, Severity: CheckInfo, Label: "Напруга мережі", Expected: expected, Actual: actual}
 	}

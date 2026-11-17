@@ -462,14 +462,26 @@ func controlTickWithout(values map[string]float64, drop ...string) Tick {
 	return buildTickFromValues("ze", TopologyDual, 1, 1, testTS, base, QualityOK)
 }
 
+var essLines = map[string]float64{"ess_grid_line_voltage_ab_v": 387, "ess_grid_line_voltage_bc_v": 388, "ess_grid_line_voltage_ca_v": 387}
+
 // ze 17.11.2026 13:48: the PCC meter stopped answering the logger. No
 // 40505, the meter's phases 0 V, the loggers' lines still 387…388 V.
 func silentMeterTick() Tick {
-	return controlTickWithout(map[string]float64{
+	values := map[string]float64{
 		"meter_phase_a_voltage_v": 0, "meter_phase_b_voltage_v": 0, "meter_phase_c_voltage_v": 0,
-		"meter_active_power_kw":      0,
-		"ess_grid_line_voltage_ab_v": 387, "ess_grid_line_voltage_bc_v": 388, "ess_grid_line_voltage_ca_v": 387,
-	}, "grid_connected_active_power_kw")
+		"meter_active_power_kw": 0,
+	}
+	for k, v := range essLines {
+		values[k] = v
+	}
+	return controlTickWithout(values, "grid_connected_active_power_kw")
+}
+
+// From 14:20 the logger gave the meter's phases no value at all.
+func meterNoValueTick(drop ...string) Tick {
+	return controlTickWithout(essLines, append([]string{
+		"meter_phase_a_voltage_v", "meter_phase_b_voltage_v", "meter_phase_c_voltage_v",
+	}, drop...)...)
 }
 
 // Without 40505 neither the import limit nor the export ceiling is
@@ -485,6 +497,7 @@ func TestControllerStopsWithoutPCCOrBatteryPower(t *testing.T) {
 		reason string
 	}{
 		{"silent PCC meter", silentMeterTick(), "потужність PCC 40505: немає даних — лічильник PCC не відповідає"},
+		{"meter gives no value", meterNoValueTick("grid_connected_active_power_kw"), "потужність PCC 40505: немає даних — лічильник PCC не відповідає"},
 		{"no 40505", controlTickWithout(nil, "grid_connected_active_power_kw"), "потужність PCC 40505: немає даних"},
 		{"no 40392", controlTickWithout(nil, "active_ess_power_kw"), "потужність УЗЕ 40392: немає даних"},
 		{"blackout", blackout, "низька напруга мережі: фаза 0 В; фаза 0 В; фаза 0 В"},
@@ -504,23 +517,43 @@ func TestControllerStopsWithoutPCCOrBatteryPower(t *testing.T) {
 	}
 }
 
-// The console names a silent PCC meter instead of 2 147 484 kW of
-// import and three 0 V phases.
-func TestPreconditionsNameASilentPCCMeter(t *testing.T) {
-	s := writeService(t, zeCfg(t))
+func preconditionsFor(t *testing.T, cfg *Config, tick Tick) map[string]WritePrecondition {
+	t.Helper()
+	s := writeService(t, cfg)
 	now := time.Now().UTC()
-	tick := silentMeterTick()
 	tick.TS = now
 	s.lastTick.Store(&tick)
 	got := map[string]WritePrecondition{}
 	for _, p := range s.writePreconditions(now) {
 		got[p.ID] = p
 	}
-	if p := got["import_now"]; p.OK || p.Label != "потужність PCC 40505 відома" || p.Actual != "немає даних — лічильник PCC не відповідає" {
-		t.Fatalf("import_now = %+v", p)
+	return got
+}
+
+// The console names a silent PCC meter instead of 2 147 484 kW of
+// import and three 0 V phases, and the loggers' lines alone do not
+// pass the grid check (ze 17.11 14:28: ✅ «мережа є» with no meter).
+func TestPreconditionsNameASilentPCCMeter(t *testing.T) {
+	for name, tick := range map[string]Tick{
+		"phases 0 V":      silentMeterTick(),
+		"phases no value": meterNoValueTick("grid_connected_active_power_kw"),
+	} {
+		got := preconditionsFor(t, zeCfg(t), tick)
+		if p := got["import_now"]; p.OK || p.Label != "потужність PCC 40505 відома" || p.Actual != "немає даних — лічильник PCC не відповідає" {
+			t.Fatalf("%s: import_now = %+v", name, p)
+		}
+		if p := got["voltage"]; p.OK || p.Actual != "лічильник PCC не відповідає: мережу в точці приєднання не підтверджено" {
+			t.Fatalf("%s: voltage = %+v", name, p)
+		}
 	}
-	if p := got["voltage"]; p.OK || p.Actual != "лічильник PCC не відповідає: фази не виміряні, логери бачать мережу" {
-		t.Fatalf("voltage = %+v", p)
+
+	withMeter := zeCfg(t)
+	withMeter.SmartLogger.Devices[0].Meter = &MeterConfig{UnitID: 11, Interval: 2 * time.Second}
+	if p := preconditionsFor(t, withMeter, meterNoValueTick())["voltage"]; p.OK || p.Actual != "фази лічильника PCC не прочитано: мережу в точці приєднання не підтверджено" {
+		t.Fatalf("meter polled, 40505 read, no phases: voltage = %+v", p)
+	}
+	if p := preconditionsFor(t, withMeter, controlTick(nil))["voltage"]; !p.OK {
+		t.Fatalf("meter phases 231 V: voltage = %+v", p)
 	}
 }
 

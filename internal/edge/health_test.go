@@ -223,12 +223,29 @@ func TestHealthNamesASilentPCCMeter(t *testing.T) {
 	}, QualityOK)
 	h := healthTestService(testCfg(), &tick, nil).buildHealth(testTS)
 	v := findCheck(t, h, "grid_voltage")
-	if v == nil || v.OK || v.Actual != "лічильник PCC не відповідає (фази 0 В)" || !strings.Contains(v.Detail, "УЗЕ 387/388/387 В") {
+	if v == nil || v.OK || v.Actual != "лічильник PCC не відповідає" ||
+		!strings.Contains(v.Detail, "мережу в точці приєднання не підтверджено") || !strings.Contains(v.Detail, "УЗЕ 387/388/387 В") {
 		t.Fatalf("grid_voltage = %+v", v)
 	}
 	g := findCheck(t, h, "grid_limit")
 	if g == nil || g.OK || g.Actual != "40505: немає даних — лічильник PCC не відповідає" {
 		t.Fatalf("grid_limit = %+v", g)
+	}
+}
+
+// A polled PCC meter without phases: the loggers' lines do not make
+// the grid check green.
+func TestHealthGridVoltageNeedsThePCCMeterPhases(t *testing.T) {
+	cfg := testCfg()
+	cfg.SmartLogger.Devices[0].Meter = &MeterConfig{UnitID: 11, Interval: 2 * time.Second}
+	tick := testTick(map[string]float64{
+		"active_pv_power_kw": 0, "load_power_kw": 0, "grid_connected_active_power_kw": 0,
+		"active_ess_power_kw": 0, "soc_percent": 60,
+		"ess_grid_line_voltage_ab_v": 390, "ess_grid_line_voltage_bc_v": 391, "ess_grid_line_voltage_ca_v": 384,
+	}, QualityOK)
+	v := findCheck(t, healthTestService(cfg, &tick, nil).buildHealth(testTS), "grid_voltage")
+	if v == nil || v.OK || v.Actual != "фази лічильника PCC не прочитано" || !strings.Contains(v.Detail, "УЗЕ 390/391/384 В") {
+		t.Fatalf("grid_voltage = %+v", v)
 	}
 }
 

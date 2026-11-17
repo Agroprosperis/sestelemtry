@@ -513,19 +513,29 @@ func lineVoltageKeys(prefix string) [3]string {
 	return [3]string{prefix + "grid_line_voltage_ab_v", prefix + "grid_line_voltage_bc_v", prefix + "grid_line_voltage_ca_v"}
 }
 
-// pccMeterSilent: the PCC meter behind the logger does not answer. The
-// logger then has no 40505 and reads the meter's phases as 0 V, while
-// its own line voltages still see the grid (ze, 17.11.2026 13:48). In
-// a blackout the lines read 0 too, and that stays an undervoltage.
+// pccMeterSilent: the loggers answer, but the PV logger has no reading
+// of its PCC meter: no 40505, the meter's phases 0 V or no value. On ze
+// 17.11.2026 13:48–14:25 the phases read 0 V, then no value, while the
+// bus kept 222–226 V.
 func pccMeterSilent(t *Tick) bool {
-	if t.GridPowerKw != nil {
+	if t.GridPowerKw != nil || (t.DataQuality != QualityOK && t.DataQuality != QualityEstimated) {
 		return false
 	}
+	zero, missing := 0, 0
 	for _, k := range meterPhaseKeys {
-		if v, ok := t.Values[k]; !ok || v != 0 {
-			return false
+		switch v, ok := t.Values[k]; {
+		case !ok:
+			missing++
+		case v == 0:
+			zero++
 		}
 	}
+	return zero == len(meterPhaseKeys) || missing == len(meterPhaseKeys)
+}
+
+// busLive: a logger's line voltages read the bus. In a blackout they
+// read 0 too, and the meter's 0 V phases stay an undervoltage.
+func busLive(t *Tick) bool {
 	for _, prefix := range []string{"", "pv_", "ess_"} {
 		for _, k := range lineVoltageKeys(prefix) {
 			if t.Values[k] > 0 {
@@ -534,6 +544,15 @@ func pccMeterSilent(t *Tick) bool {
 		}
 	}
 	return false
+}
+
+func meterPhasesRead(t *Tick) bool {
+	for _, k := range meterPhaseKeys {
+		if _, ok := t.Values[k]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 // pccMissing says why 40505 has no value, for stops and consoles.
@@ -546,8 +565,8 @@ func pccMissing(t *Tick) string {
 
 // lowVoltages lists the readings below the stop thresholds (phase
 // < 200 V, line < 350 V). Line voltages that all read 0 are an idle
-// inverter group, not an undervoltage. The phases of a silent meter
-// are no reading either: the missing 40505 stops writing instead.
+// inverter group, not an undervoltage. The 0 V phases of a silent meter
+// on a live bus are no reading either: the missing 40505 stops writing.
 func lowVoltages(t *Tick) []string {
 	type group struct {
 		label string
@@ -560,7 +579,7 @@ func lowVoltages(t *Tick) []string {
 		{"лінія СЕС", lineVoltageKeys("pv_"), 350, true},
 		{"лінія УЗЕ", lineVoltageKeys("ess_"), 350, true},
 	}
-	if !pccMeterSilent(t) {
+	if !pccMeterSilent(t) || !busLive(t) {
 		groups = append([]group{{"фаза", meterPhaseKeys, 200, false}}, groups...)
 	}
 	var low []string
