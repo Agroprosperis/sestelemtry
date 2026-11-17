@@ -254,8 +254,81 @@ func TestWriterWritesItsOwnRegisters(t *testing.T) {
 	}
 }
 
+// shortSettle lets a readback that keeps differing count as such within
+// a test's run.
+func shortSettle(t *testing.T) {
+	t.Helper()
+	oldFor, oldStep := settleFor, settleStep
+	settleFor, settleStep = 40*time.Millisecond, 10*time.Millisecond
+	t.Cleanup(func() { settleFor, settleStep = oldFor, oldStep })
+}
+
+// laggingLogger answers the first `lag` readbacks after a write with the
+// value held before it, as the ze loggers did (15:25: 660 read for 605).
+type laggingLogger struct {
+	*fakeLogger
+	lag  int
+	prev map[uint16][]byte
+	left map[uint16]int
+}
+
+func newLaggingLogger(lag int) *laggingLogger {
+	return &laggingLogger{fakeLogger: newFakeLogger(), lag: lag, prev: map[uint16][]byte{}, left: map[uint16]int{}}
+}
+
+func (l *laggingLogger) WriteMultiple(ctx context.Context, start uint16, payload []byte) error {
+	l.mu.Lock()
+	l.prev[start], l.left[start] = l.regs[start], l.lag
+	l.mu.Unlock()
+	return l.fakeLogger.WriteMultiple(ctx, start, payload)
+}
+
+func (l *laggingLogger) ReadHolding(ctx context.Context, start, qty uint16) ([]byte, error) {
+	l.mu.Lock()
+	if l.left[start] > 0 {
+		l.left[start]--
+		b := l.prev[start]
+		l.mu.Unlock()
+		if b == nil {
+			return make([]byte, 4), nil
+		}
+		return b, nil
+	}
+	l.mu.Unlock()
+	return l.fakeLogger.ReadHolding(ctx, start, qty)
+}
+
+// The loggers apply a new setpoint with a delay: the readback is read
+// again before it counts as differing, a higher PV ceiling and the
+// battery's setpoint alike.
+func TestWriterWaitsForTheLoggerToApply(t *testing.T) {
+	oldFor, oldStep := settleFor, settleStep
+	settleFor, settleStep = 300*time.Millisecond, 10*time.Millisecond
+	t.Cleanup(func() { settleFor, settleStep = oldFor, oldStep })
+	s := writeService(t, zeCfg(t))
+	enableForTest(t, s)
+	s.writeCmd.Store(&WriteCommand{At: time.Now().UTC().Add(time.Minute), State: WriteRun, ESSKw: 100, PVLimitKw: 605, PVKnown: true})
+	for _, dev := range s.cfg.SmartLogger.Devices {
+		f := newLaggingLogger(3)
+		f.regs[40378] = []byte{0, 0, 0x19, 0xC8} // 660 kW held before
+		ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
+		s.runWriter(ctx, dev, regsFor(dev.Role), 50*time.Millisecond,
+			func(context.Context, Device) (registerSession, error) { return f, nil }, nil)
+		cancel()
+	}
+	if len(s.writeFaults) != 0 {
+		t.Fatalf("fault: %+v", <-s.writeFaults)
+	}
+	for _, reg := range []writeReg{regPVLimit, regESSPower} {
+		if fb, ok := s.feedback(reg); !ok || !fb.OK || fb.Clipped {
+			t.Fatalf("%s: %+v", reg.Name, fb)
+		}
+	}
+}
+
 // A readback that differs is a fault, reported to the core loop.
 func TestWriterReadbackMismatchFaults(t *testing.T) {
+	shortSettle(t)
 	s := writeService(t, zeCfg(t))
 	enableForTest(t, s)
 	s.writeCmd.Store(&WriteCommand{At: time.Now().UTC(), State: WriteRun, ESSKw: 50, PVKnown: false})

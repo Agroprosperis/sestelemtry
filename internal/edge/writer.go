@@ -158,6 +158,15 @@ var (
 	writeDialFaultAfter = 10 * time.Second
 )
 
+// A logger applies a new setpoint with a delay: right after the write
+// the readback can still be the value before it (ze 17.11 15:25: 605
+// written over 660, 660 read back, 605 held three seconds later). The
+// readback is repeated for settleFor before it counts as differing.
+var (
+	settleFor  = 5 * time.Second
+	settleStep = 500 * time.Millisecond
+)
+
 type writeFault struct {
 	at  time.Time
 	msg string
@@ -237,6 +246,14 @@ func (s *Service) expectedRefusal(reg writeReg, fb WriteFeedback, since map[uint
 	return false, ""
 }
 
+func readBack(ctx context.Context, sess registerSession, reg writeReg) (int64, error) {
+	b, err := sess.ReadHolding(ctx, reg.Addr, 2)
+	if err != nil {
+		return 0, fmt.Errorf("readback: %w", err)
+	}
+	return reg.decode(b)
+}
+
 // writeOne writes one value and reads the same register back.
 func (s *Service) writeOne(ctx context.Context, sess registerSession, dev Device, reg writeReg, kw float64) WriteFeedback {
 	fb := WriteFeedback{Register: reg.Name, Host: dev.Host, At: time.Now().UTC(), Kw: kw}
@@ -256,20 +273,30 @@ func (s *Service) writeOne(ctx context.Context, sess registerSession, dev Device
 		}
 		return fb
 	}
-	b, err := sess.ReadHolding(wctx, reg.Addr, 2)
-	if err != nil {
-		fb.Err = "readback: " + err.Error()
-		return fb
+	got, err := readBack(wctx, sess, reg)
+	// A lower PV ceiling is taken at once (Clipped below); anything else
+	// that differs is read again until the logger applies the value.
+	for err == nil && got != raw && !(reg.Addr == regPVLimit.Addr && got < raw) && time.Since(fb.At) < settleFor {
+		t := time.NewTimer(settleStep)
+		select {
+		case <-ctx.Done():
+			t.Stop()
+			err = ctx.Err()
+		case <-t.C:
+			rctx, rcancel := context.WithTimeout(ctx, dev.RequestTimeout)
+			got, err = readBack(rctx, sess, reg)
+			rcancel()
+		}
 	}
-	got, err := reg.decode(b)
 	if err != nil {
 		fb.Err = err.Error()
 		return fb
 	}
 	rb := float64(got) / reg.Scale
 	fb.ReadbackKw = &rb
-	// ze 17.11 14:50: 40396 already read 660 kW, the logger took 550
-	// and held 660 two seconds later.
+	// The logger cut the ceiling to what its inverters have, or still
+	// holds the lower one before it (ze 17.11 14:50: 660 written, 550
+	// read back, 660 two seconds later).
 	if reg.Addr == regPVLimit.Addr && got < raw {
 		fb.OK, fb.Clipped = true, true
 		return fb
