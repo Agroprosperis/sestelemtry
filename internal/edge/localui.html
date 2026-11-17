@@ -164,7 +164,7 @@
         <div class="kpi-card soc"><div class="k">SOC зараз</div><div class="v" id="kpi-soc">—</div><div class="sub" id="kpi-soc-sub">—</div></div>
         <div class="kpi-card grid"><div class="k">P grid</div><div class="v" id="kpi-grid">—</div><div class="sub" id="kpi-grid-sub">—</div></div>
         <div class="kpi-card pv"><div class="k">P СЕС</div><div class="v" id="kpi-pv">—</div><div class="sub" id="kpi-pv-sub">—</div></div>
-        <div class="kpi-card ess"><div class="k">P УЗЕ (віртуально)</div><div class="v" id="kpi-ess">—</div><div class="sub" id="kpi-ess-sub">shadow-рішення</div></div>
+        <div class="kpi-card ess"><div class="k" id="kpi-ess-k">P УЗЕ (віртуально)</div><div class="v" id="kpi-ess">—</div><div class="sub" id="kpi-ess-sub">shadow-рішення</div></div>
         <div class="kpi-card bb"><div class="k">Black box</div><div class="v" id="kpi-bb">—</div><div class="sub">pending uplink</div></div>
       </div>
 
@@ -396,11 +396,17 @@ function renderStatus(st) {
   $('kpi-pv').textContent = fmtKw(t.pv_power_kw);
   $('kpi-pv-sub').textContent = 'rated ' + st.limits.pv_rated_kw + ' кВт';
   const dec = st.decision;
-  const p = dec && dec.outputs ? dec.outputs.p_bess_virtual_kw : null;
+  const virt = dec && dec.outputs ? dec.outputs.p_bess_virtual_kw : null;
+  // With writing on the card is what goes into 40381, not the engine's wish.
+  const wcmd = st.write && st.write.enabled && st.write.command ? st.write.command : null;
+  const p = wcmd ? wcmd.ess_kw : virt;
   const essEl = $('kpi-ess');
   essEl.textContent = p == null ? '—' : (p > 0 ? '+' : '') + fmtKw(p).replace(' кВт', '') + ' кВт';
   essEl.className = 'v ' + (p > 0 ? 'pos' : p < 0 ? 'neg' : '');
-  $('kpi-ess-sub').textContent = dec ? (dec.reason_code || 'shadow-рішення') : 'shadow-рішення';
+  $('kpi-ess-k').textContent = wcmd ? 'P УЗЕ (команда 40381)' : 'P УЗЕ (віртуально)';
+  $('kpi-ess-sub').textContent = wcmd
+    ? (wcmd.reason || wcmd.state) + (virt != null && virt !== wcmd.ess_kw ? ' · автомат ' + fmtSigned(virt) + ' кВт' : '')
+    : (dec ? (dec.reason_code || 'shadow-рішення') : 'shadow-рішення');
   const bb = st.blackbox || {};
   const pend = bb.pending || {};
   const totalPending = Object.values(pend).reduce((a, b) => a + b, 0);
