@@ -2,6 +2,7 @@ package edge
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"strings"
 	"testing"
@@ -432,14 +433,18 @@ func TestPVLoggerException4(t *testing.T) {
 	})
 }
 
-// A readback that differs on the PV logger is immaterial with the sun
-// down, and a fault at once with the sun up.
+// The PV logger cuts the ceiling to what its inverters have now (ze
+// 17.11 14:50: 660 kW written, 550 held while two inverters were still
+// joining): a lower readback is taken, sun up or down. A higher one is
+// immaterial with the sun down and a fault at once with the sun up.
 func TestPVLoggerReadbackMismatch(t *testing.T) {
-	odd := func() *fakeLogger {
+	holding := func(raw uint32) *fakeLogger {
 		f := newFakeLogger()
 		f.readback = func(addr uint16, written []byte) []byte {
 			if addr == 40378 {
-				return []byte{0, 0, 1, 0x4a} // 33.0 kW, what the logger holds at night
+				b := make([]byte, 4)
+				binary.BigEndian.PutUint32(b, raw)
+				return b
 			}
 			if written == nil {
 				return make([]byte, 4)
@@ -448,16 +453,22 @@ func TestPVLoggerReadbackMismatch(t *testing.T) {
 		}
 		return f
 	}
-	s := runRefusing(t, zeCfg(t), 0, map[string]float64{"active_pv_power_kw": 0}, odd(), 400*time.Millisecond, nil)
-	if len(s.writeFaults) != 0 {
-		t.Fatalf("sun down: %+v", <-s.writeFaults)
+	for _, pv := range []float64{0, 120} {
+		s := runRefusing(t, zeCfg(t), 0, map[string]float64{"active_pv_power_kw": pv}, holding(5500), 400*time.Millisecond, nil)
+		if len(s.writeFaults) != 0 {
+			t.Fatalf("PV %v kW, 550 held for 600 written: %+v", pv, <-s.writeFaults)
+		}
+		if fb, _ := s.feedback(regPVLimit); !fb.OK || !fb.Clipped || fb.ReadbackKw == nil || *fb.ReadbackKw != 550 {
+			t.Fatalf("PV %v kW: feedback = %+v", pv, fb)
+		}
 	}
-	if fb, _ := s.feedback(regPVLimit); !fb.Tolerated || fb.ReadbackKw == nil || *fb.ReadbackKw != 33 {
-		t.Fatalf("feedback = %+v", fb)
+	s := runRefusing(t, zeCfg(t), 0, map[string]float64{"active_pv_power_kw": 0}, holding(7000), 400*time.Millisecond, nil)
+	if fb, _ := s.feedback(regPVLimit); len(s.writeFaults) != 0 || !fb.Tolerated || fb.Clipped {
+		t.Fatalf("sun down, 700 held for 600 written: feedback = %+v", fb)
 	}
-	s = runRefusing(t, zeCfg(t), 0, map[string]float64{"active_pv_power_kw": 120}, odd(), 400*time.Millisecond, nil)
+	s = runRefusing(t, zeCfg(t), 0, map[string]float64{"active_pv_power_kw": 120}, holding(7000), 400*time.Millisecond, nil)
 	if len(s.writeFaults) == 0 {
-		t.Fatal("sun up: a readback that differs is not a fault")
+		t.Fatal("sun up: a higher readback is not a fault")
 	}
 }
 

@@ -142,6 +142,10 @@ type WriteFeedback struct {
 	// Tolerated: a refusal that is the equipment's expected answer, not
 	// a fault (expectedRefusal).
 	Tolerated bool `json:"tolerated,omitempty"`
+	// Clipped: the PV logger holds a lower ceiling than written, cut to
+	// the power its inverters have now. A lower PV ceiling is the safe
+	// side, so the write counts as taken; a higher one never does.
+	Clipped bool `json:"clipped,omitempty"`
 
 	exc      byte // Modbus exception code of the write; 0 = none
 	mismatch bool // the readback differed from what was written
@@ -264,6 +268,12 @@ func (s *Service) writeOne(ctx context.Context, sess registerSession, dev Device
 	}
 	rb := float64(got) / reg.Scale
 	fb.ReadbackKw = &rb
+	// ze 17.11 14:50: 40396 already read 660 kW, the logger took 550
+	// and held 660 two seconds later.
+	if reg.Addr == regPVLimit.Addr && got < raw {
+		fb.OK, fb.Clipped = true, true
+		return fb
+	}
 	if got != raw {
 		fb.Err = fmt.Sprintf("%s: записано %d, прочитано %d", errReadbackDiff, raw, got)
 		fb.mismatch = true
