@@ -160,6 +160,13 @@ type WriteConfig struct {
 	// rewritten (cutover §12.1: СЕС ~2 с, УЗЕ ~3 с).
 	PVInterval  time.Duration `yaml:"pv_interval"`
 	ESSInterval time.Duration `yaml:"ess_interval"`
+	// TolerateStoppedESSRefusal treats the battery logger like the PV
+	// logger: refusing 40381/40386 with exception 4 is expected while the
+	// battery is stopped (40540 ≠ 0). Off by default: the developer brief
+	// (§9.1 п. 2) makes every battery logger refusal a WRITE_FAULT. It is
+	// the owner's switch for a logger that turns out to refuse setpoints
+	// for a stopped battery at the hand-over.
+	TolerateStoppedESSRefusal bool `yaml:"tolerate_stopped_ess_refusal"`
 }
 
 // LocalUIConfig is the on-device web console (spec ems_ui_edge_vs_cloud

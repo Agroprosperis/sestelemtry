@@ -336,53 +336,236 @@ func TestDisableWithASilentLogger(t *testing.T) {
 	}
 }
 
-// The PV logger's exception 4 while the sun is down is the expected
-// answer; with the sun up, or on the battery logger, it is a fault.
-func TestPVLoggerException4(t *testing.T) {
-	cases := []struct {
-		name  string
-		dev   int
-		reg   uint16
-		pvKw  float64
-		fault bool
-	}{
-		{"PV logger, sun down", 0, 40378, 0, false},
-		{"PV logger, sun up", 0, 40378, 120, true},
-		{"battery logger", 1, 40381, 0, true},
+// runRefusing runs one logger's writer against a fake that answers its
+// registers as told, and returns the service for the verdict.
+func runRefusing(t *testing.T, cfg *Config, dev int, values map[string]float64, f *fakeLogger, d time.Duration, prep func(*Service)) *Service {
+	t.Helper()
+	s := writeService(t, cfg)
+	enableForTest(t, s)
+	tk := tickAt(time.Now().UTC(), values)
+	s.lastTick.Store(&tk)
+	s.writeCmd.Store(&WriteCommand{At: time.Now().UTC().Add(time.Minute), State: WriteAwaitStart, PVLimitKw: 600, PVKnown: true})
+	if prep != nil {
+		prep(s)
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			s := writeService(t, zeCfg(t))
-			enableForTest(t, s)
-			tk := tickAt(time.Now().UTC(), map[string]float64{"active_pv_power_kw": tc.pvKw})
-			s.lastTick.Store(&tk)
-			s.writeCmd.Store(&WriteCommand{At: time.Now().UTC(), State: WriteAwaitStart, PVLimitKw: 600, PVKnown: true})
-			f := newFakeLogger()
-			f.addrErr[tc.reg] = errException4
-			dev := s.cfg.SmartLogger.Devices[tc.dev]
-			ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
-			defer cancel()
-			s.runWriter(ctx, dev, regsFor(dev.Role), 20*time.Millisecond,
-				func(context.Context, Device) (registerSession, error) { return f, nil }, nil)
-			faulted := len(s.writeFaults) > 0
-			if faulted != tc.fault {
-				t.Fatalf("fault = %v, want %v", faulted, tc.fault)
+	device := s.cfg.SmartLogger.Devices[dev]
+	ctx, cancel := context.WithTimeout(context.Background(), d)
+	defer cancel()
+	s.runWriter(ctx, device, regsFor(device.Role), 20*time.Millisecond,
+		func(context.Context, Device) (registerSession, error) { return f, nil }, nil)
+	return s
+}
+
+func refusing(addrs ...uint16) *fakeLogger {
+	f := newFakeLogger()
+	for _, a := range addrs {
+		f.addrErr[a] = errException4
+	}
+	return f
+}
+
+func countEvents(s *Service, code string) int {
+	n := 0
+	for len(s.events) > 0 {
+		if ev := <-s.events; ev.Code == code {
+			n++
+		}
+	}
+	return n
+}
+
+func shortGrace(t *testing.T, d time.Duration) {
+	t.Helper()
+	old := refuseGrace
+	refuseGrace = d
+	t.Cleanup(func() { refuseGrace = old })
+}
+
+// The PV logger's exception 4 while the sun is down is the expected
+// answer. With the sun still reading as running it is let through for
+// the grace (the logger turns before 40388 does at a stop or a start),
+// then it is a fault. On the battery logger it is a fault at once.
+func TestPVLoggerException4(t *testing.T) {
+	sunDown := map[string]float64{"active_pv_power_kw": 0}
+	sunUp := map[string]float64{"active_pv_power_kw": 120}
+
+	t.Run("sun down", func(t *testing.T) {
+		s := runRefusing(t, zeCfg(t), 0, sunDown, refusing(40378, 40384), 700*time.Millisecond, nil)
+		if len(s.writeFaults) != 0 {
+			t.Fatalf("fault: %+v", <-s.writeFaults)
+		}
+		if fb, _ := s.feedback(regPVLimit); !fb.Tolerated || !strings.Contains(fb.Err, "СЕС не в роботі") {
+			t.Fatalf("feedback = %+v", fb)
+		}
+		if n := countEvents(s, EvPVWriteRefused); n != 1 {
+			t.Fatalf("PV_WRITE_REFUSED events = %d, want one per transition", n)
+		}
+	})
+	t.Run("sun up, within the grace", func(t *testing.T) {
+		s := runRefusing(t, zeCfg(t), 0, sunUp, refusing(40378, 40384), 700*time.Millisecond, nil)
+		if len(s.writeFaults) != 0 {
+			t.Fatalf("fault inside the grace: %+v", <-s.writeFaults)
+		}
+		if fb, _ := s.feedback(regPVLimit); !fb.Tolerated || !strings.Contains(fb.Err, "зупиняється або запускається") {
+			t.Fatalf("feedback = %+v", fb)
+		}
+	})
+	t.Run("sun up, past the grace", func(t *testing.T) {
+		shortGrace(t, 200*time.Millisecond)
+		s := runRefusing(t, zeCfg(t), 0, sunUp, refusing(40378, 40384), 1200*time.Millisecond, nil)
+		if len(s.writeFaults) == 0 {
+			t.Fatal("a refusal that outlasts the grace is not a fault")
+		}
+	})
+	t.Run("one register accepted does not extend the other's grace", func(t *testing.T) {
+		shortGrace(t, 200*time.Millisecond)
+		s := runRefusing(t, zeCfg(t), 0, sunUp, refusing(40378), 1200*time.Millisecond, nil)
+		if len(s.writeFaults) == 0 {
+			t.Fatal("40378 refused for longer than the grace while 40384 is accepted: no fault")
+		}
+	})
+	t.Run("battery logger", func(t *testing.T) {
+		s := runRefusing(t, zeCfg(t), 1, merge(sunDown, essStopped()), refusing(40381, 40386), 300*time.Millisecond, nil)
+		if len(s.writeFaults) == 0 {
+			t.Fatal("the battery logger's refusal is not a fault")
+		}
+	})
+}
+
+// A readback that differs on the PV logger is immaterial with the sun
+// down, and a fault at once with the sun up.
+func TestPVLoggerReadbackMismatch(t *testing.T) {
+	odd := func() *fakeLogger {
+		f := newFakeLogger()
+		f.readback = func(addr uint16, written []byte) []byte {
+			if addr == 40378 {
+				return []byte{0, 0, 1, 0x4a} // 33.0 kW, what the logger holds at night
 			}
-			if !tc.fault {
-				if fb, _ := s.feedback(regPVLimit); !fb.Tolerated {
-					t.Fatalf("feedback = %+v", fb)
-				}
-				refused := 0
-				for len(s.events) > 0 {
-					if ev := <-s.events; ev.Code == EvPVWriteRefused {
-						refused++
-					}
-				}
-				if refused != 1 {
-					t.Fatalf("PV_WRITE_REFUSED events = %d, want one per transition", refused)
-				}
+			if written == nil {
+				return make([]byte, 4)
 			}
-		})
+			return written
+		}
+		return f
+	}
+	s := runRefusing(t, zeCfg(t), 0, map[string]float64{"active_pv_power_kw": 0}, odd(), 400*time.Millisecond, nil)
+	if len(s.writeFaults) != 0 {
+		t.Fatalf("sun down: %+v", <-s.writeFaults)
+	}
+	if fb, _ := s.feedback(regPVLimit); !fb.Tolerated || fb.ReadbackKw == nil || *fb.ReadbackKw != 33 {
+		t.Fatalf("feedback = %+v", fb)
+	}
+	s = runRefusing(t, zeCfg(t), 0, map[string]float64{"active_pv_power_kw": 120}, odd(), 400*time.Millisecond, nil)
+	if len(s.writeFaults) == 0 {
+		t.Fatal("sun up: a readback that differs is not a fault")
+	}
+}
+
+// The owner's switch treats the battery logger like the PV logger: a
+// stopped battery may refuse its setpoints; a running one may only for
+// the grace. Off by default (TestPVLoggerException4, "battery logger").
+func TestStoppedBatteryRefusalSwitch(t *testing.T) {
+	stopped := merge(essStopped(), map[string]float64{"active_pv_power_kw": 120})
+	running := merge(essRunning(), map[string]float64{"active_pv_power_kw": 120})
+	cfg := zeCfg(t)
+	cfg.Control.Write.TolerateStoppedESSRefusal = true
+	s := runRefusing(t, cfg, 1, stopped, refusing(40381, 40386), 700*time.Millisecond, nil)
+	if len(s.writeFaults) != 0 {
+		t.Fatalf("switch on, battery stopped: %+v", <-s.writeFaults)
+	}
+	if fb, _ := s.feedback(regESSPower); !fb.Tolerated || !strings.Contains(fb.Err, "УЗЕ зупинена") {
+		t.Fatalf("feedback = %+v", fb)
+	}
+	if n := countEvents(s, EvESSWriteRefused); n != 1 {
+		t.Fatalf("ESS_WRITE_REFUSED events = %d", n)
+	}
+	shortGrace(t, 200*time.Millisecond)
+	s = runRefusing(t, cfg, 1, running, refusing(40381, 40386), 1200*time.Millisecond, nil)
+	if len(s.writeFaults) == 0 {
+		t.Fatal("a running battery refusing past the grace is not a fault")
+	}
+}
+
+// A logger the writer cannot connect to is a write fault, not a silent
+// retry.
+func TestWriterDialFailureFaults(t *testing.T) {
+	old := writeDialFaultAfter
+	writeDialFaultAfter = 60 * time.Millisecond
+	t.Cleanup(func() { writeDialFaultAfter = old })
+	s := writeService(t, zeCfg(t))
+	enableForTest(t, s)
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	s.runWriter(ctx, s.cfg.SmartLogger.Devices[1], regsFor(RoleESS), 10*time.Millisecond,
+		func(context.Context, Device) (registerSession, error) { return nil, errors.New("connection refused") }, nil)
+	select {
+	case f := <-s.writeFaults:
+		if !strings.Contains(f.msg, "немає з'єднання") {
+			t.Fatalf("fault = %q", f.msg)
+		}
+	default:
+		t.Fatal("no fault after the writer could not connect")
+	}
+}
+
+// A stop of the edge's own goes out over a start that still waits for
+// its confirmation: the logger took the start, so the battery may come
+// up, and the flag must not drop with it running.
+func TestEdgeStopSupersedesAPendingStart(t *testing.T) {
+	ctx := context.Background()
+	t.Run("write fault", func(t *testing.T) {
+		s := writeService(t, zeCfg(t))
+		enableForTest(t, s)
+		press(t, s, testTS, CmdESSStart) // taken by the logger, not confirmed
+		at := testTS.Add(10 * time.Second)
+		s.onWriteFault(ctx, writeFault{at: at, msg: "test"})
+		safeFeedback(s, at.Add(time.Second))
+		s.stepWrite(ctx, at.Add(2*time.Second), tickAt(at.Add(2*time.Second), essStopped()), nil)
+		if j, ok := job(s, RoleESS); !ok || j.addr != 40198 {
+			t.Fatalf("battery stop not sent over the pending start: %+v queued=%v", j, ok)
+		}
+		if st, _ := s.commandStatus(CmdESSStart); st.State != CmdNotConfirmed || st.Note != "перервано зупинкою" {
+			t.Fatalf("pending start = %+v", st)
+		}
+		if !s.gate.Enabled() {
+			t.Fatal("flag dropped before the battery stop was confirmed")
+		}
+		s.onCommandResult(ctx, cmdResult{id: CmdESSStop, at: at.Add(3 * time.Second)})
+		s.stepWrite(ctx, at.Add(4*time.Second), tickAt(at.Add(4*time.Second), essStopped()), nil)
+		if s.gate.Enabled() {
+			t.Fatal("flag still on after the confirmed battery stop")
+		}
+	})
+	t.Run("latched stop", func(t *testing.T) {
+		s := writeService(t, zeCfg(t))
+		enableForTest(t, s)
+		press(t, s, testTS, CmdESSStart)
+		at := testTS.Add(10 * time.Second)
+		s.stepWrite(ctx, at, tickAt(at, merge(essStopped(), map[string]float64{"sl_alarm_2": 0x10})), nil)
+		if s.ctl.State() != WriteStopped {
+			t.Fatalf("state = %s", s.ctl.State())
+		}
+		if j, ok := job(s, RoleESS); !ok || j.addr != 40198 {
+			t.Fatalf("battery stop not sent: %+v queued=%v", j, ok)
+		}
+	})
+}
+
+// A battery that tripped after its start still gets the stop command: a
+// tripped PCS comes back by itself, a stopped one does not.
+func TestTrippedBatteryStillGetsTheStop(t *testing.T) {
+	ctx := context.Background()
+	s := writeService(t, zeCfg(t))
+	enableForTest(t, s)
+	press(t, s, testTS, CmdESSStart)
+	s.stepWrite(ctx, testTS.Add(time.Second), tickAt(testTS.Add(time.Second), essRunning()), nil)
+	at := testTS.Add(time.Minute)
+	s.stepWrite(ctx, at, tickAt(at, essStopped()), nil)
+	if s.ctl.State() != WriteStopped || !s.ctl.StopAuto() {
+		t.Fatalf("state = %s", s.ctl.State())
+	}
+	if j, ok := job(s, RoleESS); !ok || j.addr != 40198 {
+		t.Fatalf("battery stop not sent to a tripped battery: %+v queued=%v", j, ok)
 	}
 }
 

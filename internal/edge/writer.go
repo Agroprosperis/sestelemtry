@@ -139,10 +139,20 @@ type WriteFeedback struct {
 	ReadbackKw *float64  `json:"readback_kw,omitempty"`
 	OK         bool      `json:"ok"`
 	Err        string    `json:"error,omitempty"`
-	// Tolerated: the PV logger refused with exception 4 while the sun is
-	// not in operation, the expected answer (handoff §9.1 п. 2).
+	// Tolerated: a refusal that is the equipment's expected answer, not
+	// a fault (expectedRefusal).
 	Tolerated bool `json:"tolerated,omitempty"`
+
+	exc      byte // Modbus exception code of the write; 0 = none
+	mismatch bool // the readback differed from what was written
 }
+
+// How long a logger may refuse its setpoints while its equipment still
+// reads as running, and how long a writer may fail to connect.
+var (
+	refuseGrace         = 30 * time.Second
+	writeDialFaultAfter = 10 * time.Second
+)
 
 type writeFault struct {
 	at  time.Time
@@ -173,18 +183,54 @@ func (s *Service) guardedWriteSingle(ctx context.Context, w registerSession, add
 	return w.WriteSingle(ctx, addr, value)
 }
 
-// pvTolerated reports a PV logger refusal that is the expected answer:
-// exception 4 while the sun is not in operation (at night, or stopped
-// before the hand-over). The battery logger's refusals never are.
-func (s *Service) pvTolerated(reg writeReg, err error) bool {
-	if reg.Role != RolePV {
-		return false
-	}
-	if code, ok := modbusclient.ExceptionCode(err); !ok || code != 4 {
-		return false
+// expectedRefusal reports a refusal that is the equipment's expected
+// answer rather than a fault, and the note for the consoles.
+//
+// The PV logger refuses its setpoints with exception 4 while the sun is
+// not in operation: at night, or stopped (handoff §9.1 п. 2). A readback
+// that differs is as immaterial then. Around a stop or a start the
+// logger turns before 40388 does, so with the sun still reading as
+// running an exception 4 is let through for refuseGrace from its first
+// occurrence on that register (since, the writer's own); after that it
+// is a fault.
+//
+// The battery logger's refusals are faults always (the same brief),
+// unless the device config treats it like the PV logger: expected while
+// the battery is stopped.
+func (s *Service) expectedRefusal(reg writeReg, fb WriteFeedback, since map[uint16]time.Time) (bool, string) {
+	if fb.exc != 4 && !fb.mismatch {
+		return false, ""
 	}
 	t := s.lastTick.Load()
-	return t == nil || !pvRunningOn(*t)
+	var idle bool
+	var note string
+	switch reg.Role {
+	case RolePV:
+		idle, note = t == nil || !pvRunningOn(*t), "СЕС не в роботі"
+	case RoleESS:
+		if !s.cfg.Control.Write.TolerateStoppedESSRefusal {
+			return false, ""
+		}
+		idle, note = t != nil && essStoppedOn(*t), "УЗЕ зупинена"
+	default:
+		return false, ""
+	}
+	if idle {
+		delete(since, reg.Addr)
+		return true, note
+	}
+	if fb.exc != 4 {
+		return false, ""
+	}
+	first, ok := since[reg.Addr]
+	if !ok {
+		first = fb.At
+		since[reg.Addr] = first
+	}
+	if fb.At.Sub(first) < refuseGrace {
+		return true, "обладнання зупиняється або запускається"
+	}
+	return false, ""
 }
 
 // writeOne writes one value and reads the same register back.
@@ -200,8 +246,9 @@ func (s *Service) writeOne(ctx context.Context, sess registerSession, dev Device
 	defer cancel()
 	if err := s.guardedWrite(wctx, sess, reg, payload); err != nil {
 		fb.Err = err.Error()
-		if s.pvTolerated(reg, err) {
-			fb.Err, fb.Tolerated = "exception 4: СЕС не в роботі", true
+		if code, ok := modbusclient.ExceptionCode(err); ok {
+			fb.exc = code
+			fb.Err = fmt.Sprintf("exception %d", code)
 		}
 		return fb
 	}
@@ -219,6 +266,7 @@ func (s *Service) writeOne(ctx context.Context, sess registerSession, dev Device
 	fb.ReadbackKw = &rb
 	if got != raw {
 		fb.Err = fmt.Sprintf("%s: записано %d, прочитано %d", errReadbackDiff, raw, got)
+		fb.mismatch = true
 		return fb
 	}
 	fb.OK = true
@@ -235,6 +283,8 @@ func (s *Service) runWriter(ctx context.Context, dev Device, regs []writeReg, ev
 	defer t.Stop()
 	var sess registerSession
 	var lastWrite time.Time
+	refusedSince := map[uint16]time.Time{} // register → first exception 4 with the sun still reading as running
+	var dialFailedSince time.Time
 	closeSess := func() {
 		if sess != nil {
 			_ = sess.Close()
@@ -242,20 +292,31 @@ func (s *Service) runWriter(ctx context.Context, dev Device, regs []writeReg, ev
 		}
 	}
 	defer closeSess()
+	// A logger the writer cannot reach is a logger that takes no command:
+	// after writeDialFaultAfter it is a write fault, not a silent retry.
 	ensure := func() bool {
 		if sess != nil {
 			return true
 		}
 		ns, err := dial(ctx, dev)
 		if err != nil {
-			if !errors.Is(err, context.Canceled) {
-				s.log.Error("edge_write_dial", "host", dev.Host, "err", err)
-				for _, reg := range regs {
-					s.storeFeedback(WriteFeedback{Register: reg.Name, Host: dev.Host, At: time.Now().UTC(), Err: "dial: " + err.Error()})
-				}
+			if errors.Is(err, context.Canceled) {
+				return false
+			}
+			now := time.Now().UTC()
+			s.log.Error("edge_write_dial", "host", dev.Host, "err", err)
+			for _, reg := range regs {
+				s.storeFeedback(WriteFeedback{Register: reg.Name, Host: dev.Host, At: now, Err: "dial: " + err.Error()})
+			}
+			if dialFailedSince.IsZero() {
+				dialFailedSince = now
+			}
+			if now.Sub(dialFailedSince) >= writeDialFaultAfter {
+				s.reportWriteFault(writeFault{at: now, msg: "немає з'єднання з логером " + dev.Host + " для запису: " + err.Error()})
 			}
 			return false
 		}
+		dialFailedSince = time.Time{}
 		sess = ns
 		return true
 	}
@@ -319,10 +380,13 @@ func (s *Service) runWriter(ctx context.Context, dev Device, regs []writeReg, ev
 			}
 			fb := s.writeOne(ctx, sess, dev, reg, kw)
 			lastWrite = time.Now()
-			s.storeFeedback(fb)
-			if reg.Role == RolePV {
-				s.notePVAnswer(fb)
+			if fb.OK {
+				delete(refusedSince, reg.Addr)
+			} else if ok, note := s.expectedRefusal(reg, fb, refusedSince); ok {
+				fb.Tolerated, fb.Err = true, fb.Err+" — "+note
 			}
+			s.storeFeedback(fb)
+			s.noteRefusal(reg, fb)
 			if fb.OK || fb.Tolerated {
 				continue
 			}
@@ -339,17 +403,22 @@ func (s *Service) runWriter(ctx context.Context, dev Device, regs []writeReg, ev
 	}
 }
 
-// notePVAnswer logs the PV logger going from accepting to refusing (the
-// sun went to standby) and back, once per transition.
-func (s *Service) notePVAnswer(fb WriteFeedback) {
+// noteRefusal logs a logger going from accepting to an expected refusal
+// and back, once per transition: the PV logger with the sun down, the
+// battery logger with the battery stopped (where the config allows it).
+func (s *Service) noteRefusal(reg writeReg, fb WriteFeedback) {
+	flag, name, refused, accepted := &s.pvRefusing, "СЕС", EvPVWriteRefused, EvPVWriteAccepted
+	if reg.Role == RoleESS {
+		flag, name, refused, accepted = &s.essRefusing, "УЗЕ", EvESSWriteRefused, EvESSWriteAccepted
+	}
 	switch {
-	case fb.Tolerated && !s.pvRefusing.Swap(true):
-		s.pushEvent(Event{TS: fb.At, Severity: SevInfo, Code: EvPVWriteRefused,
-			Message: "логер СЕС не приймає " + fb.Register + " (exception 4): СЕС не в роботі — запис триває, УЗЕ не зупиняється",
+	case fb.Tolerated && !flag.Swap(true):
+		s.pushEvent(Event{TS: fb.At, Severity: SevWarning, Code: refused,
+			Message: "логер " + name + " не приймає " + fb.Register + ": " + fb.Err + " — запис триває",
 			Context: map[string]any{"register": fb.Register, "host": fb.Host}})
-	case fb.OK && s.pvRefusing.Swap(false):
-		s.pushEvent(Event{TS: fb.At, Severity: SevInfo, Code: EvPVWriteAccepted,
-			Message: "логер СЕС знову приймає " + fb.Register,
+	case fb.OK && flag.Swap(false):
+		s.pushEvent(Event{TS: fb.At, Severity: SevInfo, Code: accepted,
+			Message: "логер " + name + " знову приймає " + fb.Register,
 			Context: map[string]any{"register": fb.Register, "host": fb.Host}})
 	}
 }

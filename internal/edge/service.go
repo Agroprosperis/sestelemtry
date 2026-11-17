@@ -72,7 +72,10 @@ type Service struct {
 	cmdResults  chan cmdResult
 	cmdJobs     map[DeviceRole]chan oneShotJob
 	pvRefusing  atomic.Bool
+	essRefusing atomic.Bool
 	sessView    atomic.Pointer[WriteEquipment]
+	// A battery start the logger took in this write session.
+	essStartSent atomic.Bool
 
 	// Core-loop state (no locks: touched only from the core loop).
 	lastManifestID   string

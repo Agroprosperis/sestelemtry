@@ -65,6 +65,8 @@ const (
 	EvArrayStopPVCheck = "ESS_ARRAY_STOP_PV_CHECK"
 	EvPVWriteRefused   = "PV_WRITE_REFUSED"
 	EvPVWriteAccepted  = "PV_WRITE_ACCEPTED"
+	EvESSWriteRefused  = "ESS_WRITE_REFUSED"
+	EvESSWriteAccepted = "ESS_WRITE_ACCEPTED"
 	EvPVNotRunning     = "PV_NOT_RUNNING"
 )
 
@@ -202,13 +204,21 @@ type cmdResult struct {
 // commands. Core loop only.
 type writeSession struct {
 	pvRunningAtEnable bool
-	pvStartedByTest   bool // PV was not running at the hand-over and the test started it
-	essStopConfirmed  bool // a battery stop was confirmed after the last start
+	pvStartedByTest   bool // PV was not running at the hand-over and the logger took a start from the test
+	essStopConfirmed  bool // a battery stop was confirmed after the last start the logger took
 	autoStopSent      bool
 	disableByOperator bool
 	stopPhase         string // turning off: zero | ess_stop | pv_stop
+	essStopAwaited    bool   // turning off waits for a battery stop
+	pvStopAwaited     bool   // turning off waits for a PV stop
 	stopNotes         []string
 	pvCheckDay        string
+}
+
+// essStartedByTest reports that the test started the battery: the
+// logger took a start in this session, confirmed or not yet.
+func (s *Service) essStartedByTest() bool {
+	return s.essStartSent.Load() || s.ctl.ESSStartedInSession()
 }
 
 // WriteEquipment is the equipment side of the write block.
@@ -263,22 +273,35 @@ func (s *Service) onCommandRequest(ctx context.Context, now time.Time, req cmdRe
 	if state := s.ctl.State(); cmd.Start && (state == WriteStopped || state == WriteStopping) {
 		return cmdReply{Error: "після зупинки повторний пуск не надсилається — вимкніть запис і почніть заново"}
 	}
-	return s.sendOneShot(ctx, now, cmd, req.by)
+	return s.sendOneShot(ctx, now, cmd, req.by, false)
 }
 
 // sendOneShot hands one command to its logger's writer. A pending
 // command blocks itself and its opposite; nothing is ever retried.
-func (s *Service) sendOneShot(ctx context.Context, now time.Time, cmd oneShot, by string) cmdReply {
+// force is the edge's own stop (a latched stop, turning writing off):
+// it goes out over a start that still waits for its confirmation, and
+// is not doubled when the same stop is already on its way.
+func (s *Service) sendOneShot(ctx context.Context, now time.Time, cmd oneShot, by string, force bool) cmdReply {
 	dev, ok := s.deviceFor(cmd.Role)
 	if !ok {
 		return cmdReply{Error: "немає логера для «" + cmd.Label + "»"}
 	}
 	s.cmdMu.Lock()
-	for _, id := range []string{cmd.ID, cmd.Opposite} {
-		if c := s.cmds[id]; c.open() {
+	if c := s.cmds[cmd.ID]; c.open() {
+		snap := *c
+		s.cmdMu.Unlock()
+		if force {
+			return cmdReply{OK: true, Status: &snap}
+		}
+		return cmdReply{Error: "«" + snap.Label + "» ще чекає підтвердження"}
+	}
+	if c := s.cmds[cmd.Opposite]; c.open() {
+		if !force {
 			s.cmdMu.Unlock()
 			return cmdReply{Error: "«" + c.Label + "» ще чекає підтвердження"}
 		}
+		at := now
+		c.State, c.DoneAt, c.Note = CmdNotConfirmed, &at, "перервано зупинкою"
 	}
 	st := &CommandStatus{
 		ID: cmd.ID, Label: cmd.Label, Register: cmd.Addr, Host: dev.Host, By: by,
@@ -337,6 +360,16 @@ func (s *Service) onCommandResult(ctx context.Context, res cmdResult) {
 	}
 	snap := *st
 	s.cmdMu.Unlock()
+	// A start the logger took counts as started by the test from here
+	// on, before its confirmation: a stop must follow it either way.
+	if cmd := oneShots[snap.ID]; snap.Answer == AnswerAccepted && cmd.Start {
+		if cmd.Target == "ess" {
+			s.essStartSent.Store(true)
+			s.sess.essStopConfirmed = false
+		} else if !s.sess.pvRunningAtEnable {
+			s.sess.pvStartedByTest = true
+		}
+	}
 	switch snap.Answer {
 	case AnswerRefused:
 		s.writeEventDeduped(ctx, Event{TS: at, Severity: SevAlarm, Code: EvCmdRefused,
@@ -443,18 +476,20 @@ func (s *Service) invertersOnGrid(now time.Time) (int, bool) {
 }
 
 // sendAutoStops stops what the test started once a check latched a
-// stop (cutover §9, §12.4): the battery if it was started, the sun only
-// if the test started it.
-func (s *Service) sendAutoStops(ctx context.Context, now time.Time, t Tick) {
+// stop (cutover §9, §12.4): the battery if the test started it, the sun
+// only if the test started it. The battery stop goes out even when the
+// PCS already reads as shut down: a PCS that tripped comes back by
+// itself, a stopped one does not.
+func (s *Service) sendAutoStops(ctx context.Context, now time.Time) {
 	if s.sess.autoStopSent || !s.ctl.StopAuto() {
 		return
 	}
 	s.sess.autoStopSent = true
-	if s.ctl.ESSStartedInSession() && !s.sess.essStopConfirmed && !essStoppedOn(t) {
-		s.sendOneShot(ctx, now, oneShots[CmdESSStop], "edge: зупинка")
+	if s.essStartedByTest() && !s.sess.essStopConfirmed {
+		s.sendOneShot(ctx, now, oneShots[CmdESSStop], "edge: зупинка", true)
 	}
 	if s.sess.pvStartedByTest {
-		s.sendOneShot(ctx, now, oneShots[CmdPVStop], "edge: зупинка")
+		s.sendOneShot(ctx, now, oneShots[CmdPVStop], "edge: зупинка", true)
 	}
 }
 
@@ -479,36 +514,41 @@ func (s *Service) advanceStopping(ctx context.Context, now time.Time, t Tick) bo
 				s.sess.stopNotes = append(s.sess.stopNotes, "readback безпечних уставок не підтверджено")
 			}
 			s.sess.stopPhase = "ess_stop"
-			needESS := s.sess.disableByOperator || s.ctl.ESSStartedInSession()
-			if needESS && !s.sess.essStopConfirmed {
-				if r := s.sendOneShot(ctx, now, oneShots[CmdESSStop], "edge: вимкнення запису"); !r.OK {
+			// At the end the battery is stopped always; after a fault,
+			// if the test started it. A stop already on its way (sent by
+			// a latched stop) is waited for, not doubled.
+			if (s.sess.disableByOperator || s.essStartedByTest()) && !s.sess.essStopConfirmed {
+				if r := s.sendOneShot(ctx, now, oneShots[CmdESSStop], "edge: вимкнення запису", true); r.OK {
+					s.sess.essStopAwaited = true
+				} else {
 					s.sess.stopNotes = append(s.sess.stopNotes, "зупинку УЗЕ не надіслано: "+r.Error)
 				}
 			}
 		case "ess_stop":
-			if st, ok := s.commandStatus(CmdESSStop); ok && st.SentAt.After(since.Add(-time.Second)) {
-				if st.open() {
+			if s.sess.essStopAwaited {
+				if st, ok := s.commandStatus(CmdESSStop); ok && st.open() {
 					return false
 				}
-				if st.State != CmdConfirmed {
+				if !s.sess.essStopConfirmed {
 					s.sess.stopNotes = append(s.sess.stopNotes, "зупинку УЗЕ не підтверджено")
 				}
 			}
 			s.sess.stopPhase = "pv_stop"
 			if s.sess.pvStartedByTest {
-				if r := s.sendOneShot(ctx, now, oneShots[CmdPVStop], "edge: вимкнення запису"); !r.OK {
+				if r := s.sendOneShot(ctx, now, oneShots[CmdPVStop], "edge: вимкнення запису", true); r.OK {
+					s.sess.pvStopAwaited = true
+				} else {
 					s.sess.stopNotes = append(s.sess.stopNotes, "зупинку СЕС не надіслано: "+r.Error)
 				}
 			}
 		case "pv_stop":
-			if s.sess.pvStartedByTest {
-				if st, ok := s.commandStatus(CmdPVStop); ok && st.SentAt.After(since.Add(-time.Second)) {
-					if st.open() {
-						return false
-					}
-					if st.State != CmdConfirmed {
-						s.sess.stopNotes = append(s.sess.stopNotes, "зупинку СЕС не підтверджено")
-					}
+			if s.sess.pvStopAwaited {
+				st, ok := s.commandStatus(CmdPVStop)
+				if ok && st.open() {
+					return false
+				}
+				if !ok || st.State != CmdConfirmed {
+					s.sess.stopNotes = append(s.sess.stopNotes, "зупинку СЕС не підтверджено")
 				}
 			}
 			reason := s.ctl.Reason()
@@ -548,6 +588,7 @@ func fmtLive(live map[string]any) string {
 // beginWriteSession starts a session's command state at enabling.
 func (s *Service) beginWriteSession(t Tick) {
 	s.sess = writeSession{pvRunningAtEnable: pvRunningOn(t)}
+	s.essStartSent.Store(false)
 	s.cmdMu.Lock()
 	s.cmds = map[string]*CommandStatus{}
 	s.cmdMu.Unlock()
@@ -566,6 +607,7 @@ func (s *Service) endWriteSession(now time.Time) {
 	}
 	s.cmdMu.Unlock()
 	s.sess = writeSession{}
+	s.essStartSent.Store(false)
 }
 
 // checkDaytimePV notes once a day at 10:00 that the sun is not in
