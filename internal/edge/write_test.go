@@ -569,6 +569,32 @@ func TestControllerStopsWhenTheBatteryDoesNotFollow(t *testing.T) {
 	}
 }
 
+// 40378 never goes above the 40396 read now: it grows inverter by
+// inverter while PV starts and falls as they stop; at 0 PV is not
+// written, running or stopped.
+func TestControllerPVCeilingFollowsTheCurrentRating(t *testing.T) {
+	c, at := runController(t)
+	for i, tc := range []struct {
+		rated float64
+		known bool
+	}{{165, true}, {550, true}, {0, false}, {660, true}} {
+		cmd, _ := step(c, at.Add(time.Duration(i+1)*time.Second), controlTick(map[string]float64{"pv_rated_kw": tc.rated}), 0)
+		if cmd.PVKnown != tc.known || (tc.known && cmd.PVLimitKw != tc.rated) {
+			t.Fatalf("40396 = %v: %+v", tc.rated, cmd)
+		}
+	}
+	c.Stop(at.Add(5*time.Second), "test", false)
+	for i, tc := range []struct {
+		rated float64
+		known bool
+	}{{495, true}, {110, true}, {0, false}} {
+		cmd, _ := step(c, at.Add(time.Duration(i+6)*time.Second), controlTick(map[string]float64{"pv_rated_kw": tc.rated}), 0)
+		if cmd.State != WriteStopped || cmd.PVKnown != tc.known || (tc.known && cmd.PVLimitKw != tc.rated) {
+			t.Fatalf("stopped, 40396 = %v: %+v", tc.rated, cmd)
+		}
+	}
+}
+
 func TestControllerLowersPVCeilingForFaultyInverters(t *testing.T) {
 	c, at := runController(t)
 	tick := controlTick(nil)

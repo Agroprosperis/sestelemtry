@@ -204,7 +204,8 @@ func (c *Controller) Step(in ControlInputs) (WriteCommand, []Event) {
 		cmd.PVLimitKw, cmd.PVKnown = c.pvCeiling(in, &cmd.Clamps)
 	default:
 		// Stopped or turning off: battery 0, PV on its rating (§12.4).
-		cmd.PVLimitKw, cmd.PVKnown = c.lastPVRatedKw, c.lastPVRatedKw > 0
+		rated := c.pvRated(t)
+		cmd.PVLimitKw, cmd.PVKnown = rated, rated > 0
 	}
 	cmd.ESSKw, cmd.PVLimitKw = c.exportCeiling(in, cmd.ESSKw, cmd.PVLimitKw, cmd.PVKnown, &cmd.Clamps)
 	cmd.ESSKw = round1(cmd.ESSKw)
@@ -264,11 +265,23 @@ func (c *Controller) essCommand(in ControlInputs, clamps *[]string) float64 {
 	return p
 }
 
+// pvRated is the PV rating to write: the last 40396 read, never above
+// the one read now. While PV starts the logger's 40396 grows inverter
+// by inverter (ze 17.11: 165, 550, 660 kW); with every inverter off it
+// reads 0 and PV is not written.
+func (c *Controller) pvRated(t Tick) float64 {
+	rated := c.lastPVRatedKw
+	if v, ok := t.Values["pv_rated_kw"]; ok && v < rated {
+		rated = v
+	}
+	return rated
+}
+
 // pvCeiling is 40378 before the export ceiling: the rating from 40396,
 // lowered by the share of the inverters in fault. false when 40396 has
-// never been read: PV is then not written at all.
+// never been read or reads 0: PV is then not written at all.
 func (c *Controller) pvCeiling(in ControlInputs, clamps *[]string) (float64, bool) {
-	rated := c.lastPVRatedKw
+	rated := c.pvRated(in.Tick)
 	if rated <= 0 {
 		return 0, false
 	}
