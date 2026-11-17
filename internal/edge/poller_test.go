@@ -10,6 +10,7 @@ import (
 
 	"github.com/grid-x/modbus"
 
+	"github.com/nesh/sestelemetry/internal/modbusclient"
 	"github.com/nesh/sestelemetry/internal/registers"
 )
 
@@ -125,6 +126,65 @@ func TestPollSoftMeterUsesUnitID(t *testing.T) {
 	}
 	if v := got["meter_active_power_kw"]; v != -150 {
 		t.Fatalf("meter = %v, want -150", v)
+	}
+}
+
+// words answers every read with the given registers, zeros elsewhere.
+func words(regs map[uint16]uint16) fakeHolding {
+	read := func(start, qty uint16) ([]byte, error) {
+		out := zeros(qty)
+		for addr, w := range regs {
+			if addr >= start && addr < start+qty {
+				binary.BigEndian.PutUint16(out[2*(addr-start):], w)
+			}
+		}
+		return out, nil
+	}
+	return fakeHolding{hold: read, unit: func(_ byte, start, qty uint16) ([]byte, error) { return read(start, qty) }}
+}
+
+// The logger's "no value" marker is no reading (ze 17.11: a silent PCC
+// meter, 40505 read as 2 147 483 kW). Codes and alarm words keep all
+// ones, which the checks read as a fault.
+func TestPollDropsTheNoValueMarker(t *testing.T) {
+	entries := testCatalog(t, []string{"grid_connected_active_power_kw", "load_power_kw", "soc_percent", "pcs_shutdown", "sl_alarm_1"})
+	sess := words(map[uint16]uint16{
+		40505: 0x7FFF, 40506: 0xFFFF, // INT32 max
+		40503: 0x0001, 40504: 0x3880, // 80 000 = 80 kW
+		40515: 0xFFFF,
+		40540: 0xFFFF,
+		50000: 0xFFFF,
+	})
+	got, err := pollOnce(context.Background(), sess, Device{RequestTimeout: time.Second}, entries, modbusclient.PlanChunks(entries))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range []string{"grid_connected_active_power_kw", "soc_percent"} {
+		if v, ok := got[k]; ok {
+			t.Fatalf("%s = %v, want no value", k, v)
+		}
+	}
+	if got["load_power_kw"] != 80 || got["pcs_shutdown"] != 0xFFFF || got["sl_alarm_1"] != 0xFFFF {
+		t.Fatalf("got %v", got)
+	}
+
+	meter := testCatalog(t, MeterMetricKeys)
+	uid := byte(11)
+	got, remaining, dropped, ioErr, err := pollSoft(context.Background(), words(map[uint16]uint16{
+		32260: 0xFFFF, 32261: 0xFFFF, // UINT32 all ones
+		32278: 0x7FFF, 32279: 0xFFFF,
+	}), time.Second, meter, &uid)
+	if err != nil || ioErr != nil || len(dropped) != 0 || len(remaining) != len(meter) {
+		t.Fatalf("err=%v ioErr=%v dropped=%v remaining=%d", err, ioErr, dropped, len(remaining))
+	}
+	if _, ok := got["meter_phase_a_voltage_v"]; ok {
+		t.Fatalf("phase A = %v, want no value", got["meter_phase_a_voltage_v"])
+	}
+	if _, ok := got["meter_active_power_kw"]; ok {
+		t.Fatalf("32278 = %v, want no value", got["meter_active_power_kw"])
+	}
+	if v, ok := got["meter_phase_b_voltage_v"]; !ok || v != 0 {
+		t.Fatalf("phase B = %v (%v), a real 0 V stays a reading", v, ok)
 	}
 }
 

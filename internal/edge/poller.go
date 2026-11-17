@@ -271,9 +271,26 @@ func mergeSoft(
 	return remaining, dropped, ioErr, nil
 }
 
+// rawStatusKeys are codes and bit words. All ones there stays a
+// reading: the checks see it as an alarm, 40540 ≠ 0 or 40737 ≠ 4, the
+// safe side. Everywhere else it is the logger's "no value".
+var rawStatusKeys = map[string]bool{
+	"sl_alarm_1": true, "sl_alarm_2": true, "sl_alarm_3": true, "sl_alarm_4": true,
+	"sl_alarm_5": true, "sl_alarm_6": true, "sl_alarm_7": true, "sl_alarm_8": true,
+	"pcs_shutdown": true, "pcs_in_operation": true,
+	"active_power_control_mode": true, "pcs_working_mode": true,
+}
+
+// noValue: the logger has no reading for the register, e.g. 40505 of a
+// PCC meter that does not answer reads 2 147 483 kW. The tick gets no
+// value rather than a fake one, as in the cloud collector.
+func noValue(e registers.ResolvedEntry, payload []byte) bool {
+	return !rawStatusKeys[e.MetricKey] && decode.IsInvalidFor(e.Entry, payload)
+}
+
 func pollOnce(
 	ctx context.Context,
-	sess *modbusclient.Session,
+	sess holdingReader,
 	dev Device,
 	entries []registers.ResolvedEntry,
 	chunks []modbusclient.ReadChunk,
@@ -296,6 +313,9 @@ func pollOnce(
 		payload := slicePayload(e, chunks, data)
 		if payload == nil {
 			return nil, errors.New("edge: missing modbus slice for " + e.MetricKey)
+		}
+		if noValue(e, payload) {
+			continue
 		}
 		v, err := decode.Scaled(e.DataType, payload, e.Gain, e.Offset)
 		if err != nil {
@@ -363,7 +383,7 @@ func pollSoft(
 		}
 		remaining = append(remaining, e)
 		payload := slicePayload(e, chunks, data)
-		if payload == nil {
+		if payload == nil || noValue(e, payload) {
 			continue
 		}
 		v, decErr := decode.Scaled(e.DataType, payload, e.Gain, e.Offset)

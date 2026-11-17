@@ -199,6 +199,9 @@ func (s *Service) buildHealth(now time.Time) *HealthSnapshot {
 
 	// grid_limit
 	limitKw := s.effectiveImportLimitKw(now)
+	if limitKw > 0 && tick != nil && tick.GridPowerKw == nil {
+		add(HealthCheck{ID: "grid_limit", OK: false, Severity: CheckWarning, Label: "Ліміт імпорту", Expected: fmt.Sprintf("≤ %.0f кВт", limitKw), Actual: "40505: " + pccMissing(tick)})
+	}
 	if limitKw > 0 && tick != nil && tick.GridPowerKw != nil {
 		imp := *tick.GridPowerKw
 		if imp > limitKw {
@@ -541,8 +544,12 @@ func voltageCheck(tick *Tick) *HealthCheck {
 		{"СЕС", lineKeys("pv_"), 350, true},
 		{"УЗЕ", lineKeys("ess_"), 350, true},
 	}
+	silent := pccMeterSilent(tick)
 	var seen, idle, low []string
 	for _, g := range groups {
+		if silent && g.label == "фази" {
+			continue
+		}
 		var vals []string
 		zero := true
 		var below []string
@@ -573,6 +580,13 @@ func voltageCheck(tick *Tick) *HealthCheck {
 		return nil
 	}
 	const expected = "фаза ≥200 В, лінія ≥350 В"
+	if silent {
+		actual := "лічильник PCC не відповідає (фази 0 В)"
+		if len(low) > 0 {
+			actual += "; " + strings.Join(low, "; ")
+		}
+		return &HealthCheck{ID: "grid_voltage", OK: false, Severity: CheckAlarm, Label: "Напруга мережі", Expected: expected, Actual: actual, Detail: "логери бачать мережу: " + strings.Join(seen, " · ")}
+	}
 	if len(low) > 0 {
 		return &HealthCheck{ID: "grid_voltage", OK: false, Severity: CheckAlarm, Label: "Напруга мережі", Expected: expected, Actual: strings.Join(low, "; ")}
 	}

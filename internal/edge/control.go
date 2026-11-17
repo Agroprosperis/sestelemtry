@@ -86,6 +86,8 @@ type Controller struct {
 	followSince    time.Time
 	lowVoltSince   time.Time
 	pollLossSince  time.Time
+	pccLossSince   time.Time
+	essLossSince   time.Time
 	exportSince    time.Time
 	importSince    time.Time
 	deviationSince time.Time
@@ -357,6 +359,29 @@ func (c *Controller) checkStops(in ControlInputs) string {
 	} else {
 		c.lowVoltSince = time.Time{}
 	}
+	// Without 40505 neither the import limit nor the export ceiling is
+	// watched; without 40392, the battery's following.
+	if t.GridPowerKw == nil {
+		c.importSince, c.exportSince = time.Time{}, time.Time{}
+		if c.pccLossSince.IsZero() {
+			c.pccLossSince = now
+		}
+		if now.Sub(c.pccLossSince) >= stopPollLossAfter {
+			return "потужність PCC 40505: " + pccMissing(&t)
+		}
+	} else {
+		c.pccLossSince = time.Time{}
+	}
+	if t.ESSPowerKw == nil {
+		if c.essLossSince.IsZero() {
+			c.essLossSince = now
+		}
+		if now.Sub(c.essLossSince) >= stopPollLossAfter {
+			return "потужність УЗЕ 40392: немає даних"
+		}
+	} else {
+		c.essLossSince = time.Time{}
+	}
 	if t.GridPowerKw != nil {
 		grid := *t.GridPowerKw
 		if limit := in.ImportLimitKw; limit > 0 && grid >= importStopShare*limit {
@@ -482,9 +507,47 @@ func controlModeOff(t Tick) (string, bool) {
 	return "", false
 }
 
+var meterPhaseKeys = [3]string{"meter_phase_a_voltage_v", "meter_phase_b_voltage_v", "meter_phase_c_voltage_v"}
+
+func lineVoltageKeys(prefix string) [3]string {
+	return [3]string{prefix + "grid_line_voltage_ab_v", prefix + "grid_line_voltage_bc_v", prefix + "grid_line_voltage_ca_v"}
+}
+
+// pccMeterSilent: the PCC meter behind the logger does not answer. The
+// logger then has no 40505 and reads the meter's phases as 0 V, while
+// its own line voltages still see the grid (ze, 17.11.2026 13:48). In
+// a blackout the lines read 0 too, and that stays an undervoltage.
+func pccMeterSilent(t *Tick) bool {
+	if t.GridPowerKw != nil {
+		return false
+	}
+	for _, k := range meterPhaseKeys {
+		if v, ok := t.Values[k]; !ok || v != 0 {
+			return false
+		}
+	}
+	for _, prefix := range []string{"", "pv_", "ess_"} {
+		for _, k := range lineVoltageKeys(prefix) {
+			if t.Values[k] > 0 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// pccMissing says why 40505 has no value, for stops and consoles.
+func pccMissing(t *Tick) string {
+	if pccMeterSilent(t) {
+		return "немає даних — лічильник PCC не відповідає"
+	}
+	return "немає даних"
+}
+
 // lowVoltages lists the readings below the stop thresholds (phase
 // < 200 V, line < 350 V). Line voltages that all read 0 are an idle
-// inverter group, not an undervoltage.
+// inverter group, not an undervoltage. The phases of a silent meter
+// are no reading either: the missing 40505 stops writing instead.
 func lowVoltages(t *Tick) []string {
 	type group struct {
 		label string
@@ -492,14 +555,13 @@ func lowVoltages(t *Tick) []string {
 		min   float64
 		idle0 bool
 	}
-	line := func(prefix string) [3]string {
-		return [3]string{prefix + "grid_line_voltage_ab_v", prefix + "grid_line_voltage_bc_v", prefix + "grid_line_voltage_ca_v"}
-	}
 	groups := []group{
-		{"фаза", [3]string{"meter_phase_a_voltage_v", "meter_phase_b_voltage_v", "meter_phase_c_voltage_v"}, 200, false},
-		{"лінія", line(""), 350, true},
-		{"лінія СЕС", line("pv_"), 350, true},
-		{"лінія УЗЕ", line("ess_"), 350, true},
+		{"лінія", lineVoltageKeys(""), 350, true},
+		{"лінія СЕС", lineVoltageKeys("pv_"), 350, true},
+		{"лінія УЗЕ", lineVoltageKeys("ess_"), 350, true},
+	}
+	if !pccMeterSilent(t) {
+		groups = append([]group{{"фаза", meterPhaseKeys, 200, false}}, groups...)
 	}
 	var low []string
 	for _, g := range groups {
