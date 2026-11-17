@@ -19,6 +19,7 @@ import type {
 } from './controlClient'
 import { PLAN_SOURCE_LABELS, REASON_LABELS } from './decisionLabels'
 import { appliedAnnotation, manifestPlanToUzePlan } from './manifestPlan'
+import { writeBanner, writeMode } from './writeState'
 
 type Props = {
   site: string
@@ -74,13 +75,15 @@ export function StateTab({ site, status }: Props) {
 
   const hb = status?.heartbeat
   const health = status?.health
+  const mode = writeMode(status)
+  const writing = mode === 'writing'
+  // While the IoT2050 writes, the middle figure is what goes into 40381.
+  const commandKw = writing ? (health?.write?.command?.ess_kw ?? virtualKw) : virtualKw
 
   return (
     <div className="ctl-state-grid">
       <div className="ctl-state-left">
-        <div className="ctl-shadow-note">
-          SHADOW: команди віртуальні — запис у SmartLogger вимкнено, керує Encombi.
-        </div>
+        <div className={'ctl-shadow-note' + (writing ? ' writing' : '')}>{writeBanner[mode]}</div>
 
         <CurrentSnapshotNarrative
           liveAllocation={liveAllocation}
@@ -91,7 +94,7 @@ export function StateTab({ site, status }: Props) {
         />
 
         <section className="ctl-card">
-          <h2>План · shadow · факт</h2>
+          <h2>{writing ? 'План · команда · факт' : 'План · shadow · факт'}</h2>
           <div className="ctl-psf">
             <div className="ctl-psf-cell">
               <span className="k">План</span>
@@ -101,20 +104,20 @@ export function StateTab({ site, status }: Props) {
               <span className="sub">інтервал manifest</span>
             </div>
             <div className="ctl-psf-cell">
-              <span className="k">Shadow</span>
+              <span className="k">{writing ? 'Команда' : 'Shadow'}</span>
               <span
-                className={'v' + ((virtualKw ?? 0) > 0 ? ' pos' : (virtualKw ?? 0) < 0 ? ' neg' : '')}
+                className={'v' + ((commandKw ?? 0) > 0 ? ' pos' : (commandKw ?? 0) < 0 ? ' neg' : '')}
               >
-                {fmtKw(virtualKw)}
+                {fmtKw(commandKw)}
               </span>
-              <span className="sub">would_write_40381 · віртуально</span>
+              <span className="sub">{writing ? '40381 · записується в SmartLogger' : 'would_write_40381 · віртуально'}</span>
             </div>
             <div className="ctl-psf-cell">
               <span className="k">Факт УЗЕ</span>
               <span className={'v' + ((factKw ?? 0) > 0 ? ' pos' : (factKw ?? 0) < 0 ? ' neg' : '')}>
                 {fmtKw(factKw)}
               </span>
-              <span className="sub">40392 · керує Encombi</span>
+              <span className="sub">{writing ? '40392 · керує IoT2050' : '40392 · керує Encombi'}</span>
             </div>
           </div>
           <div className="ctl-rows">

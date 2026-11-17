@@ -286,7 +286,12 @@ describe('StateTab write card', () => {
     expect(screen.getByText(/запущена · пуск підтверджено/)).toBeInTheDocument()
     expect(screen.getByText(/не в роботі · логер не приймає запис \(exception 4\)/)).toHaveClass('warn')
     expect(screen.getByText(/Пуск УЗЕ · логер прийняв · чекає підтвердження/)).toHaveClass('warn')
-    expect(screen.getByText(/керує IoT2050/)).toBeInTheDocument()
+    expect(screen.getByText(/кВт · керує IoT2050/)).toBeInTheDocument()
+    // The banner and the plan card follow the write flag.
+    expect(screen.getByText(/^ЗАПИС: IoT2050 пише команди в SmartLogger/)).toHaveClass('writing')
+    expect(screen.getByText('План · команда · факт')).toBeInTheDocument()
+    expect(screen.getByText('40392 · керує IoT2050')).toBeInTheDocument()
+    expect(screen.queryByText(/^SHADOW:/)).toBeNull()
     expect(screen.getByText('40381 -100.0 кВт · 40378 600 кВт')).toBeInTheDocument()
     expect(screen.getByText('перша ненульова команда ≤ 100 кВт')).toBeInTheDocument()
     expect(screen.getByText('-100.0 кВт → -100.0 кВт')).toBeInTheDocument()

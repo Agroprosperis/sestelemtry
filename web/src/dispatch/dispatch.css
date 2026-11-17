@@ -169,6 +169,45 @@
   margin-top: 2px;
 }
 
+/* «На контролері»: the version in force and what the edge does with it. */
+.d-applied {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 0;
+  margin: 10px 0 12px;
+  padding: 8px 12px;
+  background: var(--d-panel);
+  border: 1px solid var(--d-line);
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--d-muted);
+}
+
+.d-applied strong {
+  color: var(--d-ink);
+  margin-right: 10px;
+}
+
+.d-applied-part + .d-applied-part::before {
+  content: '·';
+  margin: 0 8px;
+  color: var(--d-muted);
+}
+
+.d-applied-part.ok {
+  color: var(--ok-text, #15803d);
+}
+
+.d-applied-part.warn {
+  color: var(--d-warn);
+}
+
+.d-applied-part.err {
+  color: var(--d-err);
+  font-weight: 600;
+}
+
 .d-workspace {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 340px;

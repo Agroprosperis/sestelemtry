@@ -194,6 +194,14 @@
   padding: 8px 12px;
 }
 
+/* The IoT2050 writes into the SmartLoggers: the plan acts on equipment. */
+.ctl-shadow-note.writing {
+  color: var(--warn-text-strong);
+  background: var(--warn-bg-soft);
+  border-color: var(--warn-strong);
+  font-weight: 600;
+}
+
 /* --- «Режими» tab --- */
 
 .ctl-modes-grid {

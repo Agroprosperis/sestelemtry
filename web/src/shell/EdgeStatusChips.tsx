@@ -1,4 +1,5 @@
 import type { EdgeSiteStatus } from '../control/controlClient'
+import { writeMode } from '../control/writeState'
 import type { ConsoleMode } from './ModeTopBar'
 
 function shortManifestID(id: string): string {
@@ -18,7 +19,10 @@ export function EdgeStatusChips({
   mode: ConsoleMode
 }) {
   const decision = status?.decision?.record
-  const modeChip = (decision?.mode || status?.heartbeat?.status || '').toUpperCase()
+  // The controller mode is "shadow" also while the IoT2050 writes: the
+  // chip follows the write flag, not the label.
+  const writing = writeMode(status) === 'writing'
+  const modeChip = writing ? 'ЗАПИС' : (decision?.mode || status?.heartbeat?.status || '').toUpperCase()
   const manifest = status?.manifest
   if (!status && !modeChip) return null
 
@@ -30,7 +34,14 @@ export function EdgeStatusChips({
           IOT2050 {status.heartbeat.online ? 'online' : 'offline'}
         </span>
       )}
-      {modeChip && <span className="ctl-chip plain">{modeChip}</span>}
+      {modeChip && (
+        <span
+          className={'ctl-chip ' + (writing ? 'warn' : 'plain')}
+          title={writing ? 'IoT2050 пише команди в SmartLogger' : undefined}
+        >
+          {modeChip}
+        </span>
+      )}
       {mode === 'control' && status?.health && (
         <span
           className={'ctl-chip ' + (status.health.ok ? 'ok' : 'warn')}

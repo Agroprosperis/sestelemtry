@@ -5,6 +5,7 @@
 // Manual control lives in «План УЗЕ».
 
 import type { EdgeSiteStatus } from './controlClient'
+import { writeBanner, writeMode } from './writeState'
 
 type Props = {
   status: EdgeSiteStatus | null
@@ -48,11 +49,10 @@ export function ModesTab({ status, onOpenDesk }: Props) {
   const active = activeMode(status)
   const payload = status?.manifest?.payload
   const intervals = payload?.plan?.intervals?.length ?? 0
+  const mode = writeMode(status)
   return (
     <div style={{ display: 'grid', gap: 20 }}>
-      <div className="ctl-shadow-note">
-        SHADOW: edge рахує команди у тіні, фізично керує Encombi. Запису в SmartLogger немає.
-      </div>
+      <div className={'ctl-shadow-note' + (mode === 'writing' ? ' writing' : '')}>{writeBanner[mode]}</div>
 
       <section className="ctl-card">
         <h2>Режими роботи</h2>

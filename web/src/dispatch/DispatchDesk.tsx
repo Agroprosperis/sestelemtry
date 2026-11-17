@@ -7,6 +7,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './dispatch.css'
+import type { EdgeSiteStatus } from '../control/controlClient'
+import { writeMode } from '../control/writeState'
+import { AppliedBar } from './AppliedBar'
+import { manifestVersion } from './applied'
 import { buildChartSvg, type ChartLayout, type ModeGroup, type SeriesToggles } from './chartSvg'
 import { PeriodPicker } from '../dashboard/components/PeriodPicker'
 import { ChartNotes, ChartToolbar, type ChartLayoutMode } from './ChartParts'
@@ -25,6 +29,7 @@ import {
   actionGroups,
   buildPreview,
   clone,
+  commandDesc,
   defaultParams,
   fmt,
   hasValue,
@@ -40,11 +45,13 @@ import {
   pointFromResult,
   reviewGroups,
   same,
+  scenarioNames,
   shiftModel,
   timeLabel,
   type ChartPoint,
   type Clock,
   type DeskModel,
+  type DeskScenario,
   type PlanOverlay,
 } from './model'
 import { commandOutcome } from './outcome'
@@ -58,12 +65,27 @@ type Props = {
   // readOnly shows the plan in force without the command panel, for
   // roles that may look at the desk but not confirm (no control.write).
   readOnly?: boolean
+  // status is the edge status the control page polls: which manifest the
+  // controller holds and whether the IoT2050 writes.
+  status?: EdgeSiteStatus | null
 }
 
 const STATE_REFRESH_MS = 5 * 60_000
 const PREVIEW_DEBOUNCE_MS = 250
+const PREVIEW_PENDING = 'Попередній перегляд · ці зміни ще не додано у чернетку.'
 
-export function DispatchDesk({ site, onOpenReport, readOnly = false }: Props) {
+// fieldsKeyOf identifies what the command fields hold: an action's
+// message stays until the operator touches the fields or the selection.
+const fieldsKeyOf = (
+  scenario: DeskScenario,
+  param: string,
+  direction: 'charge' | 'discharge',
+  sel: Selection,
+  form: CfgForm | null,
+  reviewOpen: boolean,
+) => JSON.stringify([scenario, param, direction, sel.start, sel.end, form, reviewOpen])
+
+export function DispatchDesk({ site, onOpenReport, readOnly = false, status = null }: Props) {
   const [state, setState] = useState<DeskState | null>(null)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
@@ -72,7 +94,9 @@ export function DispatchDesk({ site, onOpenReport, readOnly = false }: Props) {
   const [history, setHistory] = useState<DeskModel[]>([])
   const [baseVersion, setBaseVersion] = useState(0)
   const [sel, setSel] = useState<Selection>({ start: 0, end: 1, anchor: 0, inspect: 0 })
-  const [scenario, setScenario] = useState<CommandType>('cover')
+  // The desk opens on the plan in force: a default command in the fields
+  // would draw its preview over the plan the controller follows.
+  const [scenario, setScenario] = useState<DeskScenario>('none')
   const [params, setParams] = useState<Record<CommandType, string>>(
     () => Object.fromEntries(Object.entries(defaultParams).map(([k, v]) => [k, String(v)])) as Record<CommandType, string>,
   )
@@ -90,15 +114,12 @@ export function DispatchDesk({ site, onOpenReport, readOnly = false }: Props) {
   })
   const [layout, setLayout] = useState<ChartLayoutMode>('split')
   const [reviewOpen, setReviewOpen] = useState(false)
+  const paramRaw = scenario === 'none' ? '' : params[scenario]
   // An action's message stays until the operator touches the fields or
   // the selection again (the mockup overwrites it on the next render).
-  const fieldsKey = JSON.stringify([scenario, params[scenario], direction, sel.start, sel.end, form, reviewOpen])
-  const [statusState, setStatusState] = useState<{ text: string; key: string | null }>({
-    text: 'Попередній перегляд · зміни ще не застосовано.',
-    key: null,
-  })
+  const fieldsKey = fieldsKeyOf(scenario, paramRaw, direction, sel, form, reviewOpen)
+  const [statusState, setStatusState] = useState<{ text: string; key: string | null }>({ text: '', key: null })
   const setStatus = useCallback((text: string) => setStatusState({ text, key: fieldsKey }), [fieldsKey])
-  const status = statusState.text
   const [loadEdit, setLoadEdit] = useState<{ key: string; value: string; error: string } | null>(null)
   // Server results by model key; `last` is shown while a newer one is out.
   const [results, setResults] = useState<{ map: Record<string, SimResult>; last: string }>({ map: {}, last: '' })
@@ -131,7 +152,7 @@ export function DispatchDesk({ site, onOpenReport, readOnly = false }: Props) {
           setWorking(restored)
           setHistory((saved.history ?? []).map((h) => shiftModel(normalizeModel(h), shift)))
           setForm(cfgToForm(restored.cfg))
-          if (!same(restored, applied)) setStatusState({ text: 'Відновлено незбережену чернетку з цього браузера.', key: null })
+          if (!same(restored, applied)) setNotice('Відновлено незбережену чернетку з цього браузера.')
         } else {
           if (saved) setNotice('Збережену чернетку скинуто: план змінився (версія ' + next.applied.version + ').')
           setWorking(clone(applied))
@@ -175,25 +196,43 @@ export function DispatchDesk({ site, onOpenReport, readOnly = false }: Props) {
   )
 
   // The parent keys the desk by site, so a site switch remounts it.
+  const mounted = useRef(true)
   useEffect(() => {
-    let cancelled = false
-    const load = (initial: boolean) =>
+    mounted.current = true
+    return () => {
+      mounted.current = false
+    }
+  }, [])
+  const load = useCallback(
+    (initial: boolean) =>
       fetchDeskState(site)
         .then((next) => {
-          if (cancelled) return
+          if (!mounted.current) return
           setError('')
           applyState(next, initial)
         })
         .catch((e) => {
-          if (!cancelled) setError(String(e))
-        })
+          if (mounted.current) setError(String(e))
+        }),
+    [site, applyState],
+  )
+  useEffect(() => {
     void load(true)
     const id = window.setInterval(() => void load(false), STATE_REFRESH_MS)
-    return () => {
-      cancelled = true
-      window.clearInterval(id)
-    }
-  }, [site, applyState])
+    return () => window.clearInterval(id)
+  }, [load])
+
+  // Someone else confirmed: the controller already holds a newer version
+  // than the desk shows. Reload now rather than at the next refresh.
+  const controllerVersion = manifestVersion(status?.manifest?.payload?.note)
+  const appliedVersion = state?.applied.version
+  const reloadedFor = useRef<number | null>(null)
+  useEffect(() => {
+    if (controllerVersion === null || appliedVersion === undefined || controllerVersion <= appliedVersion) return
+    if (reloadedFor.current === controllerVersion) return
+    reloadedFor.current = controllerVersion
+    void load(false)
+  }, [controllerVersion, appliedVersion, load])
 
   // A viewer leaves the browser's draft alone: it may belong to someone
   // else who signs in here.
@@ -212,9 +251,8 @@ export function DispatchDesk({ site, onOpenReport, readOnly = false }: Props) {
   const clock: Clock | null = useMemo(() => (state ? makeClock(state.start_hour, state.timezone) : null), [state])
   const cfg = useMemo(() => (form ? formToCfg(form) : null), [form])
   const siteInfo = state?.site ?? null
-  const paramRaw = params[scenario]
   const cfgError = siteInfo && cfg && form ? constraintsError(siteInfo, cfg, form.reserve, form.importCap) : ''
-  const cmdError = siteInfo && cfg ? commandError(siteInfo, cfg, scenario, paramRaw, direction) : ''
+  const cmdError = siteInfo && cfg && scenario !== 'none' ? commandError(siteInfo, cfg, scenario, paramRaw, direction) : ''
   const localInvalid = cfgError || cmdError
 
   const previewModel = useMemo(() => {
@@ -222,6 +260,13 @@ export function DispatchDesk({ site, onOpenReport, readOnly = false }: Props) {
     if (reviewOpen) return clone(working)
     return buildPreview(working, cfg, scenario, Number(paramRaw), direction, sel.start, sel.end)
   }, [working, cfg, reviewOpen, scenario, paramRaw, direction, sel.start, sel.end])
+  // The command in the fields that is not in the draft: the review warns
+  // about it instead of letting it vanish on «Підтвердити».
+  const pendingFields = useMemo(() => {
+    if (!working || !cfg || scenario === 'none' || localInvalid) return null
+    const m = buildPreview(working, cfg, scenario, Number(paramRaw), direction, sel.start, sel.end)
+    return same(m.commands, working.commands) ? null : m
+  }, [working, cfg, scenario, paramRaw, direction, sel.start, sel.end, localInvalid])
   const chartModel = localInvalid ? working : previewModel
   const modelKey = state && chartModel ? state.start_hour + '|' + JSON.stringify(chartModel) : ''
   const unchanged = !!chartModel && !!active && same(chartModel, active)
@@ -306,13 +351,27 @@ export function DispatchDesk({ site, onOpenReport, readOnly = false }: Props) {
     )
   }
 
+  // After «У чернетку» the fields go back to «Нічого не змінювати»: the
+  // chart shows the draft, not a preview of the same command again.
   const stage = () => {
     if (invalid || !working || !previewModel || !clock) return
     if (!same(working, previewModel)) {
       pushHistory(working)
       setWorking(clone(previewModel))
     }
-    setStatus('У чернетці: ' + timeLabel(clock, sel.start) + '–' + timeLabel(clock, sel.end) + '. Можна додавати інші команди або переглянути чернетку.')
+    setScenario('none')
+    setStatusState({
+      text: 'У чернетці: ' + timeLabel(clock, sel.start) + '–' + timeLabel(clock, sel.end) + '. Можна додавати інші команди або переглянути чернетку.',
+      key: fieldsKeyOf('none', '', direction, sel, form, reviewOpen),
+    })
+  }
+
+  // stageFields adds the command left in the fields from the review.
+  const stageFields = () => {
+    if (!working || !pendingFields) return
+    pushHistory(working)
+    setWorking(clone(pendingFields))
+    setScenario('none')
   }
 
   const stageConstraints = () => {
@@ -390,9 +449,16 @@ export function DispatchDesk({ site, onOpenReport, readOnly = false }: Props) {
         writeDraft(site, null)
         setHistory([])
         setReviewOpen(false)
+        setScenario('none')
+        const mode = writeMode(status)
         setNotice(
           'Застосовано · версія ' + res.body.version + '. План опубліковано на edge' +
-            (res.body.publish?.manifest_id ? ' (' + res.body.publish.manifest_id + ')' : '') + ', режим shadow — без запису в SmartLogger.',
+            (res.body.publish?.manifest_id ? ' (' + res.body.publish.manifest_id + ')' : '') +
+            (mode === 'writing'
+              ? ': IoT2050 пише в SmartLogger, план виконуватиметься на обладнанні.'
+              : mode === 'shadow'
+                ? ', режим shadow — без запису в SmartLogger.'
+                : '.'),
         )
         const next = await fetchDeskState(site)
         setResults({ map: {}, last: '' })
@@ -498,7 +564,9 @@ export function DispatchDesk({ site, onOpenReport, readOnly = false }: Props) {
     i < 0 ? (past[i + HISTORY_HOURS] ?? EMPTY_POINT) : pointFromResult(res.hours[i])
   const previewAt = (i: number) => pointAt(result, i)
   const baselineAt = (i: number) => pointAt(state.result, i)
-  const planAt = (i: number): PlanOverlay | null => planOverlay(i < 0 ? at(i)?.plan : undefined)
+  // The plan the edge follows: in history the one in force at the time,
+  // from now on the published one.
+  const planAt = (i: number): PlanOverlay | null => planOverlay(at(i)?.plan)
   const reserve = invalid ? working.cfg.reserve_pct : cfg.reserve_pct
   const first = -HISTORY_HOURS
   const count = HISTORY_HOURS + FUTURE_HOURS
@@ -545,10 +613,22 @@ export function DispatchDesk({ site, onOpenReport, readOnly = false }: Props) {
   const selectedSoc = selected.map((h) => h.soc_pct)
   const completeSoc = hasValue(startSoc) && selectedSoc.every(hasValue)
   const outcome = commandOutcome(clock, result, chartModel, hours, scenario, paramRaw, direction, sel.start, sel.end)
+  const previewPending = !invalid && !same(working, previewModel)
+  const neutralStatus = same(working, active)
+    ? state.applied.version > 0
+      ? 'Показано чинний план · версія ' + state.applied.version + '.'
+      : 'Показано чинний план · AUTO, підтверджених версій ще немає.'
+    : 'У чернетці є незастосовані зміни.'
   const statusLine =
-    statusState.key === fieldsKey || invalid || same(working, previewModel)
-      ? status
-      : 'Попередній перегляд · ці зміни ще не додано у чернетку.'
+    statusState.key === fieldsKey && statusState.text ? statusState.text : previewPending ? PREVIEW_PENDING : neutralStatus
+  const pendingText =
+    pendingFields && scenario !== 'none'
+      ? (scenario === 'auto'
+          ? scenarioNames.auto
+          : commandDesc({ type: scenario, value: Number(paramRaw), direction: scenario === 'fixed' ? direction : undefined })) +
+        ' · ' +
+        span
+      : ''
 
   const review = reviewGroups(active, working)
   const reviewResult = reviewOpen ? result : null
@@ -597,6 +677,7 @@ export function DispatchDesk({ site, onOpenReport, readOnly = false }: Props) {
           )}
         </div>
       </div>
+      <AppliedBar state={state} status={status} clock={clock} />
 
       <section
         className={'d-workspace' + (reviewOpen ? ' d-reviewing' : '') + (readOnly ? ' d-readonly' : '')}
@@ -731,7 +812,7 @@ export function DispatchDesk({ site, onOpenReport, readOnly = false }: Props) {
                 <button type="button" className="d-quiet" disabled={!history.length} onClick={undo} aria-label="Скасувати останню зміну чернетки">
                   ↶ Скасувати
                 </button>
-                <button type="button" className="d-primary" disabled={!!invalid} onClick={stage}>
+                <button type="button" className="d-primary" disabled={!!invalid || same(working, previewModel)} onClick={stage}>
                   У чернетку
                 </button>
               </div>
@@ -763,6 +844,9 @@ export function DispatchDesk({ site, onOpenReport, readOnly = false }: Props) {
                 canConfirm={canConfirm}
                 confirmBusy={confirmBusy}
                 stale={stale}
+                pendingFields={pendingText}
+                onStageFields={stageFields}
+                writeMode={writeMode(status)}
                 onClose={closeReview}
                 onEditIssue={editIssue}
                 onConfirm={() => void confirm()}

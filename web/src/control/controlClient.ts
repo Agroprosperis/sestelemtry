@@ -25,6 +25,16 @@ export type ManifestPlanInterval = {
   rdn_uah_per_kwh?: number
 }
 
+// One confirmed desk block the edge executes every second.
+export type ManifestManualCommand = {
+  command_id: string
+  type: string
+  value?: number
+  direction?: string
+  from: string
+  until: string
+}
+
 export type ManifestPayload = {
   schema_version: string
   manifest_id: string
@@ -32,15 +42,18 @@ export type ManifestPayload = {
   issued_at: string
   valid_from: string
   valid_until: string
+  manifest_seq?: number
   mode: string
   write_enabled: boolean
   preset: string
   source?: string
+  // "dispatch vN": the desk version the manifest was built from.
   note?: string
   limits?: { ess_charge_max_kw?: number; ess_discharge_max_kw?: number }
-  grid_limits?: { import_limit_kw?: number; target_import_kw?: number; pv_rated_kw?: number }
+  grid_limits?: { import_limit_kw?: number; target_import_kw?: number; pv_rated_kw?: number; export_cap_kw?: number }
   soc_policy?: { min_economic_pct?: number; max_economic_pct?: number }
   plan?: { granularity: string; load_source?: string; intervals: ManifestPlanInterval[] | null }
+  manual_commands?: ManifestManualCommand[] | null
 }
 
 export type EdgeManifestState = 'none' | 'pending' | 'applied' | 'expired'

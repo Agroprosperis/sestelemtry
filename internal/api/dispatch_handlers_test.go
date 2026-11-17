@@ -358,6 +358,55 @@ func TestPlansInForcePicksTheRunBeforeEachHour(t *testing.T) {
 	}
 }
 
+func versionRun(version int, start, runAt time.Time, ess ...float64) storage.DispatchRun {
+	var hours []dispatchRunHour
+	for i, v := range ess {
+		hours = append(hours, dispatchRunHour{TS: start.Add(time.Duration(i) * time.Hour), EssKw: v})
+	}
+	raw, _ := json.Marshal(hours)
+	return storage.DispatchRun{StartHour: start, RunAt: runAt, Version: version, Hours: raw}
+}
+
+// A version the operator confirmed inside an hour holds for that hour
+// (17.11 on ze: v6 at 12:23); re-runs of one version inside the hour do
+// not replace the plan the hour started with.
+func TestPlansInForceTakesTheVersionConfirmedInsideTheHour(t *testing.T) {
+	h0 := time.Date(2026, 11, 17, 10, 0, 0, 0, time.UTC)
+	v5 := versionRun(5, h0.Add(-time.Hour), h0.Add(-45*time.Minute), 100, 200, 300) // 09:15, covers 09..11
+	v5again := versionRun(5, h0, h0.Add(14*time.Minute), 210, 310)                  // 10:14 re-run
+	v6 := versionRun(6, h0, h0.Add(23*time.Minute), 0, 50)                          // 10:23 confirm
+	v6again := versionRun(6, h0, h0.Add(38*time.Minute), 7, 8)                      // 10:38 re-run
+	hours := []time.Time{h0, h0.Add(time.Hour)}
+
+	got := plansInForce([]storage.DispatchRun{v5, v5again}, hours)
+	if got[h0].EssKw != 200 {
+		t.Fatalf("10:00 with only v5 = %v, want 200 (a re-run inside the hour does not count)", got[h0].EssKw)
+	}
+	got = plansInForce([]storage.DispatchRun{v5, v5again, v6, v6again}, hours)
+	if got[h0].EssKw != 0 {
+		t.Fatalf("10:00 = %v, want 0 from the v6 confirmed at 10:23", got[h0].EssKw)
+	}
+	if got[h0.Add(time.Hour)].EssKw != 8 {
+		t.Fatalf("11:00 = %v, want 8 from the newest run before it", got[h0.Add(time.Hour)].EssKw)
+	}
+}
+
+// The current and coming hours show the newest run: what went into the
+// manifest the controller holds.
+func TestLatestPlanIsTheNewestRun(t *testing.T) {
+	h0 := time.Date(2026, 11, 17, 10, 0, 0, 0, time.UTC)
+	got := latestPlan([]storage.DispatchRun{
+		versionRun(5, h0, h0.Add(14*time.Minute), 210, 310),
+		versionRun(6, h0, h0.Add(23*time.Minute), 0, 50),
+	})
+	if len(got) != 2 || got[h0].EssKw != 0 || got[h0.Add(time.Hour)].EssKw != 50 {
+		t.Fatalf("latest plan = %+v, want v6's 0, 50", got)
+	}
+	if len(latestPlan(nil)) != 0 {
+		t.Fatal("no runs, a plan")
+	}
+}
+
 func TestValidateModelNamesTheHour(t *testing.T) {
 	env := dispatchTestEnv(t)
 	m := dispatch.Model{Loads: make([]*float64, 24), Commands: make([]*dispatch.Command, 24), Cfg: env.defaults}

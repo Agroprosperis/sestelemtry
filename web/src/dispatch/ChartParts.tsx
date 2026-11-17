@@ -11,7 +11,7 @@ const seriesKeys = [
   ['bess', 'd-bess', 'УЗЕ'],
   ['soc', 'd-soc', 'SOC'],
   ['before', 'd-old', 'До зміни'],
-  ['plan', 'd-plan', 'План (історія)'],
+  ['plan', 'd-plan', 'План на контролері'],
 ] as const
 
 export function ChartToolbar({
