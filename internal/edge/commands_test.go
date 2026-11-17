@@ -438,6 +438,7 @@ func TestPVLoggerException4(t *testing.T) {
 // joining): a lower readback is taken, sun up or down. A higher one is
 // immaterial with the sun down and a fault at once with the sun up.
 func TestPVLoggerReadbackMismatch(t *testing.T) {
+	shortSettle(t)
 	holding := func(raw uint32) *fakeLogger {
 		f := newFakeLogger()
 		f.readback = func(addr uint16, written []byte) []byte {
