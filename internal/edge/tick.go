@@ -65,6 +65,32 @@ type Normalizer struct {
 	faultAfter time.Duration
 
 	last map[DeviceRole]reading
+
+	lastSoc   float64
+	lastSocAt time.Time
+}
+
+// A logger reads SOC 0 for a second or two while the PCS stops or comes
+// up (ze 17.11 15:25:37 and 15:35:57: 87.4 %, 0, 87.4 %). A battery does
+// not lose its charge in a second, so such a 0 is no reading; one that
+// lasts past socBlinkWindow, or follows a SOC already near 0, is taken.
+const (
+	socBlinkFloorPct = 5.0
+	socBlinkWindow   = 5 * time.Minute
+)
+
+func (n *Normalizer) dropSocBlink(now time.Time, values map[string]float64) {
+	v, ok := values["soc_percent"]
+	if !ok {
+		return
+	}
+	if v > 0 {
+		n.lastSoc, n.lastSocAt = v, now
+		return
+	}
+	if n.lastSoc >= socBlinkFloorPct && now.Sub(n.lastSocAt) <= socBlinkWindow {
+		delete(values, "soc_percent")
+	}
 }
 
 func NewNormalizer(cfg *Config) *Normalizer {
@@ -116,6 +142,7 @@ func (n *Normalizer) BuildTick(now time.Time) Tick {
 			values[k] = v
 		}
 	}
+	n.dropSocBlink(now, values)
 	return buildTickFromValues(n.siteID, n.topology, n.essSign, n.gridSign, now, values, quality)
 }
 
