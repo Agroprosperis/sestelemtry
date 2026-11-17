@@ -70,29 +70,59 @@ func (h *Handlers) dispatchFacts(ctx context.Context, env *dispatchEnv, from, to
 
 // --- history: plan in force -------------------------------------------
 
-// plansInForce maps each hour to the planned hour of the newest run
-// published before that hour started (what the edge was following).
-// runs must be oldest first (DispatchRunsBetween order).
+// plansInForce maps each hour to the planned hour the edge was asked to
+// follow: the newest run published before that hour started. When the
+// operator confirmed a newer version during the hour, that version's
+// plan holds for the hour (its first run, the confirm); re-runs of the
+// same version inside the hour do not count. runs must be oldest first
+// (DispatchRunsBetween order).
 func plansInForce(runs []storage.DispatchRun, hours []time.Time) map[time.Time]dispatchRunHour {
 	out := map[time.Time]dispatchRunHour{}
 	decoded := make([][]dispatchRunHour, len(runs))
 	for i, r := range runs {
 		_ = json.Unmarshal(r.Hours, &decoded[i])
 	}
-	for _, ts := range hours {
-		for i := len(runs) - 1; i >= 0; i-- {
-			if runs[i].RunAt.After(ts) {
-				continue
+	entry := func(i int, ts time.Time) (dispatchRunHour, bool) {
+		for _, hr := range decoded[i] {
+			if hr.TS.Equal(ts) {
+				return hr, true
 			}
-			found := false
-			for _, hr := range decoded[i] {
-				if hr.TS.Equal(ts) {
-					out[ts] = hr
-					found = true
+		}
+		return dispatchRunHour{}, false
+	}
+	for _, ts := range hours {
+		base := -1 // the newest run published before the hour started
+		for i := len(runs) - 1; i >= 0; i-- {
+			if !runs[i].RunAt.After(ts) {
+				base = i
+				break
+			}
+		}
+		confirmed := -1 // the first run of the newest version confirmed during the hour
+		if base >= 0 {
+			for i := base + 1; i < len(runs); i++ {
+				r := runs[i]
+				if !r.RunAt.Before(ts.Add(time.Hour)) {
 					break
 				}
+				newest := runs[base].Version
+				if confirmed >= 0 {
+					newest = runs[confirmed].Version
+				}
+				if r.Version > newest {
+					confirmed = i
+				}
 			}
-			if found {
+		}
+		if confirmed >= 0 {
+			if hr, ok := entry(confirmed, ts); ok {
+				out[ts] = hr
+			}
+			continue
+		}
+		for i := base; i >= 0; i-- {
+			if hr, ok := entry(i, ts); ok {
+				out[ts] = hr
 				break
 			}
 			// The newest run before ts does not cover it (no known load
@@ -101,6 +131,21 @@ func plansInForce(runs []storage.DispatchRun, hours []time.Time) map[time.Time]d
 				break
 			}
 		}
+	}
+	return out
+}
+
+// latestPlan is the newest run's plan by hour: what went into the
+// manifest the controller holds now. runs must be oldest first.
+func latestPlan(runs []storage.DispatchRun) map[time.Time]dispatchRunHour {
+	out := map[time.Time]dispatchRunHour{}
+	if len(runs) == 0 {
+		return out
+	}
+	var hours []dispatchRunHour
+	_ = json.Unmarshal(runs[len(runs)-1].Hours, &hours)
+	for _, hr := range hours {
+		out[hr.TS.UTC()] = hr
 	}
 	return out
 }

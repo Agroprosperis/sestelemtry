@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DeskState, SimResult } from './dispatchClient'
 
@@ -10,6 +10,7 @@ const api = vi.hoisted(() => ({
 }))
 vi.mock('./dispatchClient', () => api)
 
+import type { EdgeSiteStatus } from '../control/controlClient'
 import { DispatchDesk } from './DispatchDesk'
 import { readDraft, writeDraft } from './deskDraft'
 
@@ -129,6 +130,7 @@ describe('DispatchDesk', () => {
   it('blocks «У чернетку» on an invalid command without a round trip', async () => {
     render(<DispatchDesk site="ze" />)
     await screen.findByText('Ручне керування УЗЕ')
+    fireEvent.change(screen.getByLabelText('Що потрібно зробити'), { target: { value: 'cover' } })
     const param = screen.getByDisplayValue('300')
     fireEvent.change(param, { target: { value: '900' } })
     expect(screen.getByText('Паспортна межа розряду — 864 кВт.')).toBeInTheDocument()
@@ -187,6 +189,97 @@ describe('DispatchDesk', () => {
     expect(screen.getByRole('button', { name: 'Переглянути чернетку →' })).toBeEnabled()
   })
 
+  it('opens on the plan in force, without a preview of a default command', async () => {
+    const { container } = render(<DispatchDesk site="ze" />)
+    await screen.findByText('Ручне керування УЗЕ')
+    expect(screen.getByLabelText('Що потрібно зробити')).toHaveValue('none')
+    expect(screen.getByText(/^Показано чинний план/)).toBeInTheDocument()
+    expect(container.querySelector('[data-command-status="preview"]')).toBeNull()
+    expect(screen.getByRole('button', { name: 'У чернетку' })).toBeDisabled()
+    await new Promise((r) => setTimeout(r, 400))
+    expect(api.previewDraft).not.toHaveBeenCalled()
+  })
+
+  it('previews a command once one is chosen and returns to the plan after «У чернетку»', async () => {
+    const { container } = render(<DispatchDesk site="ze" />)
+    await screen.findByText('Ручне керування УЗЕ')
+    const action = screen.getByLabelText('Що потрібно зробити')
+    fireEvent.change(action, { target: { value: 'hold' } })
+    await waitFor(() => expect(api.previewDraft).toHaveBeenCalled())
+    expect(screen.getByText('Попередній перегляд · ці зміни ще не додано у чернетку.')).toBeInTheDocument()
+    expect(container.querySelector('[data-command-status="preview"]')).not.toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'У чернетку' }))
+    expect(action).toHaveValue('none')
+    expect(screen.getByText(/^У чернетці: 19:00–20:00/)).toBeInTheDocument()
+    expect(container.querySelector('[data-command-status="preview"]')).toBeNull()
+    expect(container.querySelector('[data-command-status="draft"]')).not.toBeNull()
+  })
+
+  it('warns in the review about a command left in the fields', async () => {
+    const { container } = render(<DispatchDesk site="ze" />)
+    const changes = () => within(container.querySelector('.d-review-list') as HTMLElement)
+    await screen.findByText('Ручне керування УЗЕ')
+    fireEvent.change(screen.getByLabelText('Споживання для вибраних годин'), { target: { value: '200' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Задати споживання для вибраного інтервалу' }))
+    fireEvent.change(screen.getByLabelText('Що потрібно зробити'), { target: { value: 'hold' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Переглянути чернетку →' }))
+
+    expect(screen.getByText(/лишилась дія, якої немає в чернетці/).closest('.d-warning')?.textContent).toContain(
+      'Пауза · 0 кВт · 19:00–20:00',
+    )
+    expect(changes().queryByText('Пауза · 0 кВт')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Додати у чернетку' }))
+    expect(screen.queryByText(/лишилась дія, якої немає в чернетці/)).toBeNull()
+    expect(changes().getByText('Пауза · 0 кВт')).toBeInTheDocument()
+    expect(screen.getByLabelText('Що потрібно зробити')).toHaveValue('none')
+  })
+
+  it('shows what the controller holds', async () => {
+    const state = deskState(1)
+    state.applied.confirmed_at = '2026-10-07T16:00:00Z'
+    state.applied.confirmed_by = 'op@x'
+    api.fetchDeskState.mockResolvedValue(state)
+    const status = (over: { state?: string; note?: string; writing?: boolean } = {}) =>
+      ({
+        site_id: 'ze',
+        heartbeat: { online: true, buffer_pending: 0 },
+        manifest: {
+          state: over.state ?? 'applied',
+          manifest_id: 'ze-x',
+          issued_at: '2026-10-07T16:04:00Z',
+          applied_at: '2026-10-07T16:05:00Z',
+          payload: {
+            note: over.note ?? 'dispatch v1',
+            plan: { granularity: '1h', intervals: [{ ts: '2026-10-07T16:00:00Z', ess_kw: 0 }, { ts: '2026-10-07T17:00:00Z', ess_kw: 100 }] },
+            manual_commands: [{ command_id: 'b1', type: 'hold', from: '2026-10-07T16:00:00Z', until: '2026-10-07T17:00:00Z' }],
+          },
+        },
+        health: { ts: '', ok: true, checks: [], write: { enabled: over.writing ?? false, writer: 'other', state: 'off', gate: {} } },
+      }) as unknown as EdgeSiteStatus
+
+    const { rerender } = render(<DispatchDesk site="ze" status={status()} />)
+    expect(await screen.findByText('версія 1 · підтверджено 19:00 · op@x')).toBeInTheDocument()
+    expect(screen.getByText('контролер застосував о 19:05')).toHaveClass('ok')
+    expect(screen.getByText('план до 21:00, далі самоспоживання')).toBeInTheDocument()
+    expect(screen.getByText('ручних блоків: 1')).toBeInTheDocument()
+    expect(screen.getByText(/^запис вимкнено/)).toBeInTheDocument()
+
+    rerender(<DispatchDesk site="ze" status={status({ state: 'pending' })} />)
+    expect(screen.getByText('очікує контролера · опубліковано 19:04')).toHaveClass('warn')
+
+    rerender(<DispatchDesk site="ze" status={status({ note: 'dispatch v0' })} />)
+    expect(screen.getByText('на контролері ще версія 0: нову не опубліковано')).toHaveClass('err')
+
+    rerender(<DispatchDesk site="ze" status={status({ writing: true })} />)
+    expect(screen.getByText(/^IoT2050 пише в SmartLogger/)).toHaveClass('err')
+
+    // Someone else confirmed v2: the desk reloads its state at once.
+    const calls = api.fetchDeskState.mock.calls.length
+    rerender(<DispatchDesk site="ze" status={status({ note: 'dispatch v2' })} />)
+    await waitFor(() => expect(api.fetchDeskState.mock.calls.length).toBe(calls + 1))
+  })
+
   it('shows the plan in force without the command panel when read-only', async () => {
     const draft = {
       start_hour: '2026-10-07T16:00:00Z',
@@ -204,5 +297,10 @@ describe('DispatchDesk', () => {
     }
     // Someone else's draft in this browser stays as it was.
     expect(readDraft('ze')).toEqual(draft)
+    // The viewer sees the plan in force, not a preview of anything.
+    expect(container.querySelector('[data-command-status="preview"]')).toBeNull()
+    expect(screen.getByLabelText('План на контролері')).toBeInTheDocument()
+    await new Promise((r) => setTimeout(r, 400))
+    expect(api.previewDraft).not.toHaveBeenCalled()
   })
 })

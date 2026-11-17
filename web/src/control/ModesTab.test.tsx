@@ -24,6 +24,16 @@ describe('ModesTab', () => {
     expect(activeTitle()).toBe('Самоспоживання')
   })
 
+  it('words the banner by the write flag', () => {
+    const status = statusWith('economic_arbitrage', 'plan_discharge')
+    const { rerender } = render(<ModesTab status={status} onOpenDesk={() => {}} />)
+    expect(screen.getByText(/^SHADOW:/)).not.toHaveClass('writing')
+    const writing = { ...status, health: { ts: '', ok: true, checks: [], write: { enabled: true } } } as unknown as EdgeSiteStatus
+    rerender(<ModesTab status={writing} onOpenDesk={() => {}} />)
+    expect(screen.getByText(/^ЗАПИС: IoT2050 пише команди в SmartLogger/)).toHaveClass('writing')
+    expect(screen.queryByText(/^SHADOW:/)).toBeNull()
+  })
+
   it('opens the desk', () => {
     const open = vi.fn()
     render(<ModesTab status={statusWith('self_consumption_safe', 'self_consumption')} onOpenDesk={open} />)

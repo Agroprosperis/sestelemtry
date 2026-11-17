@@ -1,5 +1,12 @@
+import type { WriteMode } from '../control/writeState'
 import type { DeskHour, Issue, SimResult } from './dispatchClient'
 import { FUTURE_HOURS, cfgSummary, timeLabel, unknownForecastText, type Clock, type DeskModel, type ReviewGroup } from './model'
+
+const CONFIRM_NOTES: Record<WriteMode, string> = {
+  writing: 'Запис увімкнено: план піде на edge і виконається на обладнанні.',
+  shadow: 'Shadow: план піде на edge погодинно, запису в SmartLogger немає.',
+  unknown: 'План піде на edge погодинно.',
+}
 
 export function ReviewPanel({
   clock,
@@ -18,6 +25,9 @@ export function ReviewPanel({
   canConfirm,
   confirmBusy,
   stale,
+  pendingFields,
+  onStageFields,
+  writeMode,
   onClose,
   onEditIssue,
   onConfirm,
@@ -38,6 +48,12 @@ export function ReviewPanel({
   canConfirm: boolean
   confirmBusy: boolean
   stale: boolean
+  // pendingFields describes a command left in the fields, not in the
+  // draft ('' = none); onStageFields adds it.
+  pendingFields: string
+  onStageFields: () => void
+  // writeMode words the footer: with writing on the plan acts on equipment.
+  writeMode: WriteMode
   onClose: () => void
   onEditIssue: (hour: number) => void
   onConfirm: () => void
@@ -103,6 +119,16 @@ export function ReviewPanel({
         )}
       </div>
       <div className="d-review-checks">
+        {pendingFields && (
+          <div className="d-warning" role="alert">
+            <strong>У полях команди лишилась дія, якої немає в чернетці:</strong> {pendingFields}. «Підтвердити» застосує чернетку без неї.
+            <div className="d-issue-edit">
+              <button type="button" onClick={onStageFields}>
+                Додати у чернетку
+              </button>
+            </div>
+          </div>
+        )}
         {result && result.known_hours < FUTURE_HOURS && (
           <p className="d-small">
             {unknownForecastText(clock, result, working, hours)} Команди можна зберегти; досяжність у цих годинах ще не оцінена.
@@ -129,8 +155,14 @@ export function ReviewPanel({
           </div>
         )}
       </div>
+      {writeMode === 'writing' && (
+        <div className="d-warning" role="alert">
+          <strong>Запис у SmartLogger увімкнено.</strong> Після підтвердження контролер виконає цей план на обладнанні: батарея заряджатиметься
+          й розряджатиметься за ним.
+        </div>
+      )}
       <div className="d-review-foot">
-        <span className="d-small">Shadow: план піде на edge погодинно, запису в SmartLogger немає.</span>
+        <span className="d-small">{CONFIRM_NOTES[writeMode]}</span>
         <button type="button" className="d-primary" disabled={!canConfirm} onClick={onConfirm}>
           {confirmBusy ? 'Підтвердження…' : stale ? 'Розрахунок…' : 'Підтвердити'}
         </button>

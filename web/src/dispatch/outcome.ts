@@ -1,16 +1,17 @@
-import type { CommandType, DeskHour, SimResult } from './dispatchClient'
-import { fmt, unknownForecastText, type Clock, type DeskModel } from './model'
+import type { DeskHour, SimResult } from './dispatchClient'
+import { fmt, unknownForecastText, type Clock, type DeskModel, type DeskScenario } from './model'
 
 export type CommandOutcome = { label: string; value: string; detail: string; comparison: string }
 
 // commandOutcome is the preview metric for the selected interval: energy
 // moved by the command, the import peak under a cap, or the SOC reached.
+// With no command in the fields it describes the plan shown.
 export function commandOutcome(
   clock: Clock,
   result: SimResult,
   model: DeskModel,
   hours: DeskHour[],
-  scenario: CommandType,
+  scenario: DeskScenario,
   paramRaw: string,
   direction: 'charge' | 'discharge',
   start: number,
@@ -28,7 +29,7 @@ export function commandOutcome(
   let detail: string
   let comparison = ''
   if (!complete) {
-    label = 'Результат команди'
+    label = scenario === 'none' ? 'План за інтервал' : 'Результат команди'
     value = 'Немає прогнозу'
     detail = unknownForecastText(clock, result, model, hours)
     if (scenario === 'export' || scenario === 'fixed') comparison = 'Запитано ' + fmt(Number(paramRaw) * (end - start)) + ' кВт·год'
@@ -47,6 +48,7 @@ export function commandOutcome(
   } else {
     label =
       scenario === 'export' ? 'Експорт PCC за інтервал' : discharged > 0 ? 'Розряд УЗЕ за інтервал' : charged > 0 ? 'Заряд УЗЕ за інтервал' : 'УЗЕ за інтервал'
+    if (scenario === 'none') label = 'План · ' + label.charAt(0).toLowerCase() + label.slice(1)
     value = fmt(scenario === 'export' ? exported : discharged > 0 ? discharged : charged) + ' кВт·год'
     detail =
       scenario === 'export'

@@ -53,7 +53,13 @@ export const scenarioNames: Record<CommandType, string> = {
   auto: 'AUTO',
 }
 
-export const scenarioOptions: { value: CommandType; label: string }[] = [
+// DeskScenario is what the command fields hold: a command, or 'none' —
+// the desk only shows the plan (the starting state, and after «У
+// чернетку» / «Підтвердити»), so no preview is mistaken for the plan.
+export type DeskScenario = CommandType | 'none'
+
+export const scenarioOptions: { value: DeskScenario; label: string }[] = [
+  { value: 'none', label: 'Нічого не змінювати · показати чинний план' },
   { value: 'cover', label: 'Покривати споживання з УЗЕ' },
   { value: 'solar', label: 'Заряджати надлишками СЕС' },
   { value: 'target', label: 'Зарядити до SOC' },
@@ -75,7 +81,8 @@ export const defaultParams: Record<CommandType, number> = {
   auto: 0,
 }
 
-export const intents: Record<CommandType, string> = {
+export const intents: Record<DeskScenario, string> = {
+  none: 'Графік показує чинний план без змін (або вашу чернетку). Оберіть дію, щоб побачити її попередній перегляд.',
   cover: 'УЗЕ покриває дефіцит після СЕС у межах потужності та резерву.',
   solar: 'Заряд лише фактичним надлишком СЕС. Без надлишку команда дає 0 кВт.',
   target:
@@ -156,11 +163,12 @@ export function actionMark(c: Command | null): ActionMark {
 }
 
 // buildPreview applies the command in the fields to the selected hours
-// of the draft — what the chart shows before «У чернетку».
+// of the draft — what the chart shows before «У чернетку». 'none' adds
+// no command: the draft as it is, with the limits in the fields.
 export function buildPreview(
   working: DeskModel,
   cfg: Constraints,
-  scenario: CommandType,
+  scenario: DeskScenario,
   value: number,
   direction: 'charge' | 'discharge',
   start: number,
@@ -168,6 +176,7 @@ export function buildPreview(
 ): DeskModel {
   const m = clone(working)
   m.cfg = clone(cfg)
+  if (scenario === 'none') return m
   const cmd: Command = { type: scenario, value, id: 'block-' + start + '-' + end + '-' + scenario }
   if (scenario === 'fixed') cmd.direction = direction
   for (let i = start; i < end; i++) m.commands[i] = scenario === 'auto' ? null : clone(cmd)
@@ -340,9 +349,10 @@ export function cfgSummary(cfg: Constraints): string {
   )
 }
 
-// PlanOverlay is what the edge was asked to follow in a past hour
-// («план / факт»): dashed over the measured series. command describes
-// the operator intent behind it (inspector only).
+// PlanOverlay is what the edge was asked to follow: in a past hour the
+// plan in force then («план / факт»), from now on the published plan the
+// controller holds. Dashed over the series; command describes the
+// operator intent behind it (inspector only).
 export type PlanOverlay = { ess: number | null; soc: number | null; grid: number | null; command?: string }
 
 export function planOverlay(p: PlanHour | undefined): PlanOverlay | null {

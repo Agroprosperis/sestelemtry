@@ -1,5 +1,16 @@
-import type { Command, CommandType, Issue, SiteInfo } from './dispatchClient'
-import { FUTURE_HOURS, commandDesc, fmt, intents, optionTime, paramLabel, scenarioOptions, timeLabel, type Clock } from './model'
+import type { Command, Issue, SiteInfo } from './dispatchClient'
+import {
+  FUTURE_HOURS,
+  commandDesc,
+  fmt,
+  intents,
+  optionTime,
+  paramLabel,
+  scenarioOptions,
+  timeLabel,
+  type Clock,
+  type DeskScenario,
+} from './model'
 import type { CommandOutcome } from './outcome'
 
 const fromOptions = Array.from({ length: FUTURE_HOURS }, (_, i) => i)
@@ -127,8 +138,8 @@ export function CommandFields({
 }: {
   site: SiteInfo
   exportCapKw: number | null
-  scenario: CommandType
-  onScenario: (s: CommandType) => void
+  scenario: DeskScenario
+  onScenario: (s: DeskScenario) => void
   param: string
   onParam: (value: string) => void
   reserve: string
@@ -140,7 +151,7 @@ export function CommandFields({
     <div className="d-fields">
       <label className="d-field">
         Що потрібно зробити
-        <select value={scenario} onChange={(e) => onScenario(e.target.value as CommandType)}>
+        <select value={scenario} onChange={(e) => onScenario(e.target.value as DeskScenario)}>
           {scenarioOptions.map((o) => (
             <option key={o.value} value={o.value}>
               {o.label}
@@ -148,7 +159,7 @@ export function CommandFields({
           ))}
         </select>
       </label>
-      {scenario !== 'hold' && scenario !== 'auto' && (
+      {scenario !== 'none' && scenario !== 'hold' && scenario !== 'auto' && (
         <label className="d-field">
           <span>{paramLabel(scenario)}</span>
           <span className="d-input-unit">
@@ -201,7 +212,7 @@ export function CommandFields({
 }
 
 // loadKw is null when some selected hour has no load.
-export function CommandHelp({ scenario, pvKw, loadKw, prices }: { scenario: CommandType; pvKw: number; loadKw: number | null; prices: number[] }) {
+export function CommandHelp({ scenario, pvKw, loadKw, prices }: { scenario: DeskScenario; pvKw: number; loadKw: number | null; prices: number[] }) {
   return (
     <details className="d-help">
       <summary>Пояснення дії та прогноз інтервалу</summary>

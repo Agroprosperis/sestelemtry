@@ -68,7 +68,8 @@ type dispatchHour struct {
 	PvKw    float64          `json:"pv_kw"` // forecast (future)
 	Weather *edgeHourWeather `json:"weather,omitempty"`
 	Fact    *dispatchFact    `json:"fact,omitempty"`
-	// Plan is what the edge was following in a history hour.
+	// Plan is what the edge was following in a history hour, and what it
+	// holds for the current and coming hours (the published plan).
 	Plan *dispatchRunHour `json:"plan,omitempty"`
 }
 
@@ -151,11 +152,14 @@ func (h *Handlers) dispatchState(w http.ResponseWriter, r *http.Request) {
 	for ts := histFrom; ts.Before(env.start); ts = ts.Add(time.Hour) {
 		histHours = append(histHours, ts)
 	}
-	runs, err := storage.DispatchRunsBetween(r.Context(), h.edge.Pool, siteID, histFrom, env.start)
+	// Runs up to now: the current hour's own publications (a confirm, a
+	// re-plan) belong to the plan the controller holds.
+	runs, err := storage.DispatchRunsBetween(r.Context(), h.edge.Pool, siteID, histFrom, env.now)
 	if err != nil {
 		h.edge.Log.Warn("dispatch_state_runs", "site_id", siteID, "err", err)
 	}
 	plans := plansInForce(runs, histHours)
+	current := latestPlan(runs)
 
 	resp := dispatchStateResponse{
 		SiteID: siteID, Timezone: env.tz, Now: env.now, StartHour: env.start,
@@ -187,6 +191,10 @@ func (h *Handlers) dispatchState(w http.ResponseWriter, r *http.Request) {
 			if wx, ok := env.weather[ts]; ok {
 				w := wx
 				hr.Weather = &w
+			}
+			if p, ok := current[ts.UTC()]; ok {
+				pl := p
+				hr.Plan = &pl
 			}
 		} else {
 			hr.Fact = facts[ts]

@@ -153,6 +153,7 @@ export function ControlPage() {
         <DispatchDesk
           key={site}
           site={site}
+          status={status}
           onOpenReport={access.can('economics.read', site) ? navigateEconomicsDay : undefined}
           readOnly={!access.can('control.write', site)}
         />
