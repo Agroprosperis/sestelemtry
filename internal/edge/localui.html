@@ -647,7 +647,7 @@ function renderWrite(w) {
     rows.push(['Команда', '40381 = ' + (c.ess_kw != null ? c.ess_kw : '—') + ' кВт · 40378 = ' + (c.pv_known ? c.pv_limit_kw + ' кВт' : 'не пишеться (40396 невідомий)')]);
     if ((c.clamps || []).length) rows.push(['Обмеження', esc(c.clamps.join('; '))]);
     for (const r of w.registers || []) {
-      rows.push([esc(r.register) + ' · ' + esc(r.host), (r.ok ? '✅ ' : '❌ ') + 'записано ' + r.kw + ' кВт · readback ' + (r.readback_kw != null ? r.readback_kw + ' кВт' : '—') + ' · ' + fmtTime(r.at) + (r.error ? ' · ' + esc(r.error) : '')]);
+      rows.push([esc(r.register) + ' · ' + esc(r.host), (r.ok ? '✅ ' : r.tolerated ? '⏸ ' : '❌ ') + 'записано ' + r.kw + ' кВт · readback ' + (r.readback_kw != null ? r.readback_kw + ' кВт' : '—') + ' · ' + fmtTime(r.at) + (r.error ? ' · ' + esc(r.error) : '')]);
     }
   }
   const eq = w.equipment || {};

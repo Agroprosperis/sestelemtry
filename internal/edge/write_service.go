@@ -41,7 +41,7 @@ func (s *Service) stepWrite(ctx context.Context, now time.Time, tick Tick, d *De
 	for _, ev := range evs {
 		s.writeEventDeduped(ctx, ev)
 	}
-	s.sendAutoStops(ctx, now, tick)
+	s.sendAutoStops(ctx, now)
 	s.checkDaytimePV(ctx, now, tick)
 	s.sessView.Store(&WriteEquipment{ESSStarted: s.ctl.ESSStartedInSession(), PVStartedByTest: s.sess.pvStartedByTest})
 	if d == nil {
