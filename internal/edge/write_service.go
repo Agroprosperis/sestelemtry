@@ -295,11 +295,17 @@ func (s *Service) writePreconditions(now time.Time) []WritePrecondition {
 	default:
 		add("import_now", false, "імпорт не біля ліміту", fmt.Sprintf("%.0f кВт, ліміт не заданий", *t.GridPowerKw))
 	}
+	// The grid at the PCC is the meter's phases; the loggers' line
+	// voltages alone do not prove it.
 	low := lowVoltages(&t)
-	if pccMeterSilent(&t) {
-		add("voltage", false, "мережа є, напруги в нормі", "лічильник PCC не відповідає: фази не виміряні, логери бачать мережу")
-	} else {
-		add("voltage", len(low) == 0 && hasVoltage(t), "мережа є, напруги в нормі", voltageActual(t, low))
+	const voltageLabel = "мережа є, напруги в нормі"
+	switch {
+	case pccMeterSilent(&t) && busLive(&t):
+		add("voltage", false, voltageLabel, "лічильник PCC не відповідає: мережу в точці приєднання не підтверджено")
+	case s.hasPCCMeter() && !meterPhasesRead(&t) && len(low) == 0:
+		add("voltage", false, voltageLabel, "фази лічильника PCC не прочитано: мережу в точці приєднання не підтверджено")
+	default:
+		add("voltage", len(low) == 0 && hasVoltage(t), voltageLabel, voltageActual(t, low))
 	}
 	if meter, has := t.Values["meter_active_power_kw"]; has && t.GridPowerKw != nil &&
 		math.Abs(meter) >= pccSignDeadbandKw && math.Abs(*t.GridPowerKw) >= pccSignDeadbandKw {
@@ -311,6 +317,16 @@ func (s *Service) writePreconditions(now time.Time) []WritePrecondition {
 		add("manifest_seq", m.ManifestSeq > 0, "чинний manifest пронумерований", fmt.Sprintf("seq %d", m.ManifestSeq))
 	}
 	return out
+}
+
+// hasPCCMeter: a logger reads the PCC meter's own registers.
+func (s *Service) hasPCCMeter() bool {
+	for _, d := range s.cfg.SmartLogger.Devices {
+		if d.Meter != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // controlModeKeys are the 40737 readings expected on this topology.
