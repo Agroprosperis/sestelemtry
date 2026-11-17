@@ -226,9 +226,16 @@ func (s *Service) buildHealth(now time.Time) *HealthSnapshot {
 		}
 	}
 
-	// shadow_vs_fact: always info in shadow — Encombi drives the BESS.
+	// shadow_vs_fact: always info. In shadow Encombi drives the BESS; with
+	// writing on the fact follows the IoT2050's 40381, which the hold and
+	// the write clamps keep apart from the shadow (the controller stops
+	// writing when the fact does not follow it).
 	if dec != nil && tick != nil && tick.ESSPowerKw != nil {
-		add(HealthCheck{ID: "shadow_vs_fact", OK: true, Severity: CheckInfo, Label: "Shadow vs факт УЗЕ", Expected: fmt.Sprintf("%.1f кВт", dec.PBessVirtualKw), Actual: fmt.Sprintf("%.1f кВт", *tick.ESSPowerKw), Detail: "керує Encombi — розбіжність очікувана"})
+		detail := "керує Encombi — розбіжність очікувана"
+		if s.gate.Enabled() {
+			detail = "керує IoT2050: факт іде за командою 40381, а не за shadow"
+		}
+		add(HealthCheck{ID: "shadow_vs_fact", OK: true, Severity: CheckInfo, Label: "Shadow vs факт УЗЕ", Expected: fmt.Sprintf("%.1f кВт", dec.PBessVirtualKw), Actual: fmt.Sprintf("%.1f кВт", *tick.ESSPowerKw), Detail: detail})
 	}
 
 	// sl_{role}: per-SmartLogger link state.

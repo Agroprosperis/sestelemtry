@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -343,6 +344,33 @@ func TestHealthPlanVsShadowWarnsWithClamps(t *testing.T) {
 	// shadow_vs_fact stays info regardless (керує Encombi).
 	if c := findCheck(t, h, "shadow_vs_fact"); c != nil && c.Severity != CheckInfo {
 		t.Fatalf("shadow_vs_fact = %+v, want info", c)
+	}
+}
+
+// With writing on the IoT2050 drives the battery, not Encombi.
+func TestHealthShadowVsFactNamesWhoDrives(t *testing.T) {
+	tick := testTick(map[string]float64{"active_ess_power_kw": 0, "soc_percent": 60}, QualityOK)
+	s := healthTestService(testCfg(), &tick, &Decision{PBessVirtualKw: 100})
+	detail := func() string {
+		c := findCheck(t, s.buildHealth(testTS), "shadow_vs_fact")
+		if c == nil || c.Severity != CheckInfo {
+			t.Fatalf("shadow_vs_fact = %+v", c)
+		}
+		return c.Detail
+	}
+	if d := detail(); d != "керує Encombi — розбіжність очікувана" {
+		t.Fatalf("shadow: %q", d)
+	}
+	g, _, err := OpenWriteGate(filepath.Join(t.TempDir(), "write_gate.json"), testTS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.Enable("test", testTS); err != nil {
+		t.Fatal(err)
+	}
+	s.gate = g
+	if d := detail(); d != "керує IoT2050: факт іде за командою 40381, а не за shadow" {
+		t.Fatalf("writing: %q", d)
 	}
 }
 
