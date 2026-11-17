@@ -36,6 +36,41 @@ func TestNormalizerMergesDualRoles(t *testing.T) {
 	}
 }
 
+// The logger reads SOC 0 for a second or two while the PCS stops (ze
+// 17.11 15:25:37): no reading. A 0 that lasts, or a battery that really
+// runs down to it, is taken.
+func TestNormalizerDropsASocBlinkToZero(t *testing.T) {
+	n := NewNormalizer(testCfg())
+	soc := func(at time.Time, v float64) *float64 {
+		n.Observe(reading{role: RoleAll, at: at, values: map[string]float64{"soc_percent": v}})
+		return n.BuildTick(at).SocPercent
+	}
+	at := testTS
+	for i, tc := range []struct {
+		after time.Duration
+		in    float64
+		want  *float64
+	}{
+		{0, 87.4, f64ptr(87.4)},
+		{time.Second, 0, nil},
+		{2 * time.Second, 87.4, f64ptr(87.4)},
+		{3 * time.Second, 0, nil},
+		{6 * time.Minute, 0, f64ptr(0)},
+	} {
+		got := soc(at.Add(tc.after), tc.in)
+		if (got == nil) != (tc.want == nil) || (got != nil && *got != *tc.want) {
+			t.Fatalf("step %d (%v, SOC %v): got %v, want %v", i, tc.after, tc.in, got, tc.want)
+		}
+	}
+
+	n = NewNormalizer(testCfg())
+	for i, v := range []float64{3, 2, 1, 0} {
+		if got := soc(at.Add(time.Duration(i)*time.Minute), v); got == nil || *got != v {
+			t.Fatalf("running down, SOC %v: got %v", v, got)
+		}
+	}
+}
+
 func TestNormalizerFaultWhenRoleNeverReported(t *testing.T) {
 	n := NewNormalizer(dualCfg())
 	now := testTS
