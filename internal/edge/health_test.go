@@ -181,7 +181,8 @@ func TestHealthNightStandbyDoesNotFailOK(t *testing.T) {
 	// words polled and zero.
 	tick := testTick(map[string]float64{
 		"active_pv_power_kw": 0, "load_power_kw": 80, "soc_percent": 60,
-		"active_ess_power_kw": 0, "pcs_shutdown": 0, "pcs_in_operation": 1,
+		"grid_connected_active_power_kw": 80,
+		"active_ess_power_kw":            0, "pcs_shutdown": 0, "pcs_in_operation": 1,
 		"sl_alarm_1": 0, "sl_alarm_2": 0, "sl_alarm_3": 0,
 		"sl_alarm_4": 0, "sl_alarm_5": 0, "sl_alarm_6": 0,
 	}, QualityOK)
@@ -207,6 +208,27 @@ func TestHealthNightStandbyDoesNotFailOK(t *testing.T) {
 	}
 	if h.Alarms == nil || len(h.Alarms.Words) != 6 || h.Alarms.Words[0] != "0x0" {
 		t.Fatalf("alarms = %+v, want six 0x0 words", h.Alarms)
+	}
+}
+
+// A silent PCC meter: the voltage and import-limit checks name it,
+// rather than 0 V phases and 2 147 483 kW of import.
+func TestHealthNamesASilentPCCMeter(t *testing.T) {
+	tick := testTick(map[string]float64{
+		"active_pv_power_kw": 0, "load_power_kw": 80, "soc_percent": 60,
+		"active_ess_power_kw": 0, "pcs_shutdown": 1,
+		"meter_phase_a_voltage_v": 0, "meter_phase_b_voltage_v": 0, "meter_phase_c_voltage_v": 0,
+		"meter_active_power_kw":      0,
+		"ess_grid_line_voltage_ab_v": 387.1, "ess_grid_line_voltage_bc_v": 388.3, "ess_grid_line_voltage_ca_v": 387,
+	}, QualityOK)
+	h := healthTestService(testCfg(), &tick, nil).buildHealth(testTS)
+	v := findCheck(t, h, "grid_voltage")
+	if v == nil || v.OK || v.Actual != "лічильник PCC не відповідає (фази 0 В)" || !strings.Contains(v.Detail, "УЗЕ 387/388/387 В") {
+		t.Fatalf("grid_voltage = %+v", v)
+	}
+	g := findCheck(t, h, "grid_limit")
+	if g == nil || g.OK || g.Actual != "40505: немає даних — лічильник PCC не відповідає" {
+		t.Fatalf("grid_limit = %+v", g)
 	}
 }
 

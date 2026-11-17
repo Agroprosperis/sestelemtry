@@ -392,7 +392,7 @@ function renderStatus(st) {
   $('kpi-soc').textContent = t.soc_percent != null ? Math.round(t.soc_percent) + '%' : '—';
   $('kpi-soc-sub').textContent = 'зона ' + (st.limits.soc_min_pct || 0) + '–' + (st.limits.soc_max_pct || 0) + '%';
   $('kpi-grid').textContent = fmtKw(t.grid_power_kw);
-  $('kpi-grid-sub').textContent = (t.grid_power_kw || 0) >= 0 ? 'імпорт · ліміт ' + st.limits.grid_import_kw : 'експорт';
+  $('kpi-grid-sub').textContent = t.grid_power_kw == null ? 'немає даних 40505' : t.grid_power_kw >= 0 ? 'імпорт · ліміт ' + st.limits.grid_import_kw : 'експорт';
   $('kpi-pv').textContent = fmtKw(t.pv_power_kw);
   $('kpi-pv-sub').textContent = 'rated ' + st.limits.pv_rated_kw + ' кВт';
   const dec = st.decision;

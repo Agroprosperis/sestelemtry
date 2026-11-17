@@ -287,13 +287,20 @@ func (s *Service) writePreconditions(now time.Time) []WritePrecondition {
 	add("export_cap", capKw > 0, "стеля відпуску задана (manifest: «Налаштування» → режим відпуску; без manifest — конфіг)", fmtKw(capKw, capKw > 0))
 	limit := s.effectiveImportLimitKw(now)
 	add("import_limit", limit > 0, "ліміт імпорту заданий", fmtKw(limit, limit > 0))
-	if t.GridPowerKw != nil && limit > 0 {
+	switch {
+	case t.GridPowerKw == nil:
+		add("import_now", false, "потужність PCC 40505 відома", pccMissing(&t))
+	case limit > 0:
 		add("import_now", *t.GridPowerKw < importStopShare*limit, "імпорт не біля ліміту", fmt.Sprintf("%.0f кВт", *t.GridPowerKw))
-	} else {
-		add("import_now", false, "потужність PCC 40505 відома", "немає")
+	default:
+		add("import_now", false, "імпорт не біля ліміту", fmt.Sprintf("%.0f кВт, ліміт не заданий", *t.GridPowerKw))
 	}
 	low := lowVoltages(&t)
-	add("voltage", len(low) == 0 && hasVoltage(t), "мережа є, напруги в нормі", voltageActual(t, low))
+	if pccMeterSilent(&t) {
+		add("voltage", false, "мережа є, напруги в нормі", "лічильник PCC не відповідає: фази не виміряні, логери бачать мережу")
+	} else {
+		add("voltage", len(low) == 0 && hasVoltage(t), "мережа є, напруги в нормі", voltageActual(t, low))
+	}
 	if meter, has := t.Values["meter_active_power_kw"]; has && t.GridPowerKw != nil &&
 		math.Abs(meter) >= pccSignDeadbandKw && math.Abs(*t.GridPowerKw) >= pccSignDeadbandKw {
 		add("pcc_sign", pccSignsAgree(*t.GridPowerKw, meter*s.cfg.EffectiveMeterSign()),

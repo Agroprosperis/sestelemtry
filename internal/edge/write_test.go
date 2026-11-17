@@ -454,6 +454,76 @@ func TestControllerStops(t *testing.T) {
 	})
 }
 
+func controlTickWithout(values map[string]float64, drop ...string) Tick {
+	base := controlTick(values).Values
+	for _, k := range drop {
+		delete(base, k)
+	}
+	return buildTickFromValues("ze", TopologyDual, 1, 1, testTS, base, QualityOK)
+}
+
+// ze 17.11.2026 13:48: the PCC meter stopped answering the logger. No
+// 40505, the meter's phases 0 V, the loggers' lines still 387…388 V.
+func silentMeterTick() Tick {
+	return controlTickWithout(map[string]float64{
+		"meter_phase_a_voltage_v": 0, "meter_phase_b_voltage_v": 0, "meter_phase_c_voltage_v": 0,
+		"meter_active_power_kw":      0,
+		"ess_grid_line_voltage_ab_v": 387, "ess_grid_line_voltage_bc_v": 388, "ess_grid_line_voltage_ca_v": 387,
+	}, "grid_connected_active_power_kw")
+}
+
+// Without 40505 neither the import limit nor the export ceiling is
+// watched, without 40392 the battery's following: writing stops after
+// 10 s, as on a lost poll. A blackout stays an undervoltage.
+func TestControllerStopsWithoutPCCOrBatteryPower(t *testing.T) {
+	blackout := controlTickWithout(map[string]float64{
+		"meter_phase_a_voltage_v": 0, "meter_phase_b_voltage_v": 0, "meter_phase_c_voltage_v": 0,
+	}, "grid_connected_active_power_kw")
+	cases := []struct {
+		name   string
+		tick   Tick
+		reason string
+	}{
+		{"silent PCC meter", silentMeterTick(), "потужність PCC 40505: немає даних — лічильник PCC не відповідає"},
+		{"no 40505", controlTickWithout(nil, "grid_connected_active_power_kw"), "потужність PCC 40505: немає даних"},
+		{"no 40392", controlTickWithout(nil, "active_ess_power_kw"), "потужність УЗЕ 40392: немає даних"},
+		{"blackout", blackout, "низька напруга мережі: фаза 0 В; фаза 0 В; фаза 0 В"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c, at := runController(t)
+			step(c, at.Add(time.Second), tc.tick, 0)
+			if cmd, _ := step(c, at.Add(9*time.Second), tc.tick, 0); cmd.State != WriteRun {
+				t.Fatalf("stopped within 10 s: %+v", cmd)
+			}
+			cmd, evs := step(c, at.Add(11*time.Second), tc.tick, 0)
+			if cmd.State != WriteStopped || len(evs) != 1 || c.Reason() != tc.reason {
+				t.Fatalf("cmd = %+v, events = %+v, reason %q, want %q", cmd, evs, c.Reason(), tc.reason)
+			}
+		})
+	}
+}
+
+// The console names a silent PCC meter instead of 2 147 484 kW of
+// import and three 0 V phases.
+func TestPreconditionsNameASilentPCCMeter(t *testing.T) {
+	s := writeService(t, zeCfg(t))
+	now := time.Now().UTC()
+	tick := silentMeterTick()
+	tick.TS = now
+	s.lastTick.Store(&tick)
+	got := map[string]WritePrecondition{}
+	for _, p := range s.writePreconditions(now) {
+		got[p.ID] = p
+	}
+	if p := got["import_now"]; p.OK || p.Label != "потужність PCC 40505 відома" || p.Actual != "немає даних — лічильник PCC не відповідає" {
+		t.Fatalf("import_now = %+v", p)
+	}
+	if p := got["voltage"]; p.OK || p.Actual != "лічильник PCC не відповідає: фази не виміряні, логери бачать мережу" {
+		t.Fatalf("voltage = %+v", p)
+	}
+}
+
 // The battery not following the command for 30 s stops writing.
 func TestControllerStopsWhenTheBatteryDoesNotFollow(t *testing.T) {
 	c, at := runController(t)
