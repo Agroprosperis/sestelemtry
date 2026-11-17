@@ -176,7 +176,7 @@
         <div class="psf-strip">
           <div class="psf-cell"><div class="k">План</div><div class="v" id="psf-plan">—</div><div class="sub">інтервал manifest (p_bess_plan_kw)</div></div>
           <div class="psf-cell"><div class="k">Shadow</div><div class="v" id="psf-shadow">—</div><div class="sub">would_write_40381 · віртуально</div></div>
-          <div class="psf-cell"><div class="k">Факт УЗЕ</div><div class="v" id="psf-fact">—</div><div class="sub">40392 · керує Encombi</div></div>
+          <div class="psf-cell"><div class="k">Факт УЗЕ</div><div class="v" id="psf-fact">—</div><div class="sub" id="psf-fact-sub">40392 · керує Encombi</div></div>
         </div>
         <p class="psf-flows" id="psf-flows">—</p>
         <p class="psf-clamps" id="psf-clamps" hidden></p>
@@ -428,14 +428,14 @@ function renderStatus(st) {
     ['Останнє рішення', dec ? fmtClock(dec.ts) + ' · ' + esc(dec.reason_code || '') : '—'],
   ].map(([k, v]) => '<tr><td style="color:var(--muted)">' + k + '</td><td>' + v + '</td></tr>').join('');
 
-  renderPlanShadowFact(dec, t);
+  renderPlanShadowFact(dec, t, !!st.write_enabled);
   renderHealth(st.health);
 }
 
 // --- План · shadow · факт (spec §3.3/§8.1) ---
 const fmtSigned = (v) => v == null ? '—' : (v > 0 ? '+' : '') + (Math.round(v * 10) / 10).toLocaleString('uk-UA');
 
-function renderPlanShadowFact(dec, tick) {
+function renderPlanShadowFact(dec, tick, writing) {
   const i = dec && dec.inputs ? dec.inputs : {};
   const o = dec && dec.outputs ? dec.outputs : {};
   const setV = (id, v) => {
@@ -450,7 +450,8 @@ function renderPlanShadowFact(dec, tick) {
   const pv = i.pv_power_kw != null ? i.pv_power_kw : (tick ? tick.pv_power_kw : null);
   const load = i.load_power_kw != null ? i.load_power_kw : (tick ? tick.load_power_kw : null);
   const grid = i.grid_power_kw != null ? i.grid_power_kw : (tick ? tick.grid_power_kw : null);
-  $('psf-flows').textContent = 'PV ' + fmtKw(pv) + ' · load ' + fmtKw(load) + ' · grid ' + fmtKw(grid) + ' · факт УЗЕ = Encombi, не EMS';
+  $('psf-fact-sub').textContent = writing ? '40392 · керує IoT2050' : '40392 · керує Encombi';
+  $('psf-flows').textContent = 'PV ' + fmtKw(pv) + ' · load ' + fmtKw(load) + ' · grid ' + fmtKw(grid) + (writing ? ' · факт УЗЕ іде за командою IoT2050 (40381)' : ' · факт УЗЕ = Encombi, не EMS');
   const clamps = (o.clamps || []);
   $('psf-clamps').hidden = !clamps.length;
   if (clamps.length) $('psf-clamps').textContent = 'CLAMP: ' + clamps.join('; ');
