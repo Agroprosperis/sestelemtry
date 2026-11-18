@@ -658,6 +658,34 @@ func TestControllerStartGrace(t *testing.T) {
 	}
 }
 
+// Above the SOC window the battery balances its cabinets on its own (ze
+// 18.11, SOC 94.6 %: about −20 kW at command 0, 25 kW for 45 kW): the
+// fact is followed within 50 kW there, the brief's tolerance below it.
+func TestControllerHighSocTolerance(t *testing.T) {
+	run := func(soc, desired, fact float64) WriteCommand {
+		c, at := runController(t)
+		c.firstConfirmed = true
+		var cmd WriteCommand
+		for i := 1; i <= 45; i++ {
+			cmd, _ = step(c, at.Add(time.Duration(i)*time.Second),
+				controlTick(map[string]float64{"soc_percent": soc, "active_ess_power_kw": fact}), desired)
+		}
+		return cmd
+	}
+	if cmd := run(94.6, 45, 25); cmd.State != WriteRun {
+		t.Fatalf("SOC 94.6 %%, 25 kW for 45: %+v", cmd)
+	}
+	if cmd := run(94.6, 0, -34); cmd.State != WriteRun {
+		t.Fatalf("SOC 94.6 %%, −34 kW for 0: %+v", cmd)
+	}
+	if cmd := run(94.6, 45, -20); cmd.State != WriteStopped {
+		t.Fatalf("SOC 94.6 %%, −20 kW for 45: %+v", cmd)
+	}
+	if cmd := run(85, 45, 25); cmd.State != WriteStopped {
+		t.Fatalf("SOC 85 %%, 25 kW for 45: %+v", cmd)
+	}
+}
+
 // The battery not following the command for 30 s stops writing.
 func TestControllerStopsWhenTheBatteryDoesNotFollow(t *testing.T) {
 	c, at := runController(t)
