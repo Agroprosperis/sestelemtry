@@ -236,7 +236,9 @@
         </div>
         <h3 style="margin:16px 0 6px;font-size:14px">Пуск і зупинка — разові команди, лише з увімкненим записом</h3>
         <table class="data" id="cmd-table"></table>
-        <p id="write-result" style="font-size:12px;color:var(--muted);margin-top:10px">Поки запис вимкнено, контролер лише читає: рішення віртуальні (<code>would_write_*</code>). Увімкнення — лише тут, людиною, з кодом об’єкта і PIN; після перезапуску сервісу запис завжди вимкнений. Стоп і вимкнення — без PIN.</p>
+        <p id="cmd-note" style="font-size:13px;color:var(--red);font-weight:600;margin-top:8px" hidden></p>
+        <p id="write-result" style="font-size:12px;margin-top:10px"></p>
+        <p id="write-hint" style="font-size:12px;color:var(--muted);margin-top:6px">Поки запис вимкнено, контролер лише читає: рішення віртуальні (<code>would_write_*</code>). Увімкнення — лише тут, людиною, з кодом об’єкта і PIN; після перезапуску сервісу запис завжди вимкнений. Стоп і вимкнення — без PIN.</p>
       </div>
 
       <div class="grid2">
@@ -664,6 +666,9 @@ function renderWrite(w) {
   rows.push(['СЕС', (PV[eq.pv] || eq.pv || '—') + (eq.pv_started_by_test ? ' · запустив цей тест' : '') + (eq.pv_refusing ? ' · логер СЕС не приймає запис (exception 4)' : '')]);
   if (w.applied_manifest_seq) rows.push(['Застосований manifest', '№ ' + w.applied_manifest_seq]);
   $('write-table').innerHTML = rows.map(([k, v]) => '<tr><th>' + k + '</th><td>' + v + '</td></tr>').join('');
+  $('write-hint').innerHTML = w.enabled
+    ? 'Запис увімкнено: IoT2050 пише в SmartLogger. Стоп і вимкнення — без PIN; після перезапуску сервісу запис завжди вимкнений.'
+    : 'Поки запис вимкнено, контролер лише читає: рішення віртуальні (<code>would_write_*</code>). Увімкнення — лише тут, людиною, з кодом об’єкта і PIN; після перезапуску сервісу запис завжди вимкнений. Стоп і вимкнення — без PIN.';
   renderCommands(w);
 }
 
@@ -683,7 +688,7 @@ const CMD_ANSWERS = {
 
 function cmdFeedback(c) {
   if (!c) return '<span style="color:var(--muted)">—</span>';
-  let s = esc(c.label) + ' · ' + fmtTime(c.sent_at) + ' · ' + esc(c.by) + '<br>1) ' + (CMD_ANSWERS[c.answer] || esc(c.answer));
+  let s = 'Остання команда: ' + esc(c.label) + ' · ' + fmtTime(c.sent_at) + ' · ' + esc(c.by) + '<br>1) ' + (CMD_ANSWERS[c.answer] || esc(c.answer));
   if (c.exception) s += ' (exception ' + c.exception + ')';
   if (c.error && c.answer !== 'accepted') s += ' · ' + esc(c.error);
   if (c.answer !== 'accepted') return s;
@@ -699,19 +704,32 @@ function cmdFeedback(c) {
   return s;
 }
 
+// The last refused command, shown by the table for a while: the next
+// status refresh would otherwise hide it at once.
+let cmdError = null;
+
 function renderCommands(w) {
   const byId = {};
   for (const c of w.commands || []) byId[c.id] = c;
   const on = !!w.enabled;
+  // After a stop the edge refuses starts until writing is turned off and on.
+  const latched = on && (w.state === 'stopped' || w.state === 'stopping');
   $('cmd-table').innerHTML = CMD_ROWS.map((r) => {
     const last = [byId[r.start], byId[r.stop]].filter(Boolean).sort((a, b) => (a.sent_at < b.sent_at ? 1 : -1))[0];
     const busy = last && last.state === 'waiting';
     const dis = !on || busy ? ' disabled' : '';
+    const disStart = dis || (latched ? ' disabled' : '');
     return '<tr><th>' + r.label + '</th><td><div class="btn-row">' +
-      '<button class="btn" data-cmd="' + r.start + '"' + dis + '>Пуск</button>' +
+      '<button class="btn" data-cmd="' + r.start + '"' + disStart + '>Пуск</button>' +
       '<button class="btn btn-danger" data-cmd="' + r.stop + '"' + dis + '>Зупинка</button></div>' +
       '<div style="font-size:12px;margin-top:4px">' + cmdFeedback(last) + '</div></td></tr>';
   }).join('');
+  const err = cmdError && cmdError.until > Date.now() ? cmdError.text : '';
+  const note = err || (latched
+    ? '⛔ Запис зупинено' + (w.reason ? ': ' + w.reason : '') + '. Пуск у цій сесії не надсилається: «Вимкнути запис», потім знову «Увімкнути запис» і «Пуск».'
+    : '');
+  $('cmd-note').hidden = !note;
+  $('cmd-note').textContent = note;
 }
 
 $('cmd-table').onclick = async (e) => {
@@ -727,9 +745,9 @@ $('cmd-table').onclick = async (e) => {
       body: JSON.stringify({ command: b.dataset.cmd }),
     });
     const body = await res.json().catch(() => ({}));
-    if (!res.ok || !body.ok) $('write-result').textContent = 'Команду не надіслано: ' + (body.error || res.statusText);
+    cmdError = !res.ok || !body.ok ? { text: 'Команду не надіслано: ' + (body.error || res.statusText), until: Date.now() + 20000 } : null;
   } catch (err) {
-    $('write-result').textContent = 'Помилка: ' + err.message;
+    cmdError = { text: 'Помилка: ' + err.message, until: Date.now() + 20000 };
   }
   refreshStatus();
 };
