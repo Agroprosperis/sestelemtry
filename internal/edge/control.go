@@ -32,8 +32,12 @@ const (
 	// Right after the confirmed battery start, at command 0: ze 18.11
 	// 12:19 and 12:37, SOC 95 %, the battery wandered −34…+20 kW for half
 	// a minute while its cabinets came up one by one (owner's decision).
-	startGrace         = 2 * time.Minute
-	startZeroTolKw     = 50.0
+	startGrace     = 2 * time.Minute
+	startZeroTolKw = 50.0
+	// Above the SOC window the battery balances its cabinets on its own:
+	// ze 18.11, SOC 94.6 %, about −20 kW at command 0 and 25 kW for 45 kW
+	// (owner's decision).
+	highSocTolKw       = 50.0
 	factTolShare       = 0.05
 	stoppingTimeout    = 15 * time.Second
 	commandStaleAfter  = 5 * time.Second // writers fall back to safe values
@@ -434,7 +438,8 @@ func (c *Controller) checkStops(in ControlInputs) string {
 // last factWindow (cutover §12.3 п. 6): zero within 2 kW, otherwise
 // within 10 kW or 5 %, against the logger's available power when that
 // is lower. For startGrace after the confirmed start zero is within
-// startZeroTolKw. Out of tolerance for factStopAfter stops writing.
+// startZeroTolKw; above the SOC window any command is within
+// highSocTolKw. Out of tolerance for factStopAfter stops writing.
 func (c *Controller) factStop(in ControlInputs) string {
 	t, now := in.Tick, in.Now
 	if t.ESSPowerKw == nil || len(c.history) == 0 {
@@ -448,6 +453,9 @@ func (c *Controller) factStop(in ControlInputs) string {
 		tol = math.Max(factMinTolKw, factTolShare*math.Max(math.Abs(lo), math.Abs(hi)))
 	case c.essStarted && now.Sub(c.essStartedAt) < startGrace:
 		tol = startZeroTolKw
+	}
+	if t.SocPercent != nil && *t.SocPercent > c.cfg.SocMaxPct && tol < highSocTolKw {
+		tol = highSocTolKw
 	}
 	actual := *t.ESSPowerKw
 	inside := actual >= lo-tol && actual <= hi+tol
