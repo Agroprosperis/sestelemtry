@@ -643,7 +643,8 @@
 .d-fields {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  align-items: start;
+  /* A label that wraps must not push its control below the neighbour's. */
+  align-items: end;
   gap: 9px 10px;
 }
 
@@ -674,6 +675,13 @@
   border: 1px solid var(--d-line);
   border-radius: 8px;
   padding-right: 10px;
+}
+
+/* A select and a field with its unit side by side are one height. */
+.dispatch-desk .d-field select,
+.d-input-unit {
+  box-sizing: border-box;
+  height: 34px;
 }
 
 .dispatch-desk .d-input-unit input {
