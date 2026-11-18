@@ -144,7 +144,9 @@ func enableForTest(t *testing.T, s *Service) {
 	if _, err := s.gate.Enable("test", testTS); err != nil {
 		t.Fatal(err)
 	}
-	s.beginWriteSession(controlTick(nil))
+	tk := controlTick(nil)
+	s.lastTick.Store(&tk)
+	s.beginWriteSession(tk)
 	s.ctl.Start(testTS)
 }
 
@@ -381,6 +383,7 @@ func controlTick(values map[string]float64) Tick {
 		"sl_alarm_1": 0, "sl_alarm_2": 0, "sl_alarm_3": 0, "sl_alarm_4": 0, "sl_alarm_5": 0, "sl_alarm_6": 0,
 		"meter_phase_a_voltage_v": 231, "meter_phase_b_voltage_v": 231, "meter_phase_c_voltage_v": 231,
 		"pv_active_power_control_mode": 4, "ess_active_power_control_mode": 4,
+		"pcs_working_mode": 0,
 	}
 	for k, v := range values {
 		base[k] = v
@@ -683,6 +686,23 @@ func TestControllerHighSocTolerance(t *testing.T) {
 	}
 	if cmd := run(85, 45, 25); cmd.State != WriteStopped {
 		t.Fatalf("SOC 85 %%, 25 kW for 45: %+v", cmd)
+	}
+}
+
+// Cutover §12.7: after the start 44364 off PQ for 10 s stops writing.
+func TestControllerStopsWhenThePCSLeavesPQ(t *testing.T) {
+	c, at := runController(t)
+	vsg := controlTick(map[string]float64{"pcs_working_mode": 1})
+	var cmd WriteCommand
+	for i := 1; i <= 9; i++ {
+		cmd, _ = step(c, at.Add(time.Duration(i)*time.Second), vsg, 0)
+	}
+	if cmd.State != WriteRun {
+		t.Fatalf("stopped within 10 s: %+v", cmd)
+	}
+	cmd, _ = step(c, at.Add(11*time.Second), vsg, 0)
+	if cmd.State != WriteStopped || c.Reason() != "режим PCS не PQ (44364 = 1)" {
+		t.Fatalf("cmd = %+v, reason %q", cmd, c.Reason())
 	}
 }
 

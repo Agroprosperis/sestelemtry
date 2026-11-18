@@ -23,6 +23,7 @@ func (s *Service) stepWrite(ctx context.Context, now time.Time, tick Tick, d *De
 	if s.ctl.State() == WriteStopping && s.advanceStopping(ctx, now, tick) {
 		return
 	}
+	s.sendPQ(ctx, now, tick)
 	decision := Decision{TS: now, ReasonCode: "no_decision"}
 	if d != nil {
 		decision = *d

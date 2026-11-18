@@ -678,6 +678,7 @@ const CMD_ROWS = [
   { label: 'Масив логера СЕС', start: 'array_start_pv', stop: 'array_stop_pv' },
   { label: 'Масив логера УЗЕ', start: 'array_start_ess', stop: 'array_stop_ess' },
 ];
+const PCS_MODES = { pq: 'PQ', vsg: 'VSG', mixed: 'частково VSG', unknown: 'невідомо' };
 const CMD_ANSWERS = {
   pending: '⏳ чекаємо відповіді логера',
   accepted: '✅ логер прийняв',
@@ -714,14 +715,24 @@ function renderCommands(w) {
   const on = !!w.enabled;
   // After a stop the edge refuses starts until writing is turned off and on.
   const latched = on && (w.state === 'stopped' || w.state === 'stopping');
+  // Cutover §12.7: the battery starts only in PQ (44364 = 0).
+  const eq = w.equipment || {};
+  const pq = eq.pcs_mode === 'pq';
   $('cmd-table').innerHTML = CMD_ROWS.map((r) => {
     const last = [byId[r.start], byId[r.stop]].filter(Boolean).sort((a, b) => (a.sent_at < b.sent_at ? 1 : -1))[0];
     const busy = last && last.state === 'waiting';
     const dis = !on || busy ? ' disabled' : '';
-    const disStart = dis || (latched ? ' disabled' : '');
+    const essStart = r.start === 'ess_start' || r.start === 'array_start_ess';
+    const disStart = dis || (latched || (essStart && !pq) ? ' disabled' : '');
+    let mode = '';
+    if (r.start === 'ess_start') {
+      mode = '<div style="font-size:12px;margin-top:4px">Режим PCS: <strong>' + (PCS_MODES[eq.pcs_mode] || '—') + '</strong>' +
+        (eq.pcs_mode_raw != null ? ' (44364 = ' + eq.pcs_mode_raw + ')' : '') + (on && !pq ? ' — пуск УЗЕ лише в PQ' : '') + '</div>' +
+        (byId.pcs_pq ? '<div style="font-size:12px;margin-top:2px">' + cmdFeedback(byId.pcs_pq) + '</div>' : '');
+    }
     return '<tr><th>' + r.label + '</th><td><div class="btn-row">' +
       '<button class="btn" data-cmd="' + r.start + '"' + disStart + '>Пуск</button>' +
-      '<button class="btn btn-danger" data-cmd="' + r.stop + '"' + dis + '>Зупинка</button></div>' +
+      '<button class="btn btn-danger" data-cmd="' + r.stop + '"' + dis + '>Зупинка</button></div>' + mode +
       '<div style="font-size:12px;margin-top:4px">' + cmdFeedback(last) + '</div></td></tr>';
   }).join('');
   const err = cmdError && cmdError.until > Date.now() ? cmdError.text : '';

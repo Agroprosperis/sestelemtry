@@ -23,6 +23,7 @@ const (
 	stopPollLossAfter = 10 * time.Second // telemetry stale or faulted
 	stopExportAfter   = time.Minute      // PCC export above the ceiling
 	stopImportAfter   = 5 * time.Second  // PCC import at 95 % of the limit
+	stopPCSModeAfter  = 10 * time.Second // 44364 not PQ after the start (§12.7)
 	importStopShare   = 0.95
 	factWindow        = 10 * time.Second // commands the fact is compared with
 	factStopAfter     = 30 * time.Second // outside the tolerance this long
@@ -98,6 +99,7 @@ type Controller struct {
 	pollLossSince  time.Time
 	pccLossSince   time.Time
 	essLossSince   time.Time
+	pcsModeSince   time.Time
 	exportSince    time.Time
 	importSince    time.Time
 	deviationSince time.Time
@@ -358,6 +360,17 @@ func (c *Controller) checkStops(in ControlInputs) string {
 	// Before the confirmed start a stopped PCS is the expected state.
 	if c.essStarted && t.PCSShutdown != nil && *t.PCSShutdown {
 		return "УЗЕ знову зупинилась після пуску (40540)"
+	}
+	// Cutover §12.7: after the start the PCS stays in PQ (44364 = 0).
+	if c.essStarted && !pcsModePQ(t) {
+		if c.pcsModeSince.IsZero() {
+			c.pcsModeSince = now
+		}
+		if now.Sub(c.pcsModeSince) >= stopPCSModeAfter {
+			return "режим PCS не PQ (" + pcsModeText(t) + ")"
+		}
+	} else {
+		c.pcsModeSince = time.Time{}
 	}
 	if mode, bad := controlModeOff(t); bad {
 		return "режим керування 40737 = " + mode + ", має бути 4"
