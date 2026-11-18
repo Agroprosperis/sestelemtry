@@ -12,8 +12,9 @@ import (
 )
 
 // writeReg is one SmartLogger register this build writes
-// (ems_sl_write_cutover.md §12.1). Nothing else is ever written: not
-// 40197/40201 (inverter start/stop), not 40380, not 44365/44376.
+// (ems_sl_write_cutover.md §12.1). Besides them only the FC06 one-shots
+// of guardedWriteSingle go out; never 40202/40203, 40380, 44376 or
+// 44365 = 1 (VSG).
 type writeReg struct {
 	Addr   uint16
 	Name   string
@@ -184,13 +185,18 @@ func (s *Service) guardedWrite(ctx context.Context, w registerSession, reg write
 	return w.WriteMultiple(ctx, reg.Addr, payload)
 }
 
+// regPCSMode is the battery PCS working mode (WO): 0 = PQ, 1 = VSG.
+const regPCSMode = 44365
+
 // guardedWriteSingle is the only call of an FC06: the flag is checked
-// right before, and only 0 into 40196…40201 goes out.
-func (s *Service) guardedWriteSingle(ctx context.Context, w registerSession, addr, value uint16) error {
+// right before, and only 0 goes out — into 40196…40201, or into 44365
+// (PCS mode PQ) on the battery logger alone (cutover §12.7).
+func (s *Service) guardedWriteSingle(ctx context.Context, w registerSession, role DeviceRole, addr, value uint16) error {
 	if !s.gate.Enabled() {
 		return errWriteOff
 	}
-	if !oneShotAddr(addr) || value != 0 {
+	pq := addr == regPCSMode && role == RoleESS
+	if value != 0 || !(oneShotAddr(addr) || pq) {
 		return errNotWritable
 	}
 	return w.WriteSingle(ctx, addr, value)
@@ -381,7 +387,7 @@ func (s *Service) runWriter(ctx context.Context, dev Device, regs []writeReg, ev
 			res := cmdResult{id: job.id, err: errWriteOff}
 			if s.gate.Enabled() && ensure() && space() {
 				wctx, cancel := context.WithTimeout(ctx, dev.RequestTimeout)
-				res.err = s.guardedWriteSingle(wctx, sess, job.addr, 0)
+				res.err = s.guardedWriteSingle(wctx, sess, dev.Role, job.addr, 0)
 				cancel()
 				lastWrite = time.Now()
 				if res.err != nil {

@@ -25,10 +25,15 @@ const (
 	CmdArrayStopPV   = "array_stop_pv"
 	CmdArrayStartESS = "array_start_ess"
 	CmdArrayStopESS  = "array_stop_ess"
+	// CmdPCSPQ sets the battery PCS to PQ (44365 = 0) before its start;
+	// the edge sends it itself (cutover §12.7).
+	CmdPCSPQ = "pcs_pq"
 )
 
 const (
 	commandConfirmWindow = 3 * time.Minute
+	// 44364 must read PQ this soon after 44365 = 0, or no start goes out.
+	pcsModeConfirmWindow = 30 * time.Second
 	// A writer that has not answered by then (stuck dialing) counts as
 	// no answer, so nothing waits on it forever.
 	commandAnswerTimeout = 15 * time.Second
@@ -89,11 +94,50 @@ var oneShots = map[string]oneShot{
 	CmdArrayStopPV:   {CmdArrayStopPV, 40201, RolePV, "Зупинка масиву (логер СЕС)", CmdArrayStartPV, false, "pv"},
 	CmdArrayStartESS: {CmdArrayStartESS, 40200, RoleESS, "Пуск масиву (логер УЗЕ)", CmdArrayStopESS, true, "ess"},
 	CmdArrayStopESS:  {CmdArrayStopESS, 40201, RoleESS, "Зупинка масиву (логер УЗЕ)", CmdArrayStartESS, false, "ess"},
+	CmdPCSPQ:         {CmdPCSPQ, regPCSMode, RoleESS, "Режим PCS: PQ", "", false, "pcs"},
 }
 
-// oneShotAddr: the only registers an FC06 may go to. 40202/40203 (the
-// same start/stop pair with a confusing 0/1) never.
+// oneShotAddr: the start/stop registers an FC06 may go to. 40202/40203
+// (the same start/stop pair with a confusing 0/1) never.
 func oneShotAddr(addr uint16) bool { return addr >= 40196 && addr <= 40201 }
+
+// window is how long a command's confirmation is waited for.
+func (c oneShot) window() time.Duration {
+	if c.Target == "pcs" {
+		return pcsModeConfirmWindow
+	}
+	return commandConfirmWindow
+}
+
+// pcsModePQ: 44364 reads 0, the PCS works with the grid (cutover §12.7).
+func pcsModePQ(t Tick) bool {
+	v, ok := t.Values["pcs_working_mode"]
+	return ok && v == 0
+}
+
+// pcsModeName names 44364 for the consoles: 0 PQ, 1 VSG, 2 and 3 a part
+// of the PCS in VSG, 65535 or no reading unknown.
+func pcsModeName(t Tick) string {
+	v, ok := t.Values["pcs_working_mode"]
+	switch {
+	case !ok:
+		return "unknown"
+	case v == 0:
+		return "pq"
+	case v == 1:
+		return "vsg"
+	case v == 2 || v == 3:
+		return "mixed"
+	}
+	return "unknown"
+}
+
+func pcsModeText(t Tick) string {
+	if v, ok := t.Values["pcs_working_mode"]; ok {
+		return fmt.Sprintf("44364 = %g", v)
+	}
+	return "44364 не прочитано"
+}
 
 // CommandStatus is one button's last command, for the consoles.
 type CommandStatus struct {
@@ -137,6 +181,12 @@ func pvStoppedOn(t Tick, onGrid int, fleetKnown bool) bool {
 
 func liveValues(target string, t Tick, onGrid int, fleetKnown bool) map[string]any {
 	out := map[string]any{}
+	if target == "pcs" {
+		if v, ok := t.Values["pcs_working_mode"]; ok {
+			out["44364"] = v
+		}
+		return out
+	}
 	if target == "ess" {
 		if t.PCSShutdown != nil {
 			out["40540"] = map[bool]int{true: 1, false: 0}[*t.PCSShutdown]
@@ -164,6 +214,8 @@ func liveValues(target string, t Tick, onGrid int, fleetKnown bool) map[string]a
 // confirmedOn reports that the equipment reached the command's state.
 func (c oneShot) confirmedOn(t Tick, now, acceptedAt time.Time, onGrid int, fleetKnown bool) bool {
 	switch {
+	case c.Target == "pcs":
+		return pcsModePQ(t)
 	case c.Target == "ess" && c.Start:
 		return essRunningOn(t)
 	case c.Target == "ess":
@@ -211,6 +263,7 @@ type writeSession struct {
 	stopPhase         string // turning off: zero | ess_stop | pv_stop
 	essStopAwaited    bool   // turning off waits for a battery stop
 	pvStopAwaited     bool   // turning off waits for a PV stop
+	pqSent            bool   // 44365 = 0 went out in this session
 	stopNotes         []string
 	pvCheckDay        string
 }
@@ -228,6 +281,9 @@ type WriteEquipment struct {
 	ESSStarted      bool   `json:"ess_started"`
 	PVStartedByTest bool   `json:"pv_started_by_test"`
 	PVRefusing      bool   `json:"pv_refusing"`
+	// PCSMode is 44364 by name: pq | vsg | mixed | unknown (§12.7).
+	PCSMode    string   `json:"pcs_mode"`
+	PCSModeRaw *float64 `json:"pcs_mode_raw,omitempty"`
 }
 
 func (s *Service) deviceFor(role DeviceRole) (Device, bool) {
@@ -273,7 +329,48 @@ func (s *Service) onCommandRequest(ctx context.Context, now time.Time, req cmdRe
 	if state := s.ctl.State(); cmd.Start && (state == WriteStopped || state == WriteStopping) {
 		return cmdReply{Error: "після зупинки повторний пуск не надсилається — вимкніть запис і почніть заново"}
 	}
+	// Cutover §12.7: the battery starts only in PQ, and PQ is set only
+	// on the stopped battery.
+	t := s.lastTick.Load()
+	if cmd.Target == "ess" && cmd.Start && (t == nil || !pcsModePQ(*t)) {
+		return cmdReply{Error: s.pcsStartRefusal(t)}
+	}
+	if cmd.ID == CmdPCSPQ && (t == nil || !essStoppedOn(*t)) {
+		return cmdReply{Error: "режим PCS задається лише на зупиненій УЗЕ (40540 ≠ 0)"}
+	}
 	return s.sendOneShot(ctx, now, cmd, req.by, false)
+}
+
+// pcsStartRefusal says why «Пуск УЗЕ» waits for PQ.
+func (s *Service) pcsStartRefusal(t *Tick) string {
+	mode := "44364 не прочитано"
+	if t != nil {
+		mode = pcsModeText(*t)
+	}
+	if st, ok := s.commandStatus(CmdPCSPQ); ok {
+		switch {
+		case st.open() || st.Answer == AnswerPending:
+			return "режим PCS ще переходить у PQ (" + mode + ") — пуск після підтвердження"
+		case st.State == CmdNotConfirmed || st.State == CmdFailed:
+			return "режим PCS не став PQ після 44365 = 0 (" + mode + ") — пуск не надсилається; вимкніть запис і почніть заново"
+		}
+	}
+	return "режим PCS не PQ (" + mode + ") — пуск не надсилається"
+}
+
+// sendPQ writes 44365 = 0 once a session: after writing is turned on,
+// on the stopped battery, before «Пуск УЗЕ» (cutover §12.7).
+func (s *Service) sendPQ(ctx context.Context, now time.Time, t Tick) {
+	if s.sess.pqSent || s.ctl.State() != WriteAwaitStart || !essStoppedOn(t) || s.essStartedByTest() {
+		return
+	}
+	for _, id := range []string{CmdESSStart, CmdArrayStartESS} {
+		if _, pressed := s.commandStatus(id); pressed {
+			return
+		}
+	}
+	s.sess.pqSent = true
+	s.sendOneShot(ctx, now, oneShots[CmdPCSPQ], "edge: увімкнення запису", false)
 }
 
 // sendOneShot hands one command to its logger's writer. A pending
@@ -346,7 +443,7 @@ func (s *Service) onCommandResult(ctx context.Context, res cmdResult) {
 	at := res.at
 	switch {
 	case res.err == nil:
-		dl := at.Add(commandConfirmWindow)
+		dl := at.Add(oneShots[res.id].window())
 		st.Answer, st.AcceptedAt, st.Deadline = AnswerAccepted, &at, &dl
 	case errors.Is(res.err, errWriteOff):
 		st.Answer, st.State, st.Error, st.DoneAt = AnswerNotSent, CmdFailed, res.err.Error(), &at
@@ -424,8 +521,12 @@ func (s *Service) updateCommands(ctx context.Context, now time.Time, t Tick) {
 	s.cmdMu.Unlock()
 	for _, d := range finished {
 		if !d.confirmed {
+			within := "3 хв"
+			if d.cmd.window() < time.Minute {
+				within = fmt.Sprintf("%.0f с", d.cmd.window().Seconds())
+			}
 			s.writeEventDeduped(ctx, Event{TS: now, Severity: SevAlarm, Code: EvCmdNotConfirmed,
-				Message: fmt.Sprintf("«%s» не підтверджено за 3 хв: %s", d.cmd.Label, fmtLive(d.snap.Live)),
+				Message: fmt.Sprintf("«%s» не підтверджено за %s: %s", d.cmd.Label, within, fmtLive(d.snap.Live)),
 				Context: map[string]any{"command": d.cmd.ID, "live": d.snap.Live}})
 			continue
 		}
@@ -636,8 +737,12 @@ func (s *Service) checkDaytimePV(ctx context.Context, now time.Time, t Tick) {
 
 // equipmentView is the equipment block for the consoles.
 func (s *Service) equipmentView(t *Tick) *WriteEquipment {
-	e := &WriteEquipment{ESS: "unknown", PV: "unknown", PVRefusing: s.pvRefusing.Load()}
+	e := &WriteEquipment{ESS: "unknown", PV: "unknown", PVRefusing: s.pvRefusing.Load(), PCSMode: "unknown"}
 	if t != nil {
+		e.PCSMode = pcsModeName(*t)
+		if v, ok := t.Values["pcs_working_mode"]; ok {
+			e.PCSModeRaw = &v
+		}
 		switch {
 		case essRunningOn(*t):
 			e.ESS = "running"

@@ -38,7 +38,11 @@ func press(t *testing.T, s *Service, now time.Time, id string) {
 		t.Fatalf("%s: %+v", id, r)
 	}
 	cmd := oneShots[id]
+	// The edge's own 44365 = 0 may be queued ahead of the button.
 	j, ok := job(s, cmd.Role)
+	for ok && j.id == CmdPCSPQ && id != CmdPCSPQ {
+		j, ok = job(s, cmd.Role)
+	}
 	if !ok || j.addr != cmd.Addr {
 		t.Fatalf("%s: job %+v queued=%v", id, j, ok)
 	}
@@ -66,7 +70,7 @@ func merge(ms ...map[string]float64) map[string]float64 {
 func TestOneShotNeverWithFlagOff(t *testing.T) {
 	s := writeService(t, zeCfg(t))
 	f := newFakeLogger()
-	if err := s.guardedWriteSingle(context.Background(), f, 40199, 0); err != errWriteOff {
+	if err := s.guardedWriteSingle(context.Background(), f, RoleESS, 40199, 0); err != errWriteOff {
 		t.Fatalf("err = %v", err)
 	}
 	if r := s.onCommandRequest(context.Background(), testTS, cmdRequest{id: CmdESSStart, by: "t"}); r.OK {
@@ -91,11 +95,11 @@ func TestOneShotAllowlist(t *testing.T) {
 	enableForTest(t, s)
 	f := newFakeLogger()
 	for _, addr := range []uint16{40202, 40203, 40381, 40195} {
-		if err := s.guardedWriteSingle(context.Background(), f, addr, 0); err != errNotWritable {
+		if err := s.guardedWriteSingle(context.Background(), f, RoleESS, addr, 0); err != errNotWritable {
 			t.Fatalf("%d: %v", addr, err)
 		}
 	}
-	if err := s.guardedWriteSingle(context.Background(), f, 40199, 1); err != errNotWritable {
+	if err := s.guardedWriteSingle(context.Background(), f, RoleESS, 40199, 1); err != errNotWritable {
 		t.Fatalf("value 1: %v", err)
 	}
 	if len(f.singleWrites()) != 0 {
@@ -121,9 +125,95 @@ func TestWriterSendsTheButtonToItsLogger(t *testing.T) {
 		t.Fatalf("result = %+v", res)
 	}
 	for id, c := range oneShots {
+		if c.Target == "pcs" {
+			if c.Role != RoleESS || c.Addr != regPCSMode {
+				t.Fatalf("%s goes to %s / %d", id, c.Role, c.Addr)
+			}
+			continue
+		}
 		if (c.Target == "ess") != (c.Role == RoleESS) || !oneShotAddr(c.Addr) {
 			t.Fatalf("%s goes to %s / %d", id, c.Role, c.Addr)
 		}
+	}
+}
+
+// Cutover §12.7: 44365 takes only 0, only on the battery logger; 44376
+// never.
+func TestFC06PQOnlyOnTheBatteryLogger(t *testing.T) {
+	s := writeService(t, zeCfg(t))
+	enableForTest(t, s)
+	f := newFakeLogger()
+	ctx := context.Background()
+	if err := s.guardedWriteSingle(ctx, f, RoleESS, 44365, 0); err != nil {
+		t.Fatalf("44365 = 0 on the battery logger: %v", err)
+	}
+	for _, tc := range []struct {
+		role  DeviceRole
+		addr  uint16
+		value uint16
+	}{{RoleESS, 44365, 1}, {RolePV, 44365, 0}, {RoleAll, 44365, 0}, {RoleESS, 44376, 0}, {RoleESS, 44376, 1}} {
+		if err := s.guardedWriteSingle(ctx, f, tc.role, tc.addr, tc.value); err != errNotWritable {
+			t.Fatalf("%s %d = %d: %v", tc.role, tc.addr, tc.value, err)
+		}
+	}
+	if got := f.singleWrites(); len(got) != 1 || got[0] != 44365 {
+		t.Fatalf("FC06 = %v", got)
+	}
+}
+
+// After enabling, on the stopped battery, the edge writes 44365 = 0 once;
+// «Пуск УЗЕ» goes out only once 44364 reads PQ (cutover §12.7).
+func TestPQBeforeTheBatteryStart(t *testing.T) {
+	s := writeService(t, zeCfg(t))
+	enableForTest(t, s)
+	ctx := context.Background()
+	vsg := tickAt(testTS, merge(essStopped(), map[string]float64{"pcs_working_mode": 1}))
+	s.lastTick.Store(&vsg)
+	s.stepWrite(ctx, testTS, vsg, nil)
+	j, ok := job(s, RoleESS)
+	if !ok || j.id != CmdPCSPQ || j.addr != 44365 {
+		t.Fatalf("PQ job = %+v queued=%v", j, ok)
+	}
+	s.onCommandResult(ctx, cmdResult{id: CmdPCSPQ, at: testTS})
+	if r := s.onCommandRequest(ctx, testTS, cmdRequest{id: CmdESSStart, by: "t"}); r.OK || !strings.Contains(r.Error, "переходить у PQ") {
+		t.Fatalf("start in VSG: %+v", r)
+	}
+	s.stepWrite(ctx, testTS.Add(time.Second), vsg, nil)
+	if _, again := job(s, RoleESS); again {
+		t.Fatal("44365 written twice in a session")
+	}
+	pq := tickAt(testTS.Add(4*time.Second), merge(essStopped(), map[string]float64{"pcs_working_mode": 0}))
+	s.lastTick.Store(&pq)
+	s.stepWrite(ctx, pq.TS, pq, nil)
+	if st, _ := s.commandStatus(CmdPCSPQ); st.State != CmdConfirmed {
+		t.Fatalf("PQ status = %+v", st)
+	}
+	press(t, s, pq.TS, CmdESSStart)
+}
+
+// No PQ within 30 s of 44365 = 0: the start does not go out, and why.
+func TestNoStartWithoutPQ(t *testing.T) {
+	s := writeService(t, zeCfg(t))
+	enableForTest(t, s)
+	ctx := context.Background()
+	vsg := tickAt(testTS, merge(essStopped(), map[string]float64{"pcs_working_mode": 1}))
+	s.lastTick.Store(&vsg)
+	s.stepWrite(ctx, testTS, vsg, nil)
+	s.onCommandResult(ctx, cmdResult{id: CmdPCSPQ, at: testTS})
+	late := testTS.Add(pcsModeConfirmWindow + time.Second)
+	s.stepWrite(ctx, late, tickAt(late, merge(essStopped(), map[string]float64{"pcs_working_mode": 1})), nil)
+	if st, _ := s.commandStatus(CmdPCSPQ); st.State != CmdNotConfirmed {
+		t.Fatalf("PQ status = %+v", st)
+	}
+	for _, id := range []string{CmdESSStart, CmdArrayStartESS} {
+		if r := s.onCommandRequest(ctx, late, cmdRequest{id: id, by: "t"}); r.OK || !strings.Contains(r.Error, "не став PQ") {
+			t.Fatalf("%s: %+v", id, r)
+		}
+	}
+	running := tickAt(late, merge(essRunning(), map[string]float64{"pcs_working_mode": 1}))
+	s.lastTick.Store(&running)
+	if r := s.onCommandRequest(ctx, late, cmdRequest{id: CmdPCSPQ, by: "t"}); r.OK {
+		t.Fatalf("PQ on a running battery: %+v", r)
 	}
 }
 
