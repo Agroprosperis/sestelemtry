@@ -630,6 +630,34 @@ func TestPreconditionsNameASilentPCCMeter(t *testing.T) {
 	}
 }
 
+// Right after the confirmed start a zero command is followed within
+// 50 kW for two minutes (ze 18.11: −34…+20 kW while the cabinets came
+// up); past that, or beyond 50 kW, the brief's 2 kW stops writing.
+func TestControllerStartGrace(t *testing.T) {
+	cfg := zeCfg(t).Control.Write
+	run := func(fact float64, until time.Duration) WriteCommand {
+		c := NewController(cfg)
+		c.Start(testTS)
+		c.ESSStarted(testTS)
+		var cmd WriteCommand
+		for d := time.Second; d <= until; d += time.Second {
+			cmd, _ = step(c, testTS.Add(d), controlTick(map[string]float64{"active_ess_power_kw": fact}), 0)
+		}
+		return cmd
+	}
+	for _, fact := range []float64{20, -34} {
+		if cmd := run(fact, 110*time.Second); cmd.State != WriteHold {
+			t.Fatalf("%v kW in the first two minutes: %+v", fact, cmd)
+		}
+	}
+	if cmd := run(60, 40*time.Second); cmd.State != WriteStopped {
+		t.Fatalf("60 kW right after the start: %+v", cmd)
+	}
+	if cmd := run(20, 160*time.Second); cmd.State != WriteStopped {
+		t.Fatalf("20 kW past the grace: %+v", cmd)
+	}
+}
+
 // The battery not following the command for 30 s stops writing.
 func TestControllerStopsWhenTheBatteryDoesNotFollow(t *testing.T) {
 	c, at := runController(t)
