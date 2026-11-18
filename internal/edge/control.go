@@ -19,16 +19,21 @@ const (
 
 // Thresholds of the stops (ems_sl_write_cutover.md §9, §12.3, §12.4).
 const (
-	stopVoltageAfter   = 10 * time.Second // phase < 200 V or line < 350 V
-	stopPollLossAfter  = 10 * time.Second // telemetry stale or faulted
-	stopExportAfter    = time.Minute      // PCC export above the ceiling
-	stopImportAfter    = 5 * time.Second  // PCC import at 95 % of the limit
-	importStopShare    = 0.95
-	factWindow         = 10 * time.Second // commands the fact is compared with
-	factStopAfter      = 30 * time.Second // outside the tolerance this long
-	factConfirmAfter   = 10 * time.Second // a non-zero command followed this long
-	factZeroTolKw      = 2.0
-	factMinTolKw       = 10.0
+	stopVoltageAfter  = 10 * time.Second // phase < 200 V or line < 350 V
+	stopPollLossAfter = 10 * time.Second // telemetry stale or faulted
+	stopExportAfter   = time.Minute      // PCC export above the ceiling
+	stopImportAfter   = 5 * time.Second  // PCC import at 95 % of the limit
+	importStopShare   = 0.95
+	factWindow        = 10 * time.Second // commands the fact is compared with
+	factStopAfter     = 30 * time.Second // outside the tolerance this long
+	factConfirmAfter  = 10 * time.Second // a non-zero command followed this long
+	factZeroTolKw     = 2.0
+	factMinTolKw      = 10.0
+	// Right after the confirmed battery start, at command 0: ze 18.11
+	// 12:19 and 12:37, SOC 95 %, the battery wandered −34…+20 kW for half
+	// a minute while its cabinets came up one by one (owner's decision).
+	startGrace         = 2 * time.Minute
+	startZeroTolKw     = 50.0
 	factTolShare       = 0.05
 	stoppingTimeout    = 15 * time.Second
 	commandStaleAfter  = 5 * time.Second // writers fall back to safe values
@@ -79,8 +84,9 @@ type Controller struct {
 	// essStarted: a battery start was confirmed in this write session
 	// (cutover 04.11.2026 §4). stopAuto: the latched stop came from a
 	// check, not from the operator's «0 кВт».
-	essStarted bool
-	stopAuto   bool
+	essStarted   bool
+	essStartedAt time.Time
+	stopAuto     bool
 
 	firstConfirmed bool
 	followSince    time.Time
@@ -119,7 +125,7 @@ func (c *Controller) ESSStarted(now time.Time) {
 	if c.state != WriteAwaitStart {
 		return
 	}
-	c.essStarted = true
+	c.essStarted, c.essStartedAt = true, now
 	c.state, c.since, c.reason = WriteHold, now, "пуск УЗЕ підтверджено — утримання на 0"
 }
 
@@ -427,7 +433,8 @@ func (c *Controller) checkStops(in ControlInputs) string {
 // factStop compares the battery's actual power with the commands of the
 // last factWindow (cutover §12.3 п. 6): zero within 2 kW, otherwise
 // within 10 kW or 5 %, against the logger's available power when that
-// is lower. Out of tolerance for factStopAfter stops writing.
+// is lower. For startGrace after the confirmed start zero is within
+// startZeroTolKw. Out of tolerance for factStopAfter stops writing.
 func (c *Controller) factStop(in ControlInputs) string {
 	t, now := in.Tick, in.Now
 	if t.ESSPowerKw == nil || len(c.history) == 0 {
@@ -436,8 +443,11 @@ func (c *Controller) factStop(in ControlInputs) string {
 	lo, hi := c.commandRange(now)
 	lo, hi = availableRange(t, lo), availableRange(t, hi)
 	tol := factZeroTolKw
-	if math.Max(math.Abs(lo), math.Abs(hi)) > factZeroTolKw {
+	switch {
+	case math.Max(math.Abs(lo), math.Abs(hi)) > factZeroTolKw:
 		tol = math.Max(factMinTolKw, factTolShare*math.Max(math.Abs(lo), math.Abs(hi)))
+	case c.essStarted && now.Sub(c.essStartedAt) < startGrace:
+		tol = startZeroTolKw
 	}
 	actual := *t.ESSPowerKw
 	inside := actual >= lo-tol && actual <= hi+tol
