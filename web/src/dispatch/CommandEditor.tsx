@@ -183,6 +183,15 @@ export function CommandFields({
           </span>
         </label>
       )}
+      {scenario === 'fixed' && (
+        <label className="d-field">
+          Напрямок потужності
+          <select value={direction} onChange={(e) => onDirection(e.target.value as 'charge' | 'discharge')}>
+            <option value="discharge">Розряд</option>
+            <option value="charge">Заряд</option>
+          </select>
+        </label>
+      )}
       <label className="d-field">
         Резерв SOC для чернетки
         <span className="d-input-unit">
@@ -198,15 +207,6 @@ export function CommandFields({
           <span>%</span>
         </span>
       </label>
-      {scenario === 'fixed' && (
-        <label className="d-field">
-          Напрямок потужності
-          <select value={direction} onChange={(e) => onDirection(e.target.value as 'charge' | 'discharge')}>
-            <option value="discharge">Розряд</option>
-            <option value="charge">Заряд</option>
-          </select>
-        </label>
-      )}
     </div>
   )
 }
