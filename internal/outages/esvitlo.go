@@ -70,6 +70,30 @@ type Client struct {
 	// the cabinet links there, "" when it links none.
 	landing string
 	path    string
+
+	trace func(Exchange)
+}
+
+// Exchange is one answer of the cabinet, as a trace sees it.
+type Exchange struct {
+	Method string
+	URL    *url.URL
+	Status int
+	// Final is where the answer came from after redirects.
+	Final  *url.URL
+	Header http.Header
+	Body   []byte
+}
+
+// SetTrace hands every answer of the cabinet to fn, for a tool that
+// records them. Request bodies are never handed over: the sign-in's
+// carries the password.
+func (c *Client) SetTrace(fn func(Exchange)) { c.trace = fn }
+
+// Get fetches one page of the cabinet in the session, for a tool that
+// looks around it.
+func (c *Client) Get(ctx context.Context, path string) (string, *url.URL, error) {
+	return c.fetch(ctx, http.MethodGet, path, nil)
 }
 
 // NewClient builds a client for the cabinet at base (BaseURL in
@@ -102,10 +126,29 @@ func (c *Client) SignIn(ctx context.Context) error {
 		return err
 	}
 	if !signedInPage(page) {
+		if msg := flash(page); msg != "" {
+			return refusal{msg: msg}
+		}
 		return ErrUnauthorized
 	}
 	c.signedIn, c.landing, c.path = true, final.Path, outagesLink(page)
 	return nil
+}
+
+// refusal is a sign-in the cabinet refused, in its own words.
+type refusal struct{ msg string }
+
+func (r refusal) Error() string { return ErrUnauthorized.Error() + ": " + r.msg }
+func (r refusal) Unwrap() error { return ErrUnauthorized }
+
+// Refusal is what the cabinet said when it refused the sign-in, "" when
+// err is no refusal or the cabinet gave no reason.
+func Refusal(err error) string {
+	var r refusal
+	if errors.As(err, &r) {
+		return r.msg
+	}
+	return ""
 }
 
 // Outages returns the point's planned outages the cabinet lists, in time
@@ -209,6 +252,9 @@ func (c *Client) fetch(ctx context.Context, method, path string, form url.Values
 	if err != nil {
 		return "", nil, fmt.Errorf("%w: %v", ErrUnreachable, err)
 	}
+	if c.trace != nil {
+		c.trace(Exchange{Method: method, URL: req.URL, Status: res.StatusCode, Final: res.Request.URL, Header: res.Header.Clone(), Body: raw})
+	}
 	page := string(raw)
 	if challenged(res, page) {
 		return "", nil, ErrBlocked
@@ -234,7 +280,19 @@ func challenged(res *http.Response, page string) bool {
 // signedInPage reports a cabinet page only a signed-in user gets: the
 // public pages carry no way out.
 func signedInPage(page string) bool {
-	return strings.Contains(page, "Вихід") || strings.Contains(strings.ToLower(page), "logout")
+	return strings.Contains(page, "Вихід") || strings.Contains(page, "Вийти") || strings.Contains(strings.ToLower(page), "logout")
+}
+
+var flashRe = regexp.MustCompile(`(?s)<div[^>]*class="[^"]*w2p_flash[^"]*"[^>]*>(.*?)</div>`)
+
+// flash is the message the cabinet shows above its page — why it refused
+// a sign-in — in plain words, "" when there is none.
+func flash(page string) string {
+	m := flashRe.FindStringSubmatch(page)
+	if m == nil {
+		return ""
+	}
+	return strings.Join(strings.Fields(html.UnescapeString(tagRe.ReplaceAllString(m[1], " "))), " ")
 }
 
 // loginPage reports the sign-in form in place of the page asked for.

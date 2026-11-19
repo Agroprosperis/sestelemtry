@@ -2,6 +2,7 @@ package outages
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -101,8 +102,28 @@ func TestClientUnauthorized(t *testing.T) {
 
 	c := NewClient(srv.URL, "x", "y", time.UTC, srv.Client())
 	err := c.SignIn(context.Background())
-	if err != ErrUnauthorized {
+	if !errors.Is(err, ErrUnauthorized) || Refusal(err) != "" {
 		t.Fatalf("got %v", err)
+	}
+}
+
+func TestClientRefusalInTheCabinetsWords(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`<div class="w2p_flash alert alert-dismissable"></div><input name="password">`))
+	})
+	mux.HandleFunc("/registr_all_user/login_all_user", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`<div class="w2p_flash alert alert-dismissable">Невірна адреса ел.пошти </div><input name="password">`))
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	err := NewClient(srv.URL, "x", "y", time.UTC, srv.Client()).SignIn(context.Background())
+	if !errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("got %v, want ErrUnauthorized", err)
+	}
+	if got := Refusal(err); got != "Невірна адреса ел.пошти" {
+		t.Fatalf("Refusal = %q", got)
 	}
 }
 
@@ -116,7 +137,7 @@ func TestClientCloudflareBlocked(t *testing.T) {
 
 	c := NewClient(srv.URL, "x", "y", time.UTC, srv.Client())
 	err := c.SignIn(context.Background())
-	if err != ErrBlocked {
+	if !errors.Is(err, ErrBlocked) {
 		t.Fatalf("got %v", err)
 	}
 }

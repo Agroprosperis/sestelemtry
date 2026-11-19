@@ -66,6 +66,9 @@ func (h *Handlers) outagesLocation() *time.Location {
 func outagesTestError(err error) string {
 	switch {
 	case errors.Is(err, outages.ErrUnauthorized):
+		if msg := outages.Refusal(err); msg != "" {
+			return "Кабінет не впустив: " + msg
+		}
 		return "Невірний логін або пароль"
 	case errors.Is(err, outages.ErrBlocked):
 		return "Кабінет закрив доступ перевіркою на бота"
