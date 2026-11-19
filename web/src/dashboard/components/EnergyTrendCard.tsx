@@ -1,6 +1,7 @@
 import { useCallback, useId, useMemo, useState } from 'react'
 import { Area, CartesianGrid, ComposedChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { formatMonthShort, formatMonthTitle } from '../../economics/monthly/format'
+import { PHONE_QUERY, useMediaQuery } from '../../shell/useMediaQuery'
 import { useChartChrome, useCssVar } from '../../theme/useChartChrome'
 import { formatPeriodLabel } from '../format'
 import type { TrendRow, TrendSeriesKey } from '../transforms/energyTrend'
@@ -78,6 +79,7 @@ type TooltipProps = {
 // period's totals underneath.
 export function EnergyTrendCard({ preset, rows, loading, error, summary, summaryLoading, site }: Props) {
   const chrome = useChartChrome()
+  const phone = useMediaQuery(PHONE_QUERY)
   const loadColor = useCssVar('--text', '#0f172a')
   const dotRing = useCssVar('--bg-elevated', '#ffffff')
   const gradientId = `energy-trend-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`
@@ -141,7 +143,7 @@ export function EnergyTrendCard({ preset, rows, loading, error, summary, summary
           <XAxis
             dataKey="key"
             tickFormatter={(key: string) => tickLabel(preset, key)}
-            interval={preset === 'year' ? 0 : 'preserveStartEnd'}
+            interval={preset === 'year' && !phone ? 0 : 'preserveStartEnd'}
             minTickGap={4}
             tick={{ fontSize: 11, fill: chrome.tick }}
             tickLine={false}

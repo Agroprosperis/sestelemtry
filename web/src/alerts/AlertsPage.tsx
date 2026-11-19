@@ -154,69 +154,71 @@ export function AlertsPage() {
               Власний список адрес <strong>замінює</strong> загальний. Порожнє
               поле означає, що організація отримує листи на загальний список.
             </p>
-            <table className="alerts-orgs">
-              <thead>
-                <tr>
-                  <th>Організація</th>
-                  <th className="alerts-col-toggle">Сповіщати</th>
-                  <th>Отримувачі</th>
-                  <th className="alerts-col-test" />
-                </tr>
-              </thead>
-              <tbody>
-                {orgs.map((org) => {
-                  const entry = organizations[org.id]
-                  const enabled = entry?.enabled ?? true
-                  const recipients = entry?.recipients ?? []
-                  return (
-                    <tr key={org.id}>
-                      <td>
-                        <span className="alerts-org-name">{org.name}</span>
-                        <span className="alerts-org-id">{org.id}</span>
-                      </td>
-                      <td className="alerts-col-toggle">
-                        <input
-                          type="checkbox"
-                          checked={enabled}
-                          aria-label={`Сповіщати про ${org.name}`}
-                          onChange={(e) =>
-                            updateOrganization(org.id, { enabled: e.target.checked })
-                          }
-                        />
-                      </td>
-                      <td>
-                        <input
-                          key={`${org.id}-${savedAt ?? 0}`}
-                          type="text"
-                          className="alerts-input"
-                          defaultValue={recipients.join(', ')}
-                          placeholder="порожньо = загальний список"
-                          aria-label={`Отримувачі для ${org.name}`}
-                          onChange={(e) =>
-                            updateOrganization(org.id, {
-                              recipients: parseRecipients(e.target.value),
-                            })
-                          }
-                        />
-                      </td>
-                      <td className="alerts-col-test">
-                        <button
-                          type="button"
-                          className="alerts-secondary"
-                          disabled={
-                            dirty || (test?.target === org.id && test.status === 'sending')
-                          }
-                          title={testHint}
-                          onClick={() => runTest(org.id)}
-                        >
-                          Тест
-                        </button>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
+            <div className="alerts-table-scroll">
+              <table className="alerts-orgs">
+                <thead>
+                  <tr>
+                    <th>Організація</th>
+                    <th className="alerts-col-toggle">Сповіщати</th>
+                    <th>Отримувачі</th>
+                    <th className="alerts-col-test" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {orgs.map((org) => {
+                    const entry = organizations[org.id]
+                    const enabled = entry?.enabled ?? true
+                    const recipients = entry?.recipients ?? []
+                    return (
+                      <tr key={org.id}>
+                        <td>
+                          <span className="alerts-org-name">{org.name}</span>
+                          <span className="alerts-org-id">{org.id}</span>
+                        </td>
+                        <td className="alerts-col-toggle">
+                          <input
+                            type="checkbox"
+                            checked={enabled}
+                            aria-label={`Сповіщати про ${org.name}`}
+                            onChange={(e) =>
+                              updateOrganization(org.id, { enabled: e.target.checked })
+                            }
+                          />
+                        </td>
+                        <td>
+                          <input
+                            key={`${org.id}-${savedAt ?? 0}`}
+                            type="text"
+                            className="alerts-input"
+                            defaultValue={recipients.join(', ')}
+                            placeholder="порожньо = загальний список"
+                            aria-label={`Отримувачі для ${org.name}`}
+                            onChange={(e) =>
+                              updateOrganization(org.id, {
+                                recipients: parseRecipients(e.target.value),
+                              })
+                            }
+                          />
+                        </td>
+                        <td className="alerts-col-test">
+                          <button
+                            type="button"
+                            className="alerts-secondary"
+                            disabled={
+                              dirty || (test?.target === org.id && test.status === 'sending')
+                            }
+                            title={testHint}
+                            onClick={() => runTest(org.id)}
+                          >
+                            Тест
+                          </button>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
             {test && test.target !== '' ? <TestResult test={test} /> : null}
           </section>
 

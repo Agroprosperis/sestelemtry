@@ -336,6 +336,9 @@ html {
   /* Keep the layout width steady when a page grows past the viewport:
      the scrollbar otherwise appears and the page narrows by its width. */
   scrollbar-gutter: stable;
+  /* iOS Safari enlarges the text of a phone turned to landscape. */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 body {
@@ -356,4 +359,15 @@ select,
 textarea,
 button {
   color: inherit;
+}
+
+/* iOS Safari zooms the page into a focused field set under 16px. The
+   module stylesheets size their fields with more specific selectors,
+   hence !important. */
+@media (pointer: coarse) {
+  input:not([type='checkbox']):not([type='radio']):not([type='range']),
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
 }

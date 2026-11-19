@@ -52,36 +52,38 @@ export function ManifestJournal({ journal, fetchedAt }: { journal: Journal; fetc
           перерахунку.
         </div>
       ) : (
-        <table className="ctl-events-table">
-          <thead>
-            <tr>
-              <th>Manifest</th>
-              <th>Опубліковано</th>
-              <th>Діє до</th>
-              <th>Інтервалів</th>
-              <th>Load</th>
-              <th>Статус</th>
-              <th>Підтверджено</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((m) => (
-              <tr key={m.manifest_id}>
-                <td className="mono">{m.manifest_id}</td>
-                <td>{fmtTime(m.issued_at)}</td>
-                <td>{fmtTime(m.valid_until)}</td>
-                <td>{m.intervals}</td>
-                <td>{m.load_source || '—'}</td>
-                <td>
-                  <span className={'ctl-sev ' + (STATUS_CHIP[m.status] ?? 'plain')}>
-                    {STATUS_LABEL[m.status] ?? m.status}
-                  </span>
-                </td>
-                <td>{fmtTime(m.applied_at ?? m.rejected_at)}</td>
+        <div className="ctl-table-scroll">
+          <table className="ctl-events-table">
+            <thead>
+              <tr>
+                <th>Manifest</th>
+                <th>Опубліковано</th>
+                <th>Діє до</th>
+                <th>Інтервалів</th>
+                <th>Load</th>
+                <th>Статус</th>
+                <th>Підтверджено</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {rows.map((m) => (
+                <tr key={m.manifest_id}>
+                  <td className="mono">{m.manifest_id}</td>
+                  <td>{fmtTime(m.issued_at)}</td>
+                  <td>{fmtTime(m.valid_until)}</td>
+                  <td>{m.intervals}</td>
+                  <td>{m.load_source || '—'}</td>
+                  <td>
+                    <span className={'ctl-sev ' + (STATUS_CHIP[m.status] ?? 'plain')}>
+                      {STATUS_LABEL[m.status] ?? m.status}
+                    </span>
+                  </td>
+                  <td>{fmtTime(m.applied_at ?? m.rejected_at)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </section>
   )

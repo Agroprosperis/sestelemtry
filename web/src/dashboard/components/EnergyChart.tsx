@@ -35,6 +35,7 @@ import { pvForecastLabel, type PvForecastHourlyRow } from '../transforms/pvForec
 import type { SOCChartRow } from '../transforms/soc'
 import type { EnergySummary as Summary } from '../transforms/summary'
 import { GEN_POWER_KEY, SUPPLY_MODE_KEY, type DaySupplyBucket, type SupplyMode } from '../transforms/supply'
+import { PHONE_QUERY, useMediaQuery } from '../../shell/useMediaQuery'
 import { useChartChrome } from '../../theme/useChartChrome'
 import { ChartSkeleton } from './ChartSkeleton'
 import { EnergySummary } from './EnergySummary'
@@ -101,6 +102,9 @@ const GEN_SHOWN_KW = 0.5
 // Day preset uses 5-minute buckets (288 per day); show every 12th tick so
 // labels land on the hour and the axis stays readable.
 const DAY_TICKS_PER_HOUR = 12
+// A phone's plot is ~180px wide: 24 hour labels overlap there, so it
+// labels every third hour.
+const PHONE_HOURS_PER_TICK = 3
 
 // Debounce ResponsiveContainer's resize handler so layout thrash on window
 // resize doesn't trigger a full recharts relayout per pixel.
@@ -170,6 +174,7 @@ export function EnergyChart({
   site,
 }: Props) {
   const chrome = useChartChrome()
+  const phone = useMediaQuery(PHONE_QUERY)
   const pvForecastName = pvForecastLabel(pvForecastWholeElevator)
   const aiEssLabel = planOverlay?.essLabel ?? AI_ESS_LABEL
   const aiSocLabel = planOverlay?.socLabel ?? AI_SOC_LABEL
@@ -373,7 +378,7 @@ export function EnergyChart({
       </h2>
       {/* A day that has not happened has no fact to sum. */}
       {!outlook && <EnergySummary summary={summary} loading={loading} />}
-      <div className="chart-wrap">
+      <div className="chart-wrap chart-wrap-day">
         {loading ? (
           <ChartSkeleton preset="day" />
         ) : !showChart ? (
@@ -384,7 +389,7 @@ export function EnergyChart({
                 <CartesianGrid strokeDasharray="3 3" stroke={chrome.grid} />
                 <XAxis
                   dataKey="time"
-                  interval={DAY_TICKS_PER_HOUR - 1}
+                  interval={(phone ? PHONE_HOURS_PER_TICK : 1) * DAY_TICKS_PER_HOUR - 1}
                   tickFormatter={dayTickFormatter}
                 />
                 <YAxis

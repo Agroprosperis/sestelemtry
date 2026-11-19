@@ -5,6 +5,7 @@ import { formatOrganizationLabel } from '../../dashboard/config'
 import { expenseGenChargeOf, revenueEssSelfOf, revenuePvSelfOf, type HourEconomicsRow } from '../compute'
 import { UAH_MONEY, useMoney, type Money } from '../currency'
 import { dayPivotSheet, exportFileName, type HourMetric } from '../exportSheets'
+import { tipLeft } from '../tipPosition'
 import { fetchUahDayRows } from '../useEconomicsData'
 import { downloadXlsx, type XlsxFormat } from '../xlsx'
 import { ExportButton } from './ExportButton'
@@ -715,6 +716,10 @@ function essNetTerms(row: HourEconomicsRow, money: Money): EssNetTerm[] {
   return terms
 }
 
+// The strip tooltip at its widest: the 320px rows of
+// .economics-ess-strip-tip plus its padding and border.
+const STRIP_TIP_WIDTH = 344
+
 // EssEffectStrip is a thin bar row of per-hour ESS net effect rendered
 // directly above the pivot, using the table's measured column widths
 // so each bar sits over its hour column. Bars grow up (positive
@@ -774,7 +779,7 @@ function EssEffectStrip({
         ? createPortal(
             <div
               className="economics-ess-strip-tip"
-              style={{ left: hover.x + 14, top: hover.y + 18 }}
+              style={{ left: tipLeft(hover.x, STRIP_TIP_WIDTH), top: hover.y + 18 }}
               role="tooltip"
             >
               <div className="economics-ess-strip-tip-hour">

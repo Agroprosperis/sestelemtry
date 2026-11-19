@@ -162,6 +162,10 @@
   margin-top: 14px;
 }
 
+.alerts-table-scroll {
+  overflow-x: auto;
+}
+
 .alerts-orgs th,
 .alerts-orgs td {
   text-align: left;
@@ -318,6 +322,20 @@
 }
 
 @media (max-width: 640px) {
+  .alerts-page {
+    padding: 16px 14px 48px;
+  }
+
+  .alerts-card {
+    padding: 16px;
+  }
+
+  /* Squeezed to a phone's width the recipients field would shrink to a
+     few letters; the table keeps a usable width and scrolls instead. */
+  .alerts-table-scroll > .alerts-orgs {
+    min-width: 560px;
+  }
+
   .alerts-grid {
     grid-template-columns: 1fr;
   }

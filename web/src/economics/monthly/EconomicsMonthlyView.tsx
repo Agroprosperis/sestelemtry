@@ -45,6 +45,7 @@ import {
   unitCostUahPerKwh,
 } from './rollup'
 import { exportFileName, monthDetailSheet } from '../exportSheets'
+import { tipLeft } from '../tipPosition'
 import { downloadXlsx } from '../xlsx'
 
 type Props = {
@@ -392,6 +393,9 @@ type BalanceBar = { name: string; total: number; segs: BalanceSeg[] }
 type SegTip = { title: string; lines: TipLine[]; x: number; y: number }
 type FlowMode = 'detail' | 'source' | 'destination'
 
+// The max-width of .economics-seg-tip.
+const SEG_TIP_WIDTH = 260
+
 export function MonthlyBalance({ totals, scope = 'month' }: { totals: EconomicsMonthlyTotals; scope?: PeriodScope }) {
   const money = useMoney()
   const w = PERIOD_WORDS[scope]
@@ -505,9 +509,9 @@ export function MonthlyBalance({ totals, scope = 'month' }: { totals: EconomicsM
   }
 
   const showTip = (s: BalanceSeg) => (e: ReactMouseEvent<HTMLSpanElement>) =>
-    setTip({ title: s.title, lines: s.lines, x: e.clientX + 14, y: e.clientY + 14 })
+    setTip({ title: s.title, lines: s.lines, x: tipLeft(e.clientX, SEG_TIP_WIDTH), y: e.clientY + 14 })
   const moveTip = (e: ReactMouseEvent<HTMLSpanElement>) =>
-    setTip((t) => (t ? { ...t, x: e.clientX + 14, y: e.clientY + 14 } : t))
+    setTip((t) => (t ? { ...t, x: tipLeft(e.clientX, SEG_TIP_WIDTH), y: e.clientY + 14 } : t))
   const hideTip = () => setTip(null)
 
   return (
