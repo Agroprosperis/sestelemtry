@@ -23,19 +23,23 @@ import (
 //
 //	GET  /                                   → the session cookie
 //	POST /registr_all_user/login_all_user    email=…&password=… → the cabinet's first page
-//	GET  …/show_only_disconnections?eic=…    → {"planned_list_cab": [{"accidentid": 0,
-//	     "acc_begin": "2026-11-19T06:00:00", "accend_plan": "2026-11-19T10:00:00", …}]}
+//	GET  /account_legal                      → the legal accounts, each linked as
+//	     /account_legal/view_main_details?a=<id>
+//	GET  /account_household/show_only_disconnections?eic=&type_user=2&a=<id>
+//	     → {"planned_list_cab": [{"acc_begin": "2026-11-19T06:00:00",
+//	       "accend_plan": "2026-11-19T10:00:00", "eic": "62Z…", "typeid": …, …}],
+//	       "current_list_cab": […], "fields": […], "keys_s": […]}
 //
-// Times carry no zone: they are Kyiv wall-clock. accidentid 0 marks the
-// hourly schedule. The first page links the outages list; a household
-// cabinet keeps it under /account_household.
+// A legal account's page asks for its outages by the account, not by
+// EIC, and the answer names each item's point. A household cabinet asks
+// by EIC and marks the hourly schedule with accidentid 0. Times carry no
+// zone: they are Kyiv wall-clock.
 
 // userAgent names the console honestly to the operator's server.
 const userAgent = "SESTelemetry/1.0 (+https://github.com/Agroprosperis/sestelemtry)"
 
-// defaultOutagesPath is where a household cabinet lists a point's
-// outages, used when the first page links none.
-const defaultOutagesPath = "/account_household/show_only_disconnections"
+// outagesPath answers an account's outages, legal and household alike.
+const outagesPath = "/account_household/show_only_disconnections"
 
 // maxPage bounds what one cabinet page may weigh.
 const maxPage = 4 << 20
@@ -46,6 +50,7 @@ var (
 	ErrBlocked      = errors.New("кабінет закрив доступ перевіркою на бота")
 	ErrUnreachable  = errors.New("немає зʼєднання з кабінетом")
 	ErrNoData       = errors.New("кабінет відповів не даними про відключення")
+	ErrNoAccount    = errors.New("у кабінеті немає рахунку юридичної особи, а EIC не вказано")
 )
 
 // errSignedOut is a page the cabinet answers once it has dropped the
@@ -55,8 +60,8 @@ var errSignedOut = errors.New("outages: the cabinet dropped the session")
 // BaseURL is the address of the cabinet at host.
 func BaseURL(host string) string { return "https://" + host }
 
-// Client signs in to one e-svitlo cabinet and reads planned outages by
-// EIC. It keeps the session between calls and signs in again when the
+// Client signs in to one e-svitlo cabinet and reads the outages it
+// lists. It keeps the session between calls and signs in again when the
 // cabinet has dropped it. Not safe for concurrent use.
 type Client struct {
 	base     string
@@ -70,6 +75,8 @@ type Client struct {
 	// the cabinet links there, "" when it links none.
 	landing string
 	path    string
+	// legal is the ids (a=) of the legal accounts the cabinet holds.
+	legal []string
 
 	trace func(Exchange)
 }
@@ -116,9 +123,10 @@ func NewClient(base, login, password string, loc *time.Location, httpClient *htt
 	return &Client{base: strings.TrimRight(base, "/"), login: login, password: password, loc: loc, http: c}
 }
 
-// SignIn opens a session with the account.
+// SignIn opens a session with the account and finds the legal accounts
+// the cabinet holds.
 func (c *Client) SignIn(ctx context.Context) error {
-	c.signedIn, c.landing, c.path = false, "", ""
+	c.signedIn, c.landing, c.path, c.legal = false, "", "", nil
 	// The cabinet hands out its session cookie with the first page.
 	if _, _, err := c.fetch(ctx, http.MethodGet, "/", nil); err != nil {
 		return err
@@ -134,7 +142,12 @@ func (c *Client) SignIn(ctx context.Context) error {
 		}
 		return ErrUnauthorized
 	}
-	c.signedIn, c.landing, c.path = true, final.Path, outagesLink(page)
+	landing, path := final.Path, outagesLink(page)
+	legal, err := c.legalAccounts(ctx)
+	if err != nil {
+		return err
+	}
+	c.signedIn, c.landing, c.path, c.legal = true, landing, path, legal
 	return nil
 }
 
@@ -154,20 +167,49 @@ func Refusal(err error) string {
 	return ""
 }
 
-// Outages returns the point's planned outages the cabinet lists, in time
-// order, overlapping ones of a kind merged.
+var legalAccountRe = regexp.MustCompile(`/account_legal/view_main_details\?a=(\d+)`)
+
+// legalAccounts is the ids of the legal accounts the cabinet lists, none
+// for a household's.
+func (c *Client) legalAccounts(ctx context.Context) ([]string, error) {
+	page, final, err := c.fetch(ctx, http.MethodGet, "/account_legal", nil)
+	if err != nil {
+		if errors.Is(err, ErrBlocked) || errors.Is(err, ErrUnreachable) || ctx.Err() != nil {
+			return nil, err
+		}
+		// A household cabinet may have no such section at all.
+		return nil, nil
+	}
+	if strings.HasPrefix(final.Path, "/user/login") || loginPage(page) {
+		return nil, ErrUnauthorized
+	}
+	var out []string
+	seen := map[string]bool{}
+	for _, m := range legalAccountRe.FindAllStringSubmatch(page, -1) {
+		if !seen[m[1]] {
+			seen[m[1]] = true
+			out = append(out, m[1])
+		}
+	}
+	return out, nil
+}
+
+// Outages returns the outages the cabinet lists — planned and under way —
+// in time order, overlapping ones of a kind merged. A legal cabinet
+// answers for each of its accounts, and eic, when given, keeps only that
+// point's; a household cabinet is asked by eic.
 func (c *Client) Outages(ctx context.Context, eic string) ([]Interval, error) {
 	if !c.signedIn {
 		if err := c.SignIn(ctx); err != nil {
 			return nil, err
 		}
 	}
-	list, err := c.readOutages(ctx, eic)
+	list, err := c.readAll(ctx, eic)
 	if errors.Is(err, errSignedOut) {
 		if err := c.SignIn(ctx); err != nil {
 			return nil, err
 		}
-		list, err = c.readOutages(ctx, eic)
+		list, err = c.readAll(ctx, eic)
 	}
 	if errors.Is(err, errSignedOut) {
 		return nil, ErrUnauthorized
@@ -175,23 +217,59 @@ func (c *Client) Outages(ctx context.Context, eic string) ([]Interval, error) {
 	return list, err
 }
 
-func (c *Client) readOutages(ctx context.Context, eic string) ([]Interval, error) {
-	page, final, err := c.fetch(ctx, http.MethodGet, c.outagesURL(eic), nil)
+func (c *Client) readAll(ctx context.Context, eic string) ([]Interval, error) {
+	if len(c.legal) == 0 {
+		if eic == "" {
+			return nil, ErrNoAccount
+		}
+		list, err := c.read(ctx, c.householdURL(eic), "")
+		return merge(list), err
+	}
+	var all []Interval
+	for _, a := range c.legal {
+		list, err := c.read(ctx, legalURL(a), eic)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, list...)
+	}
+	return merge(all), nil
+}
+
+// read fetches one outages list. eic, when given, keeps the items of
+// that point and those that name none.
+func (c *Client) read(ctx context.Context, path, eic string) ([]Interval, error) {
+	page, final, err := c.fetch(ctx, http.MethodGet, path, nil)
 	if err != nil {
 		return nil, err
 	}
 	if strings.HasPrefix(final.Path, "/user/login") || loginPage(page) {
 		return nil, errSignedOut
 	}
-	return parseOutages([]byte(page), c.loc)
+	list, err := parseItems([]byte(page), c.loc)
+	if err != nil || eic == "" {
+		return list, err
+	}
+	kept := list[:0]
+	for _, iv := range list {
+		if iv.EIC == "" || iv.EIC == eic {
+			kept = append(kept, iv)
+		}
+	}
+	return kept, nil
 }
 
-// outagesURL is the outages list of one point: the link the cabinet gave
-// with its eic set, else the household path.
-func (c *Client) outagesURL(eic string) string {
+// legalURL is where a legal account's page reads its outages from.
+func legalURL(account string) string {
+	return outagesPath + "?" + url.Values{"eic": {""}, "type_user": {"2"}, "a": {account}}.Encode()
+}
+
+// householdURL is a household point's outages list: the link the
+// cabinet gave with its eic set, else outagesPath.
+func (c *Client) householdURL(eic string) string {
 	u, err := url.Parse(c.path)
 	if c.path == "" || err != nil {
-		u = &url.URL{Path: defaultOutagesPath}
+		u = &url.URL{Path: outagesPath}
 	}
 	q := u.Query()
 	q.Set("eic", eic)
@@ -201,23 +279,30 @@ func (c *Client) outagesURL(eic string) string {
 
 // Probe is what one test of a cabinet found, for the settings page.
 type Probe struct {
-	SignedIn bool       `json:"signed_in"`
-	Landing  string     `json:"landing,omitempty"`
+	SignedIn bool   `json:"signed_in"`
+	Landing  string `json:"landing,omitempty"`
+	// Accounts is the legal accounts (a=) the cabinet holds.
+	Accounts []string   `json:"accounts,omitempty"`
 	Path     string     `json:"path,omitempty"`
 	Outages  []Interval `json:"outages"`
 }
 
-// Probe signs in and, given an EIC, reads that point's outages.
+// Probe signs in and reads the outages: a legal cabinet's for its
+// accounts, kept to eic when given; a household's for eic.
 func (c *Client) Probe(ctx context.Context, eic string) (Probe, error) {
 	p := Probe{Outages: []Interval{}}
 	if err := c.SignIn(ctx); err != nil {
 		return p, err
 	}
-	p.SignedIn, p.Landing = true, c.landing
-	if eic == "" {
+	p.SignedIn, p.Landing, p.Accounts = true, c.landing, c.legal
+	switch {
+	case len(c.legal) > 0:
+		p.Path = legalURL(c.legal[0])
+	case eic != "":
+		p.Path = c.householdURL(eic)
+	default:
 		return p, nil
 	}
-	p.Path = c.outagesURL(eic)
 	list, err := c.Outages(ctx, eic)
 	if list != nil {
 		p.Outages = list
@@ -326,8 +411,9 @@ var localLayouts = []string{
 
 // parseLocal reads a cabinet time: with a zone as written, without one
 // as Kyiv wall-clock. A time at :59 seconds is the end of its minute.
+// The cabinet's own page strips stray quotes from them, and so does this.
 func parseLocal(s string, loc *time.Location) (time.Time, bool) {
-	s = strings.TrimSpace(s)
+	s = strings.TrimSpace(strings.Trim(strings.TrimSpace(s), `"`))
 	if s == "" {
 		return time.Time{}, false
 	}
@@ -354,9 +440,23 @@ func ParseOutages(body []byte, loc *time.Location) ([]Interval, error) {
 	return parseOutages(body, loc)
 }
 
-// parseOutages reads the cabinet's outages list. A list the cabinet
-// changed the shape of is an error, not "no outages".
+// parseOutages reads the cabinet's outages list, overlapping items of a
+// kind merged.
 func parseOutages(body []byte, loc *time.Location) ([]Interval, error) {
+	list, err := parseItems(body, loc)
+	if err != nil {
+		return nil, err
+	}
+	return merge(list), nil
+}
+
+// outageLists are the lists one answer carries: the planned outages and
+// those under way.
+var outageLists = []string{"planned_list_cab", "current_list_cab"}
+
+// parseItems reads every outage of an answer. An answer the cabinet
+// changed the shape of is an error, not "no outages".
+func parseItems(body []byte, loc *time.Location) ([]Interval, error) {
 	trimmed := bytes.TrimSpace(body)
 	if len(trimmed) == 0 || trimmed[0] != '{' {
 		return nil, fmt.Errorf("%w: %s", ErrNoData, snippet(trimmed))
@@ -365,8 +465,7 @@ func parseOutages(body []byte, loc *time.Location) ([]Interval, error) {
 	if err := json.Unmarshal(trimmed, &resp); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrNoData, err)
 	}
-	raw, ok := resp["planned_list_cab"]
-	if !ok {
+	if _, ok := resp["planned_list_cab"]; !ok {
 		names := make([]string, 0, len(resp))
 		for k := range resp {
 			names = append(names, k)
@@ -374,28 +473,67 @@ func parseOutages(body []byte, loc *time.Location) ([]Interval, error) {
 		sort.Strings(names)
 		return nil, fmt.Errorf("%w: немає planned_list_cab, є %s", ErrNoData, strings.Join(names, ", "))
 	}
-	var items []map[string]any
-	if err := json.Unmarshal(raw, &items); err != nil {
-		return nil, fmt.Errorf("%w: planned_list_cab: %v", ErrNoData, err)
-	}
-	out := make([]Interval, 0, len(items))
-	for _, it := range items {
-		begin, end := text(it["acc_begin"]), text(it["accend_plan"])
-		start, ok1 := parseLocal(begin, loc)
-		stop, ok2 := parseLocal(end, loc)
-		if !ok1 || !ok2 {
-			return nil, fmt.Errorf("%w: незрозумілий час %q – %q", ErrNoData, begin, end)
-		}
-		if !stop.After(start) {
+	out := []Interval{}
+	for _, key := range outageLists {
+		raw, ok := resp[key]
+		if !ok {
 			continue
 		}
-		kind := KindSchedule
-		if id, ok := number(it["accidentid"]); ok && id != 0 {
-			kind = KindOther
+		var items []map[string]any
+		if err := json.Unmarshal(raw, &items); err != nil {
+			return nil, fmt.Errorf("%w: %s: %v", ErrNoData, key, err)
 		}
-		out = append(out, Interval{Start: start, End: stop, Kind: kind})
+		for _, it := range items {
+			iv, ok, err := item(it, loc)
+			if err != nil {
+				return nil, err
+			}
+			if ok {
+				out = append(out, iv)
+			}
+		}
 	}
-	return merge(out), nil
+	return out, nil
+}
+
+// item reads one outage. One under way with no planned end yet is left
+// out: there is no stretch ahead to shade.
+func item(it map[string]any, loc *time.Location) (Interval, bool, error) {
+	begin, end := text(it["acc_begin"]), text(it["accend_plan"])
+	start, ok := parseLocal(begin, loc)
+	if !ok {
+		return Interval{}, false, fmt.Errorf("%w: незрозумілий час %q – %q", ErrNoData, begin, end)
+	}
+	if strings.Trim(strings.TrimSpace(end), `"`) == "" {
+		return Interval{}, false, nil
+	}
+	stop, ok := parseLocal(end, loc)
+	if !ok {
+		return Interval{}, false, fmt.Errorf("%w: незрозумілий час %q – %q", ErrNoData, begin, end)
+	}
+	if !stop.After(start) {
+		return Interval{}, false, nil
+	}
+	return Interval{Start: start, End: stop, Kind: kindOf(it), EIC: NormalizeEIC(text(it["eic"]))}, true, nil
+}
+
+// kindOf tells the hourly schedule from planned works and accidents. A
+// household's list marks the schedule with accidentid 0; a legal
+// account's names the reason in typeid.
+func kindOf(it map[string]any) Kind {
+	if id, ok := number(it["accidentid"]); ok {
+		if id == 0 {
+			return KindSchedule
+		}
+		return KindOther
+	}
+	reason := strings.ToLower(text(it["typeid"]))
+	for _, w := range []string{"гпв", "погодин", "графік"} {
+		if strings.Contains(reason, w) {
+			return KindSchedule
+		}
+	}
+	return KindOther
 }
 
 // merge sorts intervals and joins overlapping or touching ones of a kind.

@@ -106,19 +106,14 @@ func main() {
 	fmt.Printf("EIC у кабінеті: %s\n", listOrNone(sortedKeys(eics)))
 	fmt.Printf("Посилання на відключення: %s\n", listOrNone(links))
 	points := pointsToRead(*eicFlag, sortedKeys(eics))
-	switch {
-	case signErr != nil:
+	if signErr != nil {
 		fmt.Println("Відключення не читаю: вхід не вдався")
-	case len(points) == 0:
-		fmt.Println("Відключення не читаю: немає EIC (можна вказати -eic 62Z…)")
-	}
-	if signErr == nil {
+	} else {
+		if len(points) == 0 {
+			readOutages(ctx, c, "", loc)
+		}
 		for _, eic := range points {
-			account := eics[eic]
-			if account == "" && len(accounts) > 0 {
-				account = accounts[0]
-			}
-			readOutages(ctx, c, eic, account, links, loc)
+			readOutages(ctx, c, eic, loc)
 		}
 		if *keep {
 			if err := saveCookies(dir, base, jar); err != nil {
@@ -183,62 +178,30 @@ func crawl(ctx context.Context, c *outages.Client, rec *recorder, host string, l
 	}
 }
 
-// readOutages tries the outage lists the cabinet linked, then the paths
-// a household and a legal account would have, until one parses.
-func readOutages(ctx context.Context, c *outages.Client, eic, account string, links []string, loc *time.Location) {
-	for _, path := range outageCandidates(eic, account, links) {
-		body, final, err := c.Get(ctx, path)
-		if err != nil {
-			fmt.Printf("Відключення %s за %s: %v\n", eic, path, err)
-			continue
-		}
-		list, err := outages.ParseOutages([]byte(body), loc)
-		if err != nil {
-			fmt.Printf("Відключення %s за %s → %s: %v\n", eic, path, final.RequestURI(), err)
-			continue
-		}
-		if len(list) == 0 {
-			fmt.Printf("Відключення %s за %s: немає запланованих\n", eic, path)
-			return
-		}
-		fmt.Printf("Відключення %s за %s:\n", eic, path)
-		for _, iv := range list {
-			kind := "ГПВ"
-			if iv.Kind == outages.KindOther {
-				kind = "інше (роботи / аварія)"
-			}
-			fmt.Printf("  %s – %s  %s\n", iv.Start.In(loc).Format("02.01 15:04"), iv.End.In(loc).Format("02.01 15:04"), kind)
-		}
+// readOutages reads, as the API's sync does, the outages of eic — of all
+// the cabinet's legal accounts when eic is "".
+func readOutages(ctx context.Context, c *outages.Client, eic string, loc *time.Location) {
+	who := "рахунків кабінету"
+	if eic != "" {
+		who = eic
+	}
+	list, err := c.Outages(ctx, eic)
+	if err != nil {
+		fmt.Printf("Відключення %s: %v\n", who, err)
 		return
 	}
-}
-
-func outageCandidates(eic, account string, links []string) []string {
-	var out []string
-	seen := map[string]bool{}
-	add := func(path string, withAccount bool) {
-		u, err := url.Parse(path)
-		if err != nil {
-			return
-		}
-		q := u.Query()
-		q.Set("eic", eic)
-		if withAccount && account != "" && q.Get("a") == "" {
-			q.Set("a", account)
-		}
-		u.RawQuery = q.Encode()
-		if s := u.String(); !seen[s] {
-			seen[s] = true
-			out = append(out, s)
-		}
+	if len(list) == 0 {
+		fmt.Printf("Відключення %s: немає ні поточних, ні планових\n", who)
+		return
 	}
-	for _, l := range links {
-		add(l, true)
+	fmt.Printf("Відключення %s:\n", who)
+	for _, iv := range list {
+		kind := "ГПВ"
+		if iv.Kind == outages.KindOther {
+			kind = "інше (роботи / аварія)"
+		}
+		fmt.Printf("  %s – %s  %s %s\n", iv.Start.In(loc).Format("02.01 15:04"), iv.End.In(loc).Format("02.01 15:04"), kind, iv.EIC)
 	}
-	add("/account_legal/show_only_disconnections?type_user=2", true)
-	add("/account_household/show_only_disconnections?type_user=1", true)
-	add("/account_household/show_only_disconnections", false)
-	return out
 }
 
 // pointsToRead is the EICs given on the command line, then the metering
@@ -454,7 +417,7 @@ var actingWords = []string{
 }
 
 // viewPrefixes start the name of a page that only shows an account.
-var viewPrefixes = []string{"view", "show", "list", "info", "detail", "get_"}
+var viewPrefixes = []string{"view", "show", "list", "info", "detail", "get_", "commercial"}
 
 // worthOpening keeps the probe to pages that show something: outage
 // lists, the cabinet's sections and an account's views, never a link

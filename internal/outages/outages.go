@@ -92,6 +92,9 @@ type Interval struct {
 	Start time.Time `json:"start"`
 	End   time.Time `json:"end"`
 	Kind  Kind      `json:"kind"`
+	// EIC is the point the cabinet named for the outage, "" when it
+	// named none.
+	EIC string `json:"eic,omitempty"`
 }
 
 // Read is the outcome of the last time a point's schedule was read.

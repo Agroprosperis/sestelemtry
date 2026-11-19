@@ -124,10 +124,12 @@ type OutageTestRequest struct {
 
 // OutageTestResponse reports the cabinet test.
 type OutageTestResponse struct {
-	OK       bool               `json:"ok"`
-	At       string             `json:"at"`
-	SignedIn bool               `json:"signed_in"`
-	Landing  string             `json:"landing,omitempty"`
+	OK       bool   `json:"ok"`
+	At       string `json:"at"`
+	SignedIn bool   `json:"signed_in"`
+	Landing  string `json:"landing,omitempty"`
+	// Accounts is the legal accounts (a=) the cabinet holds.
+	Accounts []string           `json:"accounts,omitempty"`
 	Path     string             `json:"path,omitempty"`
 	Outages  []outages.Interval `json:"outages"`
 	Error    string             `json:"error,omitempty"`
@@ -294,7 +296,7 @@ func (h *Handlers) outageSettingsTest(w http.ResponseWriter, r *http.Request) {
 	loc := h.outagesLocation()
 	resp := OutageTestResponse{At: time.Now().In(loc).Format(time.RFC3339), Outages: []outages.Interval{}}
 	probe, err := outages.NewClient(outages.BaseURL(req.Host), req.Login, password, loc, nil).Probe(ctx, req.EIC)
-	resp.SignedIn, resp.Landing, resp.Path = probe.SignedIn, probe.Landing, probe.Path
+	resp.SignedIn, resp.Landing, resp.Accounts, resp.Path = probe.SignedIn, probe.Landing, probe.Accounts, probe.Path
 	if probe.Outages != nil {
 		resp.Outages = probe.Outages
 	}

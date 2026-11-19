@@ -7,6 +7,7 @@ func TestWorthOpeningOnlyShows(t *testing.T) {
 		"/account_legal": true,
 		"/account_legal/view_main_details?a=15905&highlight_main=account_legal": true,
 		"/account_household/show_only_disconnections?eic=62Z1234567890123":      true,
+		"/account_legal_osr/commercial_accounting_osr?a=15905":                  true,
 		"/account_legal_osr_tt/select_indication_ty_osr_tt?a=15905":             false,
 		"/user/logout?_next=/":                     false,
 		"/user/change_password":                    false,
