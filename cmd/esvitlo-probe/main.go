@@ -3,11 +3,15 @@
 // outages reader can be checked against the real cabinet before the API
 // relies on it.
 //
-//	go run ./cmd/esvitlo-probe [-host vn.e-svitlo.com.ua] [-eic 62Z…]
+//	go run ./cmd/esvitlo-probe [-host vn.e-svitlo.com.ua] [-eic 62Z…] [-keep-session]
 //
 // It asks for the login and, without echo, the password; neither is
-// written down. The pages land in tmp/esvitlo-probe/<time>/, which git
-// ignores: they are the company's own cabinet, so they stay local.
+// written down. It opens only pages that show something — the cabinet's
+// sections, an account's views, outage lists — never a link that acts.
+// The pages land in tmp/esvitlo-probe/<time>/, which git ignores: they
+// are the company's own cabinet, so they stay local. -keep-session leaves
+// the session's cookie there too (cookies.txt, for curl -b) instead of
+// signing out.
 package main
 
 import (
@@ -18,6 +22,7 @@ import (
 	"fmt"
 	"html"
 	"net/http"
+	"net/http/cookiejar"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -31,14 +36,20 @@ import (
 	"github.com/nesh/sestelemetry/internal/outages"
 )
 
-// maxEICs bounds how many metering points one run reads outages for.
-const maxEICs = 5
+const (
+	// maxEICs bounds how many metering points one run reads outages for.
+	maxEICs = 5
+	// maxDepth is how many links deep from the cabinet's sections the
+	// probe goes.
+	maxDepth = 3
+)
 
 func main() {
 	host := flag.String("host", "vn.e-svitlo.com.ua", "кабінет оператора")
 	eicFlag := flag.String("eic", "", "EIC через кому; знайдені в кабінеті перевіряються й без цього")
 	outRoot := flag.String("out", "tmp/esvitlo-probe", "куди складати сторінки")
-	follow := flag.Int("follow", 8, "скільки розділів кабінету відкрити після входу")
+	limit := flag.Int("pages", 25, "скільки сторінок кабінету відкрити після входу")
+	keep := flag.Bool("keep-session", false, "не виходити з кабінету й лишити куку сесії в cookies.txt")
 	flag.Parse()
 
 	if _, ok := outages.OperatorFor(*host); !ok {
@@ -66,8 +77,10 @@ func main() {
 		fail("%v", err)
 	}
 	rec := &recorder{dir: dir}
-	hc := &http.Client{Timeout: 30 * time.Second, CheckRedirect: rec.redirect}
-	c := outages.NewClient(outages.BaseURL(*host), login, password, loc, hc)
+	jar, _ := cookiejar.New(nil)
+	hc := &http.Client{Timeout: 30 * time.Second, CheckRedirect: rec.redirect, Jar: jar}
+	base := outages.BaseURL(*host)
+	c := outages.NewClient(base, login, password, loc, hc)
 	c.SetTrace(rec.answer)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
@@ -84,36 +97,15 @@ func main() {
 	// Look around either way: a sign-in the reader misjudged still shows
 	// in what the cabinet's sections answer. No second sign-in, though —
 	// a wrong password tried again may lock the account.
-	opened := map[string]bool{}
-	for _, p := range rec.finals() {
-		opened[p] = true
-	}
-	candidates := append([]string{"/account_household"}, cabinetLinks(rec.lastBody(), *host)...)
-	rec.links = candidates[1:]
-	n := 0
-	for _, p := range candidates {
-		if n >= *follow || ctx.Err() != nil {
-			break
-		}
-		if opened[p] || !worthOpening(p) {
-			continue
-		}
-		opened[p] = true
-		n++
-		if _, final, err := c.Get(ctx, p); err != nil {
-			fmt.Printf("  %s: %v\n", p, err)
-		} else {
-			fmt.Printf("  відкрито %s → %s\n", p, final.RequestURI())
-		}
-	}
+	crawl(ctx, c, rec, *host, *limit)
 
-	found := rec.eics()
-	if len(found) > 0 {
-		fmt.Printf("EIC у кабінеті: %s\n", strings.Join(found, ", "))
-	} else {
-		fmt.Println("EIC у кабінеті не знайдено")
-	}
-	points := pointsToRead(*eicFlag, found)
+	eics := rec.eics()
+	accounts := rec.accounts()
+	links := rec.outageLinks()
+	fmt.Printf("Рахунки (a=): %s\n", listOrNone(accounts))
+	fmt.Printf("EIC у кабінеті: %s\n", listOrNone(sortedKeys(eics)))
+	fmt.Printf("Посилання на відключення: %s\n", listOrNone(links))
+	points := pointsToRead(*eicFlag, sortedKeys(eics))
 	switch {
 	case signErr != nil:
 		fmt.Println("Відключення не читаю: вхід не вдався")
@@ -122,7 +114,20 @@ func main() {
 	}
 	if signErr == nil {
 		for _, eic := range points {
-			readOutages(ctx, c, eic, loc)
+			account := eics[eic]
+			if account == "" && len(accounts) > 0 {
+				account = accounts[0]
+			}
+			readOutages(ctx, c, eic, account, links, loc)
+		}
+		if *keep {
+			if err := saveCookies(dir, base, jar); err != nil {
+				fmt.Printf("Куку сесії не записано: %v\n", err)
+			} else {
+				fmt.Println("Сесію лишено відкритою: cookies.txt")
+			}
+		} else if _, _, err := c.Get(ctx, "/user/logout"); err != nil {
+			fmt.Printf("Вихід з кабінету: %v\n", err)
 		}
 	}
 
@@ -133,24 +138,107 @@ func main() {
 	fmt.Println("Пароль ніде не записано. Сторінки лишаються на цьому компʼютері (tmp/ поза git).")
 }
 
-func readOutages(ctx context.Context, c *outages.Client, eic string, loc *time.Location) {
-	list, err := c.Outages(ctx, eic)
-	if err != nil {
-		fmt.Printf("Відключення %s: %v\n", eic, err)
-		return
+// crawl opens, breadth first, the cabinet's sections and the pages they
+// link that only show something, up to limit pages and maxDepth links
+// deep.
+func crawl(ctx context.Context, c *outages.Client, rec *recorder, host string, limit int) {
+	type item struct {
+		path  string
+		depth int
 	}
-	if len(list) == 0 {
-		fmt.Printf("Відключення %s: немає запланованих\n", eic)
-		return
+	seen := map[string]bool{}
+	for _, p := range rec.finals() {
+		seen[p] = true
 	}
-	fmt.Printf("Відключення %s:\n", eic)
-	for _, iv := range list {
-		kind := "ГПВ"
-		if iv.Kind == outages.KindOther {
-			kind = "інше (роботи / аварія)"
+	var queue []item
+	push := func(body []byte, depth int) {
+		for _, p := range cabinetLinks(body, host) {
+			rec.link(p)
+			if !seen[p] && worthOpening(p) {
+				seen[p] = true
+				queue = append(queue, item{p, depth})
+			}
 		}
-		fmt.Printf("  %s – %s  %s\n", iv.Start.In(loc).Format("02.01 15:04"), iv.End.In(loc).Format("02.01 15:04"), kind)
 	}
+	for _, p := range []string{"/account_legal", "/account_household"} {
+		if !seen[p] {
+			seen[p] = true
+			queue = append(queue, item{p, 1})
+		}
+	}
+	push(rec.lastBody(), 1)
+	for opened := 0; len(queue) > 0 && opened < limit && ctx.Err() == nil; opened++ {
+		it := queue[0]
+		queue = queue[1:]
+		body, final, err := c.Get(ctx, it.path)
+		if err != nil {
+			fmt.Printf("  %s: %v\n", it.path, err)
+			continue
+		}
+		fmt.Printf("  відкрито %s → %s\n", it.path, final.RequestURI())
+		seen[final.RequestURI()] = true
+		if it.depth < maxDepth {
+			push([]byte(body), it.depth+1)
+		}
+	}
+}
+
+// readOutages tries the outage lists the cabinet linked, then the paths
+// a household and a legal account would have, until one parses.
+func readOutages(ctx context.Context, c *outages.Client, eic, account string, links []string, loc *time.Location) {
+	for _, path := range outageCandidates(eic, account, links) {
+		body, final, err := c.Get(ctx, path)
+		if err != nil {
+			fmt.Printf("Відключення %s за %s: %v\n", eic, path, err)
+			continue
+		}
+		list, err := outages.ParseOutages([]byte(body), loc)
+		if err != nil {
+			fmt.Printf("Відключення %s за %s → %s: %v\n", eic, path, final.RequestURI(), err)
+			continue
+		}
+		if len(list) == 0 {
+			fmt.Printf("Відключення %s за %s: немає запланованих\n", eic, path)
+			return
+		}
+		fmt.Printf("Відключення %s за %s:\n", eic, path)
+		for _, iv := range list {
+			kind := "ГПВ"
+			if iv.Kind == outages.KindOther {
+				kind = "інше (роботи / аварія)"
+			}
+			fmt.Printf("  %s – %s  %s\n", iv.Start.In(loc).Format("02.01 15:04"), iv.End.In(loc).Format("02.01 15:04"), kind)
+		}
+		return
+	}
+}
+
+func outageCandidates(eic, account string, links []string) []string {
+	var out []string
+	seen := map[string]bool{}
+	add := func(path string, withAccount bool) {
+		u, err := url.Parse(path)
+		if err != nil {
+			return
+		}
+		q := u.Query()
+		q.Set("eic", eic)
+		if withAccount && account != "" && q.Get("a") == "" {
+			q.Set("a", account)
+		}
+		u.RawQuery = q.Encode()
+		if s := u.String(); !seen[s] {
+			seen[s] = true
+			out = append(out, s)
+		}
+	}
+	for _, l := range links {
+		add(l, true)
+	}
+	add("/account_legal/show_only_disconnections?type_user=2", true)
+	add("/account_household/show_only_disconnections?type_user=1", true)
+	add("/account_household/show_only_disconnections", false)
+	return out
 }
 
 // pointsToRead is the EICs given on the command line, then the metering
@@ -186,6 +274,7 @@ type recorder struct {
 	hops  []string
 	pages []page
 	links []string
+	known map[string]bool
 }
 
 type page struct {
@@ -225,6 +314,17 @@ func (r *recorder) answer(e outages.Exchange) {
 	r.pages = append(r.pages, page{final: e.Final, body: e.Body})
 }
 
+// link notes a cabinet link seen on any page, for links.txt.
+func (r *recorder) link(p string) {
+	if r.known == nil {
+		r.known = map[string]bool{}
+	}
+	if !r.known[p] {
+		r.known[p] = true
+		r.links = append(r.links, p)
+	}
+}
+
 func (r *recorder) lastBody() []byte {
 	if len(r.pages) == 0 {
 		return nil
@@ -249,19 +349,52 @@ func (r *recorder) finals() []string {
 
 var eicRe = regexp.MustCompile(`\b62[A-Z][0-9A-Z-]{12}[0-9A-Z]\b`)
 
-// eics is every EIC-looking code on the pages seen, sorted.
-func (r *recorder) eics() []string {
-	seen := map[string]bool{}
+// eics is every EIC-looking code on the pages seen, with the account
+// (a=) of the first page it was on, "" when that page names none.
+func (r *recorder) eics() map[string]string {
+	out := map[string]string{}
 	for _, p := range r.pages {
 		for _, m := range eicRe.FindAll(p.body, -1) {
-			seen[string(m)] = true
+			if _, ok := out[string(m)]; !ok {
+				out[string(m)] = p.final.Query().Get("a")
+			}
 		}
 	}
-	out := make([]string, 0, len(seen))
-	for e := range seen {
-		out = append(out, e)
+	return out
+}
+
+var accountRe = regexp.MustCompile(`[?&](?:amp;)?a=(\d+)`)
+
+// accounts is every account id (a=) the pages link, in order seen.
+func (r *recorder) accounts() []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, p := range r.pages {
+		for _, m := range accountRe.FindAllSubmatch(p.body, -1) {
+			if id := string(m[1]); !seen[id] {
+				seen[id] = true
+				out = append(out, id)
+			}
+		}
 	}
-	sort.Strings(out)
+	return out
+}
+
+var disconnectRe = regexp.MustCompile(`["'](/[^"'\s<>]*disconnect[^"'\s<>]*)["']`)
+
+// outageLinks is every cabinet path about disconnections the pages
+// mention, links and scripts alike.
+func (r *recorder) outageLinks() []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, p := range r.pages {
+		for _, m := range disconnectRe.FindAllSubmatch(p.body, -1) {
+			if s := html.UnescapeString(string(m[1])); !seen[s] {
+				seen[s] = true
+				out = append(out, s)
+			}
+		}
+	}
 	return out
 }
 
@@ -271,6 +404,21 @@ func (r *recorder) save() error {
 		return err
 	}
 	return os.WriteFile(filepath.Join(r.dir, "links.txt"), []byte(strings.Join(r.links, "\n")+"\n"), 0o600)
+}
+
+// saveCookies writes the session's cookies in the Netscape format curl
+// reads with -b.
+func saveCookies(dir, base string, jar http.CookieJar) error {
+	u, err := url.Parse(base)
+	if err != nil {
+		return err
+	}
+	var b strings.Builder
+	b.WriteString("# Netscape HTTP Cookie File\n")
+	for _, ck := range jar.Cookies(u) {
+		fmt.Fprintf(&b, "%s\tFALSE\t/\tTRUE\t0\t%s\t%s\n", u.Hostname(), ck.Name, ck.Value)
+	}
+	return os.WriteFile(filepath.Join(dir, "cookies.txt"), []byte(b.String()), 0o600)
 }
 
 var hrefRe = regexp.MustCompile(`href\s*=\s*["']([^"'#\s]+)["']`)
@@ -295,25 +443,50 @@ func cabinetLinks(body []byte, host string) []string {
 	return out
 }
 
+// actingWords mark a link that does something — signs out, sends,
+// changes, signs — or is no page at all.
+var actingWords = []string{
+	"logout", "exit", "vyhid", "delete", "remove", "del_", "edit", "change", "pay", "send",
+	"subscribe", "set_", "add_", "save", "submit", "confirm", "cancel", "create", "new_",
+	"sign", "ecp", "request", "zapyt", "dogovor", "contract", "indication", "pokaz",
+	"static/", "download", "upload",
+	".css", ".js", ".png", ".jpg", ".jpeg", ".svg", ".ico", ".pdf", ".doc", ".xls",
+}
+
+// viewPrefixes start the name of a page that only shows an account.
+var viewPrefixes = []string{"view", "show", "list", "info", "detail", "get_"}
+
 // worthOpening keeps the probe to pages that show something: outage
-// lists and the cabinet's own sections, never a link that acts.
+// lists, the cabinet's sections and an account's views, never a link
+// that acts.
 func worthOpening(p string) bool {
 	l := strings.ToLower(p)
-	for _, bad := range []string{
-		"logout", "exit", "vyhid", "delete", "remove", "del_", "edit", "change", "pay", "send",
-		"subscribe", "set_", "add_", "static/", "download", "upload",
-		".css", ".js", ".png", ".jpg", ".jpeg", ".svg", ".ico", ".pdf", ".doc", ".xls",
-	} {
-		if strings.Contains(l, bad) {
+	for _, w := range actingWords {
+		if strings.Contains(l, w) {
 			return false
 		}
 	}
-	for _, good := range []string{"disconnect", "vidkl", "grafik", "gpv"} {
-		if strings.Contains(l, good) {
+	for _, w := range []string{"disconnect", "vidkl", "grafik", "gpv"} {
+		if strings.Contains(l, w) {
 			return true
 		}
 	}
-	return strings.HasPrefix(l, "/account") && !strings.Contains(l, "?") && strings.Count(l, "/") <= 2
+	path, _, _ := strings.Cut(l, "?")
+	segs := strings.Split(strings.Trim(path, "/"), "/")
+	if !strings.HasPrefix(segs[0], "account") {
+		return false
+	}
+	switch len(segs) {
+	case 1:
+		return true
+	case 2:
+		for _, v := range viewPrefixes {
+			if strings.HasPrefix(segs[1], v) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 var slugRe = regexp.MustCompile(`[^A-Za-z0-9]+`)
@@ -337,6 +510,22 @@ func cookieNames(h http.Header) string {
 		}
 	}
 	return strings.Join(names, ", ")
+}
+
+func sortedKeys(m map[string]string) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func listOrNone(list []string) string {
+	if len(list) == 0 {
+		return "немає"
+	}
+	return strings.Join(list, ", ")
 }
 
 func ask(in *bufio.Reader, prompt string) string {

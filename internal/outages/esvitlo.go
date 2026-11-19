@@ -98,15 +98,18 @@ func (c *Client) Get(ctx context.Context, path string) (string, *url.URL, error)
 
 // NewClient builds a client for the cabinet at base (BaseURL in
 // production). Times are read in loc. A nil httpClient gets one with a
-// 20-second timeout; either way the client keeps its own cookies.
+// 20-second timeout. The session lives in httpClient's cookie jar when it
+// has one — so give each client its own — and in the client's own else.
 func NewClient(base, login, password string, loc *time.Location, httpClient *http.Client) *Client {
 	c := &http.Client{Timeout: 20 * time.Second}
 	if httpClient != nil {
 		cp := *httpClient
 		c = &cp
 	}
-	jar, _ := cookiejar.New(nil)
-	c.Jar = jar
+	if c.Jar == nil {
+		jar, _ := cookiejar.New(nil)
+		c.Jar = jar
+	}
 	if loc == nil {
 		loc = time.UTC
 	}
@@ -343,6 +346,12 @@ func parseLocal(s string, loc *time.Location) (time.Time, bool) {
 		t = t.Truncate(time.Minute).Add(time.Minute)
 	}
 	return t, true
+}
+
+// ParseOutages reads a cabinet's outages list, as Outages does, for a
+// tool that fetched the page itself.
+func ParseOutages(body []byte, loc *time.Location) ([]Interval, error) {
+	return parseOutages(body, loc)
 }
 
 // parseOutages reads the cabinet's outages list. A list the cabinet
