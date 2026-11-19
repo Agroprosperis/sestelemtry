@@ -73,6 +73,7 @@ export function CurrentSnapshotNarrative({
         debug={debug}
         registers={registers}
         gridVoltage={gridVoltage}
+        live={!metricsAt}
       />
     </section>
   )

@@ -9,7 +9,7 @@ import type { CurrentResponse } from '../../types'
 
 afterEach(cleanup)
 
-function buildAllocation(metrics: Record<string, number>) {
+function buildAllocation(metrics: Record<string, number>, time = '2026-05-10T12:00:00Z') {
   const current: CurrentResponse = {
     organization_id: 'demo',
     metrics: {},
@@ -18,10 +18,19 @@ function buildAllocation(metrics: Record<string, number>) {
     current.metrics[k] = {
       metric_key: k,
       value: v,
-      time: '2026-05-10T12:00:00Z',
+      time,
     }
   }
   return liveAllocationFromCurrent(current)
+}
+
+// pde's last readings before its SmartLoggers went silent on 18.11.
+const PDE_LAST = {
+  active_pv_power_kw: 75.87,
+  load_power_kw: 194.43,
+  grid_connected_active_power_kw: 280.5,
+  active_ess_power_kw: -161.94,
+  soc_percent: 67.3,
 }
 
 describe('EnergyFlowLive', () => {
@@ -147,6 +156,34 @@ describe('EnergyFlowLive', () => {
     })
     rerender(<EnergyFlowLive allocation={blackout} />)
     expect(screen.getAllByText('Без живлення').length).toBeGreaterThan(0)
+  })
+
+  // A station that stopped reporting keeps answering /current with its
+  // last readings. Live, they must not pass for the present.
+  it('says the station went silent instead of showing its last readings as now', () => {
+    const twoDaysAgo = new Date(Date.now() - 2 * 24 * 3600 * 1000)
+    twoDaysAgo.setHours(13, 35, 0, 0)
+    const allocation = buildAllocation(PDE_LAST, twoDaysAgo.toISOString())
+    const { container } = render(<EnergyFlowLive allocation={allocation} variant="compact" live />)
+
+    const hub = container.querySelector('.energy-flow-live-hub')
+    expect(hub).toHaveClass('is-stale')
+    expect(hub).toHaveTextContent('Немає звʼязку')
+    const day = String(twoDaysAgo.getDate()).padStart(2, '0')
+    const month = String(twoDaysAgo.getMonth() + 1).padStart(2, '0')
+    expect(hub).toHaveTextContent(`з ${day}.${month} 13:35`)
+    expect(container).not.toHaveTextContent('75.87')
+    expect(container).not.toHaveTextContent('280.5')
+    expect(container).not.toHaveTextContent('SOC 67%')
+    expect(container.querySelectorAll('.energy-flow-live-path.is-idle').length).toBe(4)
+  })
+
+  it('leaves a historical snapshot as it was', () => {
+    const allocation = buildAllocation(PDE_LAST, '2026-11-18T11:35:08Z')
+    const { container } = render(<EnergyFlowLive allocation={allocation} variant="compact" />)
+    expect(container.querySelector('.energy-flow-live-hub')).toHaveTextContent('У нормі')
+    expect(container).toHaveTextContent('75.87 kW')
+    expect(screen.getByText(/SOC 67%/)).toBeInTheDocument()
   })
 
   it('keeps four nodes for a site without a generator', () => {

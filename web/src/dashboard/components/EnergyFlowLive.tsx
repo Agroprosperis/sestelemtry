@@ -12,16 +12,22 @@ import type { RegisterMeta } from '../../types'
 import { useCssVar } from '../../theme/useChartChrome'
 import { formatChartNumber } from '../format'
 import { formatGridVoltage, gridVoltageTitle, type GridVoltage } from '../transforms/gridVoltage'
-import type {
-  LiveAllocation,
-  LiveEssState,
-  LiveGenState,
-  LiveGridState,
-  LiveLoadState,
-  LivePvState,
-  SupplyMode,
+import {
+  NO_DATA_ALLOCATION,
+  type LiveAllocation,
+  type LiveEssState,
+  type LiveGenState,
+  type LiveGridState,
+  type LiveLoadState,
+  type LivePvState,
+  type SupplyMode,
 } from '../transforms/liveAllocation'
 import { ModbusAddr } from './ModbusAddr'
+
+// LIVE_STALE_MS is how old the freshest reading may get before the live
+// diagram stops presenting it as now. The collector polls every second,
+// so minutes of silence mean the station is not reporting.
+export const LIVE_STALE_MS = 5 * 60 * 1000
 
 // EnergyFlowLive renders a real-time site-wide power flow diagram.
 // Four corner nodes (PV / Load / Battery / Grid) connect to a
@@ -145,6 +151,17 @@ function formatSeconds(seconds: number): string {
   return s === 0 ? `${m} хв` : `${m} хв ${s} с`
 }
 
+// formatLostSince is when the last reading came: the time alone on the
+// same day, with the date otherwise.
+function formatLostSince(at: Date, now: number): string {
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const time = `${pad(at.getHours())}:${pad(at.getMinutes())}`
+  const today = new Date(now)
+  const sameDay =
+    at.getFullYear() === today.getFullYear() && at.getMonth() === today.getMonth() && at.getDate() === today.getDate()
+  return sameDay ? time : `${pad(at.getDate())}.${pad(at.getMonth() + 1)} ${time}`
+}
+
 type EdgeRender = {
   id: EdgeId
   d: string
@@ -254,15 +271,20 @@ type Props = {
   // gridVoltage, when the site reports one, is printed on the «Мережа»
   // node next to the import / export status.
   gridVoltage?: GridVoltage | null
+  // live marks the diagram as showing the present: readings older than
+  // LIVE_STALE_MS then give way to «Немає звʼязку». A historical
+  // snapshot leaves it off.
+  live?: boolean
 }
 
 export function EnergyFlowLive({
-  allocation,
+  allocation: received,
   variant = 'default',
   wrapInSection = true,
   debug = false,
   registers = null,
   gridVoltage = null,
+  live = false,
 }: Props) {
   // ageSeconds drives the "Updated N seconds ago" pill in the
   // header. We re-tick every second instead of recomputing on
@@ -278,32 +300,43 @@ export function EnergyFlowLive({
   // Hub chrome was COLORS.hub (#0f172a); .energy-flow-live-hub already uses var(--text).
 
   const ageSeconds =
-    allocation.observedAt === null
+    received.observedAt === null
       ? null
-      : Math.max(0, Math.floor((now - allocation.observedAt.getTime()) / 1000))
+      : Math.max(0, Math.floor((now - received.observedAt.getTime()) / 1000))
+  // A station that stopped reporting keeps answering /current with its
+  // last readings; shown as now they would pass for a working site.
+  const lostSince =
+    live && received.observedAt !== null && now - received.observedAt.getTime() > LIVE_STALE_MS
+      ? received.observedAt
+      : null
+  const lost = lostSince !== null
+  const allocation: LiveAllocation = lost
+    ? { ...NO_DATA_ALLOCATION, observedAt: received.observedAt, genState: received.genState === null ? null : 'stale' }
+    : received
+  const quiet = lost || allocation.status === 'no_data'
 
   const isCompact = variant === 'compact'
 
   const edges = buildEdges(allocation, idle, isCompact)
 
-  const balanceLabel = describeBalance(allocation)
+  const balanceLabel = lostSince
+    ? { kw: '—', text: `з ${formatLostSince(lostSince, now)}` }
+    : describeBalance(allocation)
+  const hubStatus = lost ? 'Немає звʼязку' : allocation.status === 'no_data' ? 'Немає даних' : 'У нормі'
   const hasGen = allocation.genState !== null
 
   const header = !isCompact && (
     <header className="energy-flow-live-header">
       <h2>Перетік потужності зараз</h2>
-      <span
-        className={`energy-flow-live-status${
-          allocation.status === 'no_data' ? ' is-stale' : ''
-        }`}
-        aria-live="polite"
-      >
+      <span className={`energy-flow-live-status${quiet ? ' is-stale' : ''}`} aria-live="polite">
         <span className="energy-flow-live-dot" aria-hidden="true" />
-        {allocation.status === 'no_data'
-          ? 'Немає даних'
-          : ageSeconds === null
-            ? 'Оновлення…'
-            : `Оновлено ${formatSeconds(ageSeconds)} тому`}
+        {lostSince
+          ? `Немає звʼязку з ${formatLostSince(lostSince, now)}`
+          : allocation.status === 'no_data'
+            ? 'Немає даних'
+            : ageSeconds === null
+              ? 'Оновлення…'
+              : `Оновлено ${formatSeconds(ageSeconds)} тому`}
       </span>
     </header>
   )
@@ -358,8 +391,8 @@ export function EnergyFlowLive({
             )
           }
           title="СЕС"
-          kw={allocation.pvKw}
-          status={allocation.pvState === 'generating' ? 'Генерує' : 'Очікує'}
+          kw={lost ? null : allocation.pvKw}
+          status={lost ? 'Немає даних' : allocation.pvState === 'generating' ? 'Генерує' : 'Очікує'}
           active={allocation.pvState === 'generating'}
           debug={debug}
           registers={registers}
@@ -370,8 +403,8 @@ export function EnergyFlowLive({
           state={allocation.loadState}
           icon={<Buildings size={ICON_SIZE} weight="duotone" color={COLORS.load} />}
           title="Споживання"
-          kw={allocation.loadKw}
-          status={allocation.loadState === 'consuming' ? 'Споживає' : 'Очікує'}
+          kw={lost ? null : allocation.loadKw}
+          status={lost ? 'Немає даних' : allocation.loadState === 'consuming' ? 'Споживає' : 'Очікує'}
           active={allocation.loadState === 'consuming'}
           debug={debug}
           registers={registers}
@@ -403,13 +436,15 @@ export function EnergyFlowLive({
             )
           }
           title="УЗЕ"
-          kw={allocation.essKw}
+          kw={lost ? null : allocation.essKw}
           status={
-            allocation.essState === 'charging'
-              ? 'Заряд'
-              : allocation.essState === 'discharging'
-                ? 'Розряд'
-                : 'Очікує'
+            lost
+              ? 'Немає даних'
+              : allocation.essState === 'charging'
+                ? 'Заряд'
+                : allocation.essState === 'discharging'
+                  ? 'Розряд'
+                  : 'Очікує'
           }
           active={allocation.essState !== 'idle'}
           soc={allocation.socPercent}
@@ -440,19 +475,21 @@ export function EnergyFlowLive({
           }
           title="Мережа"
           kw={
-            allocation.gridState === 'unavailable' ? null : allocation.gridKw
+            lost || allocation.gridState === 'unavailable' ? null : allocation.gridKw
           }
           kwText={allocation.gridState === 'offline' ? 'Мережі немає' : undefined}
           status={
-            allocation.gridState === 'importing'
-              ? 'Імпорт'
-              : allocation.gridState === 'exporting'
-                ? 'Експорт'
-                : allocation.gridState === 'unavailable'
-                  ? 'Немає даних'
-                  : allocation.gridState === 'offline'
-                    ? offgridStatus(allocation.supplyMode)
-                    : 'Очікує'
+            lost
+              ? 'Немає даних'
+              : allocation.gridState === 'importing'
+                ? 'Імпорт'
+                : allocation.gridState === 'exporting'
+                  ? 'Експорт'
+                  : allocation.gridState === 'unavailable'
+                    ? 'Немає даних'
+                    : allocation.gridState === 'offline'
+                      ? offgridStatus(allocation.supplyMode)
+                      : 'Очікує'
           }
           active={
             allocation.gridState === 'importing' ||
@@ -462,7 +499,7 @@ export function EnergyFlowLive({
           registers={registers}
           metricKeys={['grid_connected_active_power_kw']}
           aside={
-            gridVoltage ? (
+            gridVoltage && !lost ? (
               <span className="energy-flow-live-node-volt" title={gridVoltageTitle(gridVoltage)}>
                 {formatGridVoltage(gridVoltage)}
               </span>
@@ -490,15 +527,8 @@ export function EnergyFlowLive({
           />
         )}
 
-        <div
-          className={`energy-flow-live-hub${
-            allocation.status === 'no_data' ? ' is-stale' : ''
-          }`}
-          aria-label="Стан системи"
-        >
-          <div className="energy-flow-live-hub-status">
-            {allocation.status === 'no_data' ? 'Немає даних' : 'У нормі'}
-          </div>
+        <div className={`energy-flow-live-hub${quiet ? ' is-stale' : ''}`} aria-label="Стан системи">
+          <div className="energy-flow-live-hub-status">{hubStatus}</div>
           <div className="energy-flow-live-hub-balance">
             {balanceLabel.kw}
           </div>
