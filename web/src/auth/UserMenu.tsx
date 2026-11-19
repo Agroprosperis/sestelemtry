@@ -102,6 +102,18 @@ export function UserMenu() {
               Курси валют ERP
             </button>
           )}
+          {me.global_admin && (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setOpen(false)
+                navigateView('esvitlo')
+              }}
+            >
+              Відключення e-svitlo
+            </button>
+          )}
           <button
             type="button"
             role="menuitem"

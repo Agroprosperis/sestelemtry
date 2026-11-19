@@ -9,6 +9,7 @@ import { EnergyChart } from '../dashboard/components/EnergyChart'
 import { WeatherCard } from '../dashboard/components/WeatherCard'
 import { useDashboardData } from '../dashboard/hooks/useDashboardData'
 import { useGridVoltage } from '../dashboard/hooks/useGridVoltage'
+import { useOutageSchedule } from '../dashboard/hooks/useOutageSchedule'
 import type {
   BessHealth,
   EdgeSiteStatus,
@@ -59,6 +60,7 @@ export function StateTab({ site, status }: Props) {
     error,
   } = useDashboardData({ organizationID: site, preset: 'day', anchor, metricsAt: null })
   const gridVoltage = useGridVoltage(site, true)
+  const { areas: outageAreas } = useOutageSchedule({ organizationID: site, anchor, enabled: true })
 
   const payload = status?.manifest?.payload
   const manifestPlan = useMemo(() => manifestPlanToUzePlan(payload, anchor), [payload, anchor])
@@ -218,6 +220,7 @@ export function StateTab({ site, status }: Props) {
           supplySeries={supplySeries}
           pvForecastSeries={pvForecastSeries}
           aiPlan={manifestPlan}
+          outageAreas={outageAreas}
           planOverlay={{
             title: 'Energy Trend · план і факт',
             essLabel: 'План УЗЕ (manifest)',

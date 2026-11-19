@@ -1,0 +1,76 @@
+import type { OutageInterval } from '../../outages/outagePointClient'
+
+// OutageArea is one planned outage as a band on the day chart: x1/x2 are
+// timeline labels ("HH:MM", 5-minute buckets).
+export type OutageArea = { x1: string; x2: string; kind: OutageInterval['kind'] }
+
+const KYIV_TZ = 'Europe/Kyiv'
+const BUCKET_MIN = 5
+
+const kyivParts = new Intl.DateTimeFormat('en-GB', {
+  timeZone: KYIV_TZ,
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23',
+})
+
+// kyivMoment splits an instant into its Kyiv calendar day (YYYY-MM-DD)
+// and minutes since local midnight; null for an unparsable time.
+function kyivMoment(iso: string): { day: string; minutes: number } | null {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return null
+  const p: Record<string, string> = {}
+  for (const part of kyivParts.formatToParts(d)) p[part.type] = part.value
+  return {
+    day: `${p.year}-${p.month}-${p.day}`,
+    minutes: Number(p.hour) * 60 + Number(p.minute),
+  }
+}
+
+function label(minutes: number): string {
+  const m = Math.max(0, Math.min(24 * 60 - 1, minutes))
+  return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`
+}
+
+// outageAreas maps the API's outage intervals onto the chart's timeline
+// of the given Kyiv day (YYYY-MM-DD): the part of each interval inside
+// the day, snapped outwards to the 5-minute labels the chart has.
+// Intervals outside the day, or reaching no label, are dropped.
+export function outageAreas(
+  intervals: OutageInterval[] | null | undefined,
+  day: string,
+  timelineLabels: string[],
+): OutageArea[] {
+  if (!intervals || intervals.length === 0 || timelineLabels.length === 0) return []
+  const first = timelineLabels[0]
+  const last = timelineLabels[timelineLabels.length - 1]
+  const out: OutageArea[] = []
+  for (const iv of intervals) {
+    const start = kyivMoment(iv.start)
+    const end = kyivMoment(iv.end)
+    if (!start || !end) continue
+    if (start.day > day || end.day < day) continue
+    // Clip to the day: an interval from the previous evening starts at
+    // 00:00, one running past midnight ends at the last label.
+    const startMin = start.day < day ? 0 : Math.floor(start.minutes / BUCKET_MIN) * BUCKET_MIN
+    const endAtDayEnd = end.day > day
+    const endMin = endAtDayEnd ? 24 * 60 : Math.ceil(end.minutes / BUCKET_MIN) * BUCKET_MIN
+    if (endMin <= startMin) continue
+    const startLabel = label(startMin)
+    const endLabel = endAtDayEnd || endMin >= 24 * 60 ? last : label(endMin)
+    const x1 = timelineLabels.find((l) => l >= startLabel) ?? first
+    let x2 = last
+    for (let i = timelineLabels.length - 1; i >= 0; i--) {
+      if (timelineLabels[i] <= endLabel) {
+        x2 = timelineLabels[i]
+        break
+      }
+    }
+    if (x1 >= x2) continue
+    out.push({ x1, x2, kind: iv.kind })
+  }
+  return out
+}

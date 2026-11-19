@@ -11,6 +11,7 @@ import { WeatherCard } from './components/WeatherCard'
 import { formatOrganizationLabel } from './config'
 import { useDashboardData } from './hooks/useDashboardData'
 import { useGridVoltage } from './hooks/useGridVoltage'
+import { useOutageSchedule } from './hooks/useOutageSchedule'
 import { useUzeDayPlan } from './hooks/useUzeDayPlan'
 import type { RangePreset } from './range'
 import { monthTrendRows, yearTrendRows } from './transforms/energyTrend'
@@ -93,6 +94,13 @@ export function DashboardSite({
     enabled: preset === 'day',
   })
 
+  // Planned grid outages (e-svitlo) are bands on the day chart only.
+  const { areas: outageAreas } = useOutageSchedule({
+    organizationID,
+    anchor,
+    enabled: preset === 'day',
+  })
+
   // The month / year trend reads the economics rollups, which carry the
   // per-day and per-month flow split (who covered the load, what went
   // out). Each hook idles while its preset is not on screen.
@@ -167,6 +175,7 @@ export function DashboardSite({
           pvForecastSeries={pvForecastSeries}
           pvForecastWholeElevator={pvForecastWholeElevator}
           aiPlan={aiPlan}
+          outageAreas={outageAreas}
           site={site}
         />
       ) : (

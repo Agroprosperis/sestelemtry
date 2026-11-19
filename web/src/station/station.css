@@ -363,7 +363,8 @@
   color: var(--text-label);
 }
 
-.pvplan input:not([type='checkbox']):not([type='radio']) {
+.pvplan input:not([type='checkbox']):not([type='radio']),
+.pvplan select {
   width: 100%;
   min-width: 0;
   padding: 6px 8px;
@@ -375,7 +376,8 @@
   font-size: 0.88rem;
 }
 
-.pvplan input:disabled {
+.pvplan input:disabled,
+.pvplan select:disabled {
   color: var(--text-secondary);
 }
 

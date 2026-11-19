@@ -4,6 +4,7 @@ import { useOrganizationParam } from '../dashboard/hooks/useOrganizationParam'
 import { ModeTopBar } from '../shell/ModeTopBar'
 import type { PlantInventory, PlantInventoryChange, PlantInventoryHistory } from '../types'
 import { GeneratorSection } from './GeneratorSection'
+import { OutagePointSection } from '../outages/OutagePointSection'
 import { PvPlanSection } from './PvPlanSection'
 import { StationIcon } from './StationIcon'
 import './station.css'
@@ -270,6 +271,14 @@ export function StationPage() {
           organizationID={organizationID}
           canEdit={access.can('technical.write', organizationID)}
           ratedKw={data?.pv_rated_kw ?? null}
+        />
+      ) : null}
+
+      {organizationID ? (
+        <OutagePointSection
+          key={`outage-${organizationID}`}
+          organizationID={organizationID}
+          canEdit={access.can('technical.write', organizationID)}
         />
       ) : null}
     </main>
