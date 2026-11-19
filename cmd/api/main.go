@@ -22,6 +22,7 @@ import (
 	"github.com/nesh/sestelemetry/internal/fusionsolar"
 	"github.com/nesh/sestelemetry/internal/fxrates"
 	"github.com/nesh/sestelemetry/internal/oree"
+	"github.com/nesh/sestelemetry/internal/outages"
 	"github.com/nesh/sestelemetry/internal/pvplan"
 	"github.com/nesh/sestelemetry/internal/storage"
 )
@@ -129,6 +130,12 @@ func main() {
 	// settings of their ERP source. Idempotent; mirrored by 024_fx_rates.sql.
 	if err := storage.InitFxRatesSchema(ctx, pool); err != nil {
 		log.Error("db_init_fx_rates", "err", err)
+		os.Exit(1)
+	}
+	// E-svitlo cabinet accounts, station EICs and planned outages.
+	// Idempotent; mirrored by 027_outages.sql.
+	if err := storage.InitOutagesSchema(ctx, pool); err != nil {
+		log.Error("db_init_outages", "err", err)
 		os.Exit(1)
 	}
 
@@ -276,6 +283,14 @@ func main() {
 	fxSync := fxrates.NewSyncer(fxStore, kyiv, log)
 	svc.SetFxRates(fxStore, fxSync)
 	go fxSync.Run(ctx)
+
+	// Planned grid outages: each station's EIC is asked of the company's
+	// e-svitlo cabinet every 15 minutes. Like the rates, the sync rereads
+	// accounts and points on every pass and idles until they are filled in.
+	outagesStore := storage.NewOutagesStore(pool)
+	outagesSync := outages.NewSyncer(outagesStore, kyiv, log)
+	svc.SetOutages(outagesStore, outagesSync)
+	go outagesSync.Run(ctx)
 
 	// Forward planner (edge level A): republishes manifest-lite with
 	// plan.intervals for every edge site every 30 min. Tomorrow's DAM

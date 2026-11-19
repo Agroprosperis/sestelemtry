@@ -105,6 +105,11 @@ type Handlers struct {
 	// background. nil serves economics in UAH only.
 	fx     fxStore
 	fxSync fxSyncer
+	// outages holds the e-svitlo cabinet accounts, station EIC codes and
+	// planned outage intervals; outagesSync fills it in the background.
+	// nil answers the outage routes 503.
+	outages     outagesStore
+	outagesSync outagesSyncer
 }
 
 // pvFlow reads the n8n forecast flow: a *pvplan.Client at a fixed
