@@ -50,7 +50,7 @@ const RESERVE_CAUSE_TEXT: Record<ReserveCause, string> = {
 
 const RESERVE_IMPROVE_TEXT: Record<ReserveCause, string> = {
   timing: 'зміщувати розряд УЗЕ ближче до вечірнього піку цін',
-  soc: 'тримати вищий SOC перед вечірнім піком',
+  soc: 'тримати батарею зарядженішою перед вечірнім піком',
   pv: 'більше заряджати УЗЕ надлишком СЕС вдень',
 }
 
@@ -93,7 +93,7 @@ export function buildNarrative(
     `Ефект проєкту: ${money.format(totals.effect_uah)}.`
 
   const captureTxt =
-    totals.ess_optimum_uah > 0 ? `захоплено ${formatPercent(totals.ess_captured_share)}` : 'оцінка за фактом'
+    totals.ess_optimum_uah > 0 ? `реалізовано ${formatPercent(totals.ess_captured_share)} від можливого` : 'оцінка за фактом'
   let mainReserve = `Підтверджений резерв УЗЕ ${money.format(totals.ess_reserve_uah)} (${captureTxt}). Головна причина — ${RESERVE_CAUSE_TEXT[cause]}.`
   if (exportHeavy) {
     mainReserve +=
@@ -196,18 +196,18 @@ export function buildAiPanel(
   const mainIsEss = r.ess >= r.elevator
   const mainKey: ReserveKey = mainIsEss ? 'ess' : 'elevator'
   const secKey: ReserveKey = mainIsEss ? 'elevator' : 'ess'
-  const mainLabel = `${mainIsEss ? 'Резерв таймінгу УЗЕ' : 'Резерв графіка'} · основний`
+  const mainLabel = `${mainIsEss ? 'Резерв розкладу УЗЕ' : 'Резерв графіка робіт'} · основний`
   const mainValue = short(mainIsEss ? r.ess : r.elevator)
-  const secLabel = mainIsEss ? 'Резерв графіка' : 'Резерв таймінгу УЗЕ'
+  const secLabel = mainIsEss ? 'Резерв графіка робіт' : 'Резерв розкладу УЗЕ'
   const secValue = short(mainIsEss ? r.elevator : r.ess)
-  const planStatus = mainIsEss ? 'резерв графіка' : 'найбільший резерв'
+  const planStatus = mainIsEss ? 'резерв графіка робіт' : 'найбільший резерв'
   const essStatus = mainIsEss ? 'найбільший резерв' : 'режим УЗЕ'
 
   if (opts.scope !== 'month') {
     const months = opts.monthsCount ?? 0
     const mainReserveText = mainIsEss
-      ? `Головний важіль — таймінг УЗЕ: ${short(r.ess)} за період${
-          totals.ess_optimum_uah > 0 ? ` (захоплено ${formatPercent(captured)} оптимуму)` : ''
+      ? `Головний важіль — розклад заряду й розряду УЗЕ: ${short(r.ess)} за період${
+          totals.ess_optimum_uah > 0 ? ` (реалізовано ${formatPercent(captured)} від можливого)` : ''
         }. Помісячна деталізація нижче.`
       : `Головний важіль — перенесення гнучких робіт на денні години: ${short(r.elevator)} за період. Помісячна деталізація нижче.`
     return {
@@ -247,12 +247,12 @@ export function buildAiPanel(
           reserve: 'ess',
           variant: 'warn',
           status: essStatus,
-          title: 'Таймінг батареї',
+          title: 'Розклад батареї',
           impact: short(r.ess),
           action:
             totals.ess_optimum_uah > 0
-              ? `УЗЕ захопила ${formatPercent(captured)} доступного оптимуму. Основні втрати — на переходах між датами, коли розряд потрапляв у нижчі години РДН.`
-              : 'Недостатньо активності УЗЕ за період для оцінки оптимуму.',
+              ? `УЗЕ отримала ${formatPercent(captured)} від можливого максимуму. Найбільше недобрано на стиках діб, коли розряд припадав на дешевші години РДН.`
+              : 'Батарея працювала надто мало, щоб оцінити її можливий максимум.',
           chips: [`резерв ${short(r.ess)}`, `розряд ${formatMwh(totals.ess_discharged_kwh)}`],
         },
       ],
@@ -262,11 +262,11 @@ export function buildAiPanel(
 
   // Month scope.
   const reserveText = mainIsEss
-    ? `Головний резерв — таймінг УЗЕ ${short(r.ess)}: розряд не завжди потрапляв у найдорожчі години.`
+    ? `Головний резерв — розклад УЗЕ, ${short(r.ess)}: розряд не завжди припадав на найдорожчі години.`
     : `Високий експорт СЕС при низькому денному навантаженні — перенесення гнучких робіт дає до ${short(r.elevator)} за місяць.`
   const actionText = mainIsEss
     ? `Пріоритет — зміщувати розряд УЗЕ ближче до вечірнього піку (${short(r.ess)}). Резерв графіка робіт — ${short(r.elevator)}.`
-    : `Пріоритет — графік елеватора в сонячні години (${short(r.elevator)}). Резерв таймінгу УЗЕ — ${short(r.ess)}.`
+    : `Пріоритет — графік елеватора в сонячні години (${short(r.elevator)}). Резерв розкладу УЗЕ — ${short(r.ess)}.`
 
   const cards: AiCard[] = [
     {
@@ -289,7 +289,7 @@ export function buildAiPanel(
       title: 'Добовий план батареї',
       impact: `≈${short(r.ess)}`,
       action:
-        'Резерв таймінгу розряду — ковзне планування на 24–36 годин, а не окремими календарними днями.',
+        'Щоб забрати цей резерв, розряд треба планувати на 24–36 годин уперед, а не окремо на кожну добу.',
       chips: [`резерв ≈${short(r.ess)}`, `розряд ${formatMwh(totals.ess_discharged_kwh)}`],
     },
   ]
@@ -355,10 +355,10 @@ export const HOURS = Array.from({ length: 24 }, (_, h) => h)
 // and month x hour grids read the same cell, so the definition lives in
 // one place and each view appends its own sentence about aggregation.
 export const HEATMAP_METRIC_TIP =
-  'Маржа розряду УЗЕ. Виручка з розряду (у мережу — за ціною експорту, у споживання — за ціною ' +
+  'Скільки УЗЕ заробила на кожній відданій кВт·год: виручка з розряду (у мережу — за ціною експорту, у споживання — за ціною ' +
   'імпорту) мінус собівартість саме тієї енергії, що була в батареї (заряд із мережі — за ціною ' +
   'тієї години, від СЕС — нуль), мінус знос; поділено на розряд. Витрати на заряд лишаються в ' +
-  'годині заряду, тому маржу розряду вони не спотворюють.'
+  'годині заряду, тому на цей заробіток вони не впливають.'
 
 // unitCostUahPerKwh is what one consumed kWh actually cost: everything
 // bought from the grid spread over the whole load. It lands below the

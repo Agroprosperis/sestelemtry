@@ -374,20 +374,20 @@ export function topFormulas(t: EconomicsMonthlyTotals, c: TopContext) {
 
   const realization: Formula = {
     text: 'Яку частку підтвердженого потенціалу проєкт уже реалізував.',
-    rule: 'Ефект ÷ (Ефект + Резерв графіка + Резерв таймінгу УЗЕ); від 0 до 100%.',
+    rule: 'Ефект ÷ (ефект + резерв графіка робіт + резерв розкладу УЗЕ); від 0 до 100%.',
     lines: [
       { label: 'Факт: економічний ефект', value: m.format(t.effect_uah) },
       {
         op: '+',
-        label: 'Резерв графіка',
+        label: 'Резерв графіка робіт',
         value: m.format(f.split.elevator),
         detail: 'перенос робіт на години СЕС',
       },
       {
         op: '+',
-        label: 'Резерв таймінгу УЗЕ',
+        label: 'Резерв розкладу УЗЕ',
         value: m.format(f.split.ess),
-        detail: 'оптимум − факт',
+        detail: 'можливий максимум − факт',
       },
       { op: '=', label: 'Потенціал', value: m.format(f.potential) },
       {

@@ -201,9 +201,9 @@ function PortfolioBody({
           amber
         />
         <SummaryCard
-          label="Оптимум УЗЕ (резерв)"
+          label="Резерв розкладу УЗЕ"
           value={money.format(totals.bess_reserve_uah)}
-          sub="недобрана вигода УЗЕ проти оптимального графіка"
+          sub="недобрано проти найвигіднішого розкладу УЗЕ"
           info={OPTIMUM_TIP}
           formula={formulas.bessReserve}
           amber
@@ -211,7 +211,7 @@ function PortfolioBody({
         <SummaryCard
           label="Разом з резервами"
           value={money.format(totals.ebitda_uah + totals.action_reserve_uah)}
-          sub="EBITDA + резерв графіка + УЗЕ"
+          sub="EBITDA + обидва резерви"
           info="Потенційний результат періоду: фактична EBITDA плюс обидва резерви, якби їх забрали повністю."
           formula={formulas.withReserves}
           good
@@ -229,8 +229,8 @@ function PortfolioBody({
 
       <div className="economics-portfolio-legend">
         <span><i style={{ background: '#7c3aed' }} />EBITDA</span>
-        <span><i style={{ background: '#f59e0b' }} />резерв графіка</span>
-        <span><i style={{ background: '#0ea5e9' }} />оптимум УЗЕ</span>
+        <span><i style={{ background: '#f59e0b' }} />резерв графіка робіт</span>
+        <span><i style={{ background: '#0ea5e9' }} />резерв розкладу УЗЕ</span>
       </div>
 
       <div className="economics-portfolio-bars">
@@ -289,12 +289,12 @@ function PortfolioBody({
                 <OptimumInfo tip={formulas.ebitda.text ?? ''} formula={formulas.ebitda} label="EBITDA" />
               </th>
               <th>
-                Резерв графіка
-                <OptimumInfo tip={formulas.scheduleReserve.text ?? ''} formula={formulas.scheduleReserve} label="Резерв графіка" />
+                Резерв графіка робіт
+                <OptimumInfo tip={formulas.scheduleReserve.text ?? ''} formula={formulas.scheduleReserve} label="Резерв графіка робіт" />
               </th>
               <th>
-                Оптимум УЗЕ
-                <OptimumInfo tip={OPTIMUM_TIP} formula={formulas.bessReserve} label="Оптимум УЗЕ" />
+                Резерв розкладу УЗЕ
+                <OptimumInfo tip={OPTIMUM_TIP} formula={formulas.bessReserve} label="Резерв розкладу УЗЕ" />
               </th>
               <th>
                 Разом резерв
@@ -305,8 +305,8 @@ function PortfolioBody({
                 <OptimumInfo tip={formulas.pv.text ?? ''} formula={formulas.pv} label="СЕС" />
               </th>
               <th>
-                Захоплення УЗЕ
-                <OptimumInfo tip={formulas.captured.text ?? ''} formula={formulas.captured} label="Захоплення УЗЕ" />
+                Реалізовано УЗЕ
+                <OptimumInfo tip={formulas.captured.text ?? ''} formula={formulas.captured} label="Реалізовано від можливого" />
               </th>
               {withGen && (
                 <th>

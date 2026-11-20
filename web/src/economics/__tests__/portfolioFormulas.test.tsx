@@ -111,7 +111,7 @@ describe('portfolio formulas', () => {
     const lines = f.withReserves.lines ?? []
     expect(lines.at(-1)?.value).toBe(money.format(p.totals.ebitda_uah + p.totals.action_reserve_uah))
     expect(signedSum(lines)).toBe(p.totals.ebitda_uah + p.totals.action_reserve_uah)
-    expect(lines.map((l) => l.label)).toEqual(['EBITDA', 'Резерв графіка робіт', 'Оптимум УЗЕ (резерв)', 'Разом з резервами'])
+    expect(lines.map((l) => l.label)).toEqual(['EBITDA', 'Резерв графіка робіт', 'Резерв розкладу УЗЕ', 'Разом з резервами'])
     expect(f.scheduleReserve.rule).toContain('менше з (СЕС → мережа; мережа → споживання)')
     expect(signedSum(f.scheduleReserve.lines ?? [])).toBe(p.totals.schedule_reserve_uah)
     expect(signedSum(f.bessReserve.lines ?? [])).toBe(p.totals.bess_reserve_uah)

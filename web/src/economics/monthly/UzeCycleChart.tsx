@@ -124,8 +124,8 @@ function CycleChartSvg({ chart }: { chart: EconomicsUzeCycleChart }) {
           rows.push({ label: 'Вартість заряду з мережі', value: fmtMoney(-gridCostUah[i], cur), total: true })
         }
       }
-      if (socO[i] != null) rows.push({ label: 'SOC оптимум', value: `${Math.round(socO[i] as number)}%` })
-      if (socF[i] != null) rows.push({ label: 'SOC факт', value: `${Math.round(socF[i] as number)}%` })
+      if (socO[i] != null) rows.push({ label: 'Заряд за найкращим розкладом', value: `${Math.round(socO[i] as number)}%` })
+      if (socF[i] != null) rows.push({ label: 'Заряд фактичний', value: `${Math.round(socF[i] as number)}%` })
       tips.push({ head: labels[i], rows })
     }
 
@@ -281,8 +281,8 @@ function CycleChartSvg({ chart }: { chart: EconomicsUzeCycleChart }) {
   if (m.has.exp) legendItems.push({ key: 's-exp', node: <><i style={{ background: C.disGrid }} />Розряд → експорт</> })
   if (m.has.sun) legendItems.push({ key: 's-sun', node: <><i style={{ background: C.chgPv }} />Заряд від сонця</> })
   if (m.has.grid) legendItems.push({ key: 's-grid', node: <><i style={{ background: C.chgGrid }} />Заряд від мережі</> })
-  if (m.has.socopt) legendItems.push({ key: 's-socopt', node: <><i style={{ borderTop: `2px solid ${C.socOpt}`, background: 'none', height: 0 }} />SOC оптимум</> })
-  if (m.has.socfact) legendItems.push({ key: 's-socfact', node: <><i style={{ borderTop: `2px dashed ${C.socFact}`, background: 'none', height: 0 }} />SOC факт</> })
+  if (m.has.socopt) legendItems.push({ key: 's-socopt', node: <><i style={{ borderTop: `2px solid ${C.socOpt}`, background: 'none', height: 0 }} />Заряд за найкращим розкладом</> })
+  if (m.has.socfact) legendItems.push({ key: 's-socfact', node: <><i style={{ borderTop: `2px dashed ${C.socFact}`, background: 'none', height: 0 }} />Заряд фактичний</> })
   if (m.has.fact) legendItems.push({ key: 's-fact', node: <><i style={{ borderTop: `2px dashed ${C.fact}`, background: 'none', height: 0 }} />Факт УЗЕ</> })
   legendItems.push({ key: 's-rdn', node: <><i style={{ background: C.rdn, opacity: 0.5 }} />Ціна РДН</> })
 
@@ -294,13 +294,13 @@ function CycleChartSvg({ chart }: { chart: EconomicsUzeCycleChart }) {
     <div className="uze-layout">
       <div className="uze-left">
         <div className="uze-waterfall">
-          <div className="uze-wf-title">Звідки {fmtMoney(optS?.effect || 0, cur)} оптимуму (собівартість врахована)</div>
+          <div className="uze-wf-title">З чого складається можливий максимум {fmtMoney(optS?.effect || 0, cur)} (вартість заряду врахована)</div>
           <div className="uze-wf-row pos"><span>Експорт УЗЕ → мережу</span><strong>{fmtMoney(optS?.export_val || 0, cur)}</strong></div>
           <div className="uze-wf-row pos"><span>УЗЕ → споживання</span><strong>{fmtMoney(optS?.load_val || 0, cur)}</strong></div>
-          <div className="uze-wf-row neg"><span>Собівартість сонця (втрачений денний експорт)</span><strong>{fmtMoney(-(optS?.charge_pv_cost || 0), cur)}</strong></div>
+          <div className="uze-wf-row neg"><span>Вартість заряду від СЕС (недоотриманий денний експорт)</span><strong>{fmtMoney(-(optS?.charge_pv_cost || 0), cur)}</strong></div>
           {optS?.grid_cost ? <div className="uze-wf-row neg"><span>Заряд з мережі</span><strong>{fmtMoney(-(optS.grid_cost || 0), cur)}</strong></div> : null}
           <div className="uze-wf-row neg"><span>Знос батареї</span><strong>{fmtMoney(-(optS?.degradation || 0), cur)}</strong></div>
-          <div className="uze-wf-row total"><span>Чистий оптимум</span><strong>{fmtMoney(optS?.effect || 0, cur)}</strong></div>
+          <div className="uze-wf-row total"><span>Можливий максимум</span><strong>{fmtMoney(optS?.effect || 0, cur)}</strong></div>
         </div>
         <div className="uze-compare-box">
           <div>
@@ -312,8 +312,8 @@ function CycleChartSvg({ chart }: { chart: EconomicsUzeCycleChart }) {
           </div>
           <div>
             <span className="lbl">
-              Оптимум
-              <FormulaTip label="Оптимум УЗЕ за цикл" formula={cf.optimum} />
+              Максимум
+              <FormulaTip label="Можливий максимум УЗЕ за цикл" formula={cf.optimum} />
             </span>
             <strong className="opt">{fmtMoney(optS?.effect || 0, cur)}</strong>
           </div>
@@ -326,8 +326,8 @@ function CycleChartSvg({ chart }: { chart: EconomicsUzeCycleChart }) {
           </div>
           <div>
             <span className="lbl">
-              Захоплено
-              <FormulaTip label="Захоплено оптимуму" formula={cf.captured} />
+              Реалізовано
+              <FormulaTip label="Реалізовано від можливого" formula={cf.captured} />
             </span>
             <strong>{m.captured}%</strong>
           </div>
@@ -340,10 +340,10 @@ function CycleChartSvg({ chart }: { chart: EconomicsUzeCycleChart }) {
       </div>
       <div className="uze-right">
         <div className="uze-chart-canvas" ref={canvasRef}>
-          <svg viewBox={`0 0 ${m.W} ${m.H}`} role="img" aria-label="Погодинний оптимальний розряд/заряд УЗЕ">
+          <svg viewBox={`0 0 ${m.W} ${m.H}`} role="img" aria-label="Найкращий розклад заряду й розряду УЗЕ по годинах">
             <text x={m.ix0 - 5} y={m.iy0 - 8} textAnchor="start" fontSize={10} fill={chrome.tick}>кВт·год</text>
             {m.has.socopt || m.has.socfact ? (
-              <text x={m.ix1 + 6} y={m.iy0 - 8} textAnchor="end" fontSize={10} fill={C.socOpt}>SOC</text>
+              <text x={m.ix1 + 6} y={m.iy0 - 8} textAnchor="end" fontSize={10} fill={C.socOpt}>Заряд</text>
             ) : null}
             <g style={{ display: vis('s-rdn') ? undefined : 'none' }}>{rdnCols}</g>
             {ax}

@@ -386,7 +386,7 @@ export function EssDataQualityNote({ dq }: { dq?: EconomicsDataQuality }) {
     <div id="ess-data-quality" className="economics-ai-dq-note" role="note" tabIndex={-1}>
       <p>
         ⚠ Дані УЗЕ: виключено {countLabel} з аномальними показаннями.
-        Факт, оптимум і резерв пораховано без цих годин.
+        Факт, можливий максимум і резерв пораховано без цих годин.
         {reasonSummary ? <> Причини: {reasonSummary}.</> : null}
         {dates.length > 0 && anomalies.length === 0 ? <> Дати: {dates.join(', ')}.</> : null}
       </p>
@@ -456,7 +456,7 @@ function MonthlyAiAnalysis({
       {cycles.length > 0 ? (
         <UzeCyclesAccordion cycles={cycles} />
       ) : (
-        <p className="economics-month-empty-note">Недостатньо активності УЗЕ в місяці для оцінки оптимуму.</p>
+        <p className="economics-month-empty-note">Батарея працювала надто мало, щоб оцінити її можливий максимум.</p>
       )}
     </section>
   )
@@ -785,13 +785,13 @@ const HEATMAP_TIP =
 export function MonthlyHeatmap({ margins }: { margins: EconomicsMonthlyDayMargin[] }) {
   const money = useMoney()
   return (
-    <section className="economics-card economics-month-section" aria-label="Маржинальність УЗЕ">
+    <section className="economics-card economics-month-section" aria-label="Заробіток УЗЕ на кВт·год">
       <div className="economics-month-section-head">
         <h3 className="economics-month-section-title">
-          Heatmap: маржинальність УЗЕ
+          Теплова карта: заробіток УЗЕ на кВт·год
           <OptimumInfo
             tip={HEATMAP_TIP}
-            label="Маржинальність УЗЕ"
+            label="Заробіток УЗЕ на кВт·год"
             formula={heatmapFormula(
               margins.map((r) => r.hours),
               money,

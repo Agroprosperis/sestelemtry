@@ -27,7 +27,7 @@ export function elevatorReserveFormula(t: EconomicsMonthlyTotals, m: Money): For
         value: priceText(m, gap),
         detail: `${priceText(m, t.avg_import_price_uah_per_kwh)} − ${priceText(m, t.avg_export_price_uah_per_kwh)}`,
       },
-      { op: '=', label: 'Резерв графіка', value: uahShort(r.elevator, m), detail: m.format(r.elevator) },
+      { op: '=', label: 'Резерв графіка робіт', value: uahShort(r.elevator, m), detail: m.format(r.elevator) },
     ],
     note: 'Оцінка зверху: припускає, що весь цей обсяг споживання можна пересунути. Не збиток, а можливість.',
   }
@@ -37,20 +37,20 @@ export function elevatorReserveFormula(t: EconomicsMonthlyTotals, m: Money): For
 export function essReserveFormula(t: EconomicsMonthlyTotals, m: Money): Formula {
   const r = reserveSplit(t)
   const hasOptimum = t.ess_optimum_uah > 0
-  const causes = `таймінг ${m.format(t.ess_reserve_timing_uah)}, SOC ${m.format(t.ess_reserve_soc_uah)}, СЕС → УЗЕ ${m.format(t.ess_reserve_pv_uah)}`
+  const causes = `години розряду ${m.format(t.ess_reserve_timing_uah)}, запас заряду перед піком ${m.format(t.ess_reserve_soc_uah)}, заряд від СЕС ${m.format(t.ess_reserve_pv_uah)}`
   return {
     text: 'Скільки УЗЕ могла б заробити більше, якби розряджалась у найкращі години.',
-    rule: 'Оптимум − Факт. Оптимум — найкращий розклад розряду й заряду (динамічне програмування) у межах потужності, діапазону SOC, ККД і зносу; факт — Σ чистого ефекту УЗЕ.',
+    rule: 'Можливий максимум − факт. Можливий максимум — скільки УЗЕ заробила б за найвигіднішого розкладу заряду й розряду з її реальною потужністю, діапазоном заряду, ККД і зносом; факт — Σ чистого ефекту УЗЕ.',
     lines: hasOptimum
       ? [
-          { label: 'Оптимум УЗЕ', value: m.format(t.ess_optimum_uah) },
+          { label: 'Можливий максимум УЗЕ', value: m.format(t.ess_optimum_uah) },
           { op: '−', label: 'Факт УЗЕ', value: m.format(t.ess_fact_uah) },
-          { op: '=', label: 'Резерв таймінгу УЗЕ', value: uahShort(r.ess, m), detail: m.format(t.ess_reserve_uah) },
+          { op: '=', label: 'Резерв розкладу УЗЕ', value: uahShort(r.ess, m), detail: m.format(t.ess_reserve_uah) },
         ]
-      : [{ op: '=', label: 'Резерв таймінгу УЗЕ', value: uahShort(r.ess, m), detail: 'оптимум не оцінено' }],
+      : [{ op: '=', label: 'Резерв розкладу УЗЕ', value: uahShort(r.ess, m), detail: 'можливий максимум не оцінено' }],
     note: hasOptimum
-      ? `Захоплено ${formatPercent(t.ess_captured_share)} = факт ÷ оптимум. Причини резерву: ${causes}. Від’ємний резерв показано нулем.`
-      : 'Недостатньо активності УЗЕ для оцінки оптимуму.',
+      ? `Реалізовано ${formatPercent(t.ess_captured_share)} від можливого = факт ÷ можливий максимум. З чого складається резерв: ${causes}. Від’ємний резерв показано нулем.`
+      : 'Батарея працювала надто мало, щоб оцінити її можливий максимум.',
   }
 }
 
@@ -59,10 +59,10 @@ export function totalReserveFormula(t: EconomicsMonthlyTotals, m: Money): Formul
   const r = reserveSplit(t)
   return {
     text: 'Усі підтверджені можливості разом.',
-    rule: 'Резерв графіка + Резерв таймінгу УЗЕ.',
+    rule: 'Резерв графіка робіт + резерв розкладу УЗЕ.',
     lines: [
-      { label: 'Резерв графіка', value: uahShort(r.elevator, m) },
-      { op: '+', label: 'Резерв таймінгу УЗЕ', value: uahShort(r.ess, m) },
+      { label: 'Резерв графіка робіт', value: uahShort(r.elevator, m) },
+      { op: '+', label: 'Резерв розкладу УЗЕ', value: uahShort(r.ess, m) },
       { op: '=', label: 'Разом до дій', value: uahShort(r.total, m) },
     ],
     note: 'Два важелі можуть частково перекриватись (одна й та сама кВт·год), тому це верхня оцінка.',
@@ -115,26 +115,26 @@ export function essMonthsFormula(months: EssMonth[], m: Money): { reserve: Formu
   const share = opt > 0 ? Math.max(0, Math.min(1, fact / opt)) : NaN
   return {
     reserve: {
-      text: 'Недовикористана можливість УЗЕ: оптимум мінус факт за кожен місяць.',
-      rule: 'Резерв місяця = Оптимум − Факт. Оптимум — модельний максимум у межах потужності, SOC, ККД і зносу цього місяця.',
+      text: 'Недовикористана можливість УЗЕ: можливий максимум мінус факт за кожен місяць.',
+      rule: 'Резерв місяця = можливий максимум − факт. Можливий максимум — розрахунок найвигіднішого розкладу з потужністю, діапазоном заряду, ККД і зносом цього місяця.',
       lines: withLines(
         [
-          { label: `Оптимум, ${months.length} міс.`, value: m.format(opt) },
+          { label: `Можливий максимум, ${months.length} міс.`, value: m.format(opt) },
           { op: '−', label: 'Факт', value: m.format(fact) },
         ],
         { label: 'Резерв (сума місяців)', value: m.format(reserve) },
       ),
-      note: 'Не збиток, а оцінка. Місяці без оцінки оптимуму не показано.',
+      note: 'Не збиток, а оцінка. Місяці, де максимум не оцінено, не показано.',
     },
     capture: {
-      text: 'Яку частку оптимуму УЗЕ реально захопила.',
-      rule: 'Захоплення = Факт ÷ Оптимум (від 0 до 100%).',
+      text: 'Яку частку можливого максимуму УЗЕ реально отримала.',
+      rule: 'Реалізовано = факт ÷ можливий максимум (від 0 до 100%).',
       lines: [
         { label: 'Факт', value: m.format(fact) },
-        { op: '÷', label: 'Оптимум', value: m.format(opt) },
-        { op: '=', label: 'Захоплення', value: formatPercent(share) },
+        { op: '÷', label: 'Можливий максимум', value: m.format(opt) },
+        { op: '=', label: 'Реалізовано', value: formatPercent(share) },
       ],
-      note: 'У смужці кожного місяця — його власна частка: факт ÷ оптимум місяця.',
+      note: 'У смужці кожного місяця — його власна частка: факт ÷ можливий максимум місяця.',
     },
   }
 }
@@ -210,7 +210,7 @@ export function cycleFormulas(chart: EconomicsUzeCycleChart, fmt: (v: number) =>
     [
       { label: 'Експорт УЗЕ → мережу', amount: exportVal, detail: energy(o?.discharge_kwh) },
       { label: 'УЗЕ → споживання', amount: loadVal },
-      { label: 'Собівартість сонця (втрачений експорт)', amount: -pvCost, detail: energy(o?.charge_pv_kwh) },
+      { label: 'Вартість заряду від СЕС (недоотриманий експорт)', amount: -pvCost, detail: energy(o?.charge_pv_kwh) },
       ...(gridCost ? [{ label: 'Заряд з мережі', amount: -gridCost, detail: energy(o?.charge_grid_kwh) }] : []),
       { label: 'Знос батареї', amount: -degradation },
     ],
@@ -222,8 +222,8 @@ export function cycleFormulas(chart: EconomicsUzeCycleChart, fmt: (v: number) =>
   return {
     optimum: {
       text: 'Скільки УЗЕ заробила б цього циклу з ідеальним розкладом розряду й заряду.',
-      rule: 'Розклад — динамічне програмування за годинами в межах потужності, діапазону SOC, ККД і зносу. Оптимум = розряд на експорт + розряд на споживання − собівартість сонця − заряд з мережі − знос.',
-      lines: sumLines(terms, { label: 'Чистий оптимум', amount: optEffect }, fmt),
+      rule: 'Розрахунок перебирає розклади по годинах у межах потужності, діапазону заряду, ККД і зносу. Можливий максимум = розряд у мережу + розряд у споживання − вартість заряду від СЕС − заряд з мережі − знос.',
+      lines: sumLines(terms, { label: 'Можливий максимум', amount: optEffect }, fmt),
     },
     fact: {
       text: 'Скільки УЗЕ реально заробила за цей цикл.',
@@ -232,10 +232,10 @@ export function cycleFormulas(chart: EconomicsUzeCycleChart, fmt: (v: number) =>
     },
     reserve: {
       text: 'Недовикористана можливість циклу — не збиток.',
-      rule: 'Резерв = Оптимум − Факт.',
+      rule: 'Резерв = можливий максимум − факт.',
       lines: sumLines(
         [
-          { label: 'Оптимум', amount: optEffect },
+          { label: 'Можливий максимум', amount: optEffect },
           { label: 'Факт', amount: -factEffect },
         ],
         { label: 'Резерв', amount: reserve },
@@ -243,12 +243,12 @@ export function cycleFormulas(chart: EconomicsUzeCycleChart, fmt: (v: number) =>
       ),
     },
     captured: {
-      text: 'Яку частку оптимуму цього циклу УЗЕ захопила.',
-      rule: 'Захоплено = Факт ÷ Оптимум, округлено до десятих відсотка.',
+      text: 'Яку частку можливого максимуму цього циклу УЗЕ отримала.',
+      rule: 'Реалізовано = факт ÷ можливий максимум, округлено до десятих відсотка.',
       lines: [
         { label: 'Факт', value: fmt(factEffect) },
-        { op: '÷', label: 'Оптимум', value: fmt(optEffect) },
-        { op: '=', label: 'Захоплено', value: `${captured}%` },
+        { op: '÷', label: 'Можливий максимум', value: fmt(optEffect) },
+        { op: '=', label: 'Реалізовано', value: `${captured}%` },
       ],
     },
     captureText: `${captured}%`,

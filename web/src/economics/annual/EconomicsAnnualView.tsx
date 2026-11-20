@@ -174,13 +174,13 @@ const HEATMAP_TIP =
 export function MonthHourHeatmap({ margins }: { margins: EconomicsAnnualMonthMargin[] }) {
   const money = useMoney()
   return (
-    <section className="economics-card economics-month-section" aria-label="Маржинальність УЗЕ по місяцях">
+    <section className="economics-card economics-month-section" aria-label="Заробіток УЗЕ на кВт·год по місяцях">
       <div className="economics-month-section-head">
         <h3 className="economics-month-section-title">
-          Heatmap: маржинальність УЗЕ (місяць × година)
+          Теплова карта: заробіток УЗЕ на кВт·год (місяць × година)
           <OptimumInfo
             tip={HEATMAP_TIP}
-            label="Маржинальність УЗЕ"
+            label="Заробіток УЗЕ на кВт·год"
             formula={heatmapFormula(
               margins.map((r) => r.hours),
               money,
@@ -375,27 +375,27 @@ function AnnualAiAnalysis({
                 <div className="economics-ai-reserve">
                   <div className="economics-ai-reserve-head">
                     <span className="economics-ai-label amber">
-                      Резерв таймінгу УЗЕ по місяцях
+                      Резерв розкладу УЗЕ по місяцях
                       <OptimumInfo
-                        tip="Оптимум − Факт за місяць. Це не збиток, а оцінка недовикористаної можливості УЗЕ (модельний максимум у межах фактичних потужності, SOC, ККД та зносу)."
-                        label="Резерв таймінгу УЗЕ по місяцях"
+                        tip="Можливий максимум мінус факт за місяць. Це не збиток, а оцінка недовикористаної можливості УЗЕ: скільки вона заробила б за найвигіднішого розкладу заряду й розряду з її реальною потужністю, діапазоном заряду, ККД і зносом."
+                        label="Резерв розкладу УЗЕ по місяцях"
                         formula={essTips.reserve}
                       />
                     </span>
                     <div className="economics-optimum-legend">
                       <span><i style={{ background: '#7c3aed' }} />фактичний ефект</span>
                       <span><i style={{ background: '#f59e0b' }} />недовикористано</span>
-                      <span><i style={{ background: chrome.neutral }} />оптимум</span>
+                      <span><i style={{ background: chrome.neutral }} />можливий максимум</span>
                     </div>
                   </div>
                   <div className="economics-optimum-list">
                     <div className="economics-optimum-row head">
                       <span>Місяць</span>
                       <span>
-                        захоплення
-                        <FormulaTip label="Захоплення оптимуму" formula={essTips.capture} />
+                        реалізовано
+                        <FormulaTip label="Реалізовано від можливого" formula={essTips.capture} />
                       </span>
-                      <span>опт.</span>
+                      <span>максимум</span>
                       <span>факт</span>
                       <span>резерв</span>
                     </div>
@@ -417,12 +417,12 @@ function AnnualAiAnalysis({
                     })}
                   </div>
                   <p className="economics-month-muted economics-optimum-note">
-                    Оптимум — найкращий диспетчинг у межах фактично продемонстрованих
-                    можливостей УЗЕ (потужність, діапазон SOC, ККД виведені з даних кожного місяця).
+                    Можливий максимум — скільки УЗЕ заробила б за найвигіднішого розкладу заряду й розряду
+                    з тими можливостями, які вона показала цього місяця: потужністю, діапазоном заряду й ККД.
                   </p>
                 </div>
               ) : (
-                <p className="economics-month-empty-note">Недостатньо активності УЗЕ за рік для оцінки оптимуму.</p>
+                <p className="economics-month-empty-note">Батарея працювала надто мало, щоб оцінити її можливий максимум.</p>
               )}
             </div>
           </details>

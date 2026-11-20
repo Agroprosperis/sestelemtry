@@ -29,7 +29,7 @@ function site(over: Partial<EconomicsPortfolioSite>): EconomicsPortfolioSite {
   }
 }
 
-describe('portfolio «Захоплення УЗЕ»', () => {
+describe('portfolio «Реалізовано УЗЕ»', () => {
   it("shows the object's УЗЕ fact over its optimum, as its month does", () => {
     // The elevator's ess_net counts its day with the generator as the
     // elevator's, the fact counts each battery: the share comes from the API.

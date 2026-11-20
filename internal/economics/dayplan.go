@@ -150,7 +150,7 @@ func classifyHour(s dispatchStep, oh optimumHour, socKwh, maxFutureImport float6
 		return "charge", ReasonChargePvSurplus,
 			fmt.Sprintf("Заряд %.0f кВт·год від надлишку СЕС", charge)
 	case oh.offgrid:
-		return "hold", ReasonOffgrid, "Об'єкт працював без мережі — година поза розрахунком оптимуму"
+		return "hold", ReasonOffgrid, "Об'єкт працював без мережі — година поза розрахунком найкращого розкладу"
 	case !oh.tradable:
 		return "hold", ReasonNoPrice, "Немає ціни РДН на цю годину — рішення не приймається"
 	case socKwh > planIdleKwh && maxFutureImport > oh.importPrice:

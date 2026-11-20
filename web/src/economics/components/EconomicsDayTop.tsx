@@ -195,7 +195,7 @@ export function EconomicsDayTop({ totals: t, rows, tariffs, pvPlan = null }: Pro
 
         <Card tone="violet" icon={ICONS.battery} label="Ефект УЗЕ" formula={fx.essEffect} value={uah(t.essNet)} hero>
           <FactLine label="Зменшення імпорту" value={uah(t.revenueEssSelf)} />
-          <FactLine label="Арбітраж (експорт)" value={uah(t.revenueEssExport)} />
+          <FactLine label="Розряд у мережу" value={uah(t.revenueEssExport)} />
           <FactLine label="Заряд і знос" value={uah(f.essChargeAndWear)} />
         </Card>
 

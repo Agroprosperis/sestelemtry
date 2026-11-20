@@ -328,7 +328,7 @@ export function dayFormulas(
         withRest(
           keepMoney([
             leg('Зменшення імпорту', t.revenueEssSelf, t.essToLoad),
-            leg('Арбітраж (експорт)', t.revenueEssExport, t.essToGrid),
+            leg('Розряд у мережу (продаж)', t.revenueEssExport, t.essToGrid),
             leg('Заряд із мережі', -t.expenseGridCharge, t.gridToEss),
             leg('Заряд від СЕС (недоотриманий експорт)', -f.pvToEssValue, t.pvToEss),
             ...(t.expenseGenCharge > 0 ? [{ label: 'Заряд від генератора (пальне)', amount: -t.expenseGenCharge }] : []),

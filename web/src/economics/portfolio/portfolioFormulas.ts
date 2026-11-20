@@ -19,7 +19,7 @@ const factorFmt = new Intl.NumberFormat('uk-UA', { minimumFractionDigits: 2, max
 const litresFmt = new Intl.NumberFormat('uk-UA', { maximumFractionDigits: 0 })
 
 export const OPTIMUM_TIP =
-  'Оптимум — найкращий графік заряду/розряду батареї в межах її ж фактичних можливостей (потужність, діапазон SOC, ККД циклу за телеметрією періоду), оцінений за цінами РДН і тарифами. Резерв = оптимум − факт: недоотримана вигода, яку ще можна забрати кращим керуванням, а не збиток.'
+  'Резерв розкладу УЗЕ — скільки ще могла б заробити батарея, якби заряджалась і розряджалась у найвигідніші години, з її реальною потужністю, діапазоном заряду й ККД, за цінами РДН і тарифами. Резерв = можливий максимум − факт: це недоотримана вигода, яку можна забрати кращим керуванням, а не збиток.'
 
 // siteSumLines writes a portfolio total as the sum of the objects with
 // data: the biggest ones one by one, the rest as «Інші об'єкти», closed
@@ -82,13 +82,13 @@ export function buildPortfolioFormulas(portfolio: EconomicsPortfolioResponse, mo
 
   const bessReserve: Formula = {
     text: OPTIMUM_TIP,
-    rule: 'Для кожного об’єкта: резерв УЗЕ = max(0; оптимум УЗЕ − факт УЗЕ). Резерв портфеля — сума по об’єктах.',
-    lines: siteSumLines(sites, (s) => s.bess_reserve_uah, totals.bess_reserve_uah, 'Оптимум УЗЕ (резерв)', fmt),
+    rule: 'Для кожного об’єкта: резерв розкладу УЗЕ = max(0; можливий максимум УЗЕ − факт УЗЕ). Резерв портфеля — сума по об’єктах.',
+    lines: siteSumLines(sites, (s) => s.bess_reserve_uah, totals.bess_reserve_uah, 'Резерв розкладу УЗЕ', fmt),
   }
 
   const actionReserveColumn: Formula = {
     text: 'Обидва резерви об’єкта разом: те, що ще можна забрати кращим графіком робіт і керуванням УЗЕ.',
-    rule: 'Разом резерв = резерв графіка робіт + оптимум УЗЕ (резерв), по кожному об’єкту; у рядку «Портфель» — сума по об’єктах.',
+    rule: 'Разом резерв = резерв графіка робіт + резерв розкладу УЗЕ, по кожному об’єкту; у рядку «Портфель» — сума по об’єктах.',
     lines: siteSumLines(sites, (s) => s.action_reserve_uah, totals.action_reserve_uah, 'Разом резерв', fmt),
   }
 
@@ -96,12 +96,12 @@ export function buildPortfolioFormulas(portfolio: EconomicsPortfolioResponse, mo
   const withReservesTerms: FormulaTerm[] = [
     { label: 'EBITDA', amount: totals.ebitda_uah },
     { label: 'Резерв графіка робіт', amount: totals.schedule_reserve_uah },
-    { label: 'Оптимум УЗЕ (резерв)', amount: totals.bess_reserve_uah },
+    { label: 'Резерв розкладу УЗЕ', amount: totals.bess_reserve_uah },
   ]
   if (Math.abs(reserveGap) >= 0.5) withReservesTerms.push({ label: 'Інше', amount: reserveGap })
   const withReserves: Formula = {
     text: 'Потенційний результат періоду: фактична EBITDA плюс обидва резерви, якби їх забрали повністю.',
-    rule: 'Разом з резервами = EBITDA + резерв графіка робіт + оптимум УЗЕ (резерв).',
+    rule: 'Разом з резервами = EBITDA + резерв графіка робіт + резерв розкладу УЗЕ.',
     lines: sumLines(
       withReservesTerms,
       { label: 'Разом з резервами', amount: totals.ebitda_uah + totals.action_reserve_uah },
@@ -155,8 +155,8 @@ export function buildPortfolioFormulas(portfolio: EconomicsPortfolioResponse, mo
 
   const captured: Formula = {
     text: 'Яку частку можливого виграшу УЗЕ вже отримано.',
-    rule: 'Захоплення УЗЕ = факт УЗЕ ÷ оптимум УЗЕ. Резерв УЗЕ — це оптимум мінус факт, тому чим більший резерв, тим менше захоплення.',
-    note: 'Для портфеля частка не рахується (—): оптимум і факт об’єктів на цій сторінці не передаються.',
+    rule: 'Реалізовано = факт УЗЕ ÷ можливий максимум УЗЕ. Резерв розкладу — це максимум мінус факт, тому що більший резерв, то менша частка.',
+    note: 'Для портфеля частка не рахується (—): максимум і факт об’єктів на цій сторінці не передаються.',
   }
 
   return {

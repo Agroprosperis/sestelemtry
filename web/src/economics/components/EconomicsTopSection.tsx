@@ -298,7 +298,7 @@ export function EconomicsTopSection({
               ) : undefined
             }
           >
-            <span>Арбітраж РДН, зменшення імпорту, peak shaving</span>
+            <span>Дешевий заряд, дорогий розряд, менше імпорту в пікові години</span>
           </Card>
 
           <Card
