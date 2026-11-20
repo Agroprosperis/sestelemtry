@@ -215,6 +215,82 @@ func TestClientReadsALegalAccountByItsID(t *testing.T) {
 	}
 }
 
+// realLegalAnswer has the shape a legal account answered with on
+// 20.11.2026: Ukrainian dates, the day's last outage closed at 23:59, the
+// same schedule under each of the site's metering points. The EICs are
+// made up.
+const realLegalAnswer = `{"current_list_cab": [], "planned_list_cab": [
+	{"accidentid": 0, "typeid": "Заходи обмеження", "acc_begin": "20 листопада 2026, 21:00", "accend_plan": "20 листопада 2026, 23:59", "eic": "62Z0000000000011", "name_to": "Площадка  елеватор"},
+	{"accidentid": 0, "typeid": "Заходи обмеження", "acc_begin": "21 листопада 2026, 04:00", "accend_plan": "21 листопада 2026, 06:00", "eic": "62Z0000000000011", "name_to": "Площадка  елеватор"},
+	{"accidentid": 0, "typeid": "Заходи обмеження", "acc_begin": "20 листопада 2026, 21:00", "accend_plan": "20 листопада 2026, 23:59", "eic": "62Z0000000000012", "name_to": "Площадка  елеватор"},
+	{"accidentid": 0, "typeid": "Заходи обмеження", "acc_begin": "21 листопада 2026, 04:00", "accend_plan": "21 листопада 2026, 06:00", "eic": "62Z0000000000012", "name_to": "Площадка  елеватор"}
+], "fields": [], "keys_s": []}`
+
+func TestParseOutagesUkrainianDates(t *testing.T) {
+	loc := time.FixedZone("Kyiv", 2*3600)
+	got, err := parseOutages([]byte(realLegalAnswer), loc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The two points share the schedule, so the station has two stretches.
+	if len(got) != 2 {
+		t.Fatalf("got %+v, want 2 merged intervals", got)
+	}
+	evening := got[0]
+	if evening.Kind != KindSchedule ||
+		!evening.Start.Equal(time.Date(2026, 11, 20, 21, 0, 0, 0, loc)) ||
+		!evening.End.Equal(time.Date(2026, 11, 21, 0, 0, 0, 0, loc)) {
+		t.Fatalf("evening: %+v, want 20.11 21:00 – 21.11 00:00 schedule", evening)
+	}
+	if !got[1].Start.Equal(time.Date(2026, 11, 21, 4, 0, 0, 0, loc)) || !got[1].End.Equal(time.Date(2026, 11, 21, 6, 0, 0, 0, loc)) {
+		t.Fatalf("night: %+v", got[1])
+	}
+}
+
+func TestParseUkrainianRefusesNonsense(t *testing.T) {
+	for _, s := range []string{"31 лютого 2026, 10:00", "21 листопадаа 2026, 10:00", "21 листопада 2026, 25:00"} {
+		if _, ok := parseUkrainian(s, time.UTC); ok {
+			t.Errorf("parseUkrainian(%q) accepted", s)
+		}
+	}
+}
+
+// A passport holding the site's EIC, which no item names, still gets the
+// account's outages; one holding a point's EIC gets that point's.
+func TestClientKeepsTheAccountsOutagesForASiteEIC(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`<input name="password">`))
+	})
+	mux.HandleFunc("/registr_all_user/login_all_user", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`<a href="/user/logout">Вихід</a>`))
+	})
+	mux.HandleFunc("/account_legal", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`<a href="/user/logout">Вихід</a><a href="/account_legal/view_main_details?a=777">Перегляд</a>`))
+	})
+	mux.HandleFunc(outagesPath, func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(realLegalAnswer))
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	c := NewClient(srv.URL, "a@b.c", "secret", time.UTC, srv.Client())
+	site, err := c.Outages(context.Background(), "62Z0000000000099")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(site) != 2 {
+		t.Fatalf("site EIC: %+v, want the account's 2 intervals", site)
+	}
+	point, err := c.Outages(context.Background(), "62Z0000000000011")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(point) != 2 || point[0].EIC != "62Z0000000000011" {
+		t.Fatalf("point EIC: %+v", point)
+	}
+}
+
 func TestValidatePoint(t *testing.T) {
 	p := Point{OrganizationID: "ab", EIC: NormalizeEIC("62z1234567890123"), Host: "vn.e-svitlo.com.ua"}
 	if err := p.Validate(); err != nil {

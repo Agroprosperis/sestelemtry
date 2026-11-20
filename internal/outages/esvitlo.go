@@ -237,7 +237,10 @@ func (c *Client) readAll(ctx context.Context, eic string) ([]Interval, error) {
 }
 
 // read fetches one outages list. eic, when given, keeps the items of
-// that point and those that name none.
+// that point and those that name none. A legal account names its items
+// by its metering points' own EICs, while a passport may hold the site's
+// («ЕІС-код площадки вимірювання»): when no item names eic at all, the
+// account's outages are the station's.
 func (c *Client) read(ctx context.Context, path, eic string) ([]Interval, error) {
 	page, final, err := c.fetch(ctx, http.MethodGet, path, nil)
 	if err != nil {
@@ -250,11 +253,18 @@ func (c *Client) read(ctx context.Context, path, eic string) ([]Interval, error)
 	if err != nil || eic == "" {
 		return list, err
 	}
-	kept := list[:0]
+	var kept []Interval
+	named := false
 	for _, iv := range list {
+		if iv.EIC == eic {
+			named = true
+		}
 		if iv.EIC == "" || iv.EIC == eic {
 			kept = append(kept, iv)
 		}
+	}
+	if !named {
+		return list, nil
 	}
 	return kept, nil
 }
@@ -409,9 +419,49 @@ var localLayouts = []string{
 	"02.01.2006 15:04",
 }
 
+// ukMonths are the genitive month names a legal account's list writes
+// its dates with: «21 листопада 2026, 20:00».
+var ukMonths = map[string]time.Month{
+	"січня": time.January, "лютого": time.February, "березня": time.March, "квітня": time.April,
+	"травня": time.May, "червня": time.June, "липня": time.July, "серпня": time.August,
+	"вересня": time.September, "жовтня": time.October, "листопада": time.November, "грудня": time.December,
+}
+
+var ukDateRe = regexp.MustCompile(`^(\d{1,2})\s+(\p{L}+)\s+(\d{4}),?\s+(\d{1,2}):(\d{2})(?::(\d{2}))?$`)
+
+// parseUkrainian reads «21 листопада 2026, 20:00» as wall-clock in loc.
+func parseUkrainian(s string, loc *time.Location) (time.Time, bool) {
+	m := ukDateRe.FindStringSubmatch(s)
+	if m == nil {
+		return time.Time{}, false
+	}
+	month, ok := ukMonths[strings.ToLower(m[2])]
+	if !ok {
+		return time.Time{}, false
+	}
+	day, _ := strconv.Atoi(m[1])
+	year, _ := strconv.Atoi(m[3])
+	hour, _ := strconv.Atoi(m[4])
+	minute, _ := strconv.Atoi(m[5])
+	second := 0
+	if m[6] != "" {
+		second, _ = strconv.Atoi(m[6])
+	}
+	if hour > 23 || minute > 59 || second > 59 {
+		return time.Time{}, false
+	}
+	t := time.Date(year, month, day, hour, minute, second, 0, loc)
+	if t.Day() != day {
+		return time.Time{}, false
+	}
+	return t, true
+}
+
 // parseLocal reads a cabinet time: with a zone as written, without one
-// as Kyiv wall-clock. A time at :59 seconds is the end of its minute.
-// The cabinet's own page strips stray quotes from them, and so does this.
+// as Kyiv wall-clock. A time at :59 seconds is the end of its minute, and
+// one at :59 minutes the end of its hour — the cabinet closes a day's
+// last outage at 23:59 for want of 24:00. The cabinet's own page strips
+// stray quotes from them, and so does this.
 func parseLocal(s string, loc *time.Location) (time.Time, bool) {
 	s = strings.TrimSpace(strings.Trim(strings.TrimSpace(s), `"`))
 	if s == "" {
@@ -426,10 +476,16 @@ func parseLocal(s string, loc *time.Location) (time.Time, bool) {
 		}
 	}
 	if err != nil {
-		return time.Time{}, false
+		var ok bool
+		if t, ok = parseUkrainian(s, loc); !ok {
+			return time.Time{}, false
+		}
 	}
 	if t.Second() > 0 || t.Nanosecond() > 0 {
 		t = t.Truncate(time.Minute).Add(time.Minute)
+	}
+	if t.Minute() == 59 && t.Second() == 0 {
+		t = t.Add(time.Minute)
 	}
 	return t, true
 }
@@ -528,7 +584,7 @@ func kindOf(it map[string]any) Kind {
 		return KindOther
 	}
 	reason := strings.ToLower(text(it["typeid"]))
-	for _, w := range []string{"гпв", "погодин", "графік"} {
+	for _, w := range []string{"гпв", "погодин", "графік", "обмеження"} {
 		if strings.Contains(reason, w) {
 			return KindSchedule
 		}
