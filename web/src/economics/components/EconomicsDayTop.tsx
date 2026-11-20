@@ -1,5 +1,5 @@
 import { Line, LineChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { offgridMinutes, revenuePvSelfOf, type DailyTotals, type HourEconomicsRow } from '../compute'
+import { offgridMinutes, type DailyTotals, type HourEconomicsRow } from '../compute'
 import { useMoney } from '../currency'
 import { formatDuration, fuelMethodLabel } from '../generatorText'
 import type { Tariffs } from '../tariffs'
@@ -130,8 +130,12 @@ export function EconomicsDayTop({ totals: t, rows, tariffs, pvPlan = null }: Pro
   const effNetwork = (gridLoad - t.gridImport) * netPerKwh
   const effOffgrid = t.baselineOffgrid - t.genFuelCost
 
-  // Ефекти СЕС і УЗЕ.
-  const pvEffect = t.revenuePvSelf + t.revenuePvExport
+  // Ефекти СЕС і УЗЕ ділять економічний ефект без залишку, як на місяці
+  // й році: СЕС отримує й енергію, віддану в УЗЕ, за ціною експорту, від
+  // якого відмовились заради заряду, — ту саму суму, що УЗЕ платить за
+  // цей заряд.
+  const pvEffect = t.effect - t.essNet
+  const pvToEssValue = pvEffect - t.revenuePvSelf - t.revenuePvExport
   const essChargeAndWear = t.essNet - t.revenueEssSelf - t.revenueEssExport
 
   // Енергетичний баланс.
@@ -171,17 +175,16 @@ export function EconomicsDayTop({ totals: t, rows, tariffs, pvPlan = null }: Pro
     coverage.push({ key: 'gen', name: 'Генератор — навантаження', kwh: t.genToLoad, color: COLOR_GEN })
   }
 
-  // Погодинний економічний ефект: СЕС-нога (власне споживання +
-  // експорт за цінами години), УЗЕ-нога (essNet) і сукупний effect.
+  // Погодинний економічний ефект: СЕС-нога (effect − essNet, як на
+  // картці), УЗЕ-нога (essNet) і сукупний effect.
   const hourly = rows.map((r, i) => {
     const label = String(i).padStart(2, '0')
     if (!r || r.rdnUahPerKwh === null) {
       return { label, 'Ефект СЕС': null, 'Ефект УЗЕ': null, 'Сукупний ефект': null }
     }
-    const pvEff = revenuePvSelfOf(r) + r.economics.pvToGrid * r.economics.exportPriceUahPerKwh
     return {
       label,
-      'Ефект СЕС': point(pvEff),
+      'Ефект СЕС': point(r.economics.effect - r.economics.essNet),
       'Ефект УЗЕ': point(r.economics.essNet),
       'Сукупний ефект': point(r.economics.effect),
     }
@@ -270,12 +273,15 @@ export function EconomicsDayTop({ totals: t, rows, tariffs, pvPlan = null }: Pro
           tone="amber"
           icon={ICONS.sun}
           label="Ефект СЕС"
-          tip="Внесок СЕС: власне споживання за ціною імпорту тієї ж години + експорт за ціною експорту."
+          tip="Внесок СЕС: власне споживання за ціною імпорту тієї ж години, експорт і заряд УЗЕ за ціною експорту. Разом з ефектом УЗЕ дає економічний ефект."
           value={uah(pvEffect)}
           hero
         >
           <FactLine label="Власне споживання" value={uah(t.revenuePvSelf)} />
           <FactLine label="Експорт" value={uah(t.revenuePvExport)} />
+          {Math.abs(pvToEssValue) >= money.fromUah(0.5) && (
+            <FactLine label="Заряд УЗЕ від СЕС" value={uah(pvToEssValue)} />
+          )}
         </Card>
 
         <Card
