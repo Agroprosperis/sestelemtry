@@ -92,10 +92,13 @@ control:
 
 # On-device web console (state, diagnostics, manifest view, emergency
 # override). LAN-only by network design; omit the section to keep the
-# defaults below.
+# defaults below. Every request needs the console login (HTTP Basic),
+# set on the device with -set-console-password; without it the console
+# answers 503.
 local_ui:
   enabled: true
   listen: ":8081"
+  # password_path: /var/lib/ems-edge/console_password.json   # default: next to write_pin.json
 
 # Приклад форми YAML — НЕ runtime-джерело кВт (діагностика §4.1).
 # Потужність УЗЕ движок бере ЛИШЕ з manifest.limits (паспорт /

@@ -752,7 +752,7 @@ $('cmd-table').onclick = async (e) => {
   try {
     const res = await fetch('/api/command', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'fetch' },
       body: JSON.stringify({ command: b.dataset.cmd }),
     });
     const body = await res.json().catch(() => ({}));
@@ -774,7 +774,7 @@ async function refreshWritePre() {
 async function postWrite(action, confirm, pin) {
   const res = await fetch('/api/write', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'fetch' },
     body: JSON.stringify({ action, confirm, pin }),
   });
   const body = await res.json().catch(() => ({}));
@@ -937,7 +937,7 @@ document.querySelectorAll('.log-tabs .btn').forEach((btn) => {
 async function postOverride(mode, ttl) {
   const res = await fetch('/api/override', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'fetch' },
     body: JSON.stringify({ mode, ttl_minutes: ttl }),
   });
   if (!res.ok) throw new Error(await res.text());

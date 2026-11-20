@@ -14,13 +14,33 @@ import (
 
 // Local on-device console (spec ems_ui_edge_vs_cloud §2, mockup
 // iot2050_console.html): status, diagnostics, manifest view and the
-// emergency override. Serves on the site LAN without auth — the
-// IOT2050 sits on the OT network; the full planner lives in the cloud.
+// emergency override. Serves on the site LAN behind the device login
+// (consoleauth.go); the full planner lives in the cloud.
 
 //go:embed localui.html
 var localUIPage []byte
 
 func (s *Service) runLocalUI(ctx context.Context) {
+	srv := &http.Server{
+		Addr:              s.cfg.LocalUI.Listen,
+		Handler:           s.localUIHandler(),
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      15 * time.Second,
+	}
+	go func() {
+		<-ctx.Done()
+		shCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(shCtx)
+	}()
+	s.log.Info("edge_local_ui", "listen", s.cfg.LocalUI.Listen)
+	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		s.log.Error("edge_local_ui", "err", err)
+	}
+}
+
+func (s *Service) localUIHandler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
@@ -37,24 +57,7 @@ func (s *Service) runLocalUI(ctx context.Context) {
 	mux.HandleFunc("/api/override", s.uiOverride)
 	mux.HandleFunc("/api/write", s.uiWrite)
 	mux.HandleFunc("/api/command", s.uiCommand)
-
-	srv := &http.Server{
-		Addr:              s.cfg.LocalUI.Listen,
-		Handler:           mux,
-		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       10 * time.Second,
-		WriteTimeout:      15 * time.Second,
-	}
-	go func() {
-		<-ctx.Done()
-		shCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		defer cancel()
-		_ = srv.Shutdown(shCtx)
-	}()
-	s.log.Info("edge_local_ui", "listen", s.cfg.LocalUI.Listen)
-	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		s.log.Error("edge_local_ui", "err", err)
-	}
+	return s.withConsoleAuth(mux)
 }
 
 func uiJSON(w http.ResponseWriter, v any) {
@@ -260,7 +263,7 @@ func (s *Service) uiWrite(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		action := strings.TrimSpace(body.Action)
-		by := "local-console " + r.RemoteAddr
+		by := consoleBy(r)
 		pinOK := false
 		if action == "enable" {
 			now := time.Now().UTC()
@@ -305,7 +308,7 @@ func (s *Service) uiCommand(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	reply := s.requestCommand(r.Context(), strings.TrimSpace(body.Command), "local-console "+r.RemoteAddr)
+	reply := s.requestCommand(r.Context(), strings.TrimSpace(body.Command), consoleBy(r))
 	if !reply.OK {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusConflict)

@@ -57,6 +57,7 @@ type Service struct {
 	// the writers read writeCmd and report what they wrote in writeFB.
 	gate          *WriteGate
 	pin           *pinGate
+	console       *consoleGate
 	writeCmd      atomic.Pointer[WriteCommand]
 	writeFB       sync.Map // register name → WriteFeedback
 	writeFaults   chan writeFault
@@ -147,6 +148,7 @@ func Run(ctx context.Context, cfg *Config, log *slog.Logger, version string) err
 		eventLastWritten: map[string]time.Time{},
 		gate:             gate,
 		pin:              &pinGate{path: cfg.Control.Write.PinPath},
+		console:          &consoleGate{path: cfg.LocalUI.PasswordPath},
 		ctl:              NewController(cfg.Control.Write),
 		writeFaults:      make(chan writeFault, 8),
 		writeRequests:    make(chan writeRequest),

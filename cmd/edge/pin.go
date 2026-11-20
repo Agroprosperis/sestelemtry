@@ -38,6 +38,38 @@ func runSetWritePin(configPath string) error {
 	return nil
 }
 
+// runSetConsolePassword asks for the console login and the password
+// twice and stores its hash where the service looks for it. It acts at
+// once, without a restart.
+func runSetConsolePassword(configPath string) error {
+	path, err := edge.ConsolePasswordPath(configPath)
+	if err != nil {
+		return err
+	}
+	in := bufio.NewReader(os.Stdin)
+	fmt.Fprint(os.Stderr, "Логін (Enter — operator): ")
+	user, err := in.ReadString('\n')
+	if err != nil && user == "" {
+		return err
+	}
+	pass, err := readSecret(in, "Новий пароль консолі (щонайменше 10 символів): ")
+	if err != nil {
+		return err
+	}
+	again, err := readSecret(in, "Повторіть пароль: ")
+	if err != nil {
+		return err
+	}
+	if pass != again {
+		return errors.New("паролі не збігаються")
+	}
+	if err := edge.SetConsolePassword(path, strings.TrimSpace(user), pass, time.Now()); err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "Пароль консолі збережено (%s). Діє одразу, перезапуск не потрібен.\n", path)
+	return nil
+}
+
 // readSecret reads one line, with the echo off on a terminal.
 func readSecret(in *bufio.Reader, prompt string) (string, error) {
 	fmt.Fprint(os.Stderr, prompt)
