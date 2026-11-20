@@ -363,11 +363,15 @@
   color: var(--text-label);
 }
 
+/* A native select ignores vertical padding, so the height is set outright
+   for it to line up with the inputs. */
 .pvplan input:not([type='checkbox']):not([type='radio']),
 .pvplan select {
+  box-sizing: border-box;
   width: 100%;
   min-width: 0;
-  padding: 6px 8px;
+  height: 32px;
+  padding: 0 8px;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--bg-page);
