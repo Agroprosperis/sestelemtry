@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
 import type { ReactElement } from 'react'
 import { formatOrganizationLabel } from '../../dashboard/config'
@@ -6,9 +6,12 @@ import { expenseGenChargeOf, revenueEssSelfOf, revenuePvSelfOf, type HourEconomi
 import { UAH_MONEY, useMoney, type Money } from '../currency'
 import { dayPivotSheet, exportFileName, type HourMetric } from '../exportSheets'
 import { tipLeft } from '../tipPosition'
+import type { Tariffs } from '../tariffs'
 import { fetchUahDayRows } from '../useEconomicsData'
 import { downloadXlsx, type XlsxFormat } from '../xlsx'
 import { ExportButton } from './ExportButton'
+import { FormulaTip } from './FormulaTip'
+import { essStripFormula, tableFormulas } from './tableFormulas'
 
 type Props = {
   rows: Array<HourEconomicsRow | null>
@@ -17,6 +20,10 @@ type Props = {
   // glance which elevator and which day the numbers belong to.
   organizationID: string
   date: string
+  // tariffs is the version in force that day (UAH): the price stack of the
+  // «Ціна імпорту» / «Ціна експорту» formulas. Without it they show the
+  // prices as one lump.
+  tariffs?: Tariffs | null
 }
 
 // formatLocalDate turns an ISO YYYY-MM-DD into the dotted Ukrainian
@@ -727,9 +734,11 @@ const STRIP_TIP_WIDTH = 344
 function EssEffectStrip({
   rows,
   cols,
+  tariffs,
 }: {
   rows: Array<HourEconomicsRow | null>
   cols: HourColumns | null
+  tariffs: Tariffs | null
 }): ReactElement | null {
   const money = useMoney()
   const formatStripUah = money.format
@@ -753,7 +762,10 @@ function EssEffectStrip({
   const hoverTerms = hoverRow && hoverValue !== null ? essNetTerms(hoverRow, money) : []
   return (
     <div className="economics-ess-strip" style={{ gridTemplateColumns: template }}>
-      <div className="economics-ess-strip-label">Чистий ефект УЗЕ, {money.unit}/год</div>
+      <div className="economics-ess-strip-label">
+        Чистий ефект УЗЕ, {money.unit}/год
+        <FormulaTip label="Чистий ефект УЗЕ" formula={essStripFormula(rows, tariffs, money)} />
+      </div>
       <div className="economics-ess-strip-total" style={{ left: `${cols.metric}px` }}>
         {formatStripUah(total)}
       </div>
@@ -836,10 +848,24 @@ type HourColumns = {
   hours: number[]
 }
 
-export function EconomicsTable({ rows, organizationID, date }: Props) {
+export function EconomicsTable({ rows, organizationID, date, tariffs = null }: Props) {
   const money = useMoney()
   const withGen = hasGenData(rows)
   const groups = useMemo(() => tableGroups(money, withGen), [money, withGen])
+  const formulas = useMemo(
+    () =>
+      tableFormulas({
+        rows,
+        tariffs,
+        money,
+        metrics: Object.fromEntries(
+          groups
+            .flatMap((group) => group.rows)
+            .map((m) => [m.id, { kind: m.kind, pick: m.pickHourValue, total: m.total }]),
+        ),
+      }),
+    [rows, tariffs, money, groups],
+  )
   const orgLabel = formatOrganizationLabel(organizationID)
   const dateLabel = formatLocalDate(date)
   const tableRef = useRef<HTMLTableElement>(null)
@@ -890,8 +916,12 @@ export function EconomicsTable({ rows, organizationID, date }: Props) {
         />
       </div>
       <div className="economics-table-scroll">
-        <EssEffectStrip rows={rows} cols={cols} />
-        <table ref={tableRef} className="economics-table economics-table-pivot">
+        <EssEffectStrip rows={rows} cols={cols} tariffs={tariffs} />
+        <table
+          ref={tableRef}
+          className="economics-table economics-table-pivot"
+          style={cols ? ({ '--metric-col': `${cols.metric}px` } as CSSProperties) : undefined}
+        >
           <thead>
             <tr>
               <th className="economics-table-metric-head" rowSpan={2} scope="col">
@@ -921,6 +951,7 @@ export function EconomicsTable({ rows, organizationID, date }: Props) {
                   <th scope="row" className="economics-table-metric">
                     {metric.label}
                     <small>, {metric.unit}</small>
+                    {formulas[metric.id] ? <FormulaTip label={metric.label} formula={formulas[metric.id]} /> : null}
                   </th>
                   <td className="economics-table-total-cell">
                     {totalValue === null ? (

@@ -1750,13 +1750,14 @@
 
 .economics-table-pivot thead th.economics-table-total-head {
   position: sticky;
-  /* The Σ column is now anchored to the right edge of the metric
-     label column (192 px wide), forming a two-column sticky block
-     on the LEFT of the table. We keep `right` unset because the
-     column scrolls together with the hour columns when the table
-     is wider than the viewport — it's the metric+Σ pair that the
-     analyst wants pinned, not the right edge. */
-  left: 192px;
+  /* The Σ column is anchored to the right edge of the metric label
+     column, forming a two-column sticky block on the LEFT of the
+     table. --metric-col is that column's measured width (a long label
+     with its «i» outgrows the 192 px minimum). We keep `right` unset
+     because the column scrolls together with the hour columns when
+     the table is wider than the viewport — it's the metric+Σ pair
+     that the analyst wants pinned, not the right edge. */
+  left: var(--metric-col, 192px);
   z-index: 3;
   background: var(--bg-muted);
   border-right: 1px solid var(--border);
@@ -1789,10 +1790,9 @@
 
 .economics-table-pivot tbody td.economics-table-total-cell {
   position: sticky;
-  /* Mirror of the Σ header: anchored 192 px from the scroll
-     container's left edge so it sits flush against the sticky
-     metric column. */
-  left: 192px;
+  /* Mirror of the Σ header: anchored at the metric column's measured
+     width so it sits flush against the sticky metric column. */
+  left: var(--metric-col, 192px);
   z-index: 2;
   background: var(--bg-sunken);
   border-right: 1px solid var(--border);

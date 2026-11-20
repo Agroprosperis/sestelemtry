@@ -710,7 +710,7 @@ export function EconomicsPage() {
             ) : (
               <>
                 <EconomicsDayTop totals={totals} rows={data.rows} tariffs={data.tariffs ?? tariffs} pvPlan={pvPlanDay} />
-                <EconomicsTable rows={data.rows} organizationID={organizationID} date={date} />
+                <EconomicsTable rows={data.rows} organizationID={organizationID} date={date} tariffs={data.tariffs ?? tariffs} />
               </>
             )}
           </>
