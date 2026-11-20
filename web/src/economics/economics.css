@@ -3454,6 +3454,136 @@ button.economics-optimum-row.open {
   display: block;
 }
 
+/* The «i» that opens how a figure is computed (FormulaTip): the dot of
+   .economics-info, as a button, with its bubble portaled to <body>. */
+.eco-formula-trigger {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 14px;
+  height: 14px;
+  margin: 0 0 0 5px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--border);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 9px;
+  font-weight: 700;
+  font-style: normal;
+  line-height: 1;
+  text-transform: none;
+  letter-spacing: normal;
+  vertical-align: middle;
+  cursor: help;
+}
+
+.eco-formula-trigger:hover,
+.eco-formula-trigger[aria-expanded='true'] {
+  background: var(--info-link);
+  color: var(--bg-elevated);
+}
+
+.eco-formula-trigger:focus-visible {
+  outline: 2px solid var(--info-link);
+  outline-offset: 1px;
+}
+
+.eco-formula {
+  position: fixed;
+  z-index: 60;
+  box-sizing: border-box;
+  width: max-content;
+  max-width: min(380px, calc(100vw - 16px));
+  padding: 9px 12px 10px;
+  border: 1px solid var(--border-muted);
+  border-radius: 9px;
+  background: var(--bg-elevated);
+  box-shadow: 0 8px 24px rgba(var(--shadow-color), 0.16);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.45;
+  text-align: left;
+  text-transform: none;
+  letter-spacing: normal;
+  white-space: normal;
+}
+
+.eco-formula-title {
+  margin-bottom: 3px;
+  color: var(--text);
+  font-weight: 700;
+}
+
+.eco-formula-text {
+  margin: 0 0 6px;
+}
+
+/* The rule in words, set apart from the numbers under it. */
+.eco-formula-rule {
+  margin: 0 0 7px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  background: var(--bg-panel-3);
+  color: var(--text);
+  font-size: 11.5px;
+}
+
+.eco-formula-lines {
+  display: grid;
+  gap: 4px;
+}
+
+/* Operator, label (with the arithmetic under it), amount: the amounts
+   line up on the right however the labels wrap. */
+.eco-formula-line {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr) auto;
+  column-gap: 8px;
+  align-items: baseline;
+}
+
+.eco-formula-op {
+  color: var(--text-faint);
+  font-weight: 700;
+  text-align: center;
+}
+
+.eco-formula-label small {
+  display: block;
+  color: var(--text-faint);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.eco-formula-value {
+  color: var(--text);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.eco-formula-result {
+  margin-top: 2px;
+  padding-top: 5px;
+  border-top: 1px solid var(--bg-panel-3);
+}
+
+.eco-formula-result .eco-formula-label {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.eco-formula-note {
+  margin: 7px 0 0;
+  color: var(--text-subtle);
+  font-size: 11px;
+}
+
 .economics-optimum-note {
   margin: 10px 0 0;
 }
@@ -4578,7 +4708,8 @@ button.economics-optimum-row.open {
 /* The «i» bubbles open on hover only. iOS Safari hovers a tapped element
    only when it looks clickable, hence the pointer cursor. */
 @media (pointer: coarse) {
-  .economics-info {
+  .economics-info,
+  .eco-formula-trigger {
     width: 18px;
     height: 18px;
     cursor: pointer;

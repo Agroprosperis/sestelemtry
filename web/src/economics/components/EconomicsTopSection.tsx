@@ -2,9 +2,11 @@ import type { ReactNode } from 'react'
 import type { EconomicsMonthlyTotals } from '../../api'
 import { PV_FORECAST_WHOLE_ELEVATOR_NOTE, pvPlanCaption } from '../../dashboard/transforms/pvForecast'
 import { useMoney } from '../currency'
+import { explain, type Formula } from '../formula'
 import { formatDuration, fuelMethodLabel, hasRollupGen, rollupOffgridMinutes } from '../generatorText'
 import { formatMwh, formatPercent } from '../monthly/format'
 import { PERIOD_WORDS, reserveSplit, uahShort, type PeriodScope } from '../monthly/rollup'
+import { FormulaTip } from './FormulaTip'
 import { KpiIcon as Icon } from './kpiIcons'
 import { KPI_ICONS as ICONS } from './kpiIconPaths'
 
@@ -77,16 +79,9 @@ function pvSelfShare(t: EconomicsMonthlyTotals): number | null {
 
 // --- Small building blocks ------------------------------------------------
 
-// InfoDot is the same "i" hover bubble the rollup sections use
-// (`.economics-info` + data-tip). Local copy to avoid importing a
-// component from the monthly view module (circular import). Exported
-// for the day-view cards.
-export function InfoDot({ tip }: { tip: string }) {
-  return (
-    <span className="economics-info" data-tip={tip} role="img" aria-label={tip}>
-      i
-    </span>
-  )
+// InfoDot is a plain «i»: a figure's explanation without a formula.
+export function InfoDot({ tip, label }: { tip: string; label?: string }) {
+  return <FormulaTip label={label} formula={{ text: tip }} />
 }
 
 type DeltaPolarity = 'up-good' | 'down-good' | 'neutral'
@@ -132,6 +127,7 @@ export function Card({
   icon,
   label,
   tip,
+  formula,
   value,
   unit,
   badge,
@@ -142,6 +138,9 @@ export function Card({
   icon: string
   label: string
   tip?: string
+  // formula is how the value is computed, with the period's numbers;
+  // the «i» opens it, tip standing in for its text.
+  formula?: Formula
   value: string
   // unit renders smaller after the value, so a long unit such as
   // «грн/кВт·год» doesn't overflow a narrow tile.
@@ -152,6 +151,7 @@ export function Card({
   // day-view effect cards.
   hero?: boolean
 }) {
+  const explained = explain(tip, formula)
   return (
     <div className={`eco-card eco-tone-${tone}${hero ? ' eco-card-hero' : ''}`}>
       <div className="eco-card-head">
@@ -160,7 +160,7 @@ export function Card({
         </span>
         <span className="eco-card-label">
           {label}
-          {tip ? <InfoDot tip={tip} /> : null}
+          {explained ? <FormulaTip label={label} formula={explained} /> : null}
         </span>
       </div>
       <div className="eco-card-value">

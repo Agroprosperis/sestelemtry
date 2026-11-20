@@ -13,6 +13,8 @@ import { UzeCyclesAccordion } from './UzeCycleChart'
 import { EconomicsTopSection, type EconomicsPvPlan } from '../components/EconomicsTopSection'
 import { EconomicsOverviewRow } from '../components/EconomicsOverviewRow'
 import { ExportButton } from '../components/ExportButton'
+import { FormulaTip } from '../components/FormulaTip'
+import { explain, type Formula } from '../formula'
 import { ExplainButton } from '../../chat/ExplainButton'
 import { formatOrganizationLabel } from '../../dashboard/config'
 import { useMoney, type Money } from '../currency'
@@ -189,12 +191,8 @@ function MiniCard({ label, value, note, good }: { label: string; value: string; 
 // same essNet objective as the realised figure. Reserve = optimum − fact
 // is the under-used opportunity (not a loss).
 
-export function OptimumInfo({ tip }: { tip: string }) {
-  return (
-    <span className="economics-info" data-tip={tip} role="img" aria-label={tip}>
-      i
-    </span>
-  )
+export function OptimumInfo({ tip, label, formula }: { tip: string; label?: string; formula?: Formula }) {
+  return <FormulaTip label={label} formula={explain(tip, formula) ?? { text: tip }} />
 }
 
 // --- Shared AI panel blocks ---

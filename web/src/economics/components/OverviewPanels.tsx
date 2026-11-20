@@ -1,5 +1,7 @@
 import { Cell, Pie, PieChart, ResponsiveContainer } from 'recharts'
-import { InfoDot, type CardTone } from './EconomicsTopSection'
+import { explain, type Formula } from '../formula'
+import { type CardTone } from './EconomicsTopSection'
+import { FormulaTip } from './FormulaTip'
 import { KpiIcon } from './kpiIcons'
 
 // CoverageSegment is one slice of the «Структура покриття споживання»
@@ -87,6 +89,9 @@ export type UzeWorkCard = {
   tone: CardTone
   icon: string
   tip?: string
+  // formula is how the value is computed; the «i» opens it, tip
+  // standing in for its text.
+  formula?: Formula
 }
 
 export function UzeWorkPanel({ cards }: { cards: UzeWorkCard[] }) {
@@ -94,24 +99,27 @@ export function UzeWorkPanel({ cards }: { cards: UzeWorkCard[] }) {
     <section className="economics-card eco-overview-panel eco-overview-uze" aria-label="Робота УЗЕ">
       <h3 className="eco-overview-title">Робота УЗЕ</h3>
       <div className="eco-uze-grid">
-        {cards.map((c) => (
-          <div className={`eco-uze-card eco-tone-${c.tone}`} key={c.label}>
-            <span className="eco-uze-icon">
-              <KpiIcon d={c.icon} />
-            </span>
-            <div className="eco-uze-body">
-              <span className="eco-uze-label">
-                {c.label}
-                {c.tip ? <InfoDot tip={c.tip} /> : null}
+        {cards.map((c) => {
+          const explained = explain(c.tip, c.formula)
+          return (
+            <div className={`eco-uze-card eco-tone-${c.tone}`} key={c.label}>
+              <span className="eco-uze-icon">
+                <KpiIcon d={c.icon} />
               </span>
-              <span className="eco-uze-value">
-                <b>{c.value}</b>
-                {c.unit ? <small>{c.unit}</small> : null}
-              </span>
-              <span className="eco-uze-sub">{c.sub}</span>
+              <div className="eco-uze-body">
+                <span className="eco-uze-label">
+                  {c.label}
+                  {explained ? <FormulaTip label={c.label} formula={explained} /> : null}
+                </span>
+                <span className="eco-uze-value">
+                  <b>{c.value}</b>
+                  {c.unit ? <small>{c.unit}</small> : null}
+                </span>
+                <span className="eco-uze-sub">{c.sub}</span>
+              </div>
             </div>
-          </div>
-        ))}
+          )
+        })}
       </div>
     </section>
   )
