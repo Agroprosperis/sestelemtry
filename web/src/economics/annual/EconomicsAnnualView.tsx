@@ -20,7 +20,10 @@ import {
 import { EconomicsTopSection, type EconomicsPvPlan } from '../components/EconomicsTopSection'
 import { EconomicsOverviewRow } from '../components/EconomicsOverviewRow'
 import { ExportButton } from '../components/ExportButton'
+import { FormulaTip } from '../components/FormulaTip'
 import { useMoney, type Money } from '../currency'
+import { heatmapFormula, periodColumnFormulas } from '../monthly/financeFormulas'
+import { essMonthsFormula, panelFormulas, quarterFormula, scheduleMonthsFormula } from '../monthly/reserveFormulas'
 import {
   buildAiPanel,
   HEATMAP_METRIC_TIP,
@@ -97,7 +100,7 @@ export function EconomicsAnnualView({ data, organizationID, onSelectMonth, prior
           essDischargeKwh: m.totals.ess_discharged_kwh,
         }))}
       />
-      <QuarterCards quarters={data.quarters} />
+      <QuarterCards quarters={data.quarters} months={data.months} />
       <div className="economics-month-grid2">
         <MonthlyFinance totals={t} scope={scope} />
         <MonthlyBalance totals={t} scope={scope} />
@@ -129,22 +132,32 @@ export function EconomicsAnnualView({ data, organizationID, onSelectMonth, prior
 const Q_ROMAN = ['I', 'II', 'III', 'IV']
 const Q_COLORS = ['#2f6fed', '#12b76a', '#f59e0b', '#7c3aed']
 
-function QuarterCards({ quarters }: { quarters: EconomicsAnnualQuarter[] }) {
+function QuarterCards({ quarters, months }: { quarters: EconomicsAnnualQuarter[]; months: EconomicsAnnualMonthRollup[] }) {
   const money = useMoney()
   return (
     <section className="economics-quarter-grid" aria-label="Квартальні підсумки">
       {quarters.map((q) => {
         const i = (q.quarter - 1) % 4
+        const label = `${Q_ROMAN[i]} кв. ${q.year}`
         return (
           <article
             key={`${q.year}-${q.quarter}`}
             className="economics-card economics-quarter-card"
             style={{ borderTop: `3px solid ${Q_COLORS[i]}` }}
           >
-            <div className="economics-quarter-label">{Q_ROMAN[i]} кв. {q.year}</div>
+            <div className="economics-quarter-label">
+              {label}
+              <FormulaTip label={`EBITDA, ${label}`} formula={quarterFormula('ebitda', q, months, money)} />
+            </div>
             <div className={`economics-quarter-value ${signClass(q.ebitda_uah)}`}>{money.format(q.ebitda_uah)}</div>
-            <div className="economics-quarter-note">EBITDA · {formatMwh(q.pv_kwh)} СЕС</div>
-            <div className="economics-quarter-sub">ефект {money.format(q.effect_uah)}</div>
+            <div className="economics-quarter-note">
+              EBITDA · {formatMwh(q.pv_kwh)} СЕС
+              <FormulaTip label={`Генерація СЕС, ${label}`} formula={quarterFormula('pv', q, months, money)} />
+            </div>
+            <div className="economics-quarter-sub">
+              ефект {money.format(q.effect_uah)}
+              <FormulaTip label={`Економічний ефект, ${label}`} formula={quarterFormula('effect', q, months, money)} />
+            </div>
           </article>
         )
       })}
@@ -165,7 +178,15 @@ export function MonthHourHeatmap({ margins }: { margins: EconomicsAnnualMonthMar
       <div className="economics-month-section-head">
         <h3 className="economics-month-section-title">
           Heatmap: маржинальність УЗЕ (місяць × година)
-          <OptimumInfo tip={HEATMAP_TIP} />
+          <OptimumInfo
+            tip={HEATMAP_TIP}
+            label="Маржинальність УЗЕ"
+            formula={heatmapFormula(
+              margins.map((r) => r.hours),
+              money,
+              'year',
+            )}
+          />
         </h3>
         <span className="economics-month-muted">{money.priceUnit} розряду</span>
       </div>
@@ -277,6 +298,17 @@ function AnnualAiAnalysis({
   )
 
   const [plan, warn] = panel.cards
+  const reserves = panelFormulas(totals, money)
+  const scheduleTip = scheduleMonthsFormula(scheduleMonths, panel.reserves.elevator, money)
+  const essTips = essMonthsFormula(
+    bessMonths.map((m) => ({
+      month: m.month,
+      optimum: m.totals.ess_optimum_uah,
+      fact: m.totals.ess_fact_uah,
+      reserve: m.totals.ess_reserve_uah,
+    })),
+    money,
+  )
 
   return (
     <section className="economics-card economics-month-section economics-ai" aria-label="AI-аналіз року">
@@ -291,7 +323,7 @@ function AnnualAiAnalysis({
         <span className="economics-ai-badge">річний управлінський висновок</span>
       </div>
 
-      <AiLead panel={panel} />
+      <AiLead panel={panel} formulas={reserves} />
 
       <EssDataQualityNote dq={totals.ess_data_quality} />
 
@@ -301,13 +333,19 @@ function AnnualAiAnalysis({
             <summary>
               <span className="economics-ai-status">{plan.status}</span>
               <span className="economics-ai-card-title">{plan.title}</span>
-              <span className="economics-ai-impact">{plan.impact}</span>
+              <span className="economics-ai-impact">
+                {plan.impact}
+                <FormulaTip label={plan.title} formula={reserves.elevator} />
+              </span>
             </summary>
             <div className="economics-ai-acc-body">
               <p className="economics-ai-action">{plan.action}</p>
               {scheduleMonths.length > 0 ? (
                 <>
-                  <div className="economics-ai-top-months-head">Резерв переносу робіт по місяцях</div>
+                  <div className="economics-ai-top-months-head">
+                    Резерв переносу робіт по місяцях
+                    <FormulaTip label="Резерв переносу робіт по місяцях" formula={scheduleTip} />
+                  </div>
                   <div className="economics-ai-days">
                     {scheduleMonths.map((x) => (
                       <span key={x.month}>
@@ -326,7 +364,10 @@ function AnnualAiAnalysis({
             <summary>
               <span className="economics-ai-status">{warn.status}</span>
               <span className="economics-ai-card-title">{warn.title}</span>
-              <span className="economics-ai-impact">{warn.impact}</span>
+              <span className="economics-ai-impact">
+                {warn.impact}
+                <FormulaTip label={warn.title} formula={reserves.ess} />
+              </span>
             </summary>
             <div className="economics-ai-acc-body">
               <p className="economics-ai-action">{warn.action}</p>
@@ -335,7 +376,11 @@ function AnnualAiAnalysis({
                   <div className="economics-ai-reserve-head">
                     <span className="economics-ai-label amber">
                       Резерв таймінгу УЗЕ по місяцях
-                      <OptimumInfo tip="Оптимум − Факт за місяць. Це не збиток, а оцінка недовикористаної можливості УЗЕ (модельний максимум у межах фактичних потужності, SOC, ККД та зносу)." />
+                      <OptimumInfo
+                        tip="Оптимум − Факт за місяць. Це не збиток, а оцінка недовикористаної можливості УЗЕ (модельний максимум у межах фактичних потужності, SOC, ККД та зносу)."
+                        label="Резерв таймінгу УЗЕ по місяцях"
+                        formula={essTips.reserve}
+                      />
                     </span>
                     <div className="economics-optimum-legend">
                       <span><i style={{ background: '#7c3aed' }} />фактичний ефект</span>
@@ -346,7 +391,10 @@ function AnnualAiAnalysis({
                   <div className="economics-optimum-list">
                     <div className="economics-optimum-row head">
                       <span>Місяць</span>
-                      <span>захоплення</span>
+                      <span>
+                        захоплення
+                        <FormulaTip label="Захоплення оптимуму" formula={essTips.capture} />
+                      </span>
                       <span>опт.</span>
                       <span>факт</span>
                       <span>резерв</span>
@@ -439,6 +487,7 @@ function AnnualMonthlyTable({
   const money = useMoney()
   const pvSelf = totals.pv_to_load_kwh + totals.pv_to_ess_kwh
   const selfShare = totals.pv_kwh > 0 ? pvSelf / totals.pv_kwh : 0
+  const columnFormulas = periodColumnFormulas(totals, money, 'year')
   return (
     <section id="economics-detail-table" className="economics-table-wrap" aria-label="Помісячна деталізація року">
       <div className="economics-month-section-head">
@@ -467,6 +516,7 @@ function AnnualMonthlyTable({
               {columns(money).map((c) => (
                 <th key={c.label}>
                   {c.label}
+                  {columnFormulas[c.label] ? <FormulaTip label={c.label} formula={columnFormulas[c.label]} /> : null}
                   {c.unit ? <small>{c.unit}</small> : null}
                 </th>
               ))}
