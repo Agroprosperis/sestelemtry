@@ -145,8 +145,8 @@ function monthCoverage(m: EconomicsAnnualMonthRollup): number {
 // buildSeasonalFactors blends the default insolation profile with the
 // observed EBITDA of each calendar month (weighted by how many times we
 // saw that month, capped at 3), then renormalizes the mean back to 1.
-// Observed months may push a factor negative (e.g. opex-heavy winters);
-// that is kept — the forecast should dip where the facts dip.
+// Observed months may push a factor negative (e.g. winters where battery
+// charging from the grid outweighs the revenue); that is kept — the forecast should dip where the facts dip.
 function buildSeasonalFactors(monthsWithData: EconomicsAnnualMonthRollup[]): number[] {
   const sum = Array<number>(12).fill(0)
   const cov = Array<number>(12).fill(0)
@@ -302,6 +302,12 @@ export type PaybackModel = {
   // months, so a summer-only window does not overstate the year.
   annualEbitda: number
   monthlyPace: number
+  // seasonalWeight is the denominator of monthlyPace: Σ seasonal factor ×
+  // data coverage over every month that produced allTimeEbitda.
+  seasonalWeight: number
+  // capexWeighted is the numerator of capexAvg: Σ CAPEX in effect × data
+  // coverage over the same months.
+  capexWeighted: number
   // seasonalFactors are the Jan..Dec multipliers (mean 1) applied to
   // monthlyPace when projecting individual future months.
   seasonalFactors: number[]
@@ -563,6 +569,8 @@ export function buildPaybackModel({
     effectiveMonths,
     annualEbitda,
     monthlyPace,
+    seasonalWeight,
+    capexWeighted,
     seasonalFactors,
     capexNow,
     capexAvg,

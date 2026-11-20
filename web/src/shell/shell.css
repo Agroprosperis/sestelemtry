@@ -326,3 +326,105 @@
 .ctl-topbar-menu-list button:hover {
   background: var(--bg-muted);
 }
+
+/* Step 3: the bar no longer fits one line. The mode switch, and the
+   status chips of the service pages beside it, take a second row of
+   their own, so chips arriving with the first poll add no row. These
+   steps close the file: the base rules above would override them. */
+@container (max-width: 860px) {
+  .ctl-topbar {
+    flex-wrap: wrap;
+    row-gap: 4px;
+  }
+
+  /* The break between the rows: ordered after the first row's items,
+     as wide as the bar. */
+  .ctl-topbar::before {
+    content: '';
+    order: 1;
+    flex-basis: 100%;
+  }
+
+  .ctl-topbar-end {
+    display: contents;
+  }
+
+  /* Fills the first row, so its buttons stay at the right edge. */
+  .ctl-topbar-object {
+    flex-grow: 1;
+  }
+
+  .ctl-topbar-mode,
+  .ctl-topbar-chips {
+    order: 2;
+  }
+
+  .ctl-topbar-chips {
+    margin-left: auto;
+  }
+}
+
+/* Step 4: a phone. The object picker shares the first row with icon
+   buttons, the mode switch spans the second, the chips wrap on a third;
+   the theme switch moves into the user menu. */
+@container (max-width: 600px) {
+  .ctl-topbar {
+    padding: 8px;
+    column-gap: 6px;
+  }
+
+  .ctl-topbar-brand,
+  .ctl-topbar-end > .theme-toggle,
+  .ctl-topbar-menu-label,
+  .ctl-topbar-menu-caret {
+    display: none;
+  }
+
+  .ctl-topbar-object {
+    flex-basis: 0;
+    min-width: 0;
+  }
+
+  .ctl-topbar-object select {
+    max-width: none;
+  }
+
+  .ctl-topbar-mode,
+  .ctl-topbar-chips {
+    flex-basis: 100%;
+  }
+
+  .ctl-mode-switch {
+    display: flex;
+    width: 100%;
+  }
+
+  .ctl-mode-switch button {
+    flex: 1 1 0;
+    min-height: 36px;
+    padding: 7px 8px;
+  }
+
+  .ctl-topbar-chips {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+
+  .ctl-topbar-menu-btn {
+    justify-content: center;
+    min-width: 36px;
+    min-height: 36px;
+  }
+
+  .ctl-topbar-menu-list {
+    max-width: calc(100vw - 24px);
+  }
+}
+
+/* Outside the bar too — the strips under it, a site's head — the chips
+   wrap on a phone. */
+@media (max-width: 640px) {
+  .ctl-topbar-chips {
+    flex-wrap: wrap;
+  }
+}

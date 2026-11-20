@@ -400,6 +400,14 @@
 }
 
 @media (max-width: 640px) {
+  .import-page {
+    padding: 16px 14px 48px;
+  }
+
+  .import-card {
+    padding: 16px;
+  }
+
   .import-controls {
     grid-template-columns: 1fr;
   }

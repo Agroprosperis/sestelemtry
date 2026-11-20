@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { fetchEconomicsDaily, type EconomicsHourApi } from '../api'
 import type { HourEconomicsRow, HourGen } from './compute'
 import type { Currency } from './currency'
+import { tariffsFromApi } from './orgTariffsClient'
 import type { Tariffs } from './tariffs'
 
 // localKyivTz is the canonical timezone for the economics page: the
@@ -38,6 +39,9 @@ export type EconomicsData = {
   fxRate: number | null
   fxCarried: boolean
   fxProvisional: boolean
+  // tariffs is the tariff version in force that day (in UAH), which its
+  // prices were built from; null for a group or before the day loads.
+  tariffs: Tariffs | null
 }
 
 type Input = {
@@ -72,6 +76,7 @@ const EMPTY_DAY: DayValues = {
   fxRate: null,
   fxCarried: false,
   fxProvisional: false,
+  tariffs: null,
 }
 
 export function useEconomicsData(input: Input): EconomicsData {
@@ -109,6 +114,7 @@ export function useEconomicsData(input: Input): EconomicsData {
             fxRate: resp.fx_rate && resp.fx_rate > 0 ? resp.fx_rate : null,
             fxCarried: resp.fx_carried ?? false,
             fxProvisional: resp.fx_provisional ?? false,
+            tariffs: resp.tariff ? tariffsFromApi(resp.tariff) : null,
           },
           error: null,
         })

@@ -563,3 +563,13 @@
   margin: 0;
   padding-left: 1.1rem;
 }
+
+@media (max-width: 640px) {
+  .station-page {
+    padding: 16px 14px 48px;
+  }
+
+  .station-grid {
+    grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr));
+  }
+}

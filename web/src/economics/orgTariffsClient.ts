@@ -12,7 +12,7 @@ import type { Tariffs } from './tariffs'
 // only the economics page reads/writes tariffs, and the snake↔camel
 // adapter has no value to other features. Mirrors the
 // dashboard/transforms/weatherAdapter.ts split.
-type OrgTariffsApi = {
+export type OrgTariffsApi = {
   distribution_uah_per_kwh: number
   transmission_uah_per_kwh: number
   supplier_margin_uah_per_kwh: number
@@ -66,7 +66,7 @@ function tariffsToApi(t: Tariffs): OrgTariffsApi {
   }
 }
 
-function tariffsFromApi(api: OrgTariffsApi): Tariffs {
+export function tariffsFromApi(api: OrgTariffsApi): Tariffs {
   return {
     distributionUahPerKwh: api.distribution_uah_per_kwh,
     transmissionUahPerKwh: api.transmission_uah_per_kwh,

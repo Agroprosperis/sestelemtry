@@ -1,42 +1,25 @@
 import { Line, LineChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { offgridMinutes, revenuePvSelfOf, type DailyTotals, type HourEconomicsRow } from '../compute'
+import { offgridMinutes, type DailyTotals, type HourEconomicsRow } from '../compute'
 import { useMoney } from '../currency'
 import { formatDuration, fuelMethodLabel } from '../generatorText'
 import type { Tariffs } from '../tariffs'
 import { useChartChrome } from '../../theme/useChartChrome'
 import { PV_FORECAST_WHOLE_ELEVATOR_NOTE, pvPlanCaption } from '../../dashboard/transforms/pvForecast'
+import { cycles, dayFigures, dayFormulas, kw, kwh, kwhNumber, pct } from './dayFormulas'
 import { Card } from './EconomicsTopSection'
 import type { EconomicsPvPlan } from './EconomicsTopSection'
+import { FormulaTip } from './FormulaTip'
 import { KPI_ICONS as ICONS } from './kpiIconPaths'
 import { CoverageDonutPanel, UzeWorkPanel, type CoverageSegment, type UzeWorkCard } from './OverviewPanels'
 
 type Props = {
   totals: DailyTotals
   rows: Array<HourEconomicsRow | null>
+  // tariffs is the tariff version the day was priced with (the form's
+  // when the day did not say).
   tariffs: Tariffs
   // pvPlan — денний план генерації з pv-plan-summary; null ховає рядки плану.
   pvPlan?: EconomicsPvPlan | null
-}
-
-// --- Formatting (day scale: кВт·год with one decimal; money via useMoney) ---
-
-const kwhFmt = new Intl.NumberFormat('uk-UA', { minimumFractionDigits: 1, maximumFractionDigits: 1 })
-const pctFmt = new Intl.NumberFormat('uk-UA', { style: 'percent', minimumFractionDigits: 1, maximumFractionDigits: 1 })
-const cyclesFmt = new Intl.NumberFormat('uk-UA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-
-function kwh(v: number): string {
-  if (!Number.isFinite(v)) return '—'
-  return `${kwhFmt.format(v)} кВт·год`
-}
-
-function kw(v: number): string {
-  if (!Number.isFinite(v)) return '—'
-  return `${kwhFmt.format(v)} кВт`
-}
-
-function pct(v: number): string {
-  if (!Number.isFinite(v)) return '—'
-  return pctFmt.format(v)
 }
 
 // FactLine is one "label: value" row of a card's financial breakdown;
@@ -84,6 +67,7 @@ function HourTooltip({ active, payload, label }: HourTooltipProps) {
 // a strip of financial cards with their per-component breakdowns, the
 // day energy balance strip, and the coverage donut / hourly effect
 // chart / «Робота УЗЕ» row. The detailed hourly table stays below.
+// Every figure's «i» opens how it is computed, with the day's numbers.
 export function EconomicsDayTop({ totals: t, rows, tariffs, pvPlan = null }: Props) {
   const chrome = useChartChrome()
   const money = useMoney()
@@ -93,73 +77,8 @@ export function EconomicsDayTop({ totals: t, rows, tariffs, pvPlan = null }: Pro
   // forty hryvnias.
   const point = (v: number) => (money.currency === 'UAH' ? Math.round(v) : Math.round(v * 100) / 100)
 
-  // Tariff components per kWh, VAT'd the same way hourEconomics builds
-  // the import price stack, so every breakdown line below sums exactly
-  // to the headline it belongs to. The tariffs are UAH; the day's money
-  // is in its own rate's currency.
-  const vat = tariffs.includeVat ? 1 + tariffs.vatRate : 1
-  const transPerKwh = money.fromUah(tariffs.transmissionUahPerKwh * vat)
-  const distPerKwh = money.fromUah(tariffs.distributionUahPerKwh * vat)
-  const netPerKwh = transPerKwh + distPerKwh
-
-  // Базова вартість: load × full import stack. The network legs are
-  // flat per-kWh tariffs, so the market/margin part is the remainder.
-  // The load without the grid is priced at the generator instead
-  // (baselineOffgrid, B_off), so it leaves the grid lines.
-  const gridLoad = t.load - t.loadOffgrid
-  const baseTrans = gridLoad * transPerKwh
-  const baseDist = gridLoad * distPerKwh
-  const baseEnergy = t.baselineCost - t.baselineOffgrid - baseTrans - baseDist
-
-  // Фактична вартість: import − export revenue + УЗЕ wear + the fuel
-  // (the exact actualCost identity from hourEconomics).
-  const importCost = t.avgImportPriceUahPerKwh * t.gridImport
-  const importNetwork = t.gridImport * netPerKwh
-  const importEnergy = importCost - importNetwork
-  const exportRevenue = t.revenuePvExport + t.revenueEssExport
-  const wear = t.essDischarged * money.fromUah(tariffs.degradationUahPerKwh)
-  const genAccounted = rows.some((r) => r?.gen?.accounted)
-  const hasGen = t.genKwh > 0 || offgridMinutes(t.supplyMinutes) > 0
-  const fuelMethod = rows.find((r) => r?.gen?.accounted)?.gen?.fuelMethod
-
-  // Економічний ефект = базова − фактична, розкладена на ті самі
-  // складові: зекономлена енергія, зекономлена мережа, дохід від
-  // експорту, мінус знос, і без мережі — дизель мінус пальне. Суми
-  // сходяться алгебраїчно.
-  const effEnergy = baseEnergy - importEnergy
-  const effNetwork = (gridLoad - t.gridImport) * netPerKwh
-  const effOffgrid = t.baselineOffgrid - t.genFuelCost
-
-  // Ефекти СЕС і УЗЕ.
-  const pvEffect = t.revenuePvSelf + t.revenuePvExport
-  const essChargeAndWear = t.essNet - t.revenueEssSelf - t.revenueEssExport
-
-  // Енергетичний баланс.
-  // The rest of today comes back as all-zero rows that already carry the
-  // day's РДН price, so the average counts only priced hours with any
-  // energy flow.
-  const loadHours = rows.filter(
-    (r) =>
-      r !== null &&
-      r.rdnUahPerKwh !== null &&
-      (r.economics.load > 0 ||
-        r.flow.gridImport > 0 ||
-        r.flow.gridExport > 0 ||
-        r.flow.pv > 0 ||
-        r.flow.essCharged > 0 ||
-        r.flow.essDischarged > 0),
-  ).length
-  const peakLoadKw = rows.reduce((m, r) => (r ? Math.max(m, r.economics.load) : m), 0)
-  const avgLoadKw = t.load / Math.max(1, loadHours)
-  const importShare = t.load > 0 ? t.gridImport / t.load : NaN
-  const exportShare = t.pv > 0 ? t.gridExport / t.pv : NaN
-  const ownEnergy = t.pvToLoad + t.essToLoad
-  const selfSuff = t.load > 0 ? ownEnergy / t.load : NaN
-  const importDependence = t.load > 0 ? t.gridToLoad / t.load : NaN
-  const pvSelfConsumed = t.pvToLoad + t.pvToEss
-  const pvSelfShare = t.pv > 0 ? pvSelfConsumed / t.pv : NaN
-  const planKwh = pvPlan && pvPlan.plannedKwh > 0 ? pvPlan.plannedKwh : NaN
-  const planDone = Number.isFinite(planKwh) ? t.pv / planKwh : NaN
+  const f = dayFigures(t, rows, tariffs, money, pvPlan)
+  const fx = dayFormulas(t, f, rows, tariffs, money)
 
   // Донат покриття споживання.
   const coverage: CoverageSegment[] = [
@@ -171,57 +90,57 @@ export function EconomicsDayTop({ totals: t, rows, tariffs, pvPlan = null }: Pro
     coverage.push({ key: 'gen', name: 'Генератор — навантаження', kwh: t.genToLoad, color: COLOR_GEN })
   }
 
-  // Погодинний економічний ефект: СЕС-нога (власне споживання +
-  // експорт за цінами години), УЗЕ-нога (essNet) і сукупний effect.
+  // Погодинний економічний ефект: СЕС-нога (effect − essNet, як на
+  // картці), УЗЕ-нога (essNet) і сукупний effect.
   const hourly = rows.map((r, i) => {
     const label = String(i).padStart(2, '0')
     if (!r || r.rdnUahPerKwh === null) {
       return { label, 'Ефект СЕС': null, 'Ефект УЗЕ': null, 'Сукупний ефект': null }
     }
-    const pvEff = revenuePvSelfOf(r) + r.economics.pvToGrid * r.economics.exportPriceUahPerKwh
     return {
       label,
-      'Ефект СЕС': point(pvEff),
+      'Ефект СЕС': point(r.economics.effect - r.economics.essNet),
       'Ефект УЗЕ': point(r.economics.essNet),
       'Сукупний ефект': point(r.economics.effect),
     }
   })
 
   // Робота УЗЕ.
-  const cycles = tariffs.essCapacityKwh > 0 ? t.essDischarged / tariffs.essCapacityKwh : NaN
-  const dischargeMargin = t.essDischarged > 0 ? t.essNet / t.essDischarged : NaN
   const uzeCards: UzeWorkCard[] = [
     {
       label: 'Коефіцієнт циклів',
-      value: Number.isFinite(cycles) ? cyclesFmt.format(cycles) : '—',
-      sub: `${kwhFmt.format(t.essDischarged)} / ${tariffs.essCapacityKwh} кВт·год`,
+      value: cycles(f.cycleRatio),
+      sub: `${kwhNumber(t.essDischarged)} / ${tariffs.essCapacityKwh} кВт·год`,
       tone: 'teal',
       icon: ICONS.cycle,
+      formula: fx.cycles,
     },
     {
       label: 'Розряд УЗЕ',
-      value: kwhFmt.format(t.essDischarged),
+      value: kwhNumber(t.essDischarged),
       unit: 'кВт·год',
-      sub: `навантаження ${kwhFmt.format(t.essToLoad)} · мережа ${kwhFmt.format(t.essToGrid)}`,
+      sub: `навантаження ${kwhNumber(t.essToLoad)} · мережа ${kwhNumber(t.essToGrid)}`,
       tone: 'orange',
       icon: ICONS.zap,
+      formula: fx.discharge,
     },
     {
       label: 'Заряд УЗЕ',
-      value: kwhFmt.format(t.essCharged),
+      value: kwhNumber(t.essCharged),
       unit: 'кВт·год',
-      sub: `СЕС: ${kwhFmt.format(t.pvToEss)} | Мережа: ${kwhFmt.format(t.gridToEss)}`,
+      sub: `СЕС: ${kwhNumber(t.pvToEss)} | Мережа: ${kwhNumber(t.gridToEss)}`,
       tone: 'green',
       icon: ICONS.battery,
+      formula: fx.charge,
     },
     {
       label: 'Сер. маржа розряду',
-      value: price(dischargeMargin),
+      value: price(f.dischargeMargin),
       unit: money.priceUnit,
-      sub: `${uah(t.essNet)} / ${kwhFmt.format(t.essDischarged)} кВт·год`,
+      sub: `${uah(t.essNet)} / ${kwhNumber(t.essDischarged)} кВт·год`,
       tone: 'sky',
       icon: ICONS.chart,
-      tip: 'Чистий ефект УЗЕ, поділений на відданий розряд: скільки заробила кожна віддана кВт·год.',
+      formula: fx.margin,
     },
   ]
 
@@ -232,21 +151,21 @@ export function EconomicsDayTop({ totals: t, rows, tariffs, pvPlan = null }: Pro
           tone="steel"
           icon={ICONS.database}
           label="Базова вартість (без проєкту)"
-          tip="Усе споживання доби, оцінене повною ціною імпорту кожної години: скільки коштувала б енергія без СЕС та УЗЕ."
+          formula={fx.baseline}
           value={uah(t.baselineCost)}
         >
-          <FactLine label="Енергія з мережі" value={uah(baseEnergy)} />
-          <FactLine label="Передача" value={uah(baseTrans)} />
-          <FactLine label="Розподіл" value={uah(baseDist)} />
-          {genAccounted && <FactLine label="Без мережі — генератором" value={uah(t.baselineOffgrid)} />}
+          <FactLine label="Енергія з мережі" value={uah(f.baseEnergy)} />
+          <FactLine label="Передача" value={uah(f.baseTrans)} />
+          <FactLine label="Розподіл" value={uah(f.baseDist)} />
+          {f.genAccounted && <FactLine label="Без мережі — генератором" value={uah(t.baselineOffgrid)} />}
         </Card>
 
-        <Card tone="teal" icon={ICONS.briefcase} label="Фактична вартість" value={uah(t.actualCost)}>
-          <FactLine label="Імпорт енергії" value={uah(importEnergy)} />
-          <FactLine label="Передача + розподіл" value={uah(importNetwork)} />
-          <FactLine label="Дохід від експорту" value={uah(-exportRevenue)} />
-          <FactLine label="Знос УЗЕ" value={uah(wear)} />
-          {genAccounted && <FactLine label="Пальне генератора" value={uah(t.genFuelCost)} />}
+        <Card tone="teal" icon={ICONS.briefcase} label="Фактична вартість" formula={fx.actual} value={uah(t.actualCost)}>
+          <FactLine label="Імпорт енергії" value={uah(f.importEnergy)} />
+          <FactLine label="Передача + розподіл" value={uah(f.importNetwork)} />
+          <FactLine label="Дохід від експорту" value={uah(-f.exportRevenue)} />
+          <FactLine label="Знос УЗЕ" value={uah(f.wear)} />
+          {f.genAccounted && <FactLine label="Пальне генератора" value={uah(t.genFuelCost)} />}
           <FactLine label="Разом" value={uah(t.actualCost)} total />
         </Card>
 
@@ -254,41 +173,30 @@ export function EconomicsDayTop({ totals: t, rows, tariffs, pvPlan = null }: Pro
           tone="green"
           icon={ICONS.trendUp}
           label="Економічний ефект за добу"
-          tip="Базова вартість мінус фактична: наскільки дешевше обійшлася доба завдяки СЕС та УЗЕ."
+          formula={fx.effect}
           value={uah(t.effect)}
           hero
         >
-          <FactLine label="Економія на імпорті" value={uah(effEnergy)} />
-          <FactLine label="Економія на мережах" value={uah(effNetwork)} />
-          <FactLine label="Дохід від експорту" value={uah(exportRevenue)} />
-          <FactLine label="Знос УЗЕ" value={uah(-wear)} />
-          {genAccounted && <FactLine label="Без мережі: зекономлене пальне" value={uah(effOffgrid)} />}
+          <FactLine label="Економія на імпорті" value={uah(f.effEnergy)} />
+          <FactLine label="Економія на мережах" value={uah(f.effNetwork)} />
+          <FactLine label="Дохід від експорту" value={uah(f.exportRevenue)} />
+          <FactLine label="Знос УЗЕ" value={uah(-f.wear)} />
+          {f.genAccounted && <FactLine label="Без мережі: зекономлене пальне" value={uah(f.effOffgrid)} />}
           <FactLine label="Разом" value={uah(t.effect)} total />
         </Card>
 
-        <Card
-          tone="amber"
-          icon={ICONS.sun}
-          label="Ефект СЕС"
-          tip="Внесок СЕС: власне споживання за ціною імпорту тієї ж години + експорт за ціною експорту."
-          value={uah(pvEffect)}
-          hero
-        >
+        <Card tone="amber" icon={ICONS.sun} label="Ефект СЕС" formula={fx.pvEffect} value={uah(f.pvEffect)} hero>
           <FactLine label="Власне споживання" value={uah(t.revenuePvSelf)} />
           <FactLine label="Експорт" value={uah(t.revenuePvExport)} />
+          {Math.abs(f.pvToEssValue) >= money.fromUah(0.5) && (
+            <FactLine label="Заряд УЗЕ від СЕС" value={uah(f.pvToEssValue)} />
+          )}
         </Card>
 
-        <Card
-          tone="violet"
-          icon={ICONS.battery}
-          label="Ефект УЗЕ"
-          tip="Чистий внесок батареї: розряд у споживання та мережу мінус вартість заряду (включно з втраченим експортом СЕС) і знос."
-          value={uah(t.essNet)}
-          hero
-        >
+        <Card tone="violet" icon={ICONS.battery} label="Ефект УЗЕ" formula={fx.essEffect} value={uah(t.essNet)} hero>
           <FactLine label="Зменшення імпорту" value={uah(t.revenueEssSelf)} />
-          <FactLine label="Арбітраж (експорт)" value={uah(t.revenueEssExport)} />
-          <FactLine label="Заряд і знос" value={uah(essChargeAndWear)} />
+          <FactLine label="Розряд у мережу" value={uah(t.revenueEssExport)} />
+          <FactLine label="Заряд і знос" value={uah(f.essChargeAndWear)} />
         </Card>
 
         <div className="eco-price-stack">
@@ -296,7 +204,7 @@ export function EconomicsDayTop({ totals: t, rows, tariffs, pvPlan = null }: Pro
             tone="sky"
             icon={ICONS.tag}
             label="Сер. ціна імпорту"
-            tip="Повна ціна імпорту (РДН + передача, розподіл, надбавка, ПДВ), зважена за обсягом імпорту кожної години доби."
+            formula={fx.importPrice}
             value={price(t.avgImportPriceUahPerKwh)}
             unit={money.priceUnit}
           />
@@ -304,7 +212,7 @@ export function EconomicsDayTop({ totals: t, rows, tariffs, pvPlan = null }: Pro
             tone="blue"
             icon={ICONS.tag}
             label="Сер. ціна експорту"
-            tip="Ціна експорту (РДН мінус знижка), зважена за обсягом експорту кожної години доби."
+            formula={fx.exportPrice}
             value={price(t.avgExportPriceUahPerKwh)}
             unit={money.priceUnit}
           />
@@ -312,70 +220,52 @@ export function EconomicsDayTop({ totals: t, rows, tariffs, pvPlan = null }: Pro
       </div>
 
       <div className="eco-kpi-grid eco-kpi-grid-6">
-        <Card tone="sky" icon={ICONS.home} label="Споживання об'єкта" value={kwh(t.load)}>
+        <Card tone="sky" icon={ICONS.home} label="Споживання об'єкта" formula={fx.load} value={kwh(t.load)}>
           <span>
-            Пік: {kw(peakLoadKw)} · Сер: {kw(avgLoadKw)}
+            Пік: {kw(f.peakLoadKw)} · Сер: {kw(f.avgLoadKw)}
           </span>
         </Card>
 
-        <Card tone="amber" icon={ICONS.sun} label="Генерація СЕС" value={kwh(t.pv)}>
-          {pvPlan && Number.isFinite(planKwh) ? (
+        <Card tone="amber" icon={ICONS.sun} label="Генерація СЕС" formula={fx.pv} value={kwh(t.pv)}>
+          {pvPlan && Number.isFinite(f.planKwh) ? (
             <>
               <span title={pvPlan.wholeElevator ? PV_FORECAST_WHOLE_ELEVATOR_NOTE : undefined}>
-                {pvPlanCaption(pvPlan.wholeElevator)}: {kwh(planKwh)}
+                {pvPlanCaption(pvPlan.wholeElevator)}: {kwh(f.planKwh)}
               </span>
-              <span>Виконання плану: {pct(planDone)}</span>
+              <span>Виконання плану: {pct(f.planDone)}</span>
             </>
           ) : (
             <span>план на день недоступний</span>
           )}
         </Card>
 
-        <Card tone="blue" icon={ICONS.tower} label="Імпорт з мережі" value={kwh(t.gridImport)}>
-          <span>{pct(importShare)} від споживання</span>
+        <Card tone="blue" icon={ICONS.tower} label="Імпорт з мережі" formula={fx.gridImport} value={kwh(t.gridImport)}>
+          <span>{pct(f.importShare)} від споживання</span>
         </Card>
 
-        <Card tone="orange" icon={ICONS.exportArrow} label="Експорт у мережу" value={kwh(t.gridExport)}>
-          <span>{pct(exportShare)} від генерації СЕС</span>
+        <Card tone="orange" icon={ICONS.exportArrow} label="Експорт у мережу" formula={fx.gridExport} value={kwh(t.gridExport)}>
+          <span>{pct(f.exportShare)} від генерації СЕС</span>
         </Card>
 
-        <Card
-          tone="teal"
-          icon={ICONS.clock}
-          label="Самозабезпечення"
-          tip="Частка споживання, покрита власними СЕС та УЗЕ замість імпорту."
-          value={pct(selfSuff)}
-        >
-          <span>Власна енергія: {kwh(ownEnergy)}</span>
-          <span>Імпортозалежність: {pct(importDependence)}</span>
+        <Card tone="teal" icon={ICONS.clock} label="Самозабезпечення" formula={fx.selfSuff} value={pct(f.selfSuff)}>
+          <span>Власна енергія: {kwh(f.ownEnergy)}</span>
+          <span>Імпортозалежність: {pct(f.importDependence)}</span>
         </Card>
 
-        <Card
-          tone="green"
-          icon={ICONS.cycle}
-          label="Самоспоживання СЕС"
-          tip="Частка виробітку СЕС, використана на об'єкті (споживання + заряд УЗЕ), а не експортована."
-          value={pct(pvSelfShare)}
-        >
+        <Card tone="green" icon={ICONS.cycle} label="Самоспоживання СЕС" formula={fx.pvSelf} value={pct(f.pvSelfShare)}>
           <span>
-            {kwhFmt.format(pvSelfConsumed)} з {kwh(t.pv)}
+            {kwhNumber(f.pvSelfConsumed)} з {kwh(t.pv)}
           </span>
         </Card>
       </div>
 
-      {hasGen && (
+      {f.hasGen && (
         <div className="eco-kpi-grid eco-kpi-grid-4" aria-label="Генератор за добу">
-          <Card
-            tone="orange"
-            icon={ICONS.zap}
-            label="Генератор"
-            tip="Енергія генератора за його лічильником (контролер Encombi)."
-            value={kwh(t.genKwh)}
-          >
+          <Card tone="orange" icon={ICONS.zap} label="Генератор" formula={fx.gen} value={kwh(t.genKwh)}>
             <span>У роботі: {formatDuration(t.supplyMinutes.generator)}</span>
-            {genAccounted && (
+            {f.genAccounted && (
               <span>
-                Навантаженню {kwhFmt.format(t.genToLoad)} · УЗЕ {kwhFmt.format(t.genToEss)} кВт·год
+                Навантаженню {kwhNumber(t.genToLoad)} · УЗЕ {kwhNumber(t.genToEss)} кВт·год
               </span>
             )}
           </Card>
@@ -383,12 +273,12 @@ export function EconomicsDayTop({ totals: t, rows, tariffs, pvPlan = null }: Pro
             tone="amber"
             icon={ICONS.tag}
             label="Пальне"
-            tip="Вартість пального генератора за тарифом доби: ціна літра × витрата × ПДВ."
-            value={genAccounted ? uah(t.genFuelCost) : '—'}
+            formula={fx.fuel}
+            value={f.genAccounted ? uah(t.genFuelCost) : '—'}
           >
-            {genAccounted ? (
+            {f.genAccounted ? (
               <span>
-                {kwhFmt.format(t.genFuelL)} л · {fuelMethodLabel(fuelMethod)}
+                {kwhNumber(t.genFuelL)} л · {fuelMethodLabel(f.fuelMethod)}
               </span>
             ) : (
               <span>вартість пального не задана</span>
@@ -398,33 +288,42 @@ export function EconomicsDayTop({ totals: t, rows, tariffs, pvPlan = null }: Pro
             tone="steel"
             icon={ICONS.clock}
             label="Без мережі"
+            formula={fx.offgrid}
             value={formatDuration(offgridMinutes(t.supplyMinutes))}
           >
             <span>
               Генератор {formatDuration(t.supplyMinutes.generator)} · острів {formatDuration(t.supplyMinutes.island)} ·
               без живлення {formatDuration(t.supplyMinutes.blackout)}
             </span>
-            {genAccounted && <span>Навантаження без мережі: {kwh(t.loadOffgrid)}</span>}
+            {f.genAccounted && <span>Навантаження без мережі: {kwh(t.loadOffgrid)}</span>}
           </Card>
           <Card
             tone="green"
             icon={ICONS.trendUp}
             label="Ефект годин без мережі"
-            tip="Ефект годин, коли об'єкт працював без мережі: скільки пального заощадили СЕС і УЗЕ проти роботи лише генератора, мінус пальне на заряд УЗЕ."
-            value={genAccounted ? uah(t.effectOffgrid) : '—'}
+            formula={fx.effectOffgrid}
+            value={f.genAccounted ? uah(t.effectOffgrid) : '—'}
           />
         </div>
       )}
 
       <div className="eco-overview">
-        <CoverageDonutPanel segments={coverage} unit="кВт·год" formatValue={(v) => kwhFmt.format(v)} />
+        <CoverageDonutPanel
+          segments={coverage}
+          unit="кВт·год"
+          formatValue={(v) => kwhNumber(v)}
+          formula={fx.coverage}
+        />
 
         <section
           className="economics-card eco-overview-panel eco-overview-chart"
           aria-label="Погодинний економічний ефект"
         >
           <div className="eco-overview-head">
-            <h3 className="eco-overview-title">Погодинний економічний ефект</h3>
+            <h3 className="eco-overview-title">
+              Погодинний економічний ефект
+              <FormulaTip label="Погодинний економічний ефект" formula={fx.hourly} />
+            </h3>
             <span className="economics-month-muted">{money.unit}/год</span>
           </div>
           <div className="eco-profile-chart">

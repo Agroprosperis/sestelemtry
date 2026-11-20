@@ -15,6 +15,8 @@ import {
 import type { EconomicsAnnualResponse } from '../../api'
 import { useChartChrome } from '../../theme/useChartChrome'
 import { useMoney, type Money } from '../currency'
+import { FormulaTip } from '../components/FormulaTip'
+import type { Formula } from '../formula'
 import { OptimumInfo } from '../monthly/EconomicsMonthlyView'
 import {
   formatMonthTitle,
@@ -33,6 +35,7 @@ import {
   paybackAxis,
   paybackLabel,
 } from '../payback'
+import { avgMonthlyFact as avgMonthlyFactOf, buildPaybackFormulas, monthTitleLower } from './paybackFormulas'
 
 // The standalone "Окупність проєкту" page: an investment report over
 // the whole operating history. The page always fetches an all-time
@@ -58,13 +61,6 @@ type Props = {
 // «Примітка» cards, hidden for now at the client's request; set it back
 // to true to restore both.
 const SHOW_PLAN_CARDS = false
-
-// monthTitleLower renders "травень 2035" (lowercase month + year) for
-// inline notes and chart labels, per the mockup copy.
-function monthTitleLower(monthKey: string): string {
-  const title = formatMonthTitle(monthKey)
-  return title.charAt(0).toLocaleLowerCase('uk-UA') + title.slice(1)
-}
 
 // --- Small inline icons for the KPI cards / sidebar rows ---
 
@@ -154,6 +150,7 @@ function KpiCard({
   value,
   note,
   valueClass,
+  formula,
 }: {
   icon: IconName
   tone: Tone
@@ -161,6 +158,7 @@ function KpiCard({
   value: string
   note: string
   valueClass?: string
+  formula?: Formula
 }) {
   return (
     <div className="economics-payback-kpi">
@@ -168,7 +166,10 @@ function KpiCard({
         <Icon name={icon} />
       </span>
       <span className="economics-payback-kpi-body">
-        <span className="economics-payback-kpi-label">{label}</span>
+        <span className="economics-payback-kpi-label">
+          {label}
+          {formula ? <FormulaTip label={label} formula={formula} /> : null}
+        </span>
         <span className={`economics-payback-kpi-value ${valueClass ?? ''}`}>{value}</span>
         <span className="economics-payback-kpi-note">{note}</span>
       </span>
@@ -182,12 +183,14 @@ function SideRow({
   label,
   value,
   note,
+  formula,
 }: {
   icon: IconName
   tone: Tone
   label: string
   value: string
   note?: string
+  formula?: Formula
 }) {
   return (
     <div className="economics-payback-side-row">
@@ -195,7 +198,10 @@ function SideRow({
         <Icon name={icon} />
       </span>
       <span className="economics-payback-side-body">
-        <span className="economics-payback-side-label">{label}</span>
+        <span className="economics-payback-side-label">
+          {label}
+          {formula ? <FormulaTip label={label} formula={formula} /> : null}
+        </span>
         <span className="economics-payback-side-value">{value}</span>
         {note ? <span className="economics-payback-side-note">{note}</span> : null}
       </span>
@@ -406,7 +412,12 @@ export function EconomicsPaybackView({ data, capexUah, capexSteps, plannedPaybac
   }, [lastFactMonthKey])
 
   // Per data-covered month, so partial months don't drag the average.
-  const avgMonthlyFact = model.effectiveMonths > 0 ? allTimeEbitda / model.effectiveMonths : NaN
+  const avgMonthlyFact = avgMonthlyFactOf(model)
+
+  const formulas = useMemo(
+    () => buildPaybackFormulas({ model, totals: data.totals, money, capexSteps }),
+    [model, data.totals, money, capexSteps],
+  )
 
   // Effect chart entries: every fact month plus a seasonal forecast for
   // the rest of the last fact month's calendar year (like the mockup's
@@ -530,7 +541,7 @@ export function EconomicsPaybackView({ data, capexUah, capexSteps, plannedPaybac
       <div className="economics-payback-head">
         <h2>
           Окупність проєкту СЕС
-          <OptimumInfo tip="CAPEX береться з колонки CAPEX у версіях тарифів: якщо проєкт інвестували етапами, планка окупності зростає разом із вкладеннями, а місяць порівнюється з тією сумою, що була вкладена на той час. Коли у версіях CAPEX не заповнений, діє одне значення з «Параметрів тарифів». Повернуто = накопичений EBITDA з початку експлуатації; середньорічний ROI рахується від середніх вкладень за період. Прогноз окупності будується помісячно з урахуванням сезонності виробітку: темп EBITDA оцінюється за фактом із поправкою на сезон, а майбутні місяці отримують свій сезонний коефіцієнт (літо швидше, зима повільніше)." />
+          <OptimumInfo tip="CAPEX береться з колонки CAPEX у версіях тарифів: якщо проєкт інвестували етапами, планка окупності зростає разом із вкладеннями, а місяць порівнюється з тією сумою, що була вкладена на той час. Коли у версіях CAPEX не заповнений, діє одне значення з «Параметрів тарифів». Повернуто = накопичений EBITDA з початку експлуатації (доходи й економія СЕС та УЗЕ мінус заряд УЗЕ з мережі та від генератора; операційні витрати й знос УЗЕ не віднімаються); середньорічний ROI рахується від середніх вкладень за період. Прогноз окупності будується помісячно з урахуванням сезонності виробітку: темп EBITDA оцінюється за фактом із поправкою на сезон, а майбутні місяці отримують свій сезонний коефіцієнт (літо швидше, зима повільніше)." />
         </h2>
         <span className="economics-month-muted">Дані оновлено: {updatedLabel}</span>
       </div>
@@ -542,6 +553,7 @@ export function EconomicsPaybackView({ data, capexUah, capexSteps, plannedPaybac
           label="CAPEX проєкту"
           value={money.format(capexNow)}
           note={staged ? investmentStagesNote(capexStages) : 'разові інвестиції'}
+          formula={formulas.capex}
         />
         <KpiCard
           icon="wallet"
@@ -550,6 +562,7 @@ export function EconomicsPaybackView({ data, capexUah, capexSteps, plannedPaybac
           value={money.format(allTimeEbitda)}
           note="накопичений EBITDA"
           valueClass={allTimeEbitda >= 0 ? 'good' : ''}
+          formula={formulas.returned}
         />
         <KpiCard
           icon="pie"
@@ -557,6 +570,7 @@ export function EconomicsPaybackView({ data, capexUah, capexSteps, plannedPaybac
           label="Залишилось повернути"
           value={money.format(paidOff ? 0 : remaining)}
           note={paidOff ? 'капекс окуплено' : 'ще потрібно повернути'}
+          formula={formulas.remaining}
         />
         <KpiCard
           icon="percent"
@@ -565,6 +579,7 @@ export function EconomicsPaybackView({ data, capexUah, capexSteps, plannedPaybac
           value={formatPercent(coveredShare)}
           note="від CAPEX"
           valueClass="good"
+          formula={formulas.covered}
         />
       </section>
 
@@ -581,7 +596,10 @@ export function EconomicsPaybackView({ data, capexUah, capexSteps, plannedPaybac
               <div className="economics-capex-bar economics-payback-bar">
                 <span className="economics-capex-bar-fill" style={{ width: `${coveredShare * 100}%` }} />
               </div>
-              <span className="economics-payback-progress-pct">{formatPercent(coveredShare)}</span>
+              <span className="economics-payback-progress-pct">
+                {formatPercent(coveredShare)}
+                <FormulaTip label="Окуплено" formula={formulas.covered} />
+              </span>
               <span className="economics-payback-progress-rest">
                 {paidOff ? 'Капекс окуплено' : `Залишилось повернути ${short(remaining)}`}
               </span>
@@ -594,6 +612,7 @@ export function EconomicsPaybackView({ data, capexUah, capexSteps, plannedPaybac
                 Накопичена окупність проєкту
                 <span className="economics-capex-chart-unit">{axis.unit}</span>
                 <OptimumInfo
+                  formula={formulas.cumulativeChart}
                   tip={
                     staged
                       ? 'Суцільна лінія — фактичний накопичений EBITDA від початку експлуатації. Пунктир — сезонний прогноз: кожен майбутній місяць додає свій очікуваний EBITDA (влітку більше, взимку менше). Сіра сходинка — CAPEX, що діяв у кожному місяці: проєкт інвестували етапами, тому планка окупності підіймається разом із вкладеннями.'
@@ -743,6 +762,7 @@ export function EconomicsPaybackView({ data, capexUah, capexSteps, plannedPaybac
                 label="Накопичений EBITDA до періоду"
                 value={money.format(prior)}
                 note={`до початку помісячних даних (${model.priorMonths} міс.)`}
+                formula={formulas.prior}
               />
             ) : null}
             <SideRow
@@ -755,6 +775,7 @@ export function EconomicsPaybackView({ data, capexUah, capexSteps, plannedPaybac
                   ? `покриття даними ${formatPercent(coverageShare)}`
                   : 'з початку експлуатації'
               }
+              formula={formulas.operation}
             />
             <SideRow
               icon="coin"
@@ -762,6 +783,7 @@ export function EconomicsPaybackView({ data, capexUah, capexSteps, plannedPaybac
               label="Середньомісячний EBITDA (факт)"
               value={Number.isFinite(avgMonthlyFact) ? money.format(avgMonthlyFact) : '—'}
               note="за фактичний період"
+              formula={formulas.avgMonthly}
             />
           </div>
           </section>
@@ -773,7 +795,10 @@ export function EconomicsPaybackView({ data, capexUah, capexSteps, plannedPaybac
               {/* Two scales with two different multipliers, so the unit
                   lives on each axis; the caption only names the currency. */}
               <span className="economics-capex-chart-unit">{money.unit}</span>
-              <OptimumInfo tip="Стовпці — EBITDA за період (ліва шкала): сині — факт, фіолетові — сезонний прогноз до кінця поточного року. Лінія — накопичений EBITDA від початку експлуатації (права шкала), факт + прогноз. Мінусовий стовпець — місяць, у якому витрати на купівлю електроенергії перевищили ефект (типово взимку, коли СЕС майже не виробляє)." />
+              <OptimumInfo
+                formula={formulas.effectChart}
+                tip="Стовпці — EBITDA за період (ліва шкала): сині — факт, фіолетові — сезонний прогноз до кінця поточного року. Лінія — накопичений EBITDA від початку експлуатації (права шкала), факт + прогноз. Мінусовий стовпець — місяць, у якому заряд УЗЕ з мережі (або від генератора) перевищив доходи й економію СЕС та УЗЕ (типово взимку, коли СЕС майже не виробляє)."
+              />
             </span>
             <div className="economics-payback-effect-tools">
               <span className="economics-month-legend">
@@ -867,6 +892,7 @@ export function EconomicsPaybackView({ data, capexUah, capexSteps, plannedPaybac
               label="Середньорічний ROI (факт)"
               value={Number.isFinite(avgAnnualRoi) ? formatPercent(avgAnnualRoi) : '—'}
               note={`за ${paybackLabel(operationYears)} експлуатації`}
+              formula={formulas.roi}
             />
             <SideRow
               icon="sun"
@@ -874,21 +900,30 @@ export function EconomicsPaybackView({ data, capexUah, capexSteps, plannedPaybac
               label="Виробіток за період"
               value={formatMwh(data.totals.pv_kwh)}
               note="за місяці з даними телеметрії"
+              formula={formulas.pv}
             />
             <SideRow
               icon="tag"
               tone="orange"
               label="Середній тариф (екв.)"
               value={`${money.formatPrice(data.totals.avg_import_price_uah_per_kwh)} ${money.priceUnit}`}
+              formula={formulas.tariff}
             />
             <SideRow
               icon="wallet"
               tone="violet"
               label="Витрати на придбання електроенергії з мережі"
-              value={money.format(data.totals.expense_total_uah)}
-              note="заряд УЗЕ з мережі за період"
+              value={money.format(data.totals.import_cost_uah)}
+              note="усе куплене з мережі за період: споживання й заряд УЗЕ"
+              formula={formulas.gridBill}
             />
-            <SideRow icon="percent" tone="green" label="Чистий ефект (EBITDA)" value={money.format(allTimeEbitda)} />
+            <SideRow
+              icon="percent"
+              tone="green"
+              label="Чистий ефект (EBITDA)"
+              value={money.format(allTimeEbitda)}
+              formula={formulas.netEffect}
+            />
           </aside>
 
           {SHOW_PLAN_CARDS ? (
@@ -943,7 +978,7 @@ export function EconomicsPaybackView({ data, capexUah, capexSteps, plannedPaybac
               <p className="economics-payback-note">
                 Прогноз базується на фактичних даних за {model.totalMonthsWithData} міс. експлуатації з
                 урахуванням сезонності сонячного виробітку та може змінюватися залежно від фактичного виробітку
-                електроенергії, цін РДН, тарифів, операційних витрат та інших факторів.
+                електроенергії, цін РДН, тарифів та інших факторів.
               </p>
             </aside>
           ) : null}

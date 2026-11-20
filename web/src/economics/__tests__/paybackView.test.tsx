@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import type { EconomicsAnnualResponse, EconomicsMonthlyTotals } from '../../api'
 import { EconomicsPaybackView } from '../payback/EconomicsPaybackView'
 
@@ -9,6 +9,9 @@ function totals(ebitdaUah: number): EconomicsMonthlyTotals {
   return {
     ebitda_uah: ebitdaUah,
     expense_total_uah: 1.2 * M,
+    expense_grid_charge_uah: 1.0 * M,
+    import_cost_uah: 3.3 * M,
+    grid_import_kwh: 600_000,
     hours_with_data: 24 * 30,
     pv_kwh: 120_000,
     avg_import_price_uah_per_kwh: 5.4,
@@ -62,5 +65,52 @@ describe('EconomicsPaybackView', () => {
 
     expect(screen.getByText('разові інвестиції')).toBeTruthy()
     expect(container.textContent).toContain('Повернуто 6,00 млн грн із 20,00 млн грн')
+  })
+
+  it('shows the whole grid import bill, not only the battery charge', () => {
+    const { container } = render(
+      <EconomicsPaybackView data={data} capexUah={20 * M} capexSteps={[]} plannedPaybackMonths={0} />,
+    )
+    const row = screen.getByText('Витрати на придбання електроенергії з мережі').closest('.economics-payback-side-row')
+    const rowText = (row?.textContent ?? '').replace(/\s/g, ' ')
+    expect(rowText).toContain('3 300 000 грн')
+    expect(rowText).not.toContain('1 200 000 грн')
+    expect(rowText).toContain('усе куплене з мережі за період: споживання й заряд УЗЕ')
+    expect(container.textContent).not.toContain('заряд УЗЕ з мережі за період')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Як рахується: Витрати на придбання електроенергії з мережі' }))
+    const tip = screen.getByRole('tooltip')
+    expect(tip).toHaveTextContent('Витрати = імпорт з мережі × середня ціна імпорту')
+    const tipText = (tip.textContent ?? '').replace(/\s/g, ' ')
+    expect(tipText).toContain('600 000 кВт·год')
+    expect(tipText).toContain('3 300 000 грн')
+  })
+
+  it('gives every payback figure an «i» and no tip claims operating expenses', () => {
+    const { container } = render(
+      <EconomicsPaybackView data={data} capexUah={20 * M} capexSteps={[]} plannedPaybackMonths={0} />,
+    )
+    for (const label of [
+      'CAPEX проєкту',
+      'Повернуто інвестицій',
+      'Залишилось повернути',
+      'Окуплено',
+      'Період експлуатації',
+      'Середньомісячний EBITDA (факт)',
+      'Середньорічний ROI (факт)',
+      'Виробіток за період',
+      'Середній тариф (екв.)',
+      'Чистий ефект (EBITDA)',
+    ]) {
+      expect(screen.getAllByRole('button', { name: `Як рахується: ${label}` }).length).toBeGreaterThan(0)
+    }
+    expect(container.textContent).not.toContain('витрати на купівлю електроенергії перевищили')
+
+    const effect = screen.getAllByRole('button', { name: 'Як рахується' })
+    for (const button of effect) {
+      fireEvent.click(button)
+      expect(screen.getByRole('tooltip').textContent).not.toMatch(/мінус операційні витрати/)
+      fireEvent.click(button)
+    }
   })
 })

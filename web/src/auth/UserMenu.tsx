@@ -1,6 +1,7 @@
 import { UserCircle } from '@phosphor-icons/react'
 import { useEffect, useRef, useState } from 'react'
 import { navigateView } from '../shell/navigation'
+import { ThemeToggle } from '../theme/ThemeToggle'
 import { useAuth } from './authContext'
 import { PasswordDialog } from './PasswordDialog'
 import './auth.css'
@@ -17,16 +18,16 @@ export function UserMenu() {
 
   useEffect(() => {
     if (!open) return
-    const onDown = (e: MouseEvent) => {
+    const onDown = (e: PointerEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
     }
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setOpen(false)
     }
-    document.addEventListener('mousedown', onDown)
+    document.addEventListener('pointerdown', onDown)
     document.addEventListener('keydown', onKey)
     return () => {
-      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('pointerdown', onDown)
       document.removeEventListener('keydown', onKey)
     }
   }, [open])
@@ -102,18 +103,10 @@ export function UserMenu() {
               Курси валют ERP
             </button>
           )}
-          {me.global_admin && (
-            <button
-              type="button"
-              role="menuitem"
-              onClick={() => {
-                setOpen(false)
-                navigateView('esvitlo')
-              }}
-            >
-              Відключення e-svitlo
-            </button>
-          )}
+          <div className="auth-user-theme">
+            <span>Тема</span>
+            <ThemeToggle />
+          </div>
           <button
             type="button"
             role="menuitem"

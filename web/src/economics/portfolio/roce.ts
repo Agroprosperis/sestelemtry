@@ -5,14 +5,18 @@ export const ROCE_TIP =
   '(CAPEX із тарифів, що діє на кінець періоду). Неповний період завищує оцінку — точна окупність на сторінці «Окупність». ' +
   'Для портфеля: сума приведених EBITDA об’єктів із CAPEX до їхнього сумарного CAPEX.'
 
-// annualEbitda scales a site's period EBITDA to a full year, the same
-// way the ROCE card on the object's own economics page does.
-function annualEbitda(site: EconomicsPortfolioSite): number {
-  const months = Math.max(1, site.months_with_data ?? 1)
-  return site.ebitda_uah * (12 / months)
+// monthsOf is the number of months a site's EBITDA is annualised over.
+export function monthsOf(site: EconomicsPortfolioSite): number {
+  return Math.max(1, site.months_with_data ?? 1)
 }
 
-function hasCapex(site: EconomicsPortfolioSite): boolean {
+// annualEbitda scales a site's period EBITDA to a full year, the same
+// way the ROCE card on the object's own economics page does.
+export function annualEbitda(site: EconomicsPortfolioSite): number {
+  return site.ebitda_uah * (12 / monthsOf(site))
+}
+
+export function hasCapex(site: EconomicsPortfolioSite): boolean {
   return site.has_data && Number.isFinite(site.capex_uah) && (site.capex_uah as number) > 0
 }
 
@@ -21,15 +25,25 @@ export function siteRoce(site: EconomicsPortfolioSite): number {
   return hasCapex(site) ? annualEbitda(site) / (site.capex_uah as number) : NaN
 }
 
-// portfolioRoce weighs the objects by their capital: annualised EBITDA
-// summed over the objects with CAPEX, over that CAPEX.
-export function portfolioRoce(sites: EconomicsPortfolioSite[]): number {
+// portfolioRoceParts are the two sums behind the portfolio ROCE: the
+// annualised EBITDA and the CAPEX of the objects that have CAPEX, and how
+// many those are.
+export function portfolioRoceParts(sites: EconomicsPortfolioSite[]): { ebitda: number; capex: number; count: number } {
   let ebitda = 0
   let capex = 0
+  let count = 0
   for (const s of sites) {
     if (!hasCapex(s)) continue
     ebitda += annualEbitda(s)
     capex += s.capex_uah as number
+    count += 1
   }
+  return { ebitda, capex, count }
+}
+
+// portfolioRoce weighs the objects by their capital: annualised EBITDA
+// summed over the objects with CAPEX, over that CAPEX.
+export function portfolioRoce(sites: EconomicsPortfolioSite[]): number {
+  const { ebitda, capex } = portfolioRoceParts(sites)
   return capex > 0 ? ebitda / capex : NaN
 }

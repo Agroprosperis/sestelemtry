@@ -2,6 +2,7 @@ import {
   type WeatherForecastApiResponse,
   weatherFromApi,
 } from './dashboard/transforms/weatherAdapter'
+import type { OrgTariffsApi } from './economics/orgTariffsClient'
 import type {
   CurrentResponse,
   DAMPricesResponse,
@@ -721,6 +722,9 @@ export type EconomicsDailyResponse = {
   fx_rate?: number
   fx_carried?: boolean
   fx_provisional?: boolean
+  // tariff is the tariff version in force that day (in UAH whatever the
+  // currency), which its prices were built from; absent for a group.
+  tariff?: OrgTariffsApi
 }
 
 // FxWindow is how a period response reports its currency: the fields

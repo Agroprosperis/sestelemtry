@@ -6,7 +6,8 @@
 // own write flag is on (ems-spec docs/specs/ems_sl_write_cutover.md).
 // The flag is off by default and after every restart, never comes from
 // the cloud, and is turned on only by a person on the local console
-// with the PIN set on the device (-set-write-pin).
+// with the PIN set on the device (-set-write-pin). The console itself
+// takes the login set on the device (-set-console-password).
 package main
 
 import (
@@ -32,6 +33,7 @@ func main() {
 	replayManifest := flag.String("replay-manifest", "", "replay mode: optional manifest-lite JSON (plan/preset/limits)")
 	showVersion := flag.Bool("version", false, "print version and exit")
 	setPin := flag.Bool("set-write-pin", false, "set the PIN that turns SmartLogger writing on (asked twice) and exit")
+	setConsolePassword := flag.Bool("set-console-password", false, "set the login of the local web console (password asked twice) and exit")
 	flag.Parse()
 
 	if *showVersion {
@@ -41,6 +43,13 @@ func main() {
 	if *setPin {
 		if err := runSetWritePin(*configPath); err != nil {
 			fmt.Fprintln(os.Stderr, "PIN не збережено:", err)
+			os.Exit(1)
+		}
+		return
+	}
+	if *setConsolePassword {
+		if err := runSetConsolePassword(*configPath); err != nil {
+			fmt.Fprintln(os.Stderr, "Пароль консолі не збережено:", err)
 			os.Exit(1)
 		}
 		return

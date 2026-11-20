@@ -510,31 +510,33 @@ function HealthChecksCard({ checks, alarms }: { checks: HealthCheck[]; alarms?: 
   return (
     <section className="ctl-card">
       <h2>Діагностика: очікувано vs факт</h2>
-      <table className="ctl-events-table ctl-checks-table">
-        <thead>
-          <tr>
-            <th>Показник</th>
-            <th>Очікувано</th>
-            <th>Факт</th>
-            <th>Статус</th>
-          </tr>
-        </thead>
-        <tbody>
-          {checks.map((c) => (
-            <tr key={c.id}>
-              <td>{c.label || c.id}</td>
-              <td className="muted">{c.expected || '—'}</td>
-              <td>
-                {c.actual || '—'}
-                {c.detail && <div className="ctl-check-detail">{c.detail}</div>}
-              </td>
-              <td>
-                <span className={'ctl-sev ' + (SEV_CLASS[c.severity] ?? '')}>{c.severity}</span>
-              </td>
+      <div className="ctl-table-scroll">
+        <table className="ctl-events-table ctl-checks-table">
+          <thead>
+            <tr>
+              <th>Показник</th>
+              <th>Очікувано</th>
+              <th>Факт</th>
+              <th>Статус</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {checks.map((c) => (
+              <tr key={c.id}>
+                <td>{c.label || c.id}</td>
+                <td className="muted">{c.expected || '—'}</td>
+                <td>
+                  {c.actual || '—'}
+                  {c.detail && <div className="ctl-check-detail">{c.detail}</div>}
+                </td>
+                <td>
+                  <span className={'ctl-sev ' + (SEV_CLASS[c.severity] ?? '')}>{c.severity}</span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
       {alarms && (
         <p className="ctl-card-sub" style={{ marginTop: 10 }}>
           Слова алармів SL (50000…): <code>{alarms.join(' ')}</code>

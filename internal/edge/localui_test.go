@@ -3,7 +3,9 @@ package edge
 import (
 	"encoding/json"
 	"log/slog"
+	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -170,6 +172,98 @@ func TestLocalUIOverrideLifecycle(t *testing.T) {
 	s.uiOverride(rec, httptest.NewRequest("POST", "/api/override", strings.NewReader(`{"mode":"bogus"}`)))
 	if rec.Code != 400 {
 		t.Errorf("bogus mode: status = %d, want 400", rec.Code)
+	}
+}
+
+func TestLocalUIRequiresLogin(t *testing.T) {
+	s := localUITestService(t)
+	path := filepath.Join(t.TempDir(), "console_password.json")
+	s.console = &consoleGate{path: path}
+	h := s.localUIHandler()
+
+	serve := func(method, target, ip, user, pass string, csrf bool) *httptest.ResponseRecorder {
+		var body *strings.Reader
+		if method == http.MethodPost {
+			body = strings.NewReader(`{"mode":"auto"}`)
+		} else {
+			body = strings.NewReader("")
+		}
+		req := httptest.NewRequest(method, target, body)
+		req.RemoteAddr = ip + ":51000"
+		if user != "" || pass != "" {
+			req.SetBasicAuth(user, pass)
+		}
+		if csrf {
+			req.Header.Set(consoleCSRFHeader, "fetch")
+		}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+
+	if rec := serve(http.MethodGet, "/api/status", "10.0.0.5", "operator", "console pass 1", false); rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("no password file: status = %d, want 503", rec.Code)
+	}
+	if err := SetConsolePassword(path, "operator", "console pass 1", testTS); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := serve(http.MethodGet, "/", "10.0.0.5", "", "", false)
+	if rec.Code != http.StatusUnauthorized || !strings.HasPrefix(rec.Header().Get("WWW-Authenticate"), `Basic realm="EMS edge ab"`) {
+		t.Fatalf("no credentials: status = %d, WWW-Authenticate = %q", rec.Code, rec.Header().Get("WWW-Authenticate"))
+	}
+	if rec := serve(http.MethodGet, "/api/status", "10.0.0.5", "operator", "console pass 1", false); rec.Code != http.StatusOK {
+		t.Fatalf("right login: status = %d (%s)", rec.Code, rec.Body.String())
+	}
+	if rec := serve(http.MethodGet, "/api/status", "10.0.0.5", "admin", "console pass 1", false); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("wrong user: status = %d, want 401", rec.Code)
+	}
+
+	// The emergency override is a POST: it needs the CSRF header too.
+	if rec := serve(http.MethodPost, "/api/override", "10.0.0.5", "operator", "console pass 1", false); rec.Code != http.StatusForbidden {
+		t.Fatalf("POST without %s: status = %d, want 403", consoleCSRFHeader, rec.Code)
+	}
+	if rec := serve(http.MethodPost, "/api/override", "10.0.0.5", "operator", "console pass 1", true); rec.Code != http.StatusOK {
+		t.Fatalf("POST with %s: status = %d (%s)", consoleCSRFHeader, rec.Code, rec.Body.String())
+	}
+	if ev := <-s.events; ev.Code != EvOverrideCleared {
+		t.Fatalf("override event = %+v", ev)
+	}
+
+	// Lockout is per address: 10.0.0.66 guessing doesn't lock 10.0.0.5 out.
+	for i := 1; i < consoleMaxFails; i++ {
+		if rec := serve(http.MethodGet, "/api/status", "10.0.0.66", "operator", "guess guess", false); rec.Code != http.StatusUnauthorized {
+			t.Fatalf("wrong password %d: status = %d, want 401", i, rec.Code)
+		}
+	}
+	rec = serve(http.MethodGet, "/api/status", "10.0.0.66", "operator", "guess guess", false)
+	if rec.Code != http.StatusTooManyRequests || rec.Header().Get("Retry-After") == "" {
+		t.Fatalf("fifth wrong password: status = %d, Retry-After = %q", rec.Code, rec.Header().Get("Retry-After"))
+	}
+	select {
+	case ev := <-s.events:
+		if ev.Code != EvConsoleAuthLocked || strings.Contains(ev.Message, "guess") {
+			t.Fatalf("event = %+v", ev)
+		}
+	default:
+		t.Fatal("no CONSOLE_LOGIN_LOCKED event")
+	}
+	if rec := serve(http.MethodGet, "/api/status", "10.0.0.66", "operator", "console pass 1", false); rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("right password during the lockout: status = %d, want 429", rec.Code)
+	}
+	if rec := serve(http.MethodGet, "/api/status", "10.0.0.5", "operator", "console pass 1", false); rec.Code != http.StatusOK {
+		t.Fatalf("other address during the lockout: status = %d, want 200", rec.Code)
+	}
+
+	// A new password replaces the remembered one at once.
+	if err := SetConsolePassword(path, "operator", "console pass 2", testTS); err != nil {
+		t.Fatal(err)
+	}
+	if rec := serve(http.MethodGet, "/api/status", "10.0.0.5", "operator", "console pass 1", false); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("old password after the change: status = %d, want 401", rec.Code)
+	}
+	if rec := serve(http.MethodGet, "/api/status", "10.0.0.5", "operator", "console pass 2", false); rec.Code != http.StatusOK {
+		t.Fatalf("new password: status = %d, want 200", rec.Code)
 	}
 }
 

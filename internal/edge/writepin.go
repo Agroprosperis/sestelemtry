@@ -1,18 +1,10 @@
 package edge
 
 import (
-	"crypto/pbkdf2"
-	"crypto/rand"
-	"crypto/sha256"
-	"crypto/subtle"
-	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -22,11 +14,8 @@ import (
 // off need no PIN.
 const (
 	writePinMinLen   = 6
-	writePinIter     = 100_000
-	writePinKeyLen   = 32
 	writePinMaxFails = 5
 	writePinLockFor  = 15 * time.Minute
-	writePinAlgo     = "pbkdf2-sha256"
 )
 
 var (
@@ -35,65 +24,16 @@ var (
 	errPinCorrupt = errors.New("файл PIN пошкоджено — задайте PIN заново")
 )
 
-type pinFile struct {
-	Algo  string    `json:"algo"`
-	Iter  int       `json:"iter"`
-	Salt  string    `json:"salt"`
-	Hash  string    `json:"hash"`
-	SetAt time.Time `json:"set_at"`
-}
-
-func hashPin(pin string, salt []byte, iter int) ([]byte, error) {
-	return pbkdf2.Key(sha256.New, pin, salt, iter, writePinKeyLen)
-}
-
-// SetWritePin stores the salted hash of pin at path. The file is
-// readable by the owner of its directory only: run as root, it is
-// handed to the service user that owns the state directory.
+// SetWritePin stores the salted hash of pin at path.
 func SetWritePin(path, pin string, now time.Time) error {
 	if len([]rune(pin)) < writePinMinLen {
 		return fmt.Errorf("PIN має бути щонайменше %d символів", writePinMinLen)
 	}
-	salt := make([]byte, 16)
-	if _, err := rand.Read(salt); err != nil {
-		return err
-	}
-	key, err := hashPin(pin, salt, writePinIter)
+	f, err := newSecretFile(pin, now)
 	if err != nil {
 		return err
 	}
-	raw, err := json.Marshal(pinFile{
-		Algo: writePinAlgo, Iter: writePinIter, SetAt: now.UTC(),
-		Salt: base64.StdEncoding.EncodeToString(salt), Hash: base64.StdEncoding.EncodeToString(key),
-	})
-	if err != nil {
-		return err
-	}
-	dir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(dir, ".write_pin-*")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(tmp.Name())
-	if _, err := tmp.Write(raw); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	if os.Geteuid() == 0 {
-		st, err := os.Stat(dir)
-		if err != nil {
-			return err
-		}
-		if sys, ok := st.Sys().(*syscall.Stat_t); ok {
-			if err := os.Chown(tmp.Name(), int(sys.Uid), int(sys.Gid)); err != nil {
-				return err
-			}
-		}
-	}
-	return os.Rename(tmp.Name(), path)
+	return writeSecretFile(path, f)
 }
 
 // pinGate checks enable attempts against the stored hash and locks out
@@ -106,20 +46,18 @@ type pinGate struct {
 	until time.Time
 }
 
-func (p *pinGate) load() (pinFile, error) {
-	if p == nil || p.path == "" {
-		return pinFile{}, errPinNotSet
+func (p *pinGate) load() (secretFile, error) {
+	if p == nil {
+		return secretFile{}, errPinNotSet
 	}
-	raw, err := os.ReadFile(p.path)
-	if os.IsNotExist(err) {
-		return pinFile{}, errPinNotSet
-	}
-	if err != nil {
-		return pinFile{}, fmt.Errorf("PIN: %w", err)
-	}
-	var f pinFile
-	if err := json.Unmarshal(raw, &f); err != nil || f.Algo != writePinAlgo || f.Iter <= 0 || f.Salt == "" || f.Hash == "" {
-		return pinFile{}, errPinCorrupt
+	f, err := readSecretFile(p.path)
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		return secretFile{}, errPinNotSet
+	case errors.Is(err, errSecretCorrupt):
+		return secretFile{}, errPinCorrupt
+	case err != nil:
+		return secretFile{}, fmt.Errorf("PIN: %w", err)
 	}
 	return f, nil
 }
@@ -144,16 +82,14 @@ func (p *pinGate) check(pin string, now time.Time) (locked bool, err error) {
 	if err != nil {
 		return false, err
 	}
-	salt, err1 := base64.StdEncoding.DecodeString(f.Salt)
-	want, err2 := base64.StdEncoding.DecodeString(f.Hash)
-	if err1 != nil || err2 != nil {
+	ok, err := f.matches(pin)
+	if errors.Is(err, errSecretCorrupt) {
 		return false, errPinCorrupt
 	}
-	got, err := hashPin(pin, salt, f.Iter)
 	if err != nil {
 		return false, err
 	}
-	if subtle.ConstantTimeCompare(got, want) == 1 {
+	if ok {
 		p.fails = 0
 		return false, nil
 	}

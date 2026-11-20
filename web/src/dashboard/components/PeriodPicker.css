@@ -117,3 +117,28 @@
 .period-picker input[type='month']::-webkit-datetime-edit-fields-wrapper {
   padding: 0;
 }
+
+/* A phone: the picker takes what its row leaves instead of a fixed
+   220px, and the arrows grow to a fingertip. Below 280px — «Сьогодні»
+   plus a readable date — the picker starts a row of its own. */
+@media (max-width: 640px) {
+  .period-picker-wrap {
+    flex: 1 1 280px;
+    min-width: 0;
+  }
+
+  .period-picker {
+    flex: 1 1 auto;
+    width: auto;
+    min-width: 0;
+  }
+
+  .period-picker .period-nav {
+    min-width: 36px;
+    min-height: 36px;
+  }
+
+  .period-today {
+    min-height: 42px;
+  }
+}

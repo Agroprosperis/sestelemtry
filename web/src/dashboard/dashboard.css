@@ -6,6 +6,13 @@
   gap: 20px;
 }
 
+/* Grid items default to `min-width: auto`, which lets one wide descendant
+   (the control tabs, a journal table) widen the page past a phone's
+   screen; the overflow belongs inside the item's own scroll box. */
+.dashboard-page > * {
+  min-width: 0;
+}
+
 .dashboard-content {
   display: grid;
   grid-template-columns: minmax(300px, 360px) minmax(0, 1fr);
@@ -763,6 +770,7 @@
   box-shadow: 0 24px 60px rgba(var(--shadow-color), 0.25);
   width: min(540px, calc(100% - 32px));
   max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 32px);
   background: var(--bg-elevated);
   color: var(--text);
 }
@@ -1938,7 +1946,7 @@
     flex-wrap: wrap;
   }
   .dashboard-content {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
   .dashboard-sites {
     grid-template-rows: none;
@@ -1979,5 +1987,44 @@
 @media (max-width: 640px) {
   .dashboard-page {
     padding: 14px;
+    gap: 14px;
+  }
+  .dashboard-content {
+    gap: 14px;
+  }
+  .dashboard-controls {
+    gap: 8px;
+    padding: 8px;
+  }
+  .range-switch {
+    flex: 1 0 100%;
+  }
+  .range-switch button {
+    flex: 1 1 0;
+    min-height: 36px;
+  }
+  .chart-card,
+  .metrics-group {
+    padding: 12px;
+  }
+  /* The day legend wraps to four lines inside the chart's box on a
+     phone; the box grows so the plot keeps its height. */
+  .chart-wrap-day {
+    height: 360px;
+  }
+  .chart-legend {
+    gap: 2px 6px;
+    font-size: 11px;
+  }
+  .energy-tooltip {
+    width: auto;
+    max-width: calc(100vw - 48px);
+    font-size: 11px;
+  }
+  .energy-tooltip-reason {
+    max-width: none;
+  }
+  .export-dialog-row {
+    grid-template-columns: 1fr;
   }
 }

@@ -709,8 +709,8 @@ export function EconomicsPage() {
               <p className="economics-loading">Завантаження…</p>
             ) : (
               <>
-                <EconomicsDayTop totals={totals} rows={data.rows} tariffs={tariffs} pvPlan={pvPlanDay} />
-                <EconomicsTable rows={data.rows} organizationID={organizationID} date={date} />
+                <EconomicsDayTop totals={totals} rows={data.rows} tariffs={data.tariffs ?? tariffs} pvPlan={pvPlanDay} />
+                <EconomicsTable rows={data.rows} organizationID={organizationID} date={date} tariffs={data.tariffs ?? tariffs} />
               </>
             )}
           </>

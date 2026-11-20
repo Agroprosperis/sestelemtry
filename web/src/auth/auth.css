@@ -3,6 +3,7 @@
 
 .auth-page {
   min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -167,9 +168,26 @@
   color: var(--text);
 }
 
+/* The theme switch, shown here once a phone's top bar drops it. */
+.auth-user-theme {
+  display: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 12px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
 @container (max-width: 1120px) {
   .auth-user-btn span {
     display: none;
+  }
+}
+
+@container (max-width: 600px) {
+  .auth-user-theme {
+    display: flex;
   }
 }
 

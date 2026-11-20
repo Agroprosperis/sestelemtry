@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useMemo, type ReactNode } from 'react'
 import type { EconomicsPortfolioResponse, EconomicsPortfolioSite, EconomicsPortfolioTrendMonth } from '../../api'
 import { formatOrganizationLabel } from '../../dashboard/config'
 import { OptimumInfo } from '../monthly/EconomicsMonthlyView'
@@ -6,6 +6,9 @@ import { useMoney, type Money } from '../currency'
 import { hasRollupGen } from '../generatorText'
 import { formatMonthTitle, formatMwh, formatMwhNumber, formatPercent, formatPeriodTitle, formatYearTitle } from '../monthly/format'
 import type { EconomicsPortfolioData } from '../useEconomicsPortfolioData'
+import { FormulaTip } from '../components/FormulaTip'
+import type { Formula } from '../formula'
+import { buildPortfolioFormulas, OPTIMUM_TIP, siteRoceFormula } from './portfolioFormulas'
 import { portfolioRoce, ROCE_TIP, siteRoce } from './roce'
 
 export type PortfolioScope = 'month' | 'year' | 'period'
@@ -33,12 +36,6 @@ type Props = {
 function compareTotal(s: EconomicsPortfolioSite): number {
   return s.ebitda_uah + s.schedule_reserve_uah + s.bess_reserve_uah
 }
-
-// OPTIMUM_TIP explains the УЗЕ reserve in operator language: the
-// optimum is the best dispatch the battery could have run inside its
-// own demonstrated envelope, so the reserve is missed upside, not loss.
-const OPTIMUM_TIP =
-  'Оптимум — найкращий графік заряду/розряду батареї в межах її ж фактичних можливостей (потужність, діапазон SOC, ККД циклу за телеметрією періоду), оцінений за цінами РДН і тарифами. Резерв = оптимум − факт: недоотримана вигода, яку ще можна забрати кращим керуванням, а не збиток.'
 
 // EconomicsPortfolioView is the zведений (all-objects) dashboard: a per-
 // object comparison of earned EBITDA + work-schedule reserve + УЗЕ
@@ -183,6 +180,7 @@ function PortfolioBody({
   const withData = sites.filter((s) => s.has_data)
   const maxTotal = Math.max(...withData.map(compareTotal), 1)
   const withGen = sites.some(hasRollupGen)
+  const formulas = useMemo(() => buildPortfolioFormulas(portfolio, money), [portfolio, money])
 
   return (
     <>
@@ -191,27 +189,31 @@ function PortfolioBody({
           label="EBITDA"
           value={money.format(totals.ebitda_uah)}
           sub="за період, всі об'єкти"
-          info="EBITDA = дохід та економія від СЕС і УЗЕ мінус операційні витрати за період, підсумовані по всіх об'єктах."
+          info="EBITDA = доходи й економія СЕС і УЗЕ мінус заряд УЗЕ з мережі та від генератора за період, підсумовані по всіх об'єктах. Знос УЗЕ й операційні витрати не віднімаються."
+          formula={formulas.ebitda}
         />
         <SummaryCard
           label="Резерв графіка робіт"
           value={money.format(totals.schedule_reserve_uah)}
           sub="перенесення гнучких робіт у день"
           info="Скільки ще можна зекономити, перенісши гнучкі роботи на денні години з дешевшою електроенергією та власним виробітком СЕС."
+          formula={formulas.scheduleReserve}
           amber
         />
         <SummaryCard
-          label="Оптимум УЗЕ (резерв)"
+          label="Резерв розкладу УЗЕ"
           value={money.format(totals.bess_reserve_uah)}
-          sub="недобрана вигода УЗЕ проти оптимального графіка"
+          sub="недобрано проти найвигіднішого розкладу УЗЕ"
           info={OPTIMUM_TIP}
+          formula={formulas.bessReserve}
           amber
         />
         <SummaryCard
           label="Разом з резервами"
           value={money.format(totals.ebitda_uah + totals.action_reserve_uah)}
-          sub="EBITDA + резерв графіка + УЗЕ"
+          sub="EBITDA + обидва резерви"
           info="Потенційний результат періоду: фактична EBITDA плюс обидва резерви, якби їх забрали повністю."
+          formula={formulas.withReserves}
           good
         />
         {withGen && (
@@ -220,14 +222,15 @@ function PortfolioBody({
             value={money.format(totals.gen_fuel_cost_uah ?? 0)}
             sub={`${litresFmt.format(totals.gen_fuel_l ?? 0)} л · ефект годин без мережі ${money.format(totals.effect_offgrid_uah ?? 0)}`}
             info="Вартість пального генераторів за тарифами об'єктів і ефект годин, коли об'єкти працювали без мережі: скільки пального заощадили СЕС і УЗЕ."
+            formula={formulas.fuel}
           />
         )}
       </div>
 
       <div className="economics-portfolio-legend">
         <span><i style={{ background: '#7c3aed' }} />EBITDA</span>
-        <span><i style={{ background: '#f59e0b' }} />резерв графіка</span>
-        <span><i style={{ background: '#0ea5e9' }} />оптимум УЗЕ</span>
+        <span><i style={{ background: '#f59e0b' }} />резерв графіка робіт</span>
+        <span><i style={{ background: '#0ea5e9' }} />резерв розкладу УЗЕ</span>
       </div>
 
       <div className="economics-portfolio-bars">
@@ -279,18 +282,38 @@ function PortfolioBody({
               <th>Об'єкт</th>
               <th>
                 ROCE
-                <OptimumInfo tip={ROCE_TIP} />
+                <OptimumInfo tip={ROCE_TIP} formula={formulas.roce} label="ROCE портфеля" />
               </th>
-              <th>EBITDA</th>
-              <th>Резерв графіка</th>
               <th>
-                Оптимум УЗЕ
-                <OptimumInfo tip={OPTIMUM_TIP} />
+                EBITDA
+                <OptimumInfo tip={formulas.ebitda.text ?? ''} formula={formulas.ebitda} label="EBITDA" />
               </th>
-              <th>Разом резерв</th>
-              <th>СЕС</th>
-              <th>Захоплення УЗЕ</th>
-              {withGen && <th>Пальне</th>}
+              <th>
+                Резерв графіка робіт
+                <OptimumInfo tip={formulas.scheduleReserve.text ?? ''} formula={formulas.scheduleReserve} label="Резерв графіка робіт" />
+              </th>
+              <th>
+                Резерв розкладу УЗЕ
+                <OptimumInfo tip={OPTIMUM_TIP} formula={formulas.bessReserve} label="Резерв розкладу УЗЕ" />
+              </th>
+              <th>
+                Разом резерв
+                <OptimumInfo tip={formulas.actionReserveColumn.text ?? ''} formula={formulas.actionReserveColumn} label="Разом резерв" />
+              </th>
+              <th>
+                СЕС
+                <OptimumInfo tip={formulas.pv.text ?? ''} formula={formulas.pv} label="СЕС" />
+              </th>
+              <th>
+                Реалізовано УЗЕ
+                <OptimumInfo tip={formulas.captured.text ?? ''} formula={formulas.captured} label="Реалізовано від можливого" />
+              </th>
+              {withGen && (
+                <th>
+                  Пальне
+                  <OptimumInfo tip={formulas.fuel.text ?? ''} formula={formulas.fuel} label="Пальне" />
+                </th>
+              )}
             </tr>
           </thead>
           <tbody>
@@ -305,7 +328,10 @@ function PortfolioBody({
                   </td>
                   {s.has_data ? (
                     <>
-                      <td>{formatPercent(siteRoce(s))}</td>
+                      <td>
+                        {formatPercent(siteRoce(s))}
+                        <SiteRoceTip site={s} money={money} />
+                      </td>
                       <td>{money.format(s.ebitda_uah)}</td>
                       <td>{money.format(s.schedule_reserve_uah)}</td>
                       <td>{money.format(s.bess_reserve_uah)}</td>
@@ -335,7 +361,7 @@ function PortfolioBody({
         </table>
       </div>
 
-      {portfolio.trend.length > 0 ? <PortfolioTrend months={portfolio.trend} /> : null}
+      {portfolio.trend.length > 0 ? <PortfolioTrend months={portfolio.trend} formula={formulas.trend} /> : null}
     </>
   )
 }
@@ -365,7 +391,7 @@ const TREND_SERIES = [
 // PortfolioTrend is the per-month portfolio energy trend (year scope): a
 // grouped mini-bar column per month, scaled to the axis max across all
 // series, with a native tooltip carrying the MWh figures + project effect.
-function PortfolioTrend({ months }: { months: EconomicsPortfolioTrendMonth[] }) {
+function PortfolioTrend({ months, formula }: { months: EconomicsPortfolioTrendMonth[]; formula: Formula }) {
   const money = useMoney()
   const axisMax = Math.max(
     ...months.flatMap((m) => [m.pv_kwh, m.grid_import_kwh, m.grid_export_kwh, m.load_kwh]),
@@ -374,7 +400,10 @@ function PortfolioTrend({ months }: { months: EconomicsPortfolioTrendMonth[] }) 
   return (
     <div className="economics-portfolio-trend">
       <div className="economics-month-section-head">
-        <h4 className="economics-month-section-title">Енергетичний тренд по місяцях (портфель)</h4>
+        <h4 className="economics-month-section-title">
+          Енергетичний тренд по місяцях (портфель)
+          <FormulaTip label="Енергетичний тренд по місяцях" formula={formula} />
+        </h4>
         <span className="economics-month-muted">МВт·год/міс</span>
       </div>
       <div className="economics-portfolio-trend-legend">
@@ -414,6 +443,7 @@ function SummaryCard({
   value,
   sub,
   info,
+  formula,
   amber,
   good,
 }: {
@@ -423,6 +453,9 @@ function SummaryCard({
   // info renders the hover "i" next to the label, for metrics whose
   // meaning is not obvious from the caption alone (e.g. the УЗЕ optimum).
   info?: string
+  // formula is how the figure is computed (rule + this period's numbers);
+  // it replaces the plain info bubble when given.
+  formula?: Formula
   amber?: boolean
   good?: boolean
 }): ReactNode {
@@ -431,10 +464,16 @@ function SummaryCard({
     <div className={cls}>
       <span className="kpi-label">
         {label}
-        {info ? <OptimumInfo tip={info} /> : null}
+        {info ? <OptimumInfo tip={info} formula={formula} label={label} /> : null}
       </span>
       <span className="kpi-value">{value}</span>
       <span className="kpi-sub">{sub}</span>
     </div>
   )
+}
+
+// SiteRoceTip is the «i» of a row's ROCE: the object's own numbers.
+function SiteRoceTip({ site, money }: { site: EconomicsPortfolioSite; money: Money }): ReactNode {
+  const formula = siteRoceFormula(site, money)
+  return formula ? <FormulaTip label={`ROCE · ${formatOrganizationLabel(site.id)}`} formula={formula} /> : null
 }

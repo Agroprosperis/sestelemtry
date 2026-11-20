@@ -171,12 +171,16 @@ type WriteConfig struct {
 
 // LocalUIConfig is the on-device web console (spec ems_ui_edge_vs_cloud
 // §2: стан + діагностика + emergency override; не повний планувальник).
-// Enabled by default on :8081 — LAN-only by network design, no login
-// (mirrors the mockup; the device sits on the site OT network). Turning
-// SmartLogger writing on takes the device PIN.
+// Enabled by default on :8081, LAN-only by network design. Every request
+// needs the console login (HTTP Basic, set with ems-edge
+// -set-console-password); turning SmartLogger writing on also takes the
+// device PIN.
 type LocalUIConfig struct {
 	Enabled *bool  `yaml:"enabled"`
 	Listen  string `yaml:"listen"`
+	// PasswordPath is the hash of the console login; default next to
+	// the write PIN. No file, no console (503).
+	PasswordPath string `yaml:"password_path"`
 }
 
 // On reports whether the console should run (default true when the
@@ -401,16 +405,34 @@ func LoadConfig(path string) (*Config, error) {
 // same config file without the env-dependent validation (the PIN is set
 // from a shell that lacks the service's environment).
 func WritePinPath(path string) (string, error) {
-	b, err := os.ReadFile(path)
+	c, err := loadConfigUnvalidated(path)
 	if err != nil {
 		return "", err
 	}
-	var c Config
-	if err := yaml.Unmarshal(b, &c); err != nil {
+	return c.Control.Write.PinPath, nil
+}
+
+// ConsolePasswordPath is where the service looks for the console login,
+// read the same way as WritePinPath.
+func ConsolePasswordPath(path string) (string, error) {
+	c, err := loadConfigUnvalidated(path)
+	if err != nil {
 		return "", err
 	}
+	return c.LocalUI.PasswordPath, nil
+}
+
+func loadConfigUnvalidated(path string) (*Config, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var c Config
+	if err := yaml.Unmarshal(b, &c); err != nil {
+		return nil, err
+	}
 	c.applyDefaults()
-	return c.Control.Write.PinPath, nil
+	return &c, nil
 }
 
 func (c *Config) applyDefaults() {
@@ -515,6 +537,9 @@ func (c *Config) applyDefaults() {
 	}
 	if strings.TrimSpace(w.PinPath) == "" {
 		w.PinPath = filepath.Join(filepath.Dir(w.StatePath), "write_pin.json")
+	}
+	if strings.TrimSpace(c.LocalUI.PasswordPath) == "" {
+		c.LocalUI.PasswordPath = filepath.Join(filepath.Dir(w.PinPath), "console_password.json")
 	}
 	if w.InitialHold <= 0 {
 		w.InitialHold = 15 * time.Minute

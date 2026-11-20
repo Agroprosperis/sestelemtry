@@ -255,96 +255,98 @@ export function UsersPage() {
         ) : visibleUsers.length === 0 ? (
           <p className="alerts-muted">Нікого не знайдено за вибраними умовами.</p>
         ) : (
-          <table className="alerts-orgs users-table">
-            <thead>
-              <tr>
-                <th aria-sort={sortKey === 'name' ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}>
-                  <button
-                    type="button"
-                    className={`users-sort-btn${sortKey === 'name' ? ' is-active' : ''}`}
-                    onClick={() => toggleSort('name')}
-                  >
-                    <span>Користувач</span>
-                    <span className="users-sort-arrow" aria-hidden="true">
-                      {sortKey === 'name' ? (sortDir === 'asc' ? '↑' : '↓') : '↕'}
-                    </span>
-                  </button>
-                </th>
-                <th aria-sort={sortKey === 'role' ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}>
-                  <button
-                    type="button"
-                    className={`users-sort-btn${sortKey === 'role' ? ' is-active' : ''}`}
-                    onClick={() => toggleSort('role')}
-                  >
-                    <span>Ролі</span>
-                    <span className="users-sort-arrow" aria-hidden="true">
-                      {sortKey === 'role' ? (sortDir === 'asc' ? '↑' : '↓') : '↕'}
-                    </span>
-                  </button>
-                </th>
-                <th aria-sort={sortKey === 'last_seen' ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}>
-                  <button
-                    type="button"
-                    className={`users-sort-btn${sortKey === 'last_seen' ? ' is-active' : ''}`}
-                    onClick={() => toggleSort('last_seen')}
-                  >
-                    <span>Активність</span>
-                    <span className="users-sort-arrow" aria-hidden="true">
-                      {sortKey === 'last_seen' ? (sortDir === 'asc' ? '↑' : '↓') : '↕'}
-                    </span>
-                  </button>
-                </th>
-                <th>Стан</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {visibleUsers.map((u) => {
-                const lines = grantSummary(u.grants, orgName)
-                const lastSeen = formatLastSeen(u.last_seen_at)
-                return (
-                  <tr key={u.id}>
-                    <td>
-                      <span className="alerts-org-name">{u.name || u.email}</span>
-                      {u.name ? <span className="alerts-org-id">{u.email}</span> : null}
-                    </td>
-                    <td>
-                      {lines.length > 0 ? (
-                        <ul className="users-grants">
-                          {lines.map((line) => (
-                            <li key={line}>{line}</li>
-                          ))}
-                        </ul>
-                      ) : (
-                        <span className="users-muted">без ролей</span>
-                      )}
-                    </td>
-                    <td className="users-last-seen">
-                      {lastSeen ? (
-                        <time dateTime={u.last_seen_at ?? undefined}>{lastSeen}</time>
-                      ) : (
-                        <span className="users-muted">—</span>
-                      )}
-                    </td>
-                    <td>
-                      {u.disabled ? (
-                        <span className="users-status-off">вимкнено</span>
-                      ) : u.must_change_password ? (
-                        <span className="users-status-pending">ще не задав свій пароль</span>
-                      ) : (
-                        'активний'
-                      )}
-                    </td>
-                    <td>
-                      <button type="button" className="alerts-secondary" onClick={() => setEditing(u)}>
-                        Змінити
-                      </button>
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
+          <div className="alerts-table-scroll">
+            <table className="alerts-orgs users-table">
+              <thead>
+                <tr>
+                  <th aria-sort={sortKey === 'name' ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}>
+                    <button
+                      type="button"
+                      className={`users-sort-btn${sortKey === 'name' ? ' is-active' : ''}`}
+                      onClick={() => toggleSort('name')}
+                    >
+                      <span>Користувач</span>
+                      <span className="users-sort-arrow" aria-hidden="true">
+                        {sortKey === 'name' ? (sortDir === 'asc' ? '↑' : '↓') : '↕'}
+                      </span>
+                    </button>
+                  </th>
+                  <th aria-sort={sortKey === 'role' ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}>
+                    <button
+                      type="button"
+                      className={`users-sort-btn${sortKey === 'role' ? ' is-active' : ''}`}
+                      onClick={() => toggleSort('role')}
+                    >
+                      <span>Ролі</span>
+                      <span className="users-sort-arrow" aria-hidden="true">
+                        {sortKey === 'role' ? (sortDir === 'asc' ? '↑' : '↓') : '↕'}
+                      </span>
+                    </button>
+                  </th>
+                  <th aria-sort={sortKey === 'last_seen' ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}>
+                    <button
+                      type="button"
+                      className={`users-sort-btn${sortKey === 'last_seen' ? ' is-active' : ''}`}
+                      onClick={() => toggleSort('last_seen')}
+                    >
+                      <span>Активність</span>
+                      <span className="users-sort-arrow" aria-hidden="true">
+                        {sortKey === 'last_seen' ? (sortDir === 'asc' ? '↑' : '↓') : '↕'}
+                      </span>
+                    </button>
+                  </th>
+                  <th>Стан</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {visibleUsers.map((u) => {
+                  const lines = grantSummary(u.grants, orgName)
+                  const lastSeen = formatLastSeen(u.last_seen_at)
+                  return (
+                    <tr key={u.id}>
+                      <td>
+                        <span className="alerts-org-name">{u.name || u.email}</span>
+                        {u.name ? <span className="alerts-org-id">{u.email}</span> : null}
+                      </td>
+                      <td>
+                        {lines.length > 0 ? (
+                          <ul className="users-grants">
+                            {lines.map((line) => (
+                              <li key={line}>{line}</li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <span className="users-muted">без ролей</span>
+                        )}
+                      </td>
+                      <td className="users-last-seen">
+                        {lastSeen ? (
+                          <time dateTime={u.last_seen_at ?? undefined}>{lastSeen}</time>
+                        ) : (
+                          <span className="users-muted">—</span>
+                        )}
+                      </td>
+                      <td>
+                        {u.disabled ? (
+                          <span className="users-status-off">вимкнено</span>
+                        ) : u.must_change_password ? (
+                          <span className="users-status-pending">ще не задав свій пароль</span>
+                        ) : (
+                          'активний'
+                        )}
+                      </td>
+                      <td>
+                        <button type="button" className="alerts-secondary" onClick={() => setEditing(u)}>
+                          Змінити
+                        </button>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
         )}
       </section>
     </main>

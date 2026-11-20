@@ -76,33 +76,35 @@ export function JournalTab({ site, status }: Props) {
         {events.length === 0 ? (
           <div className="ctl-placeholder">Подій ще немає.</div>
         ) : (
-          <table className="ctl-events-table">
-            <thead>
-              <tr>
-                <th>Час</th>
-                <th>Рівень</th>
-                <th>Код</th>
-                <th>Повідомлення</th>
-              </tr>
-            </thead>
-            <tbody>
-              {events.map((e, i) => (
-                <tr key={`${e.time}-${i}`}>
-                  <td>{fmtTime(e.time)}</td>
-                  <td>
-                    <span className={'ctl-sev ' + e.severity}>{e.severity}</span>
-                  </td>
-                  <td className="mono">
-                    {e.code}
-                    {EVENT_CODE_LABELS[e.code] && (
-                      <div className="ctl-event-code-label">{EVENT_CODE_LABELS[e.code]}</div>
-                    )}
-                  </td>
-                  <td>{e.message}</td>
+          <div className="ctl-table-scroll">
+            <table className="ctl-events-table">
+              <thead>
+                <tr>
+                  <th>Час</th>
+                  <th>Рівень</th>
+                  <th>Код</th>
+                  <th>Повідомлення</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {events.map((e, i) => (
+                  <tr key={`${e.time}-${i}`}>
+                    <td>{fmtTime(e.time)}</td>
+                    <td>
+                      <span className={'ctl-sev ' + e.severity}>{e.severity}</span>
+                    </td>
+                    <td className="mono">
+                      {e.code}
+                      {EVENT_CODE_LABELS[e.code] && (
+                        <div className="ctl-event-code-label">{EVENT_CODE_LABELS[e.code]}</div>
+                      )}
+                    </td>
+                    <td>{e.message}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </section>
     </div>
