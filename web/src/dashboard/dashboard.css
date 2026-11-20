@@ -1928,6 +1928,11 @@
   border-top: 1px solid var(--border);
 }
 
+.energy-tooltip-outage .energy-tooltip-name {
+  color: var(--err-text);
+  font-weight: 600;
+}
+
 /* Why the optimizer chose this hour's action. Wraps onto a couple of
  * lines, so it's capped and set smaller than the value rows above it. */
 .energy-tooltip-reason {

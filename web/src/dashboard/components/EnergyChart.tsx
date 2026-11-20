@@ -30,7 +30,7 @@ import {
   aiPlanHasLoad,
 } from '../transforms/aiPlan'
 import type { DAMChartRow } from '../transforms/dam'
-import type { OutageArea } from '../transforms/outages'
+import { OUTAGE_ROW_KEY, outageKindAt, type OutageArea } from '../transforms/outages'
 import type { PowerChartRow } from '../transforms/power'
 import { pvForecastLabel, type PvForecastHourlyRow } from '../transforms/pvForecast'
 import type { SOCChartRow } from '../transforms/soc'
@@ -75,13 +75,12 @@ type Props = {
 }
 
 const NO_OUTAGES: OutageArea[] = []
-const OUTAGE_KEY = 'planned_outage'
-const OUTAGE_LABEL = 'Відключення (ГПВ)'
 // Muted red for the published schedule, orange for any other outage
 // (emergency, unscheduled); both stay clear of the purple SOC / plan hues.
-const OUTAGE_STYLE: Record<OutageArea['kind'], { color: string; opacity: number }> = {
-  schedule: { color: '#dc2626', opacity: 0.14 },
-  other: { color: '#f97316', opacity: 0.2 },
+// Each kind is its own legend item, hidden on its own.
+const OUTAGE_STYLE: Record<OutageArea['kind'], { key: string; label: string; color: string; opacity: number }> = {
+  schedule: { key: 'planned_outage', label: 'Відключення за графіком', color: '#dc2626', opacity: 0.14 },
+  other: { key: 'other_outage', label: 'Інше відключення', color: '#f97316', opacity: 0.2 },
 }
 
 const DAM_PRICE_KEY = 'dam_price_uah_per_mwh'
@@ -238,6 +237,7 @@ export function EnergyChart({
     }
     const modeByTime = new Map<string, SupplyMode>()
     for (const b of supplySeries ?? []) if (b.mode) modeByTime.set(b.time, b.mode)
+    const lastLabel = String(rows[rows.length - 1]?.time ?? '')
     return rows.map((row, idx) => {
       const merged: PowerChartRow = { ...row }
       const price = priceByTime.get(String(row.time))
@@ -246,6 +246,8 @@ export function EnergyChart({
       if (soc != null && Number.isFinite(soc)) merged[SOC_KEY] = soc
       const mode = modeByTime.get(String(row.time))
       if (mode) merged[SUPPLY_MODE_KEY] = mode
+      const outage = outageAreas.length > 0 ? outageKindAt(outageAreas, String(row.time), lastLabel) : null
+      if (outage) merged[OUTAGE_ROW_KEY] = outage
       const hour = Math.floor(idx / 12)
       const inHour = idx % 12
       if (inHour === PV_FORECAST_BUCKET_OFFSET) {
@@ -270,7 +272,7 @@ export function EnergyChart({
       }
       return merged
     })
-  }, [powerSeries, damSeries, socSeries, pvForecastSeries, planBuckets, supplySeries])
+  }, [powerSeries, damSeries, socSeries, pvForecastSeries, planBuckets, supplySeries, outageAreas])
   const hasSoc = (socSeries ?? []).some((r) => r.soc != null && Number.isFinite(r.soc))
   const hasGen = dayData.some((r) => {
     const v = r[GEN_POWER_KEY]
@@ -279,7 +281,8 @@ export function EnergyChart({
   const hasPvForecast = (pvForecastSeries ?? []).length > 0
   const hasAiPlan = aiPlanHasDispatch(aiPlan ?? null)
   const hasAiLoad = aiPlanHasLoad(aiPlan ?? null)
-  const hasOutages = outageAreas.length > 0
+  const hasScheduleOutages = outageAreas.some((a) => a.kind === 'schedule')
+  const hasOtherOutages = outageAreas.some((a) => a.kind === 'other')
 
   const dayLabels = useMemo(() => dayData.map((r) => String(r.time)), [dayData])
   const hourlyAreas = useMemo(() => hourlyDamAreas(damSeries, dayLabels), [damSeries, dayLabels])
@@ -293,9 +296,9 @@ export function EnergyChart({
   )
   // A day that has not happened yet (the calendar set to tomorrow) has no
   // power telemetry. The chart still draws when a price, a generation
-  // forecast or the recommendation is present.
+  // forecast, the recommendation or a planned outage is present.
   const hasOutlook =
-    hasPvForecast || hourlyAreas.length > 0 || hasAiPlan || hasAiLoad
+    hasPvForecast || hourlyAreas.length > 0 || hasAiPlan || hasAiLoad || outageAreas.length > 0
   const showChart = dayHasData || hasOutlook
   // On a telemetry-less day the recommendation is the chart, not an
   // opt-in overlay, so it starts visible. Leaving that day restores the
@@ -352,11 +355,29 @@ export function EnergyChart({
     if (hasAiPlan) {
       items.push({ id: AI_SOC_KEY, label: aiSocLabel, color: chrome.socPlan })
     }
-    if (hasOutages) {
-      items.push({ id: OUTAGE_KEY, label: OUTAGE_LABEL, color: OUTAGE_STYLE.schedule.color })
+    if (hasScheduleOutages) {
+      const s = OUTAGE_STYLE.schedule
+      items.push({ id: s.key, label: s.label, color: s.color })
+    }
+    if (hasOtherOutages) {
+      const s = OUTAGE_STYLE.other
+      items.push({ id: s.key, label: s.label, color: s.color })
     }
     return items
-  }, [hasSoc, hasGen, hasPvForecast, pvForecastName, hasAiPlan, hasAiLoad, hasOutages, aiEssLabel, aiSocLabel, chrome.soc, chrome.socPlan])
+  }, [
+    hasSoc,
+    hasGen,
+    hasPvForecast,
+    pvForecastName,
+    hasAiPlan,
+    hasAiLoad,
+    hasScheduleOutages,
+    hasOtherOutages,
+    aiEssLabel,
+    aiSocLabel,
+    chrome.soc,
+    chrome.socPlan,
+  ])
 
   const renderDayLegend = useCallback(
     () => (
@@ -457,8 +478,8 @@ export function EnergyChart({
                 )}
                 {/* Planned grid outages: full-height bands on the power axis,
                     drawn first so the price blocks and lines sit on top. */}
-                {!hiddenSeries.has(OUTAGE_KEY) &&
-                  outageAreas.map((a, i) => (
+                {outageAreas.map((a, i) =>
+                  hiddenSeries.has(OUTAGE_STYLE[a.kind].key) ? null : (
                     <ReferenceArea
                       key={`outage-${i}`}
                       yAxisId="power"
@@ -469,7 +490,8 @@ export function EnergyChart({
                       stroke="none"
                       ifOverflow="visible"
                     />
-                  ))}
+                  ),
+                )}
                 {!hiddenSeries.has(DAM_PRICE_KEY) &&
                   hourlyAreas.map((a, i) => (
                     <ReferenceArea

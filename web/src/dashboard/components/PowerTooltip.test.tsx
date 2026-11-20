@@ -221,3 +221,18 @@ describe('PowerTooltip with a generator', () => {
     expect(screen.queryByText('Мережі немає')).toBeNull()
   })
 })
+
+describe('PowerTooltip in a planned outage', () => {
+  it('says the light is off by the schedule', () => {
+    const row = { time: '21:00', planned_outage_kind: 'schedule' }
+    const payload = buildPayload({ active_pv_power_kw: 0, load_power_kw: -20 }).map((e) => ({ ...e, payload: row }))
+    render(<PowerTooltip active label="21:00" payload={payload} />)
+    expect(screen.getByText('За графіком без світла')).toBeInTheDocument()
+  })
+
+  it('says nothing outside one', () => {
+    render(<PowerTooltip active label="13:00" payload={buildPayload({ active_pv_power_kw: 10 })} />)
+    expect(screen.queryByText('За графіком без світла')).toBeNull()
+    expect(screen.queryByText('Відключення світла')).toBeNull()
+  })
+})

@@ -114,3 +114,38 @@ describe('EnergyChart outlook day', () => {
     expect(legendHidden('План УЗЕ (manifest)')).toBe('false')
   })
 })
+
+describe('EnergyChart planned outages', () => {
+  it('draws tomorrow from its outage schedule alone', () => {
+    render(
+      <ThemeProvider>
+        <EnergyChart
+          summary={summary}
+          loading={false}
+          powerSeries={[]}
+          outageAreas={[{ x1: '04:00', x2: '06:00', kind: 'schedule' }]}
+        />
+      </ThemeProvider>,
+    )
+
+    expect(screen.queryByText('No data available for selected range.')).toBeNull()
+    expect(legendHidden('Відключення за графіком')).toBe('false')
+    expect(screen.queryByRole('button', { name: 'Інше відключення' })).toBeNull()
+  })
+
+  it('names an outage off the schedule apart', () => {
+    render(
+      <ThemeProvider>
+        <EnergyChart
+          summary={summary}
+          loading={false}
+          powerSeries={measured}
+          outageAreas={[{ x1: '10:00', x2: '12:00', kind: 'other' }]}
+        />
+      </ThemeProvider>,
+    )
+
+    expect(legendHidden('Інше відключення')).toBe('false')
+    expect(screen.queryByRole('button', { name: 'Відключення за графіком' })).toBeNull()
+  })
+})

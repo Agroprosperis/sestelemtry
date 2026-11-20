@@ -31,8 +31,8 @@ export type UseOutageScheduleResult = {
 
 // useOutageSchedule returns the planned outages of one organization-day.
 // It idles (no request, no intervals) while `enabled` is false — the day
-// chart is the only place that draws them. A failed fetch or an
-// organization with no point reads as no outages: the band is a hint,
+// chart is the only place that draws them. A failed fetch or a station
+// with no e-svitlo cabinet reads as no outages: the band is a hint,
 // never a reason to break the chart.
 export function useOutageSchedule(input: {
   organizationID: string

@@ -7,6 +7,7 @@ import {
   SUPPLY_MODE_LABELS,
   type SupplyMode,
 } from '../transforms/supply'
+import { OUTAGE_ROW_KEY } from '../transforms/outages'
 
 type PowerTooltipEntry = {
   dataKey?: string | number | ((obj: unknown) => unknown)
@@ -31,6 +32,9 @@ const AI_ESS_KEY = 'ai_ess_power_kw'
 const AI_SOC_KEY = 'ai_soc_pct'
 const AI_LOAD_KEY = 'ai_load_kw'
 const AI_REASON_KEY = 'ai_reason_text'
+
+const OUTAGE_TEXT = { schedule: 'За графіком без світла', other: 'Відключення світла' } as const
+const OUTAGE_DOT = { schedule: '#dc2626', other: '#f97316' } as const
 
 // Anything closer to zero than this is treated as "idle" — both the
 // ESS and the grid meter routinely sit at ±tens of watts even when
@@ -119,10 +123,18 @@ export function PowerTooltip({ active, label, payload }: Props) {
   const genEntry = byKey.get(GEN_POWER_KEY)
   const genValue = Number(genEntry?.value)
   const showGen = Number.isFinite(genValue)
+  const outageRaw = payload.find((e) => e.payload?.[OUTAGE_ROW_KEY] != null)?.payload?.[OUTAGE_ROW_KEY]
+  const outage = outageRaw === 'schedule' || outageRaw === 'other' ? outageRaw : null
 
   return (
     <div className="energy-tooltip">
       <div className="energy-tooltip-label">{label}</div>
+      {outage && (
+        <div className="energy-tooltip-row energy-tooltip-outage">
+          <span className="energy-tooltip-dot" style={{ backgroundColor: OUTAGE_DOT[outage] }} />
+          <span className="energy-tooltip-name">{OUTAGE_TEXT[outage]}</span>
+        </div>
+      )}
       {supplyMode && (
         <div className="energy-tooltip-row energy-tooltip-supply">
           <span className="energy-tooltip-name">Живлення</span>

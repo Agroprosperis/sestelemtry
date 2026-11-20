@@ -4,6 +4,10 @@ import type { OutageInterval } from '../../outages/outagesClient'
 // timeline labels ("HH:MM", 5-minute buckets).
 export type OutageArea = { x1: string; x2: string; kind: OutageInterval['kind'] }
 
+// OUTAGE_ROW_KEY carries the outage kind on a day-chart row inside one,
+// for the tooltip.
+export const OUTAGE_ROW_KEY = 'planned_outage_kind'
+
 const KYIV_TZ = 'Europe/Kyiv'
 const BUCKET_MIN = 5
 
@@ -73,4 +77,18 @@ export function outageAreas(
     out.push({ x1, x2, kind: iv.kind })
   }
   return out
+}
+
+// outageKindAt is the kind of the outage a timeline bucket falls in, the
+// published schedule first; null outside every one. A band ends where
+// the light is back, so its last label is not inside it — unless it is
+// the day's last label, which a band only reaches running to midnight.
+export function outageKindAt(areas: OutageArea[], time: string, lastLabel: string): OutageArea['kind'] | null {
+  let kind: OutageArea['kind'] | null = null
+  for (const a of areas) {
+    if (time < a.x1 || (time >= a.x2 && !(a.x2 === lastLabel && time === lastLabel))) continue
+    if (a.kind === 'schedule') return 'schedule'
+    kind = a.kind
+  }
+  return kind
 }
