@@ -1881,125 +1881,87 @@ paths:
                     example: Невірний логін або пароль
         "400":
           description: Invalid settings, no login or password, or the stored password asked to go to another address
-  /api/v1/outage-settings:
+  /api/v1/outage-account:
     get:
-      summary: The e-svitlo cabinets planned outages are read from
-      operationId: getOutageSettings
+      summary: A station's e-svitlo cabinet, its last read and its next outages
+      operationId: getOutageAccount
       description: |
-        Administrators of every organization only. One account per
-        operator (Вінницяобленерго, Сумиобленерго). The password is never
-        returned, only whether one is stored.
+        The station passport's «Відключення e-svitlo». The password is never
+        returned, only whether one is stored. upcoming lists the stored
+        outages of the next 48 hours.
       security:
         - sessionCookie: []
+      parameters:
+        - name: organization_id
+          in: query
+          required: true
+          schema:
+            type: string
       responses:
         "200":
-          description: Accounts and the state of the sync
+          description: The account (saved=false when the station has none)
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  accounts:
-                    type: array
-                    items:
-                      type: object
-                      properties:
-                        host:
-                          type: string
-                          example: vn.e-svitlo.com.ua
-                        name:
-                          type: string
-                        login:
-                          type: string
-                        password_configured:
-                          type: boolean
-                  sync:
-                    type: object
-                    properties:
-                      configured:
-                        type: boolean
-                      last_attempt:
-                        type: string
-                        format: date-time
-                      last_success:
-                        type: string
-                        format: date-time
-                      last_error:
-                        type: string
-        "403":
-          description: Not an administrator of every organization
+                $ref: "#/components/schemas/OutageAccount"
         "503":
           description: Outages not configured in this process
     put:
-      summary: Save the e-svitlo cabinets
-      operationId: putOutageSettings
+      summary: Save a station's e-svitlo cabinet
+      operationId: putOutageAccount
       description: |
-        Wakes the sync. password omitted or null keeps the stored one; an
-        empty string clears it.
+        The station's administrators only. password omitted or null keeps
+        the stored one, for the same cabinet and login only; an empty
+        string clears it. An empty login takes the station off the hourly
+        read, and the outages already read stay. A save wakes the read.
       security:
         - sessionCookie: []
       parameters:
-        - $ref: "#/components/parameters/CSRFHeader"
+        - name: organization_id
+          in: query
+          required: true
+          schema:
+            type: string
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              type: object
-              required: [accounts]
-              properties:
-                accounts:
-                  type: array
-                  items:
-                    type: object
-                    required: [host, login]
-                    properties:
-                      host:
-                        type: string
-                        example: sm.e-svitlo.com.ua
-                      login:
-                        type: string
-                      password:
-                        type: string
-                        nullable: true
-      responses:
-        "204":
-          description: Accounts saved
-        "400":
-          description: Unknown or repeated cabinet
-        "403":
-          description: Not an administrator of every organization
-  /api/v1/outage-settings/test:
-    post:
-      summary: Sign in to a cabinet with the account as typed
-      operationId: testOutageSettings
-      description: |
-        Nothing is saved. Without password the stored one is used. With
-        eic the point's outages are read too.
-      security:
-        - sessionCookie: []
-      parameters:
-        - $ref: "#/components/parameters/CSRFHeader"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [host, login]
-              properties:
-                host:
-                  type: string
-                login:
-                  type: string
-                password:
-                  type: string
-                  nullable: true
-                eic:
-                  type: string
+              $ref: "#/components/schemas/OutageAccountRequest"
       responses:
         "200":
-          description: The cabinet's answer; ok is false with error in plain words when it failed
+          description: The account as saved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OutageAccount"
+        "400":
+          description: Unknown cabinet, no login, bad EIC, or the stored password asked to go with another login
+  /api/v1/outage-account/test:
+    post:
+      summary: Sign in to a station's cabinet and read its outages
+      operationId: testOutageAccount
+      description: |
+        The station's administrators only. Uses the account in the body,
+        not necessarily saved; without a password, the stored one, for the
+        cabinet and login it was saved with only.
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: organization_id
+          in: query
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OutageAccountRequest"
+      responses:
+        "200":
+          description: The outcome; ok=false with error when the cabinet refused or failed
           content:
             application/json:
               schema:
@@ -2013,10 +1975,11 @@ paths:
                     format: date-time
                   signed_in:
                     type: boolean
-                  landing:
-                    type: string
-                  path:
-                    type: string
+                  accounts:
+                    type: array
+                    items:
+                      type: string
+                    description: The legal accounts (a=) the cabinet holds
                   outages:
                     type: array
                     items:
@@ -2025,64 +1988,7 @@ paths:
                     type: string
                     example: Невірний логін або пароль
         "400":
-          description: Unknown cabinet, bad EIC, or no login or password
-  /api/v1/outage-point:
-    get:
-      summary: A station's metering point (EIC) and the last read of its schedule
-      operationId: getOutagePoint
-      security:
-        - sessionCookie: []
-      parameters:
-        - name: organization_id
-          in: query
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          description: The point; saved is false until the passport stored one
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/OutagePoint"
-        "503":
-          description: Outages not configured in this process
-    put:
-      summary: Save a station's metering point
-      operationId: putOutagePoint
-      description: |
-        Wakes the sync. An empty eic and host clear the point.
-      security:
-        - sessionCookie: []
-      parameters:
-        - $ref: "#/components/parameters/CSRFHeader"
-        - name: organization_id
-          in: query
-          required: true
-          schema:
-            type: string
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                eic:
-                  type: string
-                  description: 16 Latin capitals, digits or dashes
-                host:
-                  type: string
-                  example: vn.e-svitlo.com.ua
-      responses:
-        "200":
-          description: The point as saved
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/OutagePoint"
-        "400":
-          description: Bad EIC or unknown cabinet
+          description: Unknown cabinet, no login, bad EIC, or no password
   /api/v1/outages:
     get:
       summary: Planned grid outages overlapping a range of Kyiv days
@@ -2256,15 +2162,24 @@ components:
           type: string
           enum: [schedule, other]
           description: schedule is the hourly outage schedule; other is planned work or an accident
-    OutagePoint:
+        eic:
+          type: string
+          description: The metering point the cabinet named, when it named one
+    OutageAccount:
       type: object
       properties:
         organization_id:
           type: string
-        eic:
-          type: string
         host:
           type: string
+          example: vn.e-svitlo.com.ua
+        login:
+          type: string
+        eic:
+          type: string
+          description: The station's metering point; empty takes the cabinet's whole account
+        password_configured:
+          type: boolean
         saved:
           type: boolean
         read:
@@ -2287,6 +2202,24 @@ components:
                 type: string
               name:
                 type: string
+        upcoming:
+          type: array
+          items:
+            $ref: "#/components/schemas/OutageInterval"
+    OutageAccountRequest:
+      type: object
+      required: [host, login]
+      properties:
+        host:
+          type: string
+        login:
+          type: string
+        eic:
+          type: string
+        password:
+          type: string
+          nullable: true
+          description: Omitted or null keeps the stored one; an empty string clears it
     FxSettings:
       type: object
       properties:

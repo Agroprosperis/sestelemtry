@@ -12,31 +12,31 @@ import (
 	"github.com/nesh/sestelemetry/internal/outages"
 )
 
-// --- Planned grid outages: /api/v1/outage-settings, /api/v1/outage-point,
-// /api/v1/outages ---
+// --- Planned grid outages: /api/v1/outage-account, /api/v1/outages ---
 //
 // The day chart shades the hours a station's operator plans to cut it off.
-// The company's e-svitlo cabinets (one per operator) are set once on the
-// settings page; each station's EIC code on its passport. A background
-// sync (outages.Syncer) keeps outage_intervals filled, and request paths
-// only ever read that table.
+// Each elevator is its own consumer with its own e-svitlo cabinet: the
+// station passport holds the cabinet's login, password and, optionally,
+// the station's EIC. A background sync (outages.Syncer) reads every such
+// cabinet hourly into outage_intervals, and request paths only ever read
+// that table.
 
 const (
-	maxOutageSettingsBody = 4 << 10
-	maxOutagePointBody    = 4 << 10
-	outageTestTimeout     = 30 * time.Second
+	maxOutageAccountBody = 4 << 10
+	outageTestTimeout    = 30 * time.Second
 	// maxOutagesRange bounds GET /outages: the cabinet only lists today
-	// and the days just ahead, so the chart never needs more.
+	// and tomorrow, so the chart never needs more.
 	maxOutagesRange = 3
+	// outageUpcoming is how far ahead the passport lists outages.
+	outageUpcoming = 48 * time.Hour
 )
 
 // outagesStore is the outages' Postgres side as the handlers see it.
 type outagesStore interface {
-	Accounts(ctx context.Context) ([]outages.AccountRow, error)
-	Password(ctx context.Context, host string) (string, error)
+	Account(ctx context.Context, organizationID string) (outages.AccountRow, outages.Read, bool, error)
+	Password(ctx context.Context, organizationID string) (string, error)
 	SaveAccount(ctx context.Context, a outages.Account, password *string) error
-	Point(ctx context.Context, organizationID string) (outages.Point, outages.Read, bool, error)
-	SavePoint(ctx context.Context, p outages.Point) error
+	DeleteAccount(ctx context.Context, organizationID string) error
 	Intervals(ctx context.Context, organizationID string, from, to time.Time) ([]outages.Interval, error)
 }
 
@@ -62,7 +62,7 @@ func (h *Handlers) outagesLocation() *time.Location {
 	return loc
 }
 
-// outagesTestError words a failed cabinet test for the settings page.
+// outagesTestError words a failed cabinet test for the passport.
 func outagesTestError(err error) string {
 	switch {
 	case errors.Is(err, outages.ErrUnauthorized):
@@ -77,264 +77,25 @@ func outagesTestError(err error) string {
 	case errors.Is(err, outages.ErrNoData):
 		// The wrapped detail says what the cabinet sent instead.
 		return "Кабінет відповів не даними про відключення: " + err.Error()
+	case errors.Is(err, outages.ErrNoAccount):
+		return "У кабінеті немає рахунку юридичної особи — вкажіть EIC точки обліку"
 	default:
 		return err.Error()
 	}
 }
 
-// --- Cabinet accounts: /api/v1/outage-settings ---
+// errOutagePasswordElsewhere is a test or save that would use the stored
+// password with a login or cabinet it was not saved for.
+var errOutagePasswordElsewhere = errors.New("збережений пароль — від іншого логіна або кабінету: введіть пароль ще раз")
 
-// OutageAccountJSON is one operator's cabinet as the settings page sees
-// it: the password itself never leaves the server.
-type OutageAccountJSON struct {
-	Host               string `json:"host"`
-	Name               string `json:"name"`
-	Login              string `json:"login"`
-	PasswordConfigured bool   `json:"password_configured"`
-}
+// --- Station account: /api/v1/outage-account ---
 
-// OutageSettingsResponse is the payload of GET /api/v1/outage-settings.
-type OutageSettingsResponse struct {
-	Accounts []OutageAccountJSON `json:"accounts"`
-	Sync     outages.Status      `json:"sync"`
-}
-
-// OutageAccountRequest is one cabinet in PUT /api/v1/outage-settings.
-type OutageAccountRequest struct {
-	Host  string `json:"host"`
-	Login string `json:"login"`
-	// Password omitted or null keeps the stored one, so editing the
-	// login never requires retyping it. An empty string clears it.
-	Password *string `json:"password"`
-}
-
-// OutageSettingsRequest is the body of PUT /api/v1/outage-settings.
-type OutageSettingsRequest struct {
-	Accounts []OutageAccountRequest `json:"accounts"`
-}
-
-// OutageTestRequest is the body of POST /api/v1/outage-settings/test.
-type OutageTestRequest struct {
-	Host     string  `json:"host"`
-	Login    string  `json:"login"`
-	Password *string `json:"password"`
-	// EIC, when given, also reads that point's outages.
-	EIC string `json:"eic"`
-}
-
-// OutageTestResponse reports the cabinet test.
-type OutageTestResponse struct {
-	OK       bool   `json:"ok"`
-	At       string `json:"at"`
-	SignedIn bool   `json:"signed_in"`
-	Landing  string `json:"landing,omitempty"`
-	// Accounts is the legal accounts (a=) the cabinet holds.
-	Accounts []string           `json:"accounts,omitempty"`
-	Path     string             `json:"path,omitempty"`
-	Outages  []outages.Interval `json:"outages"`
-	Error    string             `json:"error,omitempty"`
-}
-
-func (h *Handlers) outageSettings(w http.ResponseWriter, r *http.Request) {
-	if h.outages == nil {
-		http.Error(w, "outages not configured", http.StatusServiceUnavailable)
-		return
-	}
-	switch r.Method {
-	case http.MethodGet:
-		h.getOutageSettings(w, r)
-	case http.MethodPut:
-		h.putOutageSettings(w, r)
-	default:
-		w.Header().Set("Allow", "GET, PUT")
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-	}
-}
-
-func (h *Handlers) getOutageSettings(w http.ResponseWriter, r *http.Request) {
-	rows, err := h.outages.Accounts(r.Context())
-	if err != nil {
-		h.log.Error("api_outage_settings_get", "err", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
-		return
-	}
-	// The store lists every operator, saved or not; keep that order and
-	// never trust it to be complete.
-	byHost := make(map[string]outages.AccountRow, len(rows))
-	for _, a := range rows {
-		byHost[a.Host] = a
-	}
-	resp := OutageSettingsResponse{Accounts: make([]OutageAccountJSON, 0, len(outages.Operators))}
-	for _, op := range outages.Operators {
-		a := byHost[op.Host]
-		resp.Accounts = append(resp.Accounts, OutageAccountJSON{
-			Host:               op.Host,
-			Name:               op.Name,
-			Login:              a.Login,
-			PasswordConfigured: a.PasswordConfigured,
-		})
-	}
-	if h.outagesSync != nil {
-		resp.Sync = h.outagesSync.Status()
-	}
-	writeJSON(w, http.StatusOK, resp)
-}
-
-func (h *Handlers) putOutageSettings(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, maxOutageSettingsBody)
-	defer r.Body.Close()
-	dec := json.NewDecoder(r.Body)
-	dec.DisallowUnknownFields()
-	var req OutageSettingsRequest
-	if err := dec.Decode(&req); err != nil {
-		http.Error(w, fmt.Sprintf("invalid JSON body: %v", err), http.StatusBadRequest)
-		return
-	}
-	// Check every row first so a bad one saves nothing.
-	seen := make(map[string]bool, len(req.Accounts))
-	for i := range req.Accounts {
-		a := &req.Accounts[i]
-		a.Host = strings.TrimSpace(a.Host)
-		a.Login = strings.TrimSpace(a.Login)
-		if _, ok := outages.OperatorFor(a.Host); !ok {
-			http.Error(w, fmt.Sprintf("невідомий кабінет %q", a.Host), http.StatusBadRequest)
-			return
-		}
-		if seen[a.Host] {
-			http.Error(w, fmt.Sprintf("кабінет %q вказано двічі", a.Host), http.StatusBadRequest)
-			return
-		}
-		seen[a.Host] = true
-		if a.Password != nil {
-			// A password pasted from a password manager often carries
-			// a trailing newline.
-			trimmed := strings.TrimSpace(*a.Password)
-			a.Password = &trimmed
-		}
-	}
-	ctx := r.Context()
-	for _, a := range req.Accounts {
-		if err := h.outages.SaveAccount(ctx, outages.Account{Host: a.Host, Login: a.Login}, a.Password); err != nil {
-			h.log.Error("api_outage_settings_put", "host", a.Host, "err", err)
-			http.Error(w, "internal server error", http.StatusInternalServerError)
-			return
-		}
-		h.log.Info("api_outage_settings_saved",
-			"by", principalLabel(r),
-			"host", a.Host,
-			"login", a.Login,
-			"password_changed", a.Password != nil,
-		)
-	}
-	if h.outagesSync != nil {
-		h.outagesSync.Wake()
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// outageSettingsTest signs in to a cabinet with the account in the body —
-// typed on the page, not necessarily saved — and, given an EIC, reads that
-// point's outages. Without a password in the body it uses the stored one.
-//
-//	POST /api/v1/outage-settings/test
-func (h *Handlers) outageSettingsTest(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		w.Header().Set("Allow", "POST")
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	if h.outages == nil {
-		http.Error(w, "outages not configured", http.StatusServiceUnavailable)
-		return
-	}
-	r.Body = http.MaxBytesReader(w, r.Body, maxOutageSettingsBody)
-	defer r.Body.Close()
-	dec := json.NewDecoder(r.Body)
-	dec.DisallowUnknownFields()
-	var req OutageTestRequest
-	if err := dec.Decode(&req); err != nil {
-		http.Error(w, fmt.Sprintf("invalid JSON body: %v", err), http.StatusBadRequest)
-		return
-	}
-	req.Host = strings.TrimSpace(req.Host)
-	req.Login = strings.TrimSpace(req.Login)
-	req.EIC = outages.NormalizeEIC(req.EIC)
-	if _, ok := outages.OperatorFor(req.Host); !ok {
-		http.Error(w, fmt.Sprintf("невідомий кабінет %q", req.Host), http.StatusBadRequest)
-		return
-	}
-	if req.Login == "" {
-		http.Error(w, "вкажіть логін кабінету", http.StatusBadRequest)
-		return
-	}
-	if req.EIC != "" {
-		if err := (outages.Point{EIC: req.EIC, Host: req.Host}).Validate(); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-	}
-	ctx := r.Context()
-	var password string
-	if req.Password != nil {
-		password = strings.TrimSpace(*req.Password)
-	} else {
-		stored, err := h.outages.Password(ctx, req.Host)
-		if err != nil {
-			h.log.Error("api_outage_settings_test", "err", err)
-			http.Error(w, "internal server error", http.StatusInternalServerError)
-			return
-		}
-		password = stored
-	}
-	if password == "" {
-		http.Error(w, "вкажіть пароль кабінету", http.StatusBadRequest)
-		return
-	}
-
-	ctx, cancel := context.WithTimeout(ctx, outageTestTimeout)
-	defer cancel()
-	loc := h.outagesLocation()
-	resp := OutageTestResponse{At: time.Now().In(loc).Format(time.RFC3339), Outages: []outages.Interval{}}
-	probe, err := outages.NewClient(outages.BaseURL(req.Host), req.Login, password, loc, nil).Probe(ctx, req.EIC)
-	resp.SignedIn, resp.Landing, resp.Accounts, resp.Path = probe.SignedIn, probe.Landing, probe.Accounts, probe.Path
-	if probe.Outages != nil {
-		resp.Outages = probe.Outages
-	}
-	if err != nil {
-		resp.Error = outagesTestError(err)
-	} else {
-		resp.OK = true
-	}
-	h.log.Info("api_outage_settings_test", "host", req.Host, "ok", resp.OK)
-	writeJSON(w, http.StatusOK, resp)
-}
-
-// --- Station metering point: /api/v1/outage-point ---
-
-// OutageReadJSON is the outcome of the last read of a point's schedule.
-// Times are empty until the first attempt or success.
+// OutageReadJSON is the outcome of the last read of a station's
+// schedule. Times are empty until the first attempt or success.
 type OutageReadJSON struct {
 	AttemptedAt string `json:"attempted_at,omitempty"`
 	SucceededAt string `json:"succeeded_at,omitempty"`
 	Error       string `json:"error,omitempty"`
-}
-
-// OutagePointResponse is the body of GET/PUT /api/v1/outage-point.
-type OutagePointResponse struct {
-	OrganizationID string `json:"organization_id"`
-	EIC            string `json:"eic"`
-	Host           string `json:"host"`
-	// Saved is false until the passport has stored a point.
-	Saved     bool               `json:"saved"`
-	Read      OutageReadJSON     `json:"read"`
-	Operators []outages.Operator `json:"operators"`
-}
-
-// OutagePointRequest is the body of PUT /api/v1/outage-point. An empty eic
-// and host clear the point.
-type OutagePointRequest struct {
-	EIC  string `json:"eic"`
-	Host string `json:"host"`
 }
 
 func outageReadToJSON(read outages.Read) OutageReadJSON {
@@ -348,11 +109,50 @@ func outageReadToJSON(read outages.Read) OutageReadJSON {
 	return out
 }
 
-// outagePoint serves a station's metering point: the passport page reads
-// and saves it here.
+// OutageAccountResponse is the body of GET/PUT /api/v1/outage-account:
+// the station's cabinet as the passport shows it. The password itself
+// never leaves the server, only whether one is stored.
+type OutageAccountResponse struct {
+	OrganizationID     string `json:"organization_id"`
+	Host               string `json:"host"`
+	Login              string `json:"login"`
+	EIC                string `json:"eic"`
+	PasswordConfigured bool   `json:"password_configured"`
+	// Saved is false until the passport has stored an account.
+	Saved     bool               `json:"saved"`
+	Read      OutageReadJSON     `json:"read"`
+	Operators []outages.Operator `json:"operators"`
+	// Upcoming are the stored outages from now on, for the next 48 hours.
+	Upcoming []outages.Interval `json:"upcoming"`
+}
+
+// OutageAccountRequest is the body of PUT /api/v1/outage-account and of
+// its test. An empty login takes the station off the hourly read.
+type OutageAccountRequest struct {
+	Host  string `json:"host"`
+	Login string `json:"login"`
+	EIC   string `json:"eic"`
+	// Password omitted or null keeps the stored one, so editing the login
+	// or the EIC never requires retyping it. An empty string clears it.
+	Password *string `json:"password"`
+}
+
+// OutageTestResponse reports the cabinet test.
+type OutageTestResponse struct {
+	OK       bool   `json:"ok"`
+	At       string `json:"at"`
+	SignedIn bool   `json:"signed_in"`
+	// Accounts is the legal accounts (a=) the cabinet holds.
+	Accounts []string           `json:"accounts,omitempty"`
+	Outages  []outages.Interval `json:"outages"`
+	Error    string             `json:"error,omitempty"`
+}
+
+// outageAccount serves a station's cabinet: the passport reads and saves
+// it here.
 //
-//	GET|PUT /api/v1/outage-point?organization_id=
-func (h *Handlers) outagePoint(w http.ResponseWriter, r *http.Request) {
+//	GET|PUT /api/v1/outage-account?organization_id=
+func (h *Handlers) outageAccount(w http.ResponseWriter, r *http.Request) {
 	orgID := strings.TrimSpace(r.URL.Query().Get("organization_id"))
 	if orgID == "" {
 		http.Error(w, "organization_id is required", http.StatusBadRequest)
@@ -364,66 +164,207 @@ func (h *Handlers) outagePoint(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodGet:
-		h.getOutagePoint(w, r, orgID)
+		h.getOutageAccount(w, r, orgID)
 	case http.MethodPut:
-		h.putOutagePoint(w, r, orgID)
+		h.putOutageAccount(w, r, orgID)
 	default:
 		w.Header().Set("Allow", "GET, PUT")
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
 }
 
-func (h *Handlers) getOutagePoint(w http.ResponseWriter, r *http.Request, orgID string) {
-	p, read, saved, err := h.outages.Point(r.Context(), orgID)
+func (h *Handlers) getOutageAccount(w http.ResponseWriter, r *http.Request, orgID string) {
+	ctx := r.Context()
+	a, read, saved, err := h.outages.Account(ctx, orgID)
 	if err != nil {
-		h.log.Error("api_outage_point_get", "organization_id", orgID, "err", err)
+		h.log.Error("api_outage_account_get", "organization_id", orgID, "err", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, OutagePointResponse{
-		OrganizationID: orgID,
-		EIC:            p.EIC,
-		Host:           p.Host,
-		Saved:          saved,
-		Read:           outageReadToJSON(read),
-		Operators:      outages.Operators,
-	})
-}
-
-func (h *Handlers) putOutagePoint(w http.ResponseWriter, r *http.Request, orgID string) {
-	var req OutagePointRequest
-	// Unknown fields are allowed: the page may send back what GET gave it.
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxOutagePointBody)).Decode(&req); err != nil {
-		http.Error(w, "не вдалося прочитати дані точки обліку: "+err.Error(), http.StatusBadRequest)
+	loc := h.outagesLocation()
+	now := time.Now()
+	upcoming, err := h.outages.Intervals(ctx, orgID, now, now.Add(outageUpcoming))
+	if err != nil {
+		h.log.Error("api_outage_account_upcoming", "organization_id", orgID, "err", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
-	p := outages.Point{
-		OrganizationID: orgID,
-		EIC:            outages.NormalizeEIC(req.EIC),
-		Host:           strings.TrimSpace(req.Host),
+	resp := OutageAccountResponse{
+		OrganizationID:     orgID,
+		Host:               a.Host,
+		Login:              a.Login,
+		EIC:                a.EIC,
+		PasswordConfigured: a.PasswordConfigured,
+		Saved:              saved,
+		Read:               outageReadToJSON(read),
+		Operators:          outages.Operators,
+		Upcoming:           make([]outages.Interval, 0, len(upcoming)),
 	}
-	// Both empty clears the point; anything else must be askable.
-	if p.EIC != "" || p.Host != "" {
-		if err := p.Validate(); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+	for _, iv := range upcoming {
+		iv.Start, iv.End = iv.Start.In(loc), iv.End.In(loc)
+		resp.Upcoming = append(resp.Upcoming, iv)
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func decodeOutageAccount(w http.ResponseWriter, r *http.Request, orgID string) (outages.Account, *string, error) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxOutageAccountBody)
+	defer r.Body.Close()
+	var req OutageAccountRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		return outages.Account{}, nil, fmt.Errorf("не вдалося прочитати дані кабінету: %v", err)
+	}
+	a := outages.Account{
+		OrganizationID: orgID,
+		Host:           strings.TrimSpace(req.Host),
+		Login:          strings.TrimSpace(req.Login),
+		EIC:            outages.NormalizeEIC(req.EIC),
+	}
+	password := req.Password
+	if password != nil {
+		// A password pasted from a password manager often carries a
+		// trailing newline, and the refusal it causes says nothing about it.
+		trimmed := strings.TrimSpace(*password)
+		password = &trimmed
+	}
+	return a, password, nil
+}
+
+func (h *Handlers) putOutageAccount(w http.ResponseWriter, r *http.Request, orgID string) {
+	a, password, err := decodeOutageAccount(w, r, orgID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	ctx := r.Context()
+	if a.Login == "" {
+		if err := h.outages.DeleteAccount(ctx, orgID); err != nil {
+			h.log.Error("api_outage_account_delete", "organization_id", orgID, "err", err)
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+			return
+		}
+		h.log.Info("api_outage_account_deleted", "by", principalLabel(r), "organization_id", orgID)
+		h.getOutageAccount(w, r, orgID)
+		return
+	}
+	if err := a.Validate(); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if password == nil {
+		if err := h.outagePasswordStays(ctx, a); err != nil {
+			h.writeOutagePasswordError(w, "api_outage_account_put", orgID, err)
 			return
 		}
 	}
-	if err := h.outages.SavePoint(r.Context(), p); err != nil {
-		h.log.Error("api_outage_point_save", "organization_id", orgID, "err", err)
+	if err := h.outages.SaveAccount(ctx, a, password); err != nil {
+		h.log.Error("api_outage_account_save", "organization_id", orgID, "err", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 	if h.outagesSync != nil {
 		h.outagesSync.Wake()
 	}
-	h.log.Info("api_outage_point_saved",
+	h.log.Info("api_outage_account_saved",
 		"by", principalLabel(r),
 		"organization_id", orgID,
-		"host", p.Host,
-		"eic", p.EIC,
+		"host", a.Host,
+		"login", a.Login,
+		"eic", a.EIC,
+		"password_changed", password != nil,
 	)
-	h.getOutagePoint(w, r, orgID)
+	h.getOutageAccount(w, r, orgID)
+}
+
+// outagePasswordStays refuses to keep a stored password for a login or
+// cabinet other than the one it was saved with.
+func (h *Handlers) outagePasswordStays(ctx context.Context, a outages.Account) error {
+	stored, _, saved, err := h.outages.Account(ctx, a.OrganizationID)
+	if err != nil {
+		return err
+	}
+	if saved && stored.PasswordConfigured && (stored.Host != a.Host || stored.Login != a.Login) {
+		return errOutagePasswordElsewhere
+	}
+	return nil
+}
+
+func (h *Handlers) writeOutagePasswordError(w http.ResponseWriter, route, orgID string, err error) {
+	if errors.Is(err, errOutagePasswordElsewhere) {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	h.log.Error(route, "organization_id", orgID, "err", err)
+	http.Error(w, "internal server error", http.StatusInternalServerError)
+}
+
+// outageAccountTest signs in to a cabinet with the account in the body —
+// typed on the passport, not necessarily saved — and reads its outages.
+// Without a password in the body it uses the station's stored one, for
+// the login and cabinet it was saved with only.
+//
+//	POST /api/v1/outage-account/test?organization_id=
+func (h *Handlers) outageAccountTest(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", "POST")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	orgID := strings.TrimSpace(r.URL.Query().Get("organization_id"))
+	if orgID == "" {
+		http.Error(w, "organization_id is required", http.StatusBadRequest)
+		return
+	}
+	if h.outages == nil {
+		http.Error(w, "outages not configured", http.StatusServiceUnavailable)
+		return
+	}
+	a, password, err := decodeOutageAccount(w, r, orgID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := a.Validate(); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	ctx := r.Context()
+	var secret string
+	if password != nil {
+		secret = *password
+	} else {
+		if err := h.outagePasswordStays(ctx, a); err != nil {
+			h.writeOutagePasswordError(w, "api_outage_account_test", orgID, err)
+			return
+		}
+		if secret, err = h.outages.Password(ctx, orgID); err != nil {
+			h.log.Error("api_outage_account_test", "organization_id", orgID, "err", err)
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+			return
+		}
+	}
+	if secret == "" {
+		http.Error(w, "вкажіть пароль кабінету", http.StatusBadRequest)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, outageTestTimeout)
+	defer cancel()
+	loc := h.outagesLocation()
+	resp := OutageTestResponse{At: time.Now().In(loc).Format(time.RFC3339), Outages: []outages.Interval{}}
+	probe, err := outages.NewClient(outages.BaseURL(a.Host), a.Login, secret, loc, nil).Probe(ctx, a.EIC)
+	resp.SignedIn, resp.Accounts = probe.SignedIn, probe.Accounts
+	for _, iv := range probe.Outages {
+		iv.Start, iv.End = iv.Start.In(loc), iv.End.In(loc)
+		resp.Outages = append(resp.Outages, iv)
+	}
+	if err != nil {
+		resp.Error = outagesTestError(err)
+	} else {
+		resp.OK = true
+	}
+	h.log.Info("api_outage_account_test", "organization_id", orgID, "host", a.Host, "ok", resp.OK)
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // --- Intervals: /api/v1/outages ---

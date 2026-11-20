@@ -132,7 +132,7 @@ func main() {
 		log.Error("db_init_fx_rates", "err", err)
 		os.Exit(1)
 	}
-	// E-svitlo cabinet accounts, station EICs and planned outages.
+	// The stations' e-svitlo cabinet accounts and planned outages.
 	// Idempotent; mirrored by 027_outages.sql.
 	if err := storage.InitOutagesSchema(ctx, pool); err != nil {
 		log.Error("db_init_outages", "err", err)
@@ -284,9 +284,10 @@ func main() {
 	svc.SetFxRates(fxStore, fxSync)
 	go fxSync.Run(ctx)
 
-	// Planned grid outages: each station's EIC is asked of the company's
-	// e-svitlo cabinet every 15 minutes. Like the rates, the sync rereads
-	// accounts and points on every pass and idles until they are filled in.
+	// Planned grid outages: every hour each station whose passport holds
+	// an e-svitlo cabinet is read, and a save on a passport wakes the read
+	// at once. Like the rates, the sync rereads the accounts on every pass
+	// and idles until one is filled in.
 	outagesStore := storage.NewOutagesStore(pool)
 	outagesSync := outages.NewSyncer(outagesStore, kyiv, log)
 	svc.SetOutages(outagesStore, outagesSync)

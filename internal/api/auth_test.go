@@ -210,6 +210,19 @@ func TestAuthRouteMatrix(t *testing.T) {
 		{"engineer", http.MethodPut, "/api/v1/pv-plan-settings", denied},
 		{"", http.MethodGet, "/api/v1/pv-plan-settings", anon},
 
+		// A station's e-svitlo cabinet: its passport shows it, only its
+		// admin sets or tests the login; the chart reads the outages.
+		{"control", http.MethodGet, "/api/v1/outage-account?organization_id=ze", ok},
+		{"control", http.MethodPut, "/api/v1/outage-account?organization_id=ze", denied},
+		{"control", http.MethodPost, "/api/v1/outage-account/test?organization_id=ze", denied},
+		{"engineer", http.MethodGet, "/api/v1/outage-account?organization_id=ze", denied},
+		{"admin", http.MethodPut, "/api/v1/outage-account?organization_id=ze", ok},
+		{"admin", http.MethodPost, "/api/v1/outage-account/test?organization_id=ze", ok},
+		{"admin", http.MethodPut, "/api/v1/outage-account?organization_id=pe", denied},
+		{"global", http.MethodPut, "/api/v1/outage-account?organization_id=pe", ok},
+		{"engineer", http.MethodGet, "/api/v1/outages?organization_id=ze&from=2026-11-20&to=2026-11-21", ok},
+		{"engineer", http.MethodGet, "/api/v1/outages?organization_id=pe&from=2026-11-20&to=2026-11-21", denied},
+
 		{"economist", http.MethodPost, "/api/v1/chat?organization_id=ze", ok},
 		{"economist", http.MethodPost, "/api/v1/chat?organization_id=ab", denied},
 		{"engineer", http.MethodPost, "/api/v1/chat?organization_id=ze", ok},

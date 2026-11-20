@@ -174,12 +174,10 @@ func (h *Handlers) routes() []route {
 		// The daily rates themselves: the economics page converts CAPEX
 		// by them.
 		{"/api/v1/fx-rates", h.fxRates, need(onAnyOrg(auth.PermEconomicsRead))},
-		// The company's e-svitlo cabinets (planned grid outages) are one
-		// account per operator, shared by every station.
-		{"/api/v1/outage-settings", h.outageSettings, globalOnly},
-		{"/api/v1/outage-settings/test", h.outageSettingsTest, globalOnly},
-		// A station's EIC lives on its passport, like the PV orientations.
-		{"/api/v1/outage-point", h.outagePoint, need(passport).on(http.MethodPut, technical)},
+		// A station's e-svitlo cabinet lives on its passport. Its login and
+		// password are the elevator's, so only its admin sets or tests them.
+		{"/api/v1/outage-account", h.outageAccount, need(passport).on(http.MethodPut, service)},
+		{"/api/v1/outage-account/test", h.outageAccountTest, need(service)},
 		// The day chart shades the planned outages.
 		{"/api/v1/outages", h.outagesList, need(day)},
 		// Without organization_id the test goes to the default list,

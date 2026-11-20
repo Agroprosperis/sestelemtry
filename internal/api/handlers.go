@@ -105,7 +105,7 @@ type Handlers struct {
 	// background. nil serves economics in UAH only.
 	fx     fxStore
 	fxSync fxSyncer
-	// outages holds the e-svitlo cabinet accounts, station EIC codes and
+	// outages holds the stations' e-svitlo cabinet accounts and their
 	// planned outage intervals; outagesSync fills it in the background.
 	// nil answers the outage routes 503.
 	outages     outagesStore

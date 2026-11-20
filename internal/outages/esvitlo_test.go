@@ -291,13 +291,26 @@ func TestClientKeepsTheAccountsOutagesForASiteEIC(t *testing.T) {
 	}
 }
 
-func TestValidatePoint(t *testing.T) {
-	p := Point{OrganizationID: "ab", EIC: NormalizeEIC("62z1234567890123"), Host: "vn.e-svitlo.com.ua"}
-	if err := p.Validate(); err != nil {
+func TestValidateAccount(t *testing.T) {
+	a := Account{OrganizationID: "ab", Host: "vn.e-svitlo.com.ua", Login: "a@b.c", EIC: NormalizeEIC("62z1234567890123")}
+	if err := a.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	p.EIC = "короткий"
-	if err := p.Validate(); err == nil {
+	// The EIC may stay empty: the cabinet's whole account is the station's.
+	a.EIC = ""
+	if err := a.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	a.EIC = "короткий"
+	if err := a.Validate(); err == nil {
 		t.Fatal("want eic error")
+	}
+	a.EIC, a.Login = "", ""
+	if err := a.Validate(); err == nil {
+		t.Fatal("want login error")
+	}
+	a.Login, a.Host = "a@b.c", "example.com"
+	if err := a.Validate(); err == nil {
+		t.Fatal("want host error")
 	}
 }

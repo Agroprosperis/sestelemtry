@@ -9,20 +9,23 @@ import (
 	"time"
 )
 
-// SyncEvery is how often the API process re-reads every point's schedule.
-const SyncEvery = 15 * time.Minute
+// SyncEvery is how often the API process rereads every station's
+// schedule. The operators publish today's and tomorrow's hours and change
+// them during the day, rarely more than hourly.
+const SyncEvery = time.Hour
 
-// Store is the Postgres side of accounts, points and intervals.
+// Store is the Postgres side of the stations' accounts and outages.
 type Store interface {
 	Accounts(ctx context.Context) ([]AccountRow, error)
-	Password(ctx context.Context, host string) (string, error)
-	Points(ctx context.Context) ([]Point, error)
-	ReplaceIntervals(ctx context.Context, organizationID string, list []Interval, read Read) error
+	Password(ctx context.Context, organizationID string) (string, error)
+	// ReplaceIntervals stores a successful read: the station's intervals
+	// starting at or after from become list, earlier ones stay.
+	ReplaceIntervals(ctx context.Context, organizationID string, from time.Time, list []Interval, read Read) error
 	MarkRead(ctx context.Context, organizationID string, read Read) error
 }
 
-// AccountRow is one cabinet as stored: login plus whether a password is set.
-// The password itself is only Password(host).
+// AccountRow is a station's account as stored: the account plus whether
+// a password is set. The password itself is only Password(org).
 type AccountRow struct {
 	Account
 	PasswordConfigured bool `json:"password_configured"`
@@ -34,17 +37,20 @@ func (a AccountRow) Configured() bool {
 	return a.Login != "" && a.PasswordConfigured && ok
 }
 
-// Status is what the settings page shows about the sync.
+// Status is the last pass over all stations, for the logs and the
+// passport.
 type Status struct {
 	Configured  bool      `json:"configured"`
+	Stations    int       `json:"stations"`
 	LastAttempt time.Time `json:"last_attempt"`
 	LastSuccess time.Time `json:"last_success"`
 	LastError   string    `json:"last_error,omitempty"`
 }
 
-// Syncer keeps outage_intervals filled for every saved EIC: today and
-// tomorrow in Kyiv. It rereads accounts and points each pass, so a save
-// on the settings or passport page takes effect without a restart.
+// Syncer reads, every hour, the planned outages of each station whose
+// passport holds a cabinet account, and stores them with the outcome of
+// the read. It rereads the accounts each pass, so a save on a passport
+// takes effect without a restart; Wake runs a pass at once.
 type Syncer struct {
 	store      Store
 	loc        *time.Location
@@ -60,7 +66,7 @@ type Syncer struct {
 	idleLogged bool
 }
 
-// NewSyncer builds a sync over store; wall-clock days are in loc.
+// NewSyncer builds a sync over store; days are civil days in loc.
 func NewSyncer(store Store, loc *time.Location, log *slog.Logger) *Syncer {
 	if log == nil {
 		log = slog.Default()
@@ -109,97 +115,114 @@ func (s *Syncer) Run(ctx context.Context) {
 	}
 }
 
-// SyncOnce runs one pass. Idle (nil error) when no cabinet is configured
-// or no station has an EIC yet.
+// cabinet is the stations that sign in with the same credentials: one
+// sign-in serves them all.
+type cabinet struct {
+	host, login, password string
+	stations              []AccountRow
+}
+
+// SyncOnce reads every configured station once. It returns the first
+// error after trying them all, nil when none is configured.
 func (s *Syncer) SyncOnce(ctx context.Context) error {
-	accounts, err := s.store.Accounts(ctx)
+	rows, err := s.store.Accounts(ctx)
 	if err != nil {
 		return err
 	}
-	points, err := s.store.Points(ctx)
-	if err != nil {
-		return err
-	}
-	byHost := map[string][]Point{}
-	for _, p := range points {
-		if p.EIC == "" || p.Host == "" {
-			continue
-		}
-		byHost[p.Host] = append(byHost[p.Host], p)
-	}
-	configured := false
-	for _, a := range accounts {
-		if a.Configured() && len(byHost[a.Host]) > 0 {
-			configured = true
-			break
+	var configured []AccountRow
+	for _, a := range rows {
+		if a.Configured() {
+			configured = append(configured, a)
 		}
 	}
 	s.mu.Lock()
-	announce := !configured && !s.idleLogged
-	s.idleLogged = !configured
-	s.status.Configured = configured
+	announce := len(configured) == 0 && !s.idleLogged
+	s.idleLogged = len(configured) == 0
+	s.status.Configured = len(configured) > 0
+	s.status.Stations = len(configured)
 	s.mu.Unlock()
-	if !configured {
+	if len(configured) == 0 {
 		if announce {
-			s.log.Info("outages_sync_not_configured", "hint", "fill in e-svitlo cabinets and station EIC codes")
+			s.log.Info("outages_sync_not_configured", "hint", "set an e-svitlo cabinet on a station passport")
 		}
 		return nil
 	}
 
 	attempt := s.now()
 	var firstErr error
-	for _, a := range accounts {
-		if !a.Configured() {
-			continue
+	keep := func(err error) {
+		if err != nil && firstErr == nil {
+			firstErr = err
 		}
-		list := byHost[a.Host]
-		if len(list) == 0 {
-			continue
-		}
-		if err := s.syncAccount(ctx, a, list, attempt); err != nil {
-			if firstErr == nil {
-				firstErr = err
-			}
-			s.log.Warn("outages_sync_account", "host", a.Host, "err", err)
+	}
+	cabinets, err := s.cabinets(ctx, configured)
+	if err != nil {
+		return err
+	}
+	for _, c := range cabinets {
+		keep(s.syncCabinet(ctx, c, attempt))
+		if ctx.Err() != nil {
+			return ctx.Err()
 		}
 	}
 	s.mark(attempt, firstErr)
 	return firstErr
 }
 
-func (s *Syncer) syncAccount(ctx context.Context, a AccountRow, points []Point, attempt time.Time) error {
-	password, err := s.store.Password(ctx, a.Host)
-	if err != nil {
-		return err
+// cabinets groups the stations by the credentials they sign in with.
+func (s *Syncer) cabinets(ctx context.Context, stations []AccountRow) ([]*cabinet, error) {
+	byKey := map[string]*cabinet{}
+	var out []*cabinet
+	for _, a := range stations {
+		password, err := s.store.Password(ctx, a.OrganizationID)
+		if err != nil {
+			return nil, err
+		}
+		key := a.Host + "\x00" + a.Login + "\x00" + password
+		c, ok := byKey[key]
+		if !ok {
+			c = &cabinet{host: a.Host, login: a.Login, password: password}
+			byKey[key] = c
+			out = append(out, c)
+		}
+		c.stations = append(c.stations, a)
 	}
-	client := s.newClient(BaseURL(a.Host), a.Login, password, s.loc, s.httpClient)
+	return out, nil
+}
+
+func (s *Syncer) syncCabinet(ctx context.Context, c *cabinet, attempt time.Time) error {
+	client := s.newClient(BaseURL(c.host), c.login, c.password, s.loc, s.httpClient)
 	if err := client.SignIn(ctx); err != nil {
-		for _, p := range points {
-			_ = s.store.MarkRead(ctx, p.OrganizationID, Read{AttemptedAt: attempt, Error: err.Error()})
+		for _, a := range c.stations {
+			s.fail(ctx, a, attempt, err)
 		}
 		return err
 	}
+	local := attempt.In(s.loc)
+	dayStart := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, s.loc)
 	var firstErr error
-	for _, p := range points {
-		if err := s.syncPoint(ctx, client, p, attempt); err != nil && firstErr == nil {
-			firstErr = err
+	for _, a := range c.stations {
+		list, err := client.Outages(ctx, a.EIC)
+		if err == nil {
+			err = s.store.ReplaceIntervals(ctx, a.OrganizationID, dayStart, list, Read{AttemptedAt: attempt, SucceededAt: attempt})
 		}
+		if err != nil {
+			s.fail(ctx, a, attempt, err)
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		s.log.Info("outages_read", "organization_id", a.OrganizationID, "host", c.host, "intervals", len(list))
 	}
 	return firstErr
 }
 
-func (s *Syncer) syncPoint(ctx context.Context, client *Client, p Point, attempt time.Time) error {
-	list, err := client.Outages(ctx, p.EIC)
-	if err != nil {
-		_ = s.store.MarkRead(ctx, p.OrganizationID, Read{AttemptedAt: attempt, Error: err.Error()})
-		return err
+func (s *Syncer) fail(ctx context.Context, a AccountRow, attempt time.Time, err error) {
+	s.log.Warn("outages_read_failed", "organization_id", a.OrganizationID, "host", a.Host, "err", err)
+	if merr := s.store.MarkRead(ctx, a.OrganizationID, Read{AttemptedAt: attempt, Error: err.Error()}); merr != nil {
+		s.log.Warn("outages_mark_read_failed", "organization_id", a.OrganizationID, "err", merr)
 	}
-	read := Read{AttemptedAt: attempt, SucceededAt: attempt}
-	if err := s.store.ReplaceIntervals(ctx, p.OrganizationID, list, read); err != nil {
-		_ = s.store.MarkRead(ctx, p.OrganizationID, Read{AttemptedAt: attempt, Error: err.Error()})
-		return err
-	}
-	return nil
 }
 
 func (s *Syncer) mark(attempt time.Time, err error) {

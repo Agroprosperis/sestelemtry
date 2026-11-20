@@ -3,10 +3,11 @@
 // before they happen.
 //
 // Vinnytsiaoblenergo and Sumyoblenergo run their consumer cabinets on the
-// e-svitlo platform: the console signs in to the company's cabinet once
-// per operator, and the cabinet answers a metering point's planned
-// outages by its EIC code. The operators' public schedule sites sit
-// behind a bot check this package does not get round.
+// e-svitlo platform. Each elevator is its own consumer with its own
+// cabinet: the console signs in with the login its passport holds, and
+// the cabinet lists the outages of that consumer's metering points. The
+// operators' public schedule sites sit behind a bot check this package
+// does not get round.
 package outages
 
 import (
@@ -39,20 +40,16 @@ func OperatorFor(host string) (Operator, bool) {
 	return Operator{}, false
 }
 
-// Account is the company's cabinet at one operator: the login it signs in
-// with (email or phone). The password is stored and passed apart, so
-// every read of it is a call a reviewer can grep.
+// Account is a station's cabinet: the operator it is at, the login it
+// signs in with (email or phone) and, for a cabinet that lists more than
+// the station, the EIC of the station's metering point. The password is
+// stored and passed apart, so every read of it is a call a reviewer can
+// grep.
 type Account struct {
-	Host  string `json:"host"`
-	Login string `json:"login"`
-}
-
-// Point is a station's metering point: its EIC code and the operator
-// whose cabinet knows it.
-type Point struct {
 	OrganizationID string `json:"organization_id"`
-	EIC            string `json:"eic"`
 	Host           string `json:"host"`
+	Login          string `json:"login"`
+	EIC            string `json:"eic"`
 }
 
 // eicRe is an EIC code: 16 Latin capitals, digits or dashes. A Cyrillic
@@ -65,14 +62,17 @@ func NormalizeEIC(s string) string {
 	return strings.ToUpper(strings.TrimSpace(s))
 }
 
-// Validate refuses a point the cabinet could not be asked about. Messages
-// are shown to the engineer as-is.
-func (p Point) Validate() error {
-	if !eicRe.MatchString(p.EIC) {
-		return errors.New("EIC — 16 латинських літер і цифр, як у договорі, наприклад 62Z…")
+// Validate refuses an account the cabinet could not be asked with.
+// Messages are shown on the passport as-is.
+func (a Account) Validate() error {
+	if _, ok := OperatorFor(a.Host); !ok {
+		return fmt.Errorf("невідомий кабінет %q", a.Host)
 	}
-	if _, ok := OperatorFor(p.Host); !ok {
-		return fmt.Errorf("невідомий кабінет %q", p.Host)
+	if a.Login == "" {
+		return errors.New("вкажіть логін кабінету: email або телефон")
+	}
+	if a.EIC != "" && !eicRe.MatchString(a.EIC) {
+		return errors.New("EIC — 16 латинських літер і цифр, як у договорі, наприклад 62Z…")
 	}
 	return nil
 }
@@ -97,7 +97,7 @@ type Interval struct {
 	EIC string `json:"eic,omitempty"`
 }
 
-// Read is the outcome of the last time a point's schedule was read.
+// Read is the outcome of the last time a station's schedule was read.
 type Read struct {
 	AttemptedAt time.Time `json:"attempted_at"`
 	SucceededAt time.Time `json:"succeeded_at"`
