@@ -40,6 +40,7 @@ import { PHONE_QUERY, useMediaQuery } from '../../shell/useMediaQuery'
 import { useChartChrome } from '../../theme/useChartChrome'
 import { ChartSkeleton } from './ChartSkeleton'
 import { EnergySummary } from './EnergySummary'
+import { OutageIcon, OutageMarkers } from './OutageMarker'
 import { PowerTooltip } from './PowerTooltip'
 
 type Props = {
@@ -75,12 +76,12 @@ type Props = {
 }
 
 const NO_OUTAGES: OutageArea[] = []
-// Muted red for the published schedule, orange for any other outage
+// Red for the published schedule, orange for any other outage
 // (emergency, unscheduled); both stay clear of the purple SOC / plan hues.
 // Each kind is its own legend item, hidden on its own.
-const OUTAGE_STYLE: Record<OutageArea['kind'], { key: string; label: string; color: string; opacity: number }> = {
-  schedule: { key: 'planned_outage', label: 'Відключення за графіком', color: '#dc2626', opacity: 0.14 },
-  other: { key: 'other_outage', label: 'Інше відключення', color: '#f97316', opacity: 0.2 },
+const OUTAGE_STYLE: Record<OutageArea['kind'], { key: string; label: string; color: string }> = {
+  schedule: { key: 'planned_outage', label: 'Відключення за графіком', color: '#dc2626' },
+  other: { key: 'other_outage', label: 'Інше відключення', color: '#f97316' },
 }
 
 const DAM_PRICE_KEY = 'dam_price_uah_per_mwh'
@@ -283,6 +284,13 @@ export function EnergyChart({
   const hasAiLoad = aiPlanHasLoad(aiPlan ?? null)
   const hasScheduleOutages = outageAreas.some((a) => a.kind === 'schedule')
   const hasOtherOutages = outageAreas.some((a) => a.kind === 'other')
+  const outageMarks = useMemo(
+    () =>
+      outageAreas
+        .filter((a) => !hiddenSeries.has(OUTAGE_STYLE[a.kind].key))
+        .map((a) => ({ x1: a.x1, x2: a.x2, color: OUTAGE_STYLE[a.kind].color })),
+    [outageAreas, hiddenSeries],
+  )
 
   const dayLabels = useMemo(() => dayData.map((r) => String(r.time)), [dayData])
   const hourlyAreas = useMemo(() => hourlyDamAreas(damSeries, dayLabels), [damSeries, dayLabels])
@@ -330,7 +338,8 @@ export function EnergyChart({
   // component type and y-axis, which puts SOC at the front and shuffles
   // power lines, so we render the legend ourselves via `Legend.content`.
   const dayLegendItems = useMemo(() => {
-    type Item = { id: string; label: string; color: string }
+    // outage items wear the chart's outage icon instead of a swatch.
+    type Item = { id: string; label: string; color: string; outage?: boolean }
     const items: Item[] = DAY_POWER_METRIC_KEYS.map((key) => ({
       id: key,
       label: DAY_POWER_METRIC_LABELS[key] ?? key,
@@ -357,11 +366,11 @@ export function EnergyChart({
     }
     if (hasScheduleOutages) {
       const s = OUTAGE_STYLE.schedule
-      items.push({ id: s.key, label: s.label, color: s.color })
+      items.push({ id: s.key, label: s.label, color: s.color, outage: true })
     }
     if (hasOtherOutages) {
       const s = OUTAGE_STYLE.other
-      items.push({ id: s.key, label: s.label, color: s.color })
+      items.push({ id: s.key, label: s.label, color: s.color, outage: true })
     }
     return items
   }, [
@@ -393,7 +402,13 @@ export function EnergyChart({
                 title={hidden ? 'Показати' : 'Сховати'}
                 onClick={() => toggleSeries(item.id)}
               >
-                <span className="chart-legend-swatch" style={{ background: item.color }} />
+                {item.outage ? (
+                  <span className="chart-legend-icon">
+                    <OutageIcon color={item.color} size={12} />
+                  </span>
+                ) : (
+                  <span className="chart-legend-swatch" style={{ background: item.color }} />
+                )}
                 <span className="chart-legend-label">{item.label}</span>
               </button>
             </li>
@@ -475,22 +490,6 @@ export function EnergyChart({
                     isAnimationActive={false}
                     connectNulls
                   />
-                )}
-                {/* Planned grid outages: full-height bands on the power axis,
-                    drawn first so the price blocks and lines sit on top. */}
-                {outageAreas.map((a, i) =>
-                  hiddenSeries.has(OUTAGE_STYLE[a.kind].key) ? null : (
-                    <ReferenceArea
-                      key={`outage-${i}`}
-                      yAxisId="power"
-                      x1={a.x1}
-                      x2={a.x2}
-                      fill={OUTAGE_STYLE[a.kind].color}
-                      fillOpacity={OUTAGE_STYLE[a.kind].opacity}
-                      stroke="none"
-                      ifOverflow="visible"
-                    />
-                  ),
                 )}
                 {!hiddenSeries.has(DAM_PRICE_KEY) &&
                   hourlyAreas.map((a, i) => (
@@ -653,6 +652,9 @@ export function EnergyChart({
                   hide={hiddenSeries.has(DAM_PRICE_KEY)}
                   isAnimationActive={false}
                 />
+                {/* Planned grid outages: an icon at the top of the plot over
+                    each, drawn last so the lines pass under it. */}
+                <OutageMarkers marks={outageMarks} />
               </ComposedChart>
             </ResponsiveContainer>
         )}

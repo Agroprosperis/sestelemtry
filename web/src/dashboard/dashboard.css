@@ -1824,6 +1824,11 @@
   flex: 0 0 auto;
 }
 
+.chart-legend-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
 .energy-tooltip {
   background: var(--bg-elevated);
   backdrop-filter: blur(6px);

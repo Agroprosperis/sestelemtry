@@ -1,5 +1,5 @@
 import { cloneElement, type ReactElement } from 'react'
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import type { UzePlanResponse } from '../../api'
 import { ThemeProvider } from '../../theme/theme'
@@ -117,7 +117,7 @@ describe('EnergyChart outlook day', () => {
 
 describe('EnergyChart planned outages', () => {
   it('draws tomorrow from its outage schedule alone', () => {
-    render(
+    const { container } = render(
       <ThemeProvider>
         <EnergyChart
           summary={summary}
@@ -129,6 +129,7 @@ describe('EnergyChart planned outages', () => {
     )
 
     expect(screen.queryByText('No data available for selected range.')).toBeNull()
+    expect(container.querySelectorAll('.outage-marker')).toHaveLength(1)
     expect(legendHidden('Відключення за графіком')).toBe('false')
     expect(screen.queryByRole('button', { name: 'Інше відключення' })).toBeNull()
   })
@@ -147,5 +148,29 @@ describe('EnergyChart planned outages', () => {
 
     expect(legendHidden('Інше відключення')).toBe('false')
     expect(screen.queryByRole('button', { name: 'Відключення за графіком' })).toBeNull()
+  })
+
+  it('marks each outage with an icon at the top, gone once hidden in the legend', () => {
+    const wholeDay: PowerChartRow[] = Array.from({ length: 288 }, (_, i) => ({
+      time: `${String(Math.floor(i / 12)).padStart(2, '0')}:${String((i % 12) * 5).padStart(2, '0')}`,
+      active_pv_power_kw: 12,
+    }))
+    const { container } = render(
+      <ThemeProvider>
+        <EnergyChart
+          summary={summary}
+          loading={false}
+          powerSeries={wholeDay}
+          outageAreas={[
+            { x1: '04:00', x2: '06:00', kind: 'schedule' },
+            { x1: '10:00', x2: '12:00', kind: 'schedule' },
+          ]}
+        />
+      </ThemeProvider>,
+    )
+
+    expect(container.querySelectorAll('.outage-marker')).toHaveLength(2)
+    fireEvent.click(screen.getByRole('button', { name: 'Відключення за графіком' }))
+    expect(container.querySelectorAll('.outage-marker')).toHaveLength(0)
   })
 })
