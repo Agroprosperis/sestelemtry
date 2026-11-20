@@ -185,6 +185,11 @@ type EconomicsDailyResponse struct {
 	FxRate        float64 `json:"fx_rate,omitempty"`
 	FxCarried     bool    `json:"fx_carried,omitempty"`
 	FxProvisional bool    `json:"fx_provisional,omitempty"`
+
+	// Tariff is the tariff version in force that day, which its prices
+	// were built from — in UAH whatever Currency is. Absent for a group,
+	// whose members each have their own.
+	Tariff *OrgTariffs `json:"tariff,omitempty"`
 }
 
 // fxWindowJSON is how a period response reports its currency: the
@@ -324,6 +329,13 @@ func (h *Handlers) economicsDaily(w http.ResponseWriter, r *http.Request) {
 		Reconciliation: day.Totals.Reconciliation,
 		ComputedAt:     computedAtJSON(computedAt),
 		Currency:       view.code(),
+	}
+	if t, ok, err := h.economics.TariffsForDay(r.Context(), orgID, dayStart); err != nil {
+		// The breakdown falls back to the tariff form; the day still serves.
+		h.log.Warn("api_economics_daily_tariff", "organization_id", orgID, "date", dateStr, "err", err)
+	} else if ok {
+		tariff := economicsToOrgTariffs(t)
+		resp.Tariff = &tariff
 	}
 	if !view.uah() {
 		rate, carried := view.rate(dayStart)

@@ -303,6 +303,32 @@ func orgTariffsToEconomics(t OrgTariffs) economics.Tariffs {
 	}
 }
 
+// economicsToOrgTariffs is orgTariffsToEconomics the other way. The
+// display-only fields (CAPEX, planned payback) are not the engine's and
+// stay zero.
+func economicsToOrgTariffs(t economics.Tariffs) OrgTariffs {
+	return OrgTariffs{
+		DistributionUahPerKwh:   t.DistributionUahPerKwh,
+		TransmissionUahPerKwh:   t.TransmissionUahPerKwh,
+		SupplierMarginUahPerKwh: t.SupplierMarginUahPerKwh,
+		SupplierMarginMode:      t.SupplierMarginMode,
+		SupplierMarginPct:       t.SupplierMarginPct,
+		OtherFeesUahPerKwh:      t.OtherFeesUahPerKwh,
+		ExportDiscount:          t.ExportDiscount,
+		DegradationUahPerKwh:    t.DegradationUahPerKwh,
+		IncludeVat:              t.IncludeVat,
+		VatRate:                 t.VatRate,
+		EssCapacityKwh:          t.EssCapacityKwh,
+		EssPowerLimitKw:         t.EssPowerLimitKw,
+		RoundtripEfficiency:     t.RoundtripEfficiency,
+
+		GenFuelPriceUahPerL:       t.GenFuelPriceUahPerL,
+		GenFuelMethod:             t.GenFuelMethod,
+		GenFuelConsumptionLPerKwh: t.GenFuelConsumptionLPerKwh,
+		GenFuelConsumptionLPerH:   t.GenFuelConsumptionLPerH,
+	}
+}
+
 func hourRowToStorage(orgID string, r *economics.HourRow) storage.EconomicsHourlyRow {
 	return storage.EconomicsHourlyRow{
 		OrganizationID: orgID,

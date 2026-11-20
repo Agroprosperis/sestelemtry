@@ -235,6 +235,24 @@ func (s *Service) ComputeDay(ctx context.Context, orgID, date, tz string) (Store
 	return day, nil
 }
 
+// TariffsForDay returns the tariffs a day is computed with: the version
+// of the org's schedule in force on dayStart, else DefaultTariffs. ok is
+// false for a group, whose members each have their own.
+func (s *Service) TariffsForDay(ctx context.Context, orgID string, dayStart time.Time) (Tariffs, bool, error) {
+	if _, ok := s.groupOf(orgID); ok {
+		return Tariffs{}, false, nil
+	}
+	schedule, err := s.backend.TariffSchedule(ctx, orgID)
+	if err != nil {
+		return Tariffs{}, false, fmt.Errorf("tariff schedule: %w", err)
+	}
+	t, ok := schedule.ResolveForDay(dayStart)
+	if !ok {
+		t = DefaultTariffs
+	}
+	return t, true, nil
+}
+
 // GetDay returns economics for one day, read-through: a stored final day
 // is served from cache; a missing or non-final day is recomputed (and
 // persisted) on read.

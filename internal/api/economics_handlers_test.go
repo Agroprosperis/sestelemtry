@@ -79,6 +79,30 @@ func TestEconomicsDailyReportsComputedAt(t *testing.T) {
 	}
 }
 
+// datedTariffBackend is a stored day with two tariff versions around it.
+type datedTariffBackend struct{ storedDayBackend }
+
+func (datedTariffBackend) TariffSchedule(context.Context, string) (economics.Schedule, error) {
+	return economics.Schedule{
+		{EffectiveFrom: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), Tariffs: economics.Tariffs{DistributionUahPerKwh: 2.5, EssCapacityKwh: 516}},
+		{EffectiveFrom: time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC), Tariffs: economics.Tariffs{DistributionUahPerKwh: 3.1, EssCapacityKwh: 1032}},
+	}, nil
+}
+
+// A day says which tariff version it was priced with, so the page splits
+// its costs by that version and not by whatever the form holds now.
+func TestEconomicsDailyCarriesTheDaysTariff(t *testing.T) {
+	h := NewHandlers(&mockStore{}, "*")
+	h.SetEconomicsService(economics.NewService(datedTariffBackend{}))
+	code, day := getJSON[EconomicsDailyResponse](t, h, "/api/v1/economics/daily?organization_id=ze&date=2026-03-10&tz=Europe/Kyiv")
+	if code != http.StatusOK || day.Tariff == nil {
+		t.Fatalf("status %d, tariff %+v", code, day.Tariff)
+	}
+	if day.Tariff.DistributionUahPerKwh != 2.5 || day.Tariff.EssCapacityKwh != 516 {
+		t.Fatalf("tariff = %+v, want the version from 2026-01-01", *day.Tariff)
+	}
+}
+
 func TestEconomicsMonthlyUnconfigured(t *testing.T) {
 	h := NewHandlers(&mockStore{}, "*")
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/economics/monthly?organization_id=org-a&month=2026-06", nil)
