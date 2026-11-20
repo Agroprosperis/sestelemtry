@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { fetchOutages, type OutageInterval } from '../../outages/outagePointClient'
+import { fetchOutages, type OutageInterval } from '../../outages/outagesClient'
 import { outageAreas, type OutageArea } from '../transforms/outages'
 import { forecastDayFromAnchor } from '../transforms/pvForecast'
 

@@ -13,7 +13,6 @@ import { Dashboard } from './dashboard/Dashboard'
 import { EconomicsPage } from './economics/EconomicsPage'
 import { FxSettingsPage } from './economics/FxSettingsPage'
 import { ImportPage } from './import/ImportPage'
-import { OutageSettingsPage } from './outages/OutageSettingsPage'
 import { replaceView } from './shell/navigation'
 import { PvPlanSettingsPage } from './station/PvPlanSettingsPage'
 import { StationPage } from './station/StationPage'
@@ -39,7 +38,6 @@ function readView(): View {
   if (view === 'ai') return 'ai'
   if (view === 'pvplan') return 'pvplan'
   if (view === 'fx') return 'fx'
-  if (view === 'esvitlo') return 'esvitlo'
   // The standalone planner was replaced by the desk in the control
   // mode's «План УЗЕ» tab; old ?view=planner links (bookmarks,
   // dashboard header) land there. The URL is normalised so
@@ -155,9 +153,6 @@ function renderView(view: View) {
   }
   if (view === 'fx') {
     return <FxSettingsPage />
-  }
-  if (view === 'esvitlo') {
-    return <OutageSettingsPage />
   }
   return <Dashboard />
 }

@@ -530,6 +530,17 @@
   border-radius: 8px;
 }
 
+.outage-days {
+  margin: 4px 0 12px;
+  padding-left: 18px;
+  font-size: 0.88rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.pvplan-notice .outage-days {
+  margin-bottom: 0;
+}
+
 .pvplan-journal summary {
   cursor: pointer;
   font-size: 0.9rem;

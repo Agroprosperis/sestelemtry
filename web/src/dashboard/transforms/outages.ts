@@ -1,4 +1,4 @@
-import type { OutageInterval } from '../../outages/outagePointClient'
+import type { OutageInterval } from '../../outages/outagesClient'
 
 // OutageArea is one planned outage as a band on the day chart: x1/x2 are
 // timeline labels ("HH:MM", 5-minute buckets).

@@ -63,31 +63,17 @@ export type AppView =
   | 'ai'
   | 'pvplan'
   | 'fx'
-  | 'esvitlo'
 
 // The first view a user may open is where they land.
-const VIEW_ORDER: AppView[] = [
-  'dashboard',
-  'economics',
-  'control',
-  'station',
-  'import',
-  'alerts',
-  'users',
-  'ai',
-  'pvplan',
-  'fx',
-  'esvitlo',
-]
+const VIEW_ORDER: AppView[] = ['dashboard', 'economics', 'control', 'station', 'import', 'alerts', 'users', 'ai', 'pvplan', 'fx']
 
 // users, ai (the assistant's settings), pvplan (where the PV plan comes
-// from), fx (the ERP account the exchange rates come from) and esvitlo
-// (the e-svitlo cabinets planned outages are read from) serve every
+// from) and fx (the ERP account the exchange rates come from) serve every
 // organization, so only administrators of all of them open those. Any
 // one listed permission opens a view.
-type GlobalView = 'users' | 'ai' | 'pvplan' | 'fx' | 'esvitlo'
+type GlobalView = 'users' | 'ai' | 'pvplan' | 'fx'
 
-const GLOBAL_VIEWS: readonly AppView[] = ['users', 'ai', 'pvplan', 'fx', 'esvitlo'] satisfies GlobalView[]
+const GLOBAL_VIEWS: readonly AppView[] = ['users', 'ai', 'pvplan', 'fx'] satisfies GlobalView[]
 
 const isGlobalView = (view: AppView): view is GlobalView => GLOBAL_VIEWS.includes(view)
 
