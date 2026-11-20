@@ -15,6 +15,15 @@ import { EconomicsOverviewRow } from '../components/EconomicsOverviewRow'
 import { ExportButton } from '../components/ExportButton'
 import { FormulaTip } from '../components/FormulaTip'
 import { explain, type Formula } from '../formula'
+import {
+  balanceFormulas,
+  financeFigures,
+  financeFormulas,
+  heatmapFormula,
+  periodColumnFormulas,
+  type FinanceLeg,
+  type FlowId,
+} from './financeFormulas'
 import { ExplainButton } from '../../chat/ExplainButton'
 import { formatOrganizationLabel } from '../../dashboard/config'
 import { useMoney, type Money } from '../currency'
@@ -43,9 +52,11 @@ import {
   importPriceUahPerKwh,
   PERIOD_WORDS,
   type PeriodScope,
+  type ReserveKey,
   signClass,
   unitCostUahPerKwh,
 } from './rollup'
+import { panelFormulas } from './reserveFormulas'
 import { exportFileName, monthDetailSheet } from '../exportSheets'
 import { tipLeft } from '../tipPosition'
 import { downloadXlsx } from '../xlsx'
@@ -97,21 +108,16 @@ export function EconomicsMonthlyView({ data, organizationID, prior, pvPlan, cape
 
 // --- Finance breakdown + mini grid ---
 
+// MonthlyFinance is «Фінансова розкладка»: the two sides of EBITDA —
+// what the project earned and saved, and what charging the battery cost
+// — so «Дохід» − «Витрати» is the EBITDA beside them. The battery wear,
+// which EBITDA leaves out, is shown under the expenses, outside their sum.
 export function MonthlyFinance({ totals, scope = 'month' }: { totals: EconomicsMonthlyTotals; scope?: PeriodScope }) {
   const money = useMoney()
   const w = PERIOD_WORDS[scope]
-  const revenueLines = [
-    { label: 'СЕС → споживання', amount: totals.revenue_pv_self_uah },
-    { label: 'СЕС → мережа', amount: totals.revenue_pv_export_uah },
-    { label: 'УЗЕ → споживання', amount: totals.revenue_ess_self_uah },
-    { label: 'УЗЕ → мережа', amount: totals.revenue_ess_export_uah },
-  ]
-  const expenseLines = [
-    { label: 'Заряд УЗЕ із мережі', amount: totals.expense_grid_charge_uah },
-    { label: 'Знос / ресурс УЗЕ', amount: Math.max(totals.ess_degradation_cost_uah, 0) },
-  ]
-  const expenseTotal = expenseLines.reduce((acc, l) => acc + l.amount, 0)
-  const savingShare = totals.baseline_cost_uah > 0 ? totals.ebitda_uah / totals.baseline_cost_uah : 0
+  const fig = financeFigures(totals)
+  const ff = financeFormulas(totals, money, scope)
+  const { revenueLegs, expenseLegs, expenseTotal, wear, savingShare } = fig
 
   return (
     <section className="economics-card economics-month-section" aria-label={`Фінансова розкладка ${w.per}`}>
@@ -123,23 +129,55 @@ export function MonthlyFinance({ totals, scope = 'month' }: { totals: EconomicsM
         </div>
       </div>
       <div className="economics-finance">
-        <FinanceBox title="Дохід / економія" total={totals.revenue_total_uah} lines={revenueLines} />
-        <FinanceBox title="Витрати" total={expenseTotal} lines={expenseLines} />
+        <FinanceBox
+          title="Дохід / економія"
+          total={totals.revenue_total_uah}
+          lines={revenueLegs}
+          formula={ff.revenue}
+          legs={ff.legs}
+        />
+        <FinanceBox
+          title="Витрати"
+          total={expenseTotal}
+          lines={expenseLegs}
+          formula={ff.expenses}
+          legs={ff.legs}
+          aside={
+            wear > 0 ? (
+              <div className="economics-metric-row economics-month-muted">
+                <span>
+                  Знос УЗЕ — поза EBITDA
+                  <FormulaTip label="Знос УЗЕ" formula={ff.wear} />
+                </span>
+                <span className="economics-money">{money.format(wear)}</span>
+                <span />
+              </div>
+            ) : null
+          }
+        />
       </div>
       <div className="economics-month-mini-grid">
-        <MiniCard label="EBITDA" value={money.format(totals.ebitda_uah)} note={`${formatPercent(savingShare)} від бази`} good />
+        <MiniCard
+          label="EBITDA"
+          value={money.format(totals.ebitda_uah)}
+          note={`${formatPercent(savingShare)} від бази`}
+          good
+          formula={ff.ebitda}
+        />
         <MiniCard
           label="Найкращий день"
           value={money.format(totals.best_day.effect_uah)}
           note={totals.best_day.date ? formatDayLabel(totals.best_day.date) : '—'}
           good
+          formula={ff.bestDay}
         />
         <MiniCard
           label="Мінімальний ефект"
           value={money.format(totals.min_effect_day.effect_uah)}
           note={totals.min_effect_day.date ? formatDayLabel(totals.min_effect_day.date) : '—'}
+          formula={ff.minDay}
         />
-        <MiniCard label="Розряд УЗЕ" value={formatMwh(totals.ess_discharged_kwh)} note={w.per} />
+        <MiniCard label="Розряд УЗЕ" value={formatMwh(totals.ess_discharged_kwh)} note={w.per} formula={ff.discharge} />
       </div>
     </section>
   )
@@ -149,34 +187,64 @@ function FinanceBox({
   title,
   total,
   lines,
+  formula,
+  legs,
+  aside,
 }: {
   title: string
   total: number
-  lines: { label: string; amount: number }[]
+  lines: FinanceLeg[]
+  // formula is the box total's; legs holds each line's by its key.
+  formula?: Formula
+  legs?: Record<string, Formula>
+  // aside renders under the lines, outside the total.
+  aside?: ReactNode
 }) {
   const money = useMoney()
   return (
     <div className="economics-finance-box">
       <div className="economics-finance-title">
-        <span>{title}</span>
+        <span>
+          {title}
+          {formula ? <FormulaTip label={title} formula={formula} /> : null}
+        </span>
         <span>{money.format(total)}</span>
         <span>100%</span>
       </div>
       {lines.map((line) => (
-        <div key={line.label} className="economics-metric-row">
-          <span>{line.label}</span>
+        <div key={line.key} className="economics-metric-row">
+          <span>
+            {line.label}
+            {legs?.[line.key] ? <FormulaTip label={line.label} formula={legs[line.key]} /> : null}
+          </span>
           <span className="economics-money">{money.format(line.amount)}</span>
           <span className="economics-month-muted">{formatShare(line.amount, total)}</span>
         </div>
       ))}
+      {aside}
     </div>
   )
 }
 
-function MiniCard({ label, value, note, good }: { label: string; value: string; note: string; good?: boolean }) {
+function MiniCard({
+  label,
+  value,
+  note,
+  good,
+  formula,
+}: {
+  label: string
+  value: string
+  note: string
+  good?: boolean
+  formula?: Formula
+}) {
   return (
     <div className="economics-month-mini">
-      <span className="economics-month-mini-label">{label}</span>
+      <span className="economics-month-mini-label">
+        {label}
+        {formula ? <FormulaTip label={label} formula={formula} /> : null}
+      </span>
       <span className={good ? 'economics-month-mini-value good' : 'economics-month-mini-value'}>{value}</span>
       <span className="economics-month-mini-note">{note}</span>
     </div>
@@ -203,7 +271,11 @@ export function OptimumInfo({ tip, label, formula }: { tip: string; label?: stri
 // AiPanel model (see buildAiPanel in ./rollup) and are reused by the
 // annual view.
 
-export function AiLead({ panel }: { panel: AiPanel }) {
+// ReserveFormulas are the reserve figures' formulas, by the key the panel
+// model tags them with.
+type ReserveFormulas = Partial<Record<ReserveKey, Formula>>
+
+export function AiLead({ panel, formulas }: { panel: AiPanel; formulas?: ReserveFormulas }) {
   return (
     <div className="economics-ai-lead">
       <div className="economics-ai-lead-text">
@@ -228,35 +300,47 @@ export function AiLead({ panel }: { panel: AiPanel }) {
         {panel.weatherNote ? <p className="economics-ai-weather-note">{panel.weatherNote}</p> : null}
       </div>
       <div className="economics-ai-result">
-        {panel.result.map((r) => (
-          <div key={r.label} className="economics-ai-result-row">
-            <span>{r.label}</span>
-            <strong className={r.amber ? 'economics-ai-amber' : undefined}>{r.value}</strong>
-          </div>
-        ))}
+        {panel.result.map((r) => {
+          const formula = r.reserve ? formulas?.[r.reserve] : undefined
+          return (
+            <div key={r.label} className="economics-ai-result-row">
+              <span>
+                {r.label}
+                {formula ? <FormulaTip label={r.label} formula={formula} /> : null}
+              </span>
+              <strong className={r.amber ? 'economics-ai-amber' : undefined}>{r.value}</strong>
+            </div>
+          )
+        })}
       </div>
     </div>
   )
 }
 
-export function AiCardGrid({ cards }: { cards: AiCard[] }) {
+export function AiCardGrid({ cards, formulas }: { cards: AiCard[]; formulas?: ReserveFormulas }) {
   return (
     <div className="economics-ai-grid">
-      {cards.map((c) => (
-        <div key={c.title} className={`economics-ai-card ${c.variant}`}>
-          <span className="economics-ai-status">{c.status}</span>
-          <h4 className="economics-ai-card-title">{c.title}</h4>
-          <div className="economics-ai-impact">{c.impact}</div>
-          <div className="economics-ai-action">{c.action}</div>
-          {c.chips.length > 0 ? (
-            <div className="economics-ai-days">
-              {c.chips.map((chip) => (
-                <span key={chip}>{chip}</span>
-              ))}
+      {cards.map((c) => {
+        const formula = c.reserve ? formulas?.[c.reserve] : undefined
+        return (
+          <div key={c.title} className={`economics-ai-card ${c.variant}`}>
+            <span className="economics-ai-status">{c.status}</span>
+            <h4 className="economics-ai-card-title">{c.title}</h4>
+            <div className="economics-ai-impact">
+              {c.impact}
+              {formula ? <FormulaTip label={c.title} formula={formula} /> : null}
             </div>
-          ) : null}
-        </div>
-      ))}
+            <div className="economics-ai-action">{c.action}</div>
+            {c.chips.length > 0 ? (
+              <div className="economics-ai-days">
+                {c.chips.map((chip) => (
+                  <span key={chip}>{chip}</span>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        )
+      })}
     </div>
   )
 }
@@ -349,6 +433,7 @@ function MonthlyAiAnalysis({
         : null
     return buildAiPanel(totals, { heading, scope: 'month', periodLabel: formatMonthTitle(month), weakest, money })
   }, [totals, heading, month, money])
+  const reserves = panelFormulas(totals, money)
 
   return (
     <section className="economics-card economics-month-section economics-ai" aria-label="AI-аналіз місяця">
@@ -363,8 +448,8 @@ function MonthlyAiAnalysis({
         <span className="economics-ai-badge">управлінський висновок</span>
       </div>
 
-      <AiLead panel={panel} />
-      <AiCardGrid cards={panel.cards} />
+      <AiLead panel={panel} formulas={reserves} />
+      <AiCardGrid cards={panel.cards} formulas={reserves} />
 
       <EssDataQualityNote dq={totals.ess_data_quality} />
 
@@ -387,7 +472,7 @@ function MonthlyAiAnalysis({
 type BalanceSegClass = 'green' | 'blue' | 'amber' | 'violet' | 'red'
 type TipLine = { k: string; v: string }
 type BalanceSeg = { cls: BalanceSegClass; kwh: number; title: string; lines: TipLine[] }
-type BalanceBar = { name: string; total: number; segs: BalanceSeg[] }
+type BalanceBar = { name: string; total: number; segs: BalanceSeg[]; formula: Formula }
 type SegTip = { title: string; lines: TipLine[]; x: number; y: number }
 type FlowMode = 'detail' | 'source' | 'destination'
 
@@ -399,6 +484,7 @@ export function MonthlyBalance({ totals, scope = 'month' }: { totals: EconomicsM
   const w = PERIOD_WORDS[scope]
   const [flowMode, setFlowMode] = useState<FlowMode>('detail')
   const [tip, setTip] = useState<SegTip | null>(null)
+  const bf = balanceFormulas(totals, money, scope)
 
   // Sources entering the object boundary.
   const sourcesTotal = totals.pv_kwh + totals.grid_import_kwh
@@ -419,6 +505,7 @@ export function MonthlyBalance({ totals, scope = 'month' }: { totals: EconomicsM
     {
       name: 'Джерела',
       total: sourcesTotal,
+      formula: bf.sources,
       segs: [
         {
           cls: 'green',
@@ -445,6 +532,7 @@ export function MonthlyBalance({ totals, scope = 'month' }: { totals: EconomicsM
     {
       name: 'Напрямки',
       total: checkTotal,
+      formula: bf.directions,
       segs: [
         {
           cls: 'amber',
@@ -528,7 +616,10 @@ export function MonthlyBalance({ totals, scope = 'month' }: { totals: EconomicsM
       <div className="economics-month-balance">
         {bars.map((bar) => (
           <div className="economics-balance-row" key={bar.name}>
-            <strong className="economics-balance-name">{bar.name}</strong>
+            <strong className="economics-balance-name">
+              {bar.name}
+              <FormulaTip label={bar.name} formula={bar.formula} />
+            </strong>
             <div className="economics-balance-bar">
               {bar.segs.map((s) => (
                 <BalanceSegment
@@ -562,7 +653,10 @@ export function MonthlyBalance({ totals, scope = 'month' }: { totals: EconomicsM
               <tr>
                 <th>Потік</th>
                 <th>МВт·год</th>
-                <th>Частка</th>
+                <th>
+                  Частка
+                  <FormulaTip label="Частка потоку" formula={bf.flowShare} />
+                </th>
                 <th>Фін. ефект</th>
               </tr>
             </thead>
@@ -577,6 +671,7 @@ export function MonthlyBalance({ totals, scope = 'month' }: { totals: EconomicsM
                   <td>{formatShare(f.kwh, flowTotalKwh)}</td>
                   <td className={`cell-${f.cls === 'good' ? 'positive' : f.cls === 'bad' ? 'negative' : 'neutral'}`}>
                     {money.format(f.effect)}
+                    <FormulaTip label={`Фін. ефект: ${f.label}`} formula={bf.flowEffects[f.id as FlowId]} />
                   </td>
                 </tr>
               ))}
@@ -588,7 +683,10 @@ export function MonthlyBalance({ totals, scope = 'month' }: { totals: EconomicsM
               <tr>
                 <th>{flowMode === 'source' ? 'Джерело' : 'Призначення'}</th>
                 <th>МВт·год</th>
-                <th>Частка</th>
+                <th>
+                  Частка
+                  <FormulaTip label="Частка потоку" formula={bf.flowShare} />
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -691,7 +789,15 @@ export function MonthlyHeatmap({ margins }: { margins: EconomicsMonthlyDayMargin
       <div className="economics-month-section-head">
         <h3 className="economics-month-section-title">
           Heatmap: маржинальність УЗЕ
-          <OptimumInfo tip={HEATMAP_TIP} />
+          <OptimumInfo
+            tip={HEATMAP_TIP}
+            label="Маржинальність УЗЕ"
+            formula={heatmapFormula(
+              margins.map((r) => r.hours),
+              money,
+              'month',
+            )}
+          />
         </h3>
         <span className="economics-month-muted">{money.priceUnit} розряду</span>
       </div>
@@ -794,6 +900,7 @@ function MonthlyDailyTable({
   const money = useMoney()
   const pvSelf = totals.pv_to_load_kwh + totals.pv_to_ess_kwh
   const selfShare = totals.pv_kwh > 0 ? pvSelf / totals.pv_kwh : 0
+  const columnFormulas = periodColumnFormulas(totals, money, 'month')
   return (
     <section id="economics-detail-table" className="economics-table-wrap" aria-label="Денна деталізація місяця">
       <div className="economics-month-section-head">
@@ -820,6 +927,7 @@ function MonthlyDailyTable({
               {columns(money).map((c) => (
                 <th key={c.label}>
                   {c.label}
+                  {columnFormulas[c.label] ? <FormulaTip label={c.label} formula={columnFormulas[c.label]} /> : null}
                   {c.unit ? <small>{c.unit}</small> : null}
                 </th>
               ))}

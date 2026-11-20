@@ -2,7 +2,9 @@ import { useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { EconomicsUzeCycle, EconomicsUzeCycleChart } from '../../api'
 import { useChartChrome } from '../../theme/useChartChrome'
+import { FormulaTip } from '../components/FormulaTip'
 import { useMoney, type Money } from '../currency'
+import { cycleFormulas } from './reserveFormulas'
 
 // Колірна палітра серій (порт client_js/uze_cycle_chart.js).
 const C = {
@@ -286,6 +288,7 @@ function CycleChartSvg({ chart }: { chart: EconomicsUzeCycleChart }) {
 
   const optS = m.optS
   const factS = m.factS
+  const cf = cycleFormulas(chart, (v) => fmtMoney(v, cur))
 
   return (
     <div className="uze-layout">
@@ -300,10 +303,34 @@ function CycleChartSvg({ chart }: { chart: EconomicsUzeCycleChart }) {
           <div className="uze-wf-row total"><span>Чистий оптимум</span><strong>{fmtMoney(optS?.effect || 0, cur)}</strong></div>
         </div>
         <div className="uze-compare-box">
-          <div><span className="lbl">Факт</span><strong className="fact">{fmtMoney(factS?.effect || 0, cur)}</strong></div>
-          <div><span className="lbl">Оптимум</span><strong className="opt">{fmtMoney(optS?.effect || 0, cur)}</strong></div>
-          <div><span className="lbl">Резерв</span><strong className="bad">{fmtMoney(m.reserve, cur)}</strong></div>
-          <div><span className="lbl">Захоплено</span><strong>{m.captured}%</strong></div>
+          <div>
+            <span className="lbl">
+              Факт
+              <FormulaTip label="Факт УЗЕ за цикл" formula={cf.fact} />
+            </span>
+            <strong className="fact">{fmtMoney(factS?.effect || 0, cur)}</strong>
+          </div>
+          <div>
+            <span className="lbl">
+              Оптимум
+              <FormulaTip label="Оптимум УЗЕ за цикл" formula={cf.optimum} />
+            </span>
+            <strong className="opt">{fmtMoney(optS?.effect || 0, cur)}</strong>
+          </div>
+          <div>
+            <span className="lbl">
+              Резерв
+              <FormulaTip label="Резерв УЗЕ за цикл" formula={cf.reserve} />
+            </span>
+            <strong className="bad">{fmtMoney(m.reserve, cur)}</strong>
+          </div>
+          <div>
+            <span className="lbl">
+              Захоплено
+              <FormulaTip label="Захоплено оптимуму" formula={cf.captured} />
+            </span>
+            <strong>{m.captured}%</strong>
+          </div>
         </div>
         <p className="uze-chart-foot">
           Заряд за цикл: {fmtN(optS?.charge_pv_kwh || 0)} кВт·год з СЕС
