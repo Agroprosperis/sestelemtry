@@ -5,7 +5,17 @@ import { useMoney } from '../currency'
 import { explain, type Formula } from '../formula'
 import { formatDuration, fuelMethodLabel, hasRollupGen, rollupOffgridMinutes } from '../generatorText'
 import { formatMwh, formatPercent } from '../monthly/format'
-import { PERIOD_WORDS, reserveSplit, uahShort, type PeriodScope } from '../monthly/rollup'
+import {
+  formatSignedPct,
+  formatSignedPp,
+  generatorFormulas,
+  pvSelfShare,
+  ratio,
+  selfSufficiency,
+  topFigures,
+  topFormulas,
+} from '../monthly/periodFormulas'
+import { PERIOD_WORDS, uahShort, type PeriodScope } from '../monthly/rollup'
 import { FormulaTip } from './FormulaTip'
 import { KpiIcon as Icon } from './kpiIcons'
 import { KPI_ICONS as ICONS } from './kpiIconPaths'
@@ -35,46 +45,6 @@ type Props = {
   // annualizeMonths scales the period EBITDA to a year for the ROCE
   // card: 1 for the month view, months_with_data for the annual view.
   annualizeMonths?: number
-}
-
-// --- Formatting -----------------------------------------------------------
-
-const signedPctFmt = new Intl.NumberFormat('uk-UA', {
-  minimumFractionDigits: 1,
-  maximumFractionDigits: 1,
-  signDisplay: 'exceptZero',
-})
-
-function formatSignedPct(fraction: number): string {
-  return `${signedPctFmt.format(fraction * 100)}%`
-}
-
-function formatSignedPp(fraction: number): string {
-  return `${signedPctFmt.format(fraction * 100)} п.п.`
-}
-
-// ratio is the relative change (curr − prev) / prev, or null when the
-// previous value can't serve as a denominator.
-function ratio(curr: number, prev: number | null): number | null {
-  if (prev === null || !Number.isFinite(prev) || Math.abs(prev) < 1e-9) return null
-  if (!Number.isFinite(curr)) return null
-  return (curr - prev) / prev
-}
-
-// --- Derived shares -------------------------------------------------------
-
-// selfSufficiency: how much of the object's consumption was served by
-// its own PV + battery instead of grid import.
-function selfSufficiency(t: EconomicsMonthlyTotals): number | null {
-  if (t.load_kwh <= 0) return null
-  return (t.pv_to_load_kwh + t.ess_to_load_kwh) / t.load_kwh
-}
-
-// pvSelfShare: how much of the PV yield stayed on site (consumed
-// directly or stored) rather than being exported.
-function pvSelfShare(t: EconomicsMonthlyTotals): number | null {
-  if (t.pv_kwh <= 0) return null
-  return (t.pv_to_load_kwh + t.pv_to_ess_kwh) / t.pv_kwh
 }
 
 // --- Small building blocks ------------------------------------------------
@@ -194,38 +164,31 @@ export function EconomicsTopSection({
   const prevNote =
     scope === 'month' ? 'до попереднього місяця' : scope === 'year' ? 'до попереднього року' : 'до попереднього періоду'
 
-  // Row 1 money.
-  const baseline = totals.baseline_cost_uah
-  const effectShare = baseline > 0 ? totals.effect_uah / baseline : NaN
-  const baselineUnit = totals.load_kwh > 0 ? baseline / totals.load_kwh : NaN
-  const actualUnit = totals.load_kwh > 0 ? totals.actual_cost_uah / totals.load_kwh : NaN
-  const pvEffect = totals.effect_uah - totals.ess_net_uah
-  const pvEffectShare = totals.effect_uah > 0 ? pvEffect / totals.effect_uah : NaN
-  const essEffectShare = totals.effect_uah > 0 ? totals.ess_net_uah / totals.effect_uah : NaN
-
-  // ROCE: the period EBITDA scaled to a full year, over the capital at
-  // work. A partial period annualises optimistically — the tooltip says
-  // so, and the payback view keeps the precise all-time math.
-  const months = Math.max(1, annualizeMonths)
-  const annualEbitda = totals.ebitda_uah * (12 / months)
-  const hasCapex = Number.isFinite(capexUah) && (capexUah as number) > 0
-  const roce = hasCapex ? annualEbitda / (capexUah as number) : NaN
-
-  // Realised share of the confirmed potential: fact effect vs fact +
-  // the two reserve levers (work-schedule shift + УЗЕ dispatch optimum).
-  const reserve = reserveSplit(totals).total
-  const potential = totals.effect_uah + reserve
-  const realizationShare =
-    potential > 0 && totals.effect_uah >= 0 ? Math.max(0, Math.min(1, totals.effect_uah / potential)) : NaN
-
-  // Row 2 energy.
-  const importPrice = totals.grid_import_kwh > 0 ? totals.import_cost_uah / totals.grid_import_kwh : NaN
-  const exportRevenue = totals.revenue_pv_export_uah + totals.revenue_ess_export_uah
-  const exportPrice = totals.grid_export_kwh > 0 ? exportRevenue / totals.grid_export_kwh : NaN
-  const selfSuff = selfSufficiency(totals)
-  const pvSelf = pvSelfShare(totals)
-  const covered = totals.pv_to_load_kwh + totals.ess_to_load_kwh
-  const pvConsumed = totals.pv_to_load_kwh + totals.pv_to_ess_kwh
+  // The cards' numbers, and how each is computed with the period's own
+  // numbers (monthly/periodFormulas).
+  const f = topFigures(totals, { capexUah, annualizeMonths })
+  const fx = topFormulas(totals, { money, figures: f, prior, prevNote, pvPlan, scope })
+  const {
+    baseline,
+    effectShare,
+    baselineUnit,
+    actualUnit,
+    pvEffect,
+    pvEffectShare,
+    essEffectShare,
+    hasCapex,
+    roce,
+    reserve,
+    potential,
+    realizationShare,
+    importPrice,
+    exportRevenue,
+    exportPrice,
+    selfSuff,
+    pvSelf,
+    covered,
+    pvConsumed,
+  } = f
 
   // Prior-period deltas (null hides the badge).
   const priorSelfSuff = prior ? selfSufficiency(prior) : null
@@ -258,12 +221,13 @@ export function EconomicsTopSection({
             tone="steel"
             icon={ICONS.database}
             label="Базова вартість (без проєкту)"
-            tip="Усе споживання об'єкта, оцінене повною ціною імпорту кожної години: скільки коштувала б енергія, якби СЕС та УЗЕ не було."
+            formula={fx.baseline}
             value={money.format(baseline)}
           >
             <span>100% споживання з мережі · {formatMwh(totals.load_kwh)}</span>
             <span>
               {money.formatPrice(baselineUnit)} {money.priceUnit}
+              <FormulaTip label="Базова ціна кВт·год" formula={fx.baselineUnit} />
             </span>
           </Card>
 
@@ -271,7 +235,7 @@ export function EconomicsTopSection({
             tone="teal"
             icon={ICONS.briefcase}
             label="Фактична вартість"
-            tip="Фактичні витрати на енергію: імпорт мінус дохід від експорту плюс знос УЗЕ."
+            formula={fx.actual}
             value={money.format(totals.actual_cost_uah)}
             badge={
               <DeltaBadge
@@ -285,6 +249,7 @@ export function EconomicsTopSection({
             <span>
               {money.formatPrice(actualUnit)} {money.priceUnit}{' '}
               {Number.isFinite(baselineUnit) ? `(без проєкту ${money.formatPrice(baselineUnit)})` : ''}
+              <FormulaTip label="Фактична ціна кВт·год" formula={fx.actualUnit} />
             </span>
           </Card>
 
@@ -292,7 +257,7 @@ export function EconomicsTopSection({
             tone="green"
             icon={ICONS.trendUp}
             label="Економічний ефект"
-            tip="Базова вартість мінус фактична: наскільки дешевше обійшлася енергія завдяки СЕС та УЗЕ."
+            formula={fx.effect}
             value={money.format(totals.effect_uah)}
             badge={
               <DeltaBadge
@@ -310,7 +275,7 @@ export function EconomicsTopSection({
             tone="amber"
             icon={ICONS.sun}
             label="Ефект СЕС"
-            tip="Частина ефекту без УЗЕ: власне споживання СЕС замість імпорту та експорт у мережу."
+            formula={fx.pv}
             value={money.format(pvEffect)}
             badge={
               Number.isFinite(pvEffectShare) ? (
@@ -318,14 +283,14 @@ export function EconomicsTopSection({
               ) : undefined
             }
           >
-            <span>Власне споживання + експорт</span>
+            <span>Власне споживання + експорт + заряд УЗЕ</span>
           </Card>
 
           <Card
             tone="violet"
             icon={ICONS.battery}
             label="Ефект УЗЕ"
-            tip="Чистий ефект УЗЕ: розряд у споживання та мережу мінус вартість заряду і знос."
+            formula={fx.ess}
             value={money.format(totals.ess_net_uah)}
             badge={
               Number.isFinite(essEffectShare) ? (
@@ -340,10 +305,7 @@ export function EconomicsTopSection({
             tone="sky"
             icon={ICONS.percent}
             label="ROCE (річний)"
-            tip={
-              'EBITDA періоду, приведена до року (×12 / кількість місяців із даними), поділена на інвестований капітал ' +
-              '(CAPEX із тарифів, що діє на кінець періоду). Неповний період завищує оцінку — точна окупність на сторінці «Окупність».'
-            }
+            formula={fx.roce}
             value={formatPercent(roce)}
           >
             {hasCapex ? (
@@ -357,10 +319,7 @@ export function EconomicsTopSection({
             tone="green"
             icon={ICONS.target}
             label="Реалізація потенціалу"
-            tip={
-              'Факт — економічний ефект періоду. Потенціал — ефект плюс підтверджений резерв: перенесення гнучкого ' +
-              'споживання на години надлишку СЕС та ідеальний диспетчинг УЗЕ (оптимум). Резерв — недовикористана можливість, не збиток.'
-            }
+            formula={fx.realization}
             value={formatPercent(realizationShare)}
             badge={
               <span className="eco-progress" role="presentation">
@@ -402,6 +361,7 @@ export function EconomicsTopSection({
             tone="sky"
             icon={ICONS.home}
             label="Споживання об'єкта"
+            formula={fx.load}
             value={formatMwh(totals.load_kwh)}
             badge={<DeltaBadge value={loadDelta} polarity="neutral" unit="pct" note={prevNote} />}
           />
@@ -410,6 +370,7 @@ export function EconomicsTopSection({
             tone="amber"
             icon={ICONS.sun}
             label="Генерація СЕС"
+            formula={fx.pvGen}
             value={formatMwh(totals.pv_kwh)}
             badge={<DeltaBadge value={planDelta} polarity="up-good" unit="pct" note="до плану" />}
           >
@@ -436,11 +397,13 @@ export function EconomicsTopSection({
             tone="blue"
             icon={ICONS.tower}
             label="Імпорт з мережі"
+            formula={fx.import}
             value={formatMwh(totals.grid_import_kwh)}
             badge={<DeltaBadge value={importDelta} polarity="down-good" unit="pct" note={prevNote} />}
           >
             <span>
               Середня ціна: {money.formatPrice(importPrice)} {money.priceUnit}
+              <FormulaTip label="Середня ціна імпорту" formula={fx.importPrice} />
             </span>
           </Card>
 
@@ -448,12 +411,17 @@ export function EconomicsTopSection({
             tone="orange"
             icon={ICONS.exportArrow}
             label="Експорт у мережу"
+            formula={fx.export}
             value={formatMwh(totals.grid_export_kwh)}
             badge={<DeltaBadge value={exportDelta} polarity="up-good" unit="pct" note={prevNote} />}
           >
-            <span>Дохід: {money.format(exportRevenue)}</span>
+            <span>
+              Дохід: {money.format(exportRevenue)}
+              <FormulaTip label="Дохід від експорту" formula={fx.exportRevenue} />
+            </span>
             <span>
               Середня ціна: {money.formatPrice(exportPrice)} {money.priceUnit}
+              <FormulaTip label="Середня ціна експорту" formula={fx.exportPrice} />
             </span>
           </Card>
 
@@ -461,7 +429,7 @@ export function EconomicsTopSection({
             tone="teal"
             icon={ICONS.clock}
             label="Самозабезпечення"
-            tip="Частка споживання об'єкта, покрита власними СЕС та УЗЕ замість імпорту."
+            formula={fx.selfSuff}
             value={selfSuff === null ? '—' : formatPercent(selfSuff)}
             badge={<DeltaBadge value={selfSuffDelta} polarity="up-good" unit="pp" note={prevNote} />}
           >
@@ -474,7 +442,7 @@ export function EconomicsTopSection({
             tone="green"
             icon={ICONS.cycle}
             label="Самоспоживання СЕС"
-            tip="Частка виробітку СЕС, використана на об'єкті (споживання + заряд УЗЕ), а не експортована."
+            formula={fx.pvSelf}
             value={pvSelf === null ? '—' : formatPercent(pvSelf)}
             badge={<DeltaBadge value={pvSelfDelta} polarity="up-good" unit="pp" note={prevNote} />}
           >
@@ -497,6 +465,8 @@ function GeneratorSection({ totals, per }: { totals: EconomicsMonthlyTotals; per
   const money = useMoney()
   const counted = (totals.gen_fuel_cost_uah ?? 0) > 0 || (totals.load_offgrid_kwh ?? 0) > 0
   const method = fuelMethodLabel(totals.gen_fuel_method)
+  const g = generatorFormulas(totals, money)
+  const notCounted = { text: 'Вартість пального не задана в тарифах, тож генератор у грошах не рахується.' }
   return (
     <div className="eco-kpi-section">
       <header className="eco-kpi-head">
@@ -513,7 +483,7 @@ function GeneratorSection({ totals, per }: { totals: EconomicsMonthlyTotals; per
           tone="orange"
           icon={ICONS.zap}
           label="Генератор"
-          tip="Енергія генератора за його лічильником (контролер Encombi)."
+          formula={g.energy}
           value={formatMwh(totals.gen_kwh ?? 0)}
         >
           <span>У роботі: {formatDuration(totals.minutes_generator ?? 0)}</span>
@@ -527,7 +497,7 @@ function GeneratorSection({ totals, per }: { totals: EconomicsMonthlyTotals; per
           tone="amber"
           icon={ICONS.tag}
           label="Пальне"
-          tip="Вартість пального генератора за тарифом кожної доби: ціна літра × витрата × ПДВ."
+          formula={counted ? g.fuel : notCounted}
           value={counted ? money.format(totals.gen_fuel_cost_uah ?? 0) : '—'}
         >
           {counted ? (
@@ -539,7 +509,13 @@ function GeneratorSection({ totals, per }: { totals: EconomicsMonthlyTotals; per
             <span>вартість пального не задана</span>
           )}
         </Card>
-        <Card tone="steel" icon={ICONS.clock} label="Без мережі" value={formatDuration(rollupOffgridMinutes(totals))}>
+        <Card
+          tone="steel"
+          icon={ICONS.clock}
+          label="Без мережі"
+          formula={g.offgrid}
+          value={formatDuration(rollupOffgridMinutes(totals))}
+        >
           <span>
             Генератор {formatDuration(totals.minutes_generator ?? 0)} · острів {formatDuration(totals.minutes_island ?? 0)} ·
             без живлення {formatDuration(totals.minutes_blackout ?? 0)}
@@ -550,7 +526,7 @@ function GeneratorSection({ totals, per }: { totals: EconomicsMonthlyTotals; per
           tone="green"
           icon={ICONS.trendUp}
           label="Ефект годин без мережі"
-          tip="Ефект годин, коли об'єкт працював без мережі: скільки пального заощадили СЕС і УЗЕ проти роботи лише генератора, мінус пальне на заряд УЗЕ."
+          formula={counted ? g.offgridEffect : notCounted}
           value={counted ? money.format(totals.effect_offgrid_uah ?? 0) : '—'}
         />
       </div>

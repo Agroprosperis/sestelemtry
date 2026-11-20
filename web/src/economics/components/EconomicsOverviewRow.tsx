@@ -2,7 +2,9 @@ import { Line, LineChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YA
 import type { EconomicsMonthlyTotals } from '../../api'
 import { useChartChrome } from '../../theme/useChartChrome'
 import { formatCycles, formatMwhNumber, formatPercent } from '../monthly/format'
+import { coverageFormula, profileFormula, uzeWorkFormulas } from '../monthly/periodFormulas'
 import { PERIOD_WORDS, type PeriodScope } from '../monthly/rollup'
+import { FormulaTip } from './FormulaTip'
 import { KPI_ICONS } from './kpiIconPaths'
 import { CoverageDonutPanel, UzeWorkPanel, type CoverageSegment, type UzeWorkCard } from './OverviewPanels'
 
@@ -81,6 +83,7 @@ export function EconomicsOverviewRow({ totals, scope = 'month', profile }: Props
   // fact-vs-optimum and cost-basis sections below.
   const days = Math.max(1, totals.days_with_data)
   const rte = totals.ess_charged_kwh > 0 ? totals.ess_discharged_kwh / totals.ess_charged_kwh : NaN
+  const uze = uzeWorkFormulas(totals, scope)
   const uzeCards: UzeWorkCard[] = [
     {
       label: 'Еквівалентні цикли',
@@ -88,6 +91,7 @@ export function EconomicsOverviewRow({ totals, scope = 'month', profile }: Props
       sub: `${formatCycles(totals.equivalent_cycles / days)} на добу`,
       tone: 'teal',
       icon: KPI_ICONS.cycle,
+      formula: uze.cycles,
     },
     {
       label: 'Розряд УЗЕ',
@@ -96,6 +100,7 @@ export function EconomicsOverviewRow({ totals, scope = 'month', profile }: Props
       sub: `середньо ${mwhFmt.format(totals.ess_discharged_kwh / 1000 / days)} МВт·год/добу`,
       tone: 'orange',
       icon: KPI_ICONS.zap,
+      formula: uze.discharge,
     },
     {
       label: 'Заряд УЗЕ',
@@ -104,6 +109,7 @@ export function EconomicsOverviewRow({ totals, scope = 'month', profile }: Props
       sub: `СЕС: ${formatMwhNumber(totals.pv_to_ess_kwh)} | Мережа: ${formatMwhNumber(totals.grid_to_ess_kwh)}`,
       tone: 'green',
       icon: KPI_ICONS.battery,
+      formula: uze.charge,
     },
     {
       label: 'Ефективність (RTE)',
@@ -111,19 +117,31 @@ export function EconomicsOverviewRow({ totals, scope = 'month', profile }: Props
       sub: 'розряд / заряд за період',
       tone: 'sky',
       icon: KPI_ICONS.chart,
+      formula: uze.rte,
     },
   ]
 
   return (
     <div className="eco-overview">
-      <CoverageDonutPanel segments={coverage} unit="МВт·год" formatValue={formatMwhNumber} />
+      <CoverageDonutPanel
+        segments={coverage}
+        unit="МВт·год"
+        formatValue={formatMwhNumber}
+        formula={coverageFormula(totals)}
+      />
 
       <section
         className="economics-card eco-overview-panel eco-overview-chart"
         aria-label="Профіль споживання та генерації"
       >
         <div className="eco-overview-head">
-          <h3 className="eco-overview-title">Профіль споживання та генерації</h3>
+          <h3 className="eco-overview-title">
+            Профіль споживання та генерації
+            <FormulaTip
+              label="Профіль споживання та генерації"
+              formula={profileFormula(profile, scope === 'month' ? 'добу' : 'місяць')}
+            />
+          </h3>
           <span className="economics-month-muted">МВт·год {w.per}</span>
         </div>
         <div className="eco-profile-chart">

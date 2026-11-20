@@ -130,9 +130,14 @@ export function uahShort(v: number, money: Money = UAH_MONEY): string {
 // AI panel model — the deterministic management narrative shared by the
 // month and year views. All text is built from already-computed figures.
 export type AiBriefRow = { kind: 'summary' | 'reserve' | 'action'; label: string; text: string }
-export type AiResultRow = { label: string; value: string; amber?: boolean }
+// ReserveKey names the three reserve figures of the panel, so the view can
+// hang each one's formula on its row or card.
+export type ReserveKey = 'elevator' | 'ess' | 'total'
+export type AiResultRow = { label: string; value: string; amber?: boolean; reserve?: ReserveKey }
 export type AiCardVariant = 'plan' | 'warn' | 'context'
 export type AiCard = {
+  // reserve is the figure the card's impact shows, when it is one.
+  reserve?: Exclude<ReserveKey, 'total'>
   variant: AiCardVariant
   status: string
   title: string
@@ -189,6 +194,8 @@ export function buildAiPanel(
   // drives the narrative ("Головний резерв" / "Що покращити"), and carries
   // the "найбільший резерв" badge on its card.
   const mainIsEss = r.ess >= r.elevator
+  const mainKey: ReserveKey = mainIsEss ? 'ess' : 'elevator'
+  const secKey: ReserveKey = mainIsEss ? 'elevator' : 'ess'
   const mainLabel = `${mainIsEss ? 'Резерв таймінгу УЗЕ' : 'Резерв графіка'} · основний`
   const mainValue = short(mainIsEss ? r.ess : r.elevator)
   const secLabel = mainIsEss ? 'Резерв графіка' : 'Резерв таймінгу УЗЕ'
@@ -222,12 +229,13 @@ export function buildAiPanel(
         'Архів FusionSolar: повна телеметрія СЕС/УЗЕ/мережі за весь період. Можливі невеликі пробіли після імпорту.',
       result: [
         { label: 'Період аналізу', value: opts.periodLabel },
-        { label: mainLabel, value: mainValue, amber: true },
-        { label: secLabel, value: secValue },
-        { label: 'Сумарний резерв', value: short(r.total) },
+        { label: mainLabel, value: mainValue, amber: true, reserve: mainKey },
+        { label: secLabel, value: secValue, reserve: secKey },
+        { label: 'Сумарний резерв', value: short(r.total), reserve: 'total' },
       ],
       cards: [
         {
+          reserve: 'elevator',
           variant: 'plan',
           status: planStatus,
           title: 'Графік робіт елеватора',
@@ -236,6 +244,7 @@ export function buildAiPanel(
           chips: [`експорт ${formatMwh(totals.grid_export_kwh)}`, `імпорт ${formatMwh(totals.grid_import_kwh)}`],
         },
         {
+          reserve: 'ess',
           variant: 'warn',
           status: essStatus,
           title: 'Таймінг батареї',
@@ -261,6 +270,7 @@ export function buildAiPanel(
 
   const cards: AiCard[] = [
     {
+      reserve: 'elevator',
       variant: 'plan',
       status: planStatus,
       title: 'Графік робіт елеватора',
@@ -273,6 +283,7 @@ export function buildAiPanel(
       ],
     },
     {
+      reserve: 'ess',
       variant: 'warn',
       status: essStatus,
       title: 'Добовий план батареї',
@@ -307,9 +318,9 @@ export function buildAiPanel(
     sources: ['телеметрія SmartLogger', 'РДН: Оператор ринку', 'погодний архів'],
     result: [
       { label: 'Період аналізу', value: opts.periodLabel },
-      { label: mainLabel, value: mainValue, amber: true },
-      { label: secLabel, value: secValue },
-      { label: 'Разом до дій', value: short(r.total) },
+      { label: mainLabel, value: mainValue, amber: true, reserve: mainKey },
+      { label: secLabel, value: secValue, reserve: secKey },
+      { label: 'Разом до дій', value: short(r.total), reserve: 'total' },
     ],
     cards,
     reserves: r,
@@ -330,11 +341,12 @@ export function heatTier(v: number | null, money: Money = UAH_MONEY): string {
 
 // heatLegend names heatTier's colour bands for the text under a heatmap.
 export function heatLegend(money: Money = UAH_MONEY): string {
-  if (money.currency === 'UAH') {
-    return 'сірий 0–1, світло-зелений 2–5, зелений 6–11, темно-зелений понад 12 грн/кВт·год'
-  }
-  const at = (uah: number) => money.formatPrice(money.fromUah(uah))
-  return `сірий до ${at(2)}, світло-зелений ${at(2)}–${at(6)}, зелений ${at(6)}–${at(12)}, темно-зелений понад ${at(12)} ${money.priceUnit}`
+  // Whole hryvnias read plainly; dollars and euros carry their cents.
+  const at = (uah: number) => (money.currency === 'UAH' ? String(uah) : money.formatPrice(money.fromUah(uah)))
+  return (
+    `сірий до ${at(2)}, блідо-зелений ${at(2)}–${at(6)}, світло-зелений ${at(6)}–${at(12)}, ` +
+    `зелений ${at(12)}–${at(18)}, темно-зелений від ${at(18)} ${money.priceUnit}`
+  )
 }
 
 export const HOURS = Array.from({ length: 24 }, (_, h) => h)
