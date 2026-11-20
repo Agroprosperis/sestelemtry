@@ -23,10 +23,13 @@ export function CoverageDonutPanel({
   segments,
   unit,
   formatValue,
+  formula,
 }: {
   segments: CoverageSegment[]
   unit: string
   formatValue: (kwh: number) => string
+  // formula is how the segments add up; the title's «i» opens it.
+  formula?: Formula
 }) {
   const total = segments.reduce((acc, s) => acc + s.kwh, 0)
   return (
@@ -34,7 +37,10 @@ export function CoverageDonutPanel({
       className="economics-card eco-overview-panel eco-overview-donut"
       aria-label="Структура покриття споживання"
     >
-      <h3 className="eco-overview-title">Структура покриття споживання</h3>
+      <h3 className="eco-overview-title">
+        Структура покриття споживання
+        {formula ? <FormulaTip label="Структура покриття споживання" formula={formula} /> : null}
+      </h3>
       <div className="eco-donut-wrap">
         <div className="eco-donut">
           <ResponsiveContainer width="100%" height={160}>
