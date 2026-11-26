@@ -261,6 +261,11 @@ const WRITE_STATE_LABELS: Record<EdgeWriteHealth['state'], string> = {
   run: 'робота',
   stopped: 'зупинка: УЗЕ 0 кВт',
   stopping: 'вимикання запису',
+  mode_stop: 'мережа зникла: УЗЕ 0 кВт, далі — кнопками на консолі',
+  gen_run: 'УЗЕ з генератором',
+  island_start: 'вхід в острів',
+  island: 'острів: УЗЕ тримає шину',
+  island_stop: 'вихід з острова',
 }
 
 const ESS_LABELS = { running: 'запущена', stopped: 'зупинена', unknown: 'невідомо' } as const

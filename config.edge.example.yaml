@@ -59,7 +59,7 @@ uplink:
   site_token_env: EMS_SITE_TOKEN_AB # env var holding the Bearer token
 
 manifest:
-  poll_interval: 60s
+  poll_interval: 5s                 # unchanged manifest = 304; commands land in seconds
   cache_path: /data/manifest/active_manifest.json
 
 control:

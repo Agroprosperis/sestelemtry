@@ -29,6 +29,9 @@ const TAB_LABELS: { id: Tab; label: string }[] = [
 ]
 
 const STATUS_POLL_MS = 15_000
+// While a confirmed version is on its way to the controller the desk
+// follows it closely (offgrid §4.3 п. 4: seconds, or «в дорозі»).
+const STATUS_POLL_PENDING_MS = 3_000
 
 function readTab(): Tab {
   const t = new URLSearchParams(window.location.search).get('tab')
@@ -75,14 +78,15 @@ export function ControlPage() {
       .catch(() => {})
   }, [site])
 
+  const status = statusEntry && statusEntry.site === site ? statusEntry.status : null
+  const pending = status?.manifest?.state === 'pending'
+
   useEffect(() => {
     if (!site) return
     refreshStatus()
-    const id = window.setInterval(refreshStatus, STATUS_POLL_MS)
+    const id = window.setInterval(refreshStatus, pending ? STATUS_POLL_PENDING_MS : STATUS_POLL_MS)
     return () => window.clearInterval(id)
-  }, [site, refreshStatus])
-
-  const status = statusEntry && statusEntry.site === site ? statusEntry.status : null
+  }, [site, refreshStatus, pending])
 
   useEffect(() => {
     const handler = () => setTab(readTab())

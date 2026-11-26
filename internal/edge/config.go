@@ -515,7 +515,9 @@ func (c *Config) applyDefaults() {
 
 	m := &c.Manifest
 	if m.PollInterval <= 0 {
-		m.PollInterval = time.Minute
+		// An operator's command should reach the device in seconds
+		// (offgrid §4.3 п. 4); an unchanged manifest is a 304.
+		m.PollInterval = 5 * time.Second
 	}
 	if strings.TrimSpace(m.CachePath) == "" {
 		m.CachePath = "/data/manifest/active_manifest.json"

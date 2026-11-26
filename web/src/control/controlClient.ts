@@ -211,11 +211,63 @@ export type EdgeWriteCommand = {
   note?: string
 }
 
+/** One action now: open, or closed with why (offgrid §4.3). */
+export type EdgeAvail = { ok: boolean; reason?: string }
+
+/** What the cloud's commands and the console's buttons may do now. */
+export type EdgeActions = {
+  restriction?: string
+  power: EdgeAvail
+  plan: EdgeAvail
+  manual: Record<string, EdgeAvail>
+  buttons: Record<string, EdgeAvail>
+}
+
+export type SupplyMode = 'grid' | 'generator' | 'island' | 'blackout' | 'transition' | 'unknown'
+
+/** The status line from the IoT2050's own read of Encombi (offgrid §4.3). */
+export type EdgeSupply = {
+  mode: SupplyMode
+  mode_label: string
+  mode_since: string
+  switch: 'pq' | 'off' | 'vsg' | 'unknown'
+  switch_label: string
+  ess_mode: string
+  ess_mode_label: string
+  controller: 'ems' | 'encombi' | 'none'
+  controller_label: string
+  restriction?: string
+  di_bits?: number
+  inputs?: Record<string, boolean>
+  gen_power_kw?: number
+  gen_load_pct?: number
+  gen_min_pct: number
+  gen_best_pct: [number, number]
+  bus_voltage_v?: number
+  soc_percent?: number
+  soc_floor_pct: number
+  load_kw?: number
+  autonomy_min?: number
+  actions?: EdgeActions
+  island_power_max_kw?: number
+}
+
 /** The device write flag and what goes into the loggers (cutover §4, §8). */
 export type EdgeWriteHealth = {
   enabled: boolean
   writer: 'iot2050' | 'other'
-  state: 'off' | 'await_start' | 'hold' | 'run' | 'stopped' | 'stopping'
+  state:
+    | 'off'
+    | 'await_start'
+    | 'hold'
+    | 'run'
+    | 'stopped'
+    | 'stopping'
+    | 'mode_stop'
+    | 'gen_run'
+    | 'island_start'
+    | 'island'
+    | 'island_stop'
   reason?: string
   gate: { enabled: boolean; at: string; by: string; reason?: string }
   /** The PIN that turns writing on is set on the device. */
@@ -249,6 +301,8 @@ export type EdgeHealth = {
   inverters?: InverterHealth[]
   alarms?: { words: string[] }
   write?: EdgeWriteHealth
+  /** Absent while the IoT2050 does not read Encombi. */
+  supply?: EdgeSupply
 }
 
 export type EdgeSiteStatus = {

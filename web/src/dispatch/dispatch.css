@@ -208,6 +208,128 @@
   font-weight: 600;
 }
 
+/* The power line (offgrid §4.3): what feeds the site, from the IoT2050. */
+.d-supply {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 10px 0 0;
+  padding: 8px 12px;
+  background: var(--d-panel);
+  border: 1px solid var(--d-line);
+  border-left-width: 4px;
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--d-muted);
+}
+
+.d-supply.ok {
+  border-left-color: var(--ok-text, #15803d);
+}
+
+.d-supply.warn {
+  border-left-color: var(--d-warn);
+}
+
+.d-supply.err {
+  border-left-color: var(--d-err);
+}
+
+.d-supply.err > strong {
+  color: var(--d-err);
+}
+
+.d-supply-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 22px;
+}
+
+.d-supply-f {
+  display: inline-flex;
+  flex-direction: column;
+}
+
+.d-supply-f > span {
+  font-size: 11px;
+}
+
+.d-supply-f > strong {
+  color: var(--d-ink);
+  font-size: 14px;
+}
+
+.d-supply-f > strong.ok {
+  color: var(--ok-text, #15803d);
+}
+
+.d-supply-f > strong.warn {
+  color: var(--d-warn);
+}
+
+.d-supply-f > strong.err {
+  color: var(--d-err);
+}
+
+.d-supply-restr {
+  margin: 0;
+  color: var(--d-err);
+  font-weight: 600;
+}
+
+.d-supply-note {
+  align-self: center;
+}
+
+.d-supply-extra {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  align-items: center;
+  color: var(--d-ink);
+}
+
+.d-supply-gen {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.d-gen-bar {
+  position: relative;
+  display: inline-block;
+  width: 180px;
+  height: 10px;
+  border-radius: 5px;
+  background: var(--d-line);
+}
+
+.d-gen-band {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  background: rgba(22, 163, 74, 0.2);
+  border-left: 1px dashed var(--ok-text, #15803d);
+  border-right: 1px dashed var(--ok-text, #15803d);
+}
+
+.d-gen-fill {
+  position: absolute;
+  top: 1px;
+  bottom: 1px;
+  left: 0;
+  border-radius: 4px;
+  background: #0d9488;
+}
+
+.d-gen-min {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 2px;
+  background: var(--d-err);
+}
+
 .d-workspace {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 340px;

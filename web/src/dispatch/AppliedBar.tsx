@@ -34,7 +34,7 @@ function delivery(state: DeskState, status: EdgeSiteStatus | null | undefined): 
   if (v !== null && v < ver) return { text: 'на контролері ще версія ' + v + ': нову не опубліковано', sev: 'err' }
   if (v !== null && v > ver) return { text: 'на контролері вже версія ' + v + ', оновлюю пульт…', sev: 'warn' }
   if (m.state === 'expired') return { text: 'manifest прострочений: контролер у безпечному режимі', sev: 'err' }
-  if (m.state === 'pending') return { text: 'очікує контролера · опубліковано ' + at(m.issued_at), sev: 'warn' }
+  if (m.state === 'pending') return { text: 'в дорозі до контролера · опубліковано ' + at(m.issued_at), sev: 'warn' }
   return { text: 'контролер застосував о ' + at(m.applied_at), sev: 'ok' }
 }
 

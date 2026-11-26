@@ -52,6 +52,9 @@ type Service struct {
 	override      atomic.Pointer[overrideState]
 	lastInverters atomic.Pointer[inverterFleet] // written by the 51xxx poller
 	events        chan Event                    // core-loop event channel (console sends too)
+	// uplinkNow ships the black box at once: the cloud learns that a new
+	// manifest is in force without waiting for the batch interval.
+	uplinkNow chan struct{}
 
 	// Write path (ems_sl_write_cutover.md). The gate is the device flag;
 	// the writers read writeCmd and report what they wrote in writeFB.
@@ -156,6 +159,7 @@ func Run(ctx context.Context, cfg *Config, log *slog.Logger, version string) err
 		cmdRequests:      make(chan cmdRequest),
 		cmdResults:       make(chan cmdResult, 16),
 		cmdJobs:          map[DeviceRole]chan oneShotJob{},
+		uplinkNow:        make(chan struct{}, 1),
 	}
 	for _, dev := range cfg.SmartLogger.Devices {
 		s.cmdJobs[dev.Role] = make(chan oneShotJob, 4)
@@ -354,6 +358,10 @@ func (s *Service) onTick(ctx context.Context, now time.Time) {
 				"manifest_seq": cur.ManifestSeq, "manual_commands": len(cur.ManualCommands),
 			},
 		})
+		select {
+		case s.uplinkNow <- struct{}{}:
+		default:
+		}
 	}
 	if cur != nil && !cur.ActiveAt(now) && !s.manifestExpired {
 		s.manifestExpired = true
@@ -443,6 +451,7 @@ func (s *Service) runUplink(ctx context.Context, events chan<- Event) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
+		case <-s.uplinkNow:
 		}
 		if time.Now().Before(blockedUntil) {
 			continue

@@ -10,6 +10,8 @@ import './dispatch.css'
 import type { EdgeSiteStatus } from '../control/controlClient'
 import { writeMode } from '../control/writeState'
 import { AppliedBar } from './AppliedBar'
+import { SupplyLine } from './SupplyLine'
+import { closedScenarios } from './supply'
 import { manifestVersion } from './applied'
 import { buildChartSvg, type ChartLayout, type ModeGroup, type SeriesToggles } from './chartSvg'
 import { PeriodPicker } from '../dashboard/components/PeriodPicker'
@@ -677,6 +679,7 @@ export function DispatchDesk({ site, onOpenReport, readOnly = false, status = nu
           )}
         </div>
       </div>
+      <SupplyLine status={status} timeZone={state.timezone} />
       <AppliedBar state={state} status={status} clock={clock} />
 
       <section
@@ -784,6 +787,7 @@ export function DispatchDesk({ site, onOpenReport, readOnly = false, status = nu
                 onReserve={(value) => setForm({ ...form, reserve: value })}
                 direction={direction}
                 onDirection={setDirection}
+                closed={closedScenarios(status)}
               />
 
               <CommandHelp scenario={scenario} pvKw={mean(futurePv)} loadKw={knownLoads ? mean(chartModel.loads) : null} prices={prices} />
