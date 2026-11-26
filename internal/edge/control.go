@@ -22,7 +22,17 @@ const (
 	// The battery runs with the generator (offgrid §6), started by
 	// «Пуск УЗЕ з генератором».
 	WriteGenRun = "gen_run"
+	// The island (offgrid §5): its entry sequence, the battery holding
+	// the bus, the exit sequence. 40381 is not written in any of them.
+	WriteIslandStart = "island_start"
+	WriteIsland      = "island"
+	WriteIslandStop  = "island_stop"
 )
+
+// islandState: the battery is (being) put in VSG; its power is its own.
+func islandState(s string) bool {
+	return s == WriteIslandStart || s == WriteIsland || s == WriteIslandStop
+}
 
 // EvWriteModeStop journals the stop on the grid's loss.
 const EvWriteModeStop = "WRITE_MODE_STOP"
@@ -63,8 +73,11 @@ type WriteCommand struct {
 	ESSKw     float64   `json:"ess_kw"`      // 40381: + discharge / − charge
 	PVLimitKw float64   `json:"pv_limit_kw"` // 40378: PV ceiling
 	PVKnown   bool      `json:"pv_known"`    // false: 40396 never read, PV is not written
-	Reason    string    `json:"reason"`
-	Clamps    []string  `json:"clamps,omitempty"`
+	// ESSHold: the battery logger's setpoints are not written at all
+	// (offgrid §5.2: in the island the battery's power is its own).
+	ESSHold bool     `json:"ess_hold,omitempty"`
+	Reason  string   `json:"reason"`
+	Clamps  []string `json:"clamps,omitempty"`
 }
 
 // ControlInputs is one tick's view for the controller.
@@ -103,6 +116,10 @@ type Controller struct {
 	cfg WriteConfig
 	og  OffgridConfig
 	gen genState
+	// islandPV: the island's PV start went out; essHold: the battery's
+	// setpoints stay unwritten, also while turning off from the island.
+	islandPV bool
+	essHold  bool
 
 	state      string
 	since      time.Time
@@ -225,6 +242,75 @@ func (c *Controller) GenStarted(now time.Time) {
 	c.resetChecks()
 }
 
+// IslandBegin: «Пуск острова» pressed on the dead bus after the grid's
+// loss; the entry sequence runs.
+func (c *Controller) IslandBegin(now time.Time, by string) bool {
+	if c.state != WriteModeStop {
+		return false
+	}
+	c.state, c.since, c.stopAuto = WriteIslandStart, now, false
+	c.reason = "«Пуск острова» (" + by + "): вхід в острів"
+	c.islandPV, c.essHold = false, true
+	c.resetChecks()
+	return true
+}
+
+// TurningOffFromIsland: writing is being turned off while the battery
+// may still be in VSG; turning off puts it back in PQ after its stop.
+func (c *Controller) TurningOffFromIsland() bool { return c.state == WriteStopping && c.essHold }
+
+// IslandPVOn: the island's PV start went out; its ceiling follows §5.2.
+func (c *Controller) IslandPVOn() { c.islandPV = true }
+
+// IslandUp: the battery holds the bus.
+func (c *Controller) IslandUp(now time.Time) {
+	if c.state != WriteIslandStart {
+		return
+	}
+	c.state, c.since, c.reason = WriteIsland, now, "острів: УЗЕ тримає шину"
+	c.essStarted, c.essStartedAt = true, now
+}
+
+// IslandExit starts the exit sequence (§5.3).
+func (c *Controller) IslandExit(now time.Time, why string) {
+	if c.state != WriteIslandStart && c.state != WriteIsland {
+		return
+	}
+	c.state, c.since, c.reason = WriteIslandStop, now, "вихід з острова: "+why
+	c.islandPV = false
+}
+
+// IslandDone: the battery is stopped and back in PQ; the session goes
+// on, the power mode decides what is next.
+func (c *Controller) IslandDone(now time.Time, reason string) {
+	if !islandState(c.state) {
+		return
+	}
+	c.state, c.since, c.stopAuto, c.reason = WriteModeStop, now, false, reason
+	c.essStarted, c.essStartedAt, c.islandPV, c.essHold = false, time.Time{}, false, false
+	c.resetChecks()
+}
+
+// islandPVCeiling is 40378 in the island (§5.2): 0 until the island's
+// PV start, then the rating while the charge is below 88 %, above it no
+// more than the load, so the sun does not overcharge the battery.
+func (c *Controller) islandPVCeiling(in ControlInputs, clamps *[]string) (float64, bool) {
+	if c.state != WriteIsland || !c.islandPV {
+		return 0, true
+	}
+	ceiling, known := c.pvCeiling(in, clamps)
+	t := in.Tick
+	if !known || t.SocPercent == nil || *t.SocPercent < c.og.IslandPVFullSocPct || t.PVPowerKw == nil || t.ESSPowerKw == nil {
+		return ceiling, known
+	}
+	load := math.Max(0, *t.PVPowerKw+*t.ESSPowerKw)
+	if load < ceiling {
+		*clamps = append(*clamps, fmt.Sprintf("заряд %.1f%% ≥ %.0f%% — стеля СЕС до споживання %.0f кВт", *t.SocPercent, c.og.IslandPVFullSocPct, load))
+		ceiling = load
+	}
+	return ceiling, true
+}
+
 // OperatorStopOffgrid: the operator stopped the battery that runs
 // without the grid. The session goes on; the mode's start button is
 // open again, nothing else is stopped for it.
@@ -323,11 +409,15 @@ func (c *Controller) Step(in ControlInputs) (WriteCommand, []Event) {
 			cmd.ESSKw, c.gen.last = 0, 0
 			cmd.Clamps = append(cmd.Clamps, "живлення змінюється — УЗЕ 0")
 		}
+	case WriteIslandStart, WriteIsland, WriteIslandStop:
+		cmd.ESSHold = true
+		cmd.PVLimitKw, cmd.PVKnown = c.islandPVCeiling(in, &cmd.Clamps)
 	default:
 		// Stopped, turning off or the grid gone: battery 0, PV on its
 		// rating (§12.4).
 		rated := c.pvRated(t)
 		cmd.PVLimitKw, cmd.PVKnown = rated, rated > 0
+		cmd.ESSHold = c.state == WriteStopping && c.essHold
 	}
 	if c.state == WriteRun && cmd.ESSKw != 0 && settling {
 		cmd.ESSKw = 0
@@ -344,8 +434,9 @@ func (c *Controller) Step(in ControlInputs) (WriteCommand, []Event) {
 			}
 		}
 	}
-	if c.state != WriteGenRun {
-		// No PCC on the generator: the ceiling of export does not apply.
+	if c.state != WriteGenRun && !islandState(c.state) {
+		// No PCC on the generator or in the island: the ceiling of
+		// export does not apply.
 		cmd.ESSKw, cmd.PVLimitKw = c.exportCeiling(in, cmd.ESSKw, cmd.PVLimitKw, cmd.PVKnown, &cmd.Clamps)
 	}
 	cmd.ESSKw = round1(cmd.ESSKw)

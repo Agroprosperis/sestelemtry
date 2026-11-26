@@ -83,6 +83,9 @@ func (r writeReg) decode(b []byte) (int64, error) {
 
 // valueFor is the command's value for reg; false = nothing to write.
 func (c WriteCommand) valueFor(reg writeReg) (float64, bool) {
+	if c.ESSHold && reg.Role == RoleESS {
+		return 0, false
+	}
 	switch reg.Addr {
 	case regESSPower.Addr:
 		return c.ESSKw, true
@@ -387,7 +390,7 @@ func (s *Service) runWriter(ctx context.Context, dev Device, regs []writeReg, ev
 			res := cmdResult{id: job.id, err: errWriteOff}
 			if s.gate.Enabled() && ensure() && space() {
 				wctx, cancel := context.WithTimeout(ctx, dev.RequestTimeout)
-				res.err = s.guardedWriteSingle(wctx, sess, dev.Role, job.addr, 0)
+				res.err = s.guardedWriteSingle(wctx, sess, dev.Role, job.addr, job.value)
 				cancel()
 				lastWrite = time.Now()
 				if res.err != nil {
@@ -504,6 +507,10 @@ func (s *Service) currentWriteCommand(now time.Time) WriteCommand {
 	if fb, ok := s.feedback(regPVLimit); ok && fb.OK {
 		safe.PVLimitKw, safe.PVKnown = fb.Kw, true
 	}
+	if c := s.writeCmd.Load(); c != nil && c.ESSHold {
+		// In the island the battery's setpoints stay unwritten.
+		safe.ESSHold = true
+	}
 	return safe
 }
 
@@ -519,11 +526,13 @@ func (s *Service) configuredWriteRegs() []writeReg {
 // stoppingConfirmed reports that every logger took the safe values after
 // turning off began: the battery written 0 and read back, PV read back.
 func (s *Service) stoppingConfirmed(since time.Time) bool {
+	cur := s.writeCmd.Load()
 	for _, reg := range s.configuredWriteRegs() {
-		if reg.Addr == regPVLimit.Addr {
-			if c := s.writeCmd.Load(); c != nil && !c.PVKnown {
-				continue
-			}
+		if reg.Addr == regPVLimit.Addr && cur != nil && !cur.PVKnown {
+			continue
+		}
+		if reg.Role == RoleESS && cur != nil && cur.ESSHold {
+			continue
 		}
 		fb, ok := s.feedback(reg)
 		if !ok || !(fb.OK || fb.Tolerated) || fb.At.Before(since) {

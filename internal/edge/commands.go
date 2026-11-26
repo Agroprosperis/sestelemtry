@@ -31,7 +31,28 @@ const (
 	// CmdGenESSStart is «Пуск УЗЕ з генератором» (offgrid §4.4): PQ,
 	// its confirmation, then 40199; the generator control follows.
 	CmdGenESSStart = "gen_ess_start"
+	// The island sequence's own writes (offgrid §5.1, §5.3); no button
+	// sends them directly. 44365 = 1 is refused by the writer until the
+	// test order is approved.
+	CmdPCSVSG         = "pcs_vsg"
+	CmdIslandESSStart = "island_ess_start"
+	CmdIslandESSStop  = "island_ess_stop"
+	CmdIslandPVStart  = "island_pv_start"
 )
+
+// Island buttons: sequences, not single writes.
+const (
+	ActIslandStart = "island_start"
+	ActIslandStop  = "island_stop"
+)
+
+// oneShotValue is what a one-shot writes when it is not 0.
+var oneShotValue = map[string]uint16{CmdPCSVSG: 1}
+
+// internalOneShots go out only from a sequence, never from a request.
+var internalOneShots = map[string]bool{
+	CmdPCSVSG: true, CmdIslandESSStart: true, CmdIslandESSStop: true, CmdIslandPVStart: true,
+}
 
 const (
 	commandConfirmWindow = 3 * time.Minute
@@ -99,11 +120,16 @@ var oneShots = map[string]oneShot{
 	CmdArrayStopESS:  {CmdArrayStopESS, 40201, RoleESS, "Зупинка масиву (логер УЗЕ)", CmdArrayStartESS, false, "ess"},
 	CmdPCSPQ:         {CmdPCSPQ, regPCSMode, RoleESS, "Режим PCS: PQ", "", false, "pcs"},
 	CmdGenESSStart:   {CmdGenESSStart, 40199, RoleESS, "Пуск УЗЕ з генератором", CmdESSStop, true, "ess"},
+
+	CmdPCSVSG:         {CmdPCSVSG, regPCSMode, RoleESS, "Режим PCS: VSG (острів)", "", false, "pcs_vsg"},
+	CmdIslandESSStart: {CmdIslandESSStart, 40199, RoleESS, "Пуск УЗЕ (острів)", CmdIslandESSStop, true, "ess"},
+	CmdIslandESSStop:  {CmdIslandESSStop, 40198, RoleESS, "Зупинка УЗЕ (острів)", CmdIslandESSStart, false, "ess"},
+	CmdIslandPVStart:  {CmdIslandPVStart, 40197, RolePV, "Пуск СЕС (острів)", "", true, "pv"},
 }
 
 // pinCommands are the off-grid buttons: each takes the device PIN, as
 // turning writing on does (offgrid §4.4).
-var pinCommands = map[string]bool{CmdGenESSStart: true}
+var pinCommands = map[string]bool{CmdGenESSStart: true, ActIslandStart: true, ActIslandStop: true}
 
 // oneShotAddr: the start/stop registers an FC06 may go to. 40202/40203
 // (the same start/stop pair with a confusing 0/1) never.
@@ -111,10 +137,16 @@ func oneShotAddr(addr uint16) bool { return addr >= 40196 && addr <= 40201 }
 
 // window is how long a command's confirmation is waited for.
 func (c oneShot) window() time.Duration {
-	if c.Target == "pcs" {
+	if c.Target == "pcs" || c.Target == "pcs_vsg" {
 		return pcsModeConfirmWindow
 	}
 	return commandConfirmWindow
+}
+
+// pcsModeVSG: 44364 reads 1, the PCS forms the bus itself.
+func pcsModeVSG(t Tick) bool {
+	v, ok := t.Values["pcs_working_mode"]
+	return ok && v == 1
 }
 
 // pcsModePQ: 44364 reads 0, the PCS works with the grid (cutover §12.7).
@@ -224,6 +256,8 @@ func (c oneShot) confirmedOn(t Tick, now, acceptedAt time.Time, onGrid int, flee
 	switch {
 	case c.Target == "pcs":
 		return pcsModePQ(t)
+	case c.Target == "pcs_vsg":
+		return pcsModeVSG(t)
 	case c.Target == "ess" && c.Start:
 		return essRunningOn(t)
 	case c.Target == "ess":
@@ -250,8 +284,9 @@ type cmdReply struct {
 }
 
 type oneShotJob struct {
-	id   string
-	addr uint16
+	id    string
+	addr  uint16
+	value uint16
 }
 
 type cmdResult struct {
@@ -276,6 +311,7 @@ type writeSession struct {
 	pvCheckDay        string
 	// genStartAfterPQ: «Пуск УЗЕ з генератором» waits for its PQ.
 	genStartAfterPQ string // the presser, "" = none
+	pqAwaited       bool   // turning off from the island waits for PQ
 }
 
 // essStartedByTest reports that the test started the battery: the
@@ -329,8 +365,14 @@ func (s *Service) commandStatus(id string) (CommandStatus, bool) {
 
 // onCommandRequest serves a console button in the core loop.
 func (s *Service) onCommandRequest(ctx context.Context, now time.Time, req cmdRequest) cmdReply {
+	if req.id == ActIslandStart || req.id == ActIslandStop {
+		if !s.gate.Enabled() {
+			return cmdReply{Error: "запис не ввімкнено: острів запускається лише з увімкненим записом"}
+		}
+		return s.islandAction(ctx, now, req.id, req.by)
+	}
 	cmd, ok := oneShots[req.id]
-	if !ok {
+	if !ok || internalOneShots[req.id] {
 		return cmdReply{Error: "невідома команда"}
 	}
 	if !s.gate.Enabled() {
@@ -401,9 +443,11 @@ func (s *Service) genStartGate(t Tick) Avail {
 }
 
 // availabilityNow is §4.3 plus this tick's off-grid buttons.
-func (s *Service) availabilityNow(t Tick) *Availability {
+func (s *Service) availabilityNow(now time.Time, t Tick) *Availability {
 	a := availabilityFor(s.supplyNow)
 	a.Buttons[CmdGenESSStart] = s.genStartGate(t)
+	a.Buttons[ActIslandStart] = s.islandStartGate(now, t)
+	a.Buttons[ActIslandStop] = s.islandStopGate()
 	return a
 }
 
@@ -474,7 +518,7 @@ func (s *Service) sendOneShot(ctx context.Context, now time.Time, cmd oneShot, b
 	s.cmdMu.Unlock()
 
 	select {
-	case s.cmdJobs[dev.Role] <- oneShotJob{id: cmd.ID, addr: cmd.Addr}:
+	case s.cmdJobs[dev.Role] <- oneShotJob{id: cmd.ID, addr: cmd.Addr, value: oneShotValue[cmd.ID]}:
 	default:
 		s.onCommandResult(ctx, cmdResult{id: cmd.ID, at: now, err: errors.New("writer зайнятий")})
 		snap, _ := s.commandStatus(cmd.ID)
@@ -482,7 +526,7 @@ func (s *Service) sendOneShot(ctx context.Context, now time.Time, cmd oneShot, b
 	}
 	s.writeEventDeduped(ctx, Event{
 		TS: now, Severity: SevWarning, Code: EvCmdSent,
-		Message: fmt.Sprintf("«%s»: %d = 0 на %s (%s)", cmd.Label, cmd.Addr, dev.Host, by),
+		Message: fmt.Sprintf("«%s»: %d = %d на %s (%s)", cmd.Label, cmd.Addr, oneShotValue[cmd.ID], dev.Host, by),
 		Context: map[string]any{"command": cmd.ID, "register": cmd.Addr, "host": dev.Host, "by": by},
 	})
 	// The operator stopping a running battery ends the day's commands
@@ -712,6 +756,24 @@ func (s *Service) advanceStopping(ctx context.Context, now time.Time, t Tick) bo
 				}
 				if !s.sess.essStopConfirmed {
 					s.sess.stopNotes = append(s.sess.stopNotes, "зупинку УЗЕ не підтверджено")
+				}
+			}
+			s.sess.stopPhase = "pq"
+			// Turned off from the island: the stopped battery back in PQ.
+			if s.ctl.TurningOffFromIsland() && !pcsModePQ(t) {
+				if r := s.sendOneShot(ctx, now, oneShots[CmdPCSPQ], "edge: вимкнення запису з острова", true); r.OK {
+					s.sess.pqAwaited = true
+				} else {
+					s.sess.stopNotes = append(s.sess.stopNotes, "режим PQ не надіслано: "+r.Error)
+				}
+			}
+		case "pq":
+			if s.sess.pqAwaited {
+				if st, ok := s.commandStatus(CmdPCSPQ); ok && st.open() {
+					return false
+				}
+				if st, _ := s.commandStatus(CmdPCSPQ); st.State != CmdConfirmed {
+					s.sess.stopNotes = append(s.sess.stopNotes, "режим PQ не підтверджено")
 				}
 			}
 			s.sess.stopPhase = "pv_stop"

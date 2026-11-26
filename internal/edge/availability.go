@@ -58,7 +58,9 @@ func allOpen() *Availability {
 		a.Manual[t] = open
 	}
 	for id := range oneShots {
-		a.Buttons[id] = open
+		if !internalOneShots[id] {
+			a.Buttons[id] = open
+		}
 	}
 	return a
 }
@@ -76,7 +78,7 @@ func availabilityFor(st SupplyState) *Availability {
 	}
 	closeStarts := func(reason string, keepPV bool) {
 		for id, c := range oneShots {
-			if !c.Start || (keepPV && c.Target == "pv") {
+			if !c.Start || internalOneShots[id] || (keepPV && c.Target == "pv") {
 				continue
 			}
 			a.Buttons[id] = Avail{Reason: reason}

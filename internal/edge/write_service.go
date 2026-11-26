@@ -21,6 +21,7 @@ func (s *Service) stepWrite(ctx context.Context, now time.Time, tick Tick, d *De
 	}
 	before := s.ctl.State()
 	s.updateCommands(ctx, now, tick)
+	s.islandStep(ctx, now, tick)
 	if s.ctl.State() == WriteStopping && s.advanceStopping(ctx, now, tick) {
 		return
 	}
@@ -145,6 +146,9 @@ func (s *Service) onWriteRequest(ctx context.Context, now time.Time, req writeRe
 	case "stop":
 		if !s.gate.Enabled() {
 			return writeReply{Error: "запис не ввімкнено"}
+		}
+		if islandState(s.ctl.State()) {
+			return writeReply{Error: "в острові потужність УЗЕ не задається — «Зупинка острова»"}
 		}
 		if ev, ok := s.ctl.Stop(now, "оператор: УЗЕ 0 кВт ("+req.by+")", false); ok {
 			s.writeEventDeduped(ctx, ev)

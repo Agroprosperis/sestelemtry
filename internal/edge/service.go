@@ -94,6 +94,7 @@ type Service struct {
 	supply           *supplyTracker // nil while encombi is off
 	supplyNow        SupplyState
 	avail            *Availability // nil while encombi is off
+	isl              islandSeq
 }
 
 // writeRequest is a console action on the write flag, served by the

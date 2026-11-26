@@ -125,7 +125,7 @@ func TestWriterSendsTheButtonToItsLogger(t *testing.T) {
 		t.Fatalf("result = %+v", res)
 	}
 	for id, c := range oneShots {
-		if c.Target == "pcs" {
+		if c.Target == "pcs" || c.Target == "pcs_vsg" {
 			if c.Role != RoleESS || c.Addr != regPCSMode {
 				t.Fatalf("%s goes to %s / %d", id, c.Role, c.Addr)
 			}

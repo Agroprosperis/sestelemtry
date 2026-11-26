@@ -274,6 +274,8 @@ type SupplyStatus struct {
 	AutonomyMin *float64 `json:"autonomy_min,omitempty"`
 	// Actions is what the cloud's commands and the buttons may do now.
 	Actions *Availability `json:"actions,omitempty"`
+	// IslandPowerMaxKw is the island's load limit (§3, Huawei 2/3).
+	IslandPowerMaxKw float64 `json:"island_power_max_kw"`
 }
 
 var inputNames = map[int]string{
@@ -334,6 +336,8 @@ func buildSupplyStatus(st SupplyState, t Tick, controller string, cfg *Config, c
 		SocFloorPct: og.IslandSocFloorPct,
 		BusVoltageV: st.BusVoltageV,
 		GenPowerKw:  st.GenPowerKw,
+
+		IslandPowerMaxKw: og.IslandPowerMaxKw,
 	}
 	out.ESSMode = essModeOf(t)
 	out.ESSModeLabel = essModeLabels[out.ESSMode]

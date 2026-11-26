@@ -172,7 +172,7 @@ func (s *Service) observeSupply(ctx context.Context, now time.Time, tick *Tick) 
 	if r := s.lastEncombi.Load(); r != nil {
 		s.supplyNow.DataAge = now.Sub(r.At)
 	}
-	s.avail = s.availabilityNow(*tick)
+	s.avail = s.availabilityNow(now, *tick)
 	if changed {
 		s.writeEventDeduped(ctx, supplyEvent(now, prevMode, s.supplyNow.Mode, s.supplyNow))
 	}
