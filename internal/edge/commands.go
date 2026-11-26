@@ -704,12 +704,16 @@ func (s *Service) invertersOnGrid(now time.Time) (int, bool) {
 // stop (cutover §9, §12.4): the battery if the test started it, the sun
 // only if the test started it. The battery stop goes out even when the
 // PCS already reads as shut down: a PCS that tripped comes back by
-// itself, a stopped one does not.
+// itself, a stopped one does not. Nothing goes out while an island the
+// console did not start holds the bus.
 func (s *Service) sendAutoStops(ctx context.Context, now time.Time) {
 	if s.sess.autoStopSent || !s.ctl.StopAuto() {
 		return
 	}
 	s.sess.autoStopSent = true
+	if s.ctl.ExternalIsland() {
+		return
+	}
 	if s.essStartedByTest() && !s.sess.essStopConfirmed {
 		s.sendOneShot(ctx, now, oneShots[CmdESSStop], "edge: зупинка", true)
 	}
@@ -741,8 +745,11 @@ func (s *Service) advanceStopping(ctx context.Context, now time.Time, t Tick) bo
 			s.sess.stopPhase = "ess_stop"
 			// At the end the battery is stopped always; after a fault,
 			// if the test started it. A stop already on its way (sent by
-			// a latched stop) is waited for, not doubled.
-			if (s.sess.disableByOperator || s.essStartedByTest()) && !s.sess.essStopConfirmed {
+			// a latched stop) is waited for, not doubled. An island the
+			// console did not start is left to whoever holds it.
+			if s.ctl.ExternalIsland() {
+				s.sess.stopNotes = append(s.sess.stopNotes, "острів тримає УЗЕ — зупинку УЗЕ не надсилали")
+			} else if (s.sess.disableByOperator || s.essStartedByTest()) && !s.sess.essStopConfirmed {
 				if r := s.sendOneShot(ctx, now, oneShots[CmdESSStop], "edge: вимкнення запису", true); r.OK {
 					s.sess.essStopAwaited = true
 				} else {
@@ -777,7 +784,9 @@ func (s *Service) advanceStopping(ctx context.Context, now time.Time, t Tick) bo
 				}
 			}
 			s.sess.stopPhase = "pv_stop"
-			if s.sess.pvStartedByTest {
+			if s.sess.pvStartedByTest && s.ctl.ExternalIsland() {
+				s.sess.stopNotes = append(s.sess.stopNotes, "острів тримає УЗЕ — зупинку СЕС не надсилали")
+			} else if s.sess.pvStartedByTest {
 				if r := s.sendOneShot(ctx, now, oneShots[CmdPVStop], "edge: вимкнення запису", true); r.OK {
 					s.sess.pvStopAwaited = true
 				} else {
