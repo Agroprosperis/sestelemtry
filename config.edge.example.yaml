@@ -167,3 +167,15 @@ offgrid:
   generator_deadband_kw: 20      # band around the target left alone
   generator_reverse_after: 2s    # generator ≤ 0 kW this long: reverse power
   generator_charge_hold: 30s     # Encombi data older: the charge too goes to 0
+  # «Пуск острова» / «Зупинка острова» (§5). Off until the vendor answers;
+  # even on, the writer refuses 44365 = 1 until the test order is approved.
+  island_actions_enabled: false
+  island_start_min_soc_pct: 25
+  island_soc_warn_pct: 30        # «запускайте генератор»
+  island_pv_full_soc_pct: 88     # above: the PV ceiling down to the load
+  island_switch_hold: 5s
+  island_step_pause: 5s          # the order and pauses wait for the vendor
+  island_vsg_timeout: 30s
+  island_start_timeout: 3m
+  island_stop_timeout: 3m
+  island_retry_after: 5m         # the device off time set in the logger

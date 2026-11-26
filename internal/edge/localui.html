@@ -491,6 +491,9 @@ function renderSupply(sp) {
       '<span class="fill" style="width:calc(' + pct + '% - 2px)"></span><span class="min" style="left:' + sp.gen_min_pct + '%"></span></span>' +
       '<span style="color:var(--muted);font-size:11px">мінімум ' + sp.gen_min_pct + ' % · найдешевше ' + sp.gen_best_pct[0] + '–' + sp.gen_best_pct[1] + ' %</span>');
   }
+  if (sp.mode === 'island' || (sp.mode === 'blackout' && sp.switch === 'vsg')) {
+    extra.push('<span>Доступна потужність острова: <strong>не більше ' + sp.island_power_max_kw + ' кВт</strong> · двигуни прямого пуску до ' + Math.round(sp.island_power_max_kw * 0.15) + ' кВт</span>');
+  }
   if (off) {
     extra.push('<span>Заряд УЗЕ <strong>' + (sp.soc_percent != null ? Math.round(sp.soc_percent) + ' %' : '—') + '</strong></span>');
     extra.push('<span>До ' + sp.soc_floor_pct + ' %: <strong>' + (sp.autonomy_min != null ? Math.floor(sp.autonomy_min / 60) + ' год ' + (sp.autonomy_min % 60) + ' хв' : '—') + '</strong> при ' + fmtKw(sp.load_kw) + '</span>');
@@ -699,6 +702,9 @@ const WRITE_STATES = {
   stopping: ['вимикання запису…', 'amber'],
   mode_stop: ['IoT2050 пише · мережа зникла (УЗЕ 0)', 'red'],
   gen_run: ['IoT2050 пише · УЗЕ з генератором', 'red'],
+  island_start: ['IoT2050 пише · вхід в острів', 'red'],
+  island: ['IoT2050 пише · острів (40381 не пишеться)', 'red'],
+  island_stop: ['IoT2050 пише · вихід з острова', 'red'],
 };
 
 function renderWrite(w) {
@@ -817,6 +823,8 @@ function renderCommands(w) {
 
 // --- Робота без мережі (offgrid §4.4) ---
 const OFFGRID_ROWS = [
+  { id: 'island_start', label: 'Пуск острова', hint: 'стеля СЕС 0, VSG (44365 = 1), пуск УЗЕ, пуск СЕС; навантаження вмикати частинами' },
+  { id: 'island_stop', label: 'Зупинка острова', hint: 'зупинка УЗЕ (40198), потім PQ (44365 = 0)' },
   { id: 'gen_ess_start', label: 'Пуск УЗЕ з генератором', hint: 'PQ (44365 = 0), підтвердження, пуск 40199; далі генератор тримається між 220 і 480 кВт' },
 ];
 

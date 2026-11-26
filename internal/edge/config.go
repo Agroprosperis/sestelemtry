@@ -288,6 +288,29 @@ type OffgridConfig struct {
 	// GeneratorChargeHold: Encombi data older than this takes the charge
 	// to 0 as well (§6: 30 s).
 	GeneratorChargeHold time.Duration `yaml:"generator_charge_hold"`
+
+	// IslandActionsEnabled lets «Пуск острова» and «Зупинка острова» do
+	// anything (§4.4, §5). Off until the vendor answers; even on, the
+	// writer refuses 44365 = 1 until the test order is approved.
+	IslandActionsEnabled bool `yaml:"island_actions_enabled"`
+	// IslandStartMinSocPct: «Пуск острова» needs more charge than this.
+	IslandStartMinSocPct float64 `yaml:"island_start_min_soc_pct"`
+	// IslandSocWarnPct: «запускайте генератор» (§5.2: 30 %).
+	IslandSocWarnPct float64 `yaml:"island_soc_warn_pct"`
+	// IslandPVFullSocPct: above it the PV ceiling drops to the load.
+	IslandPVFullSocPct float64 `yaml:"island_pv_full_soc_pct"`
+	// IslandSwitchHold: the switch must sit in VSG this long before the
+	// start, and away from VSG this long to stop the island.
+	IslandSwitchHold time.Duration `yaml:"island_switch_hold"`
+	// The sequence's pause between steps and its waits (§5.1: settings,
+	// not constants; the order and the pauses wait for the vendor).
+	IslandStepPause    time.Duration `yaml:"island_step_pause"`
+	IslandVSGTimeout   time.Duration `yaml:"island_vsg_timeout"`
+	IslandStartTimeout time.Duration `yaml:"island_start_timeout"`
+	IslandStopTimeout  time.Duration `yaml:"island_stop_timeout"`
+	// IslandRetryAfter: a failed start may be pressed again only after
+	// the device off time set in the logger.
+	IslandRetryAfter time.Duration `yaml:"island_retry_after"`
 }
 
 // Config is the root of the edge YAML (config.edge.yaml).
@@ -677,6 +700,33 @@ func (c *Config) applyDefaults() {
 	if og.GeneratorChargeHold <= 0 {
 		og.GeneratorChargeHold = 30 * time.Second
 	}
+	if og.IslandStartMinSocPct <= 0 {
+		og.IslandStartMinSocPct = 25
+	}
+	if og.IslandSocWarnPct <= 0 {
+		og.IslandSocWarnPct = 30
+	}
+	if og.IslandPVFullSocPct <= 0 {
+		og.IslandPVFullSocPct = 88
+	}
+	if og.IslandSwitchHold <= 0 {
+		og.IslandSwitchHold = 5 * time.Second
+	}
+	if og.IslandStepPause <= 0 {
+		og.IslandStepPause = 5 * time.Second
+	}
+	if og.IslandVSGTimeout <= 0 {
+		og.IslandVSGTimeout = 30 * time.Second
+	}
+	if og.IslandStartTimeout <= 0 {
+		og.IslandStartTimeout = 3 * time.Minute
+	}
+	if og.IslandStopTimeout <= 0 {
+		og.IslandStopTimeout = 3 * time.Minute
+	}
+	if og.IslandRetryAfter <= 0 {
+		og.IslandRetryAfter = 5 * time.Minute
+	}
 }
 
 func (c *Config) validate() error {
@@ -811,6 +861,13 @@ func (c *Config) validate() error {
 	}
 	if og.GeneratorEnabled && !c.Encombi.Enabled {
 		return fmt.Errorf("edge config: offgrid.generator_enabled needs encombi.enabled")
+	}
+	if og.IslandActionsEnabled && !c.Encombi.Enabled {
+		return fmt.Errorf("edge config: offgrid.island_actions_enabled needs encombi.enabled")
+	}
+	if !(og.IslandSocFloorPct < og.IslandStartMinSocPct && og.IslandSocFloorPct < og.IslandSocWarnPct) {
+		return fmt.Errorf("edge config: offgrid island floor %g%% must be below the start (%g%%) and the warning (%g%%)",
+			og.IslandSocFloorPct, og.IslandStartMinSocPct, og.IslandSocWarnPct)
 	}
 	return nil
 }
