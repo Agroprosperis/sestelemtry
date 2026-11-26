@@ -274,6 +274,20 @@ type OffgridConfig struct {
 	IslandSocFloorPct float64 `yaml:"island_soc_floor_pct"`
 	// IslandPowerMaxKw caps the island load (Huawei: 2/3 of the rating).
 	IslandPowerMaxKw float64 `yaml:"island_power_max_kw"`
+
+	// GeneratorEnabled opens «Пуск УЗЕ з генератором» and the generator
+	// control (§6). Off by default; needs encombi.
+	GeneratorEnabled bool `yaml:"generator_enabled"`
+	// GeneratorStepKw caps how much a battery charge grows per second;
+	// GeneratorDeadbandKw is the band around the target left alone.
+	GeneratorStepKw     float64 `yaml:"generator_step_kw"`
+	GeneratorDeadbandKw float64 `yaml:"generator_deadband_kw"`
+	// GeneratorReverseAfter: the generator at or below 0 kW this long is
+	// reverse power (§6: 2 s).
+	GeneratorReverseAfter time.Duration `yaml:"generator_reverse_after"`
+	// GeneratorChargeHold: Encombi data older than this takes the charge
+	// to 0 as well (§6: 30 s).
+	GeneratorChargeHold time.Duration `yaml:"generator_charge_hold"`
 }
 
 // Config is the root of the edge YAML (config.edge.yaml).
@@ -651,6 +665,18 @@ func (c *Config) applyDefaults() {
 	if og.IslandPowerMaxKw <= 0 {
 		og.IslandPowerMaxKw = 576
 	}
+	if og.GeneratorStepKw <= 0 {
+		og.GeneratorStepKw = 50
+	}
+	if og.GeneratorDeadbandKw <= 0 {
+		og.GeneratorDeadbandKw = 20
+	}
+	if og.GeneratorReverseAfter <= 0 {
+		og.GeneratorReverseAfter = 2 * time.Second
+	}
+	if og.GeneratorChargeHold <= 0 {
+		og.GeneratorChargeHold = 30 * time.Second
+	}
 }
 
 func (c *Config) validate() error {
@@ -782,6 +808,9 @@ func (c *Config) validate() error {
 	}
 	if og.IslandSocFloorPct >= 100 {
 		return fmt.Errorf("edge config: offgrid.island_soc_floor_pct out of range: %g", og.IslandSocFloorPct)
+	}
+	if og.GeneratorEnabled && !c.Encombi.Enabled {
+		return fmt.Errorf("edge config: offgrid.generator_enabled needs encombi.enabled")
 	}
 	return nil
 }

@@ -158,7 +158,7 @@ func Run(ctx context.Context, cfg *Config, log *slog.Logger, version string) err
 		gate:             gate,
 		pin:              &pinGate{path: cfg.Control.Write.PinPath},
 		console:          &consoleGate{path: cfg.LocalUI.PasswordPath},
-		ctl:              NewController(cfg.Control.Write),
+		ctl:              NewController(cfg.Control.Write).WithOffgrid(cfg.Offgrid),
 		writeFaults:      make(chan writeFault, 8),
 		writeRequests:    make(chan writeRequest),
 		cmds:             map[string]*CommandStatus{},

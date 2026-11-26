@@ -224,7 +224,9 @@ type SupplyState struct {
 	// Settling: the readings show a mode without the grid that is not
 	// taken yet. The PCS trips the moment the grid goes, well inside
 	// the debounce.
-	Settling    bool
+	Settling bool
+	// DataAge is how old the last Encombi reading is.
+	DataAge     time.Duration
 	Bits        uint16
 	Fresh       bool
 	GenPowerKw  *float64

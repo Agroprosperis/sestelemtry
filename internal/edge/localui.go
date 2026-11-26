@@ -303,12 +303,31 @@ func (s *Service) uiCommand(w http.ResponseWriter, r *http.Request) {
 	}
 	var body struct {
 		Command string `json:"command"`
+		Pin     string `json:"pin"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	reply := s.requestCommand(r.Context(), strings.TrimSpace(body.Command), consoleBy(r))
+	id := strings.TrimSpace(body.Command)
+	if pinCommands[id] {
+		now := time.Now().UTC()
+		if locked, err := s.pin.check(body.Pin, now); err != nil {
+			if errors.Is(err, errPinWrong) {
+				sev := SevWarning
+				if locked {
+					sev = SevAlarm
+				}
+				s.pushEvent(Event{TS: now, Severity: sev, Code: EvWriteDenied,
+					Message: "команду «" + oneShots[id].Label + "» відхилено: " + err.Error() + " (" + consoleBy(r) + ")"})
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusConflict)
+			_ = json.NewEncoder(w).Encode(cmdReply{Error: err.Error()})
+			return
+		}
+	}
+	reply := s.requestCommand(r.Context(), id, consoleBy(r))
 	if !reply.OK {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusConflict)
