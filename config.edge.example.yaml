@@ -139,3 +139,24 @@ diagnostics:
     poll_interval: 30s
     # labels:
     #   12: INV-12
+
+# Own read of the Encombi controller (ems_offgrid_island_generator.md
+# §4): inputs 20500, generator meter, bus voltage; FC04, read only.
+# Off: no power mode, the edge behaves as before. ze: 10.28.40.103.
+encombi:
+  enabled: false
+  host: ""
+  port: 502
+  unit_id: 1
+  poll_interval: 1s
+  stale_after: 5s        # older data → power mode «невідомо»
+  debounce: 2s           # a new mode is taken once it holds this long
+  bus_live_min_v: 180
+
+# Site figures without the grid (§3, §6). ze defaults shown.
+offgrid:
+  generator_rated_kw: 734
+  generator_min_kw: 220
+  generator_target_kw: 480
+  island_soc_floor_pct: 20
+  island_power_max_kw: 576

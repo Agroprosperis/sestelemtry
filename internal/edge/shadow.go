@@ -60,6 +60,9 @@ type Decision struct {
 
 	Degraded bool
 	Anomaly  bool
+
+	// Supply is the status line at this tick; nil while encombi is off.
+	Supply *SupplyStatus
 }
 
 // Record renders the canonical MVP §9.3 control record — the exact
@@ -80,6 +83,14 @@ func (d Decision) Record(siteID string) map[string]any {
 	putF(inputs, "meter_active_power_kw", d.MeterPowerKw)
 	if d.ManualCommandID != "" {
 		inputs["manual_command_id"] = d.ManualCommandID
+	}
+	if d.Supply != nil {
+		inputs["supply_mode"] = d.Supply.Mode
+		inputs["cabinet_switch"] = d.Supply.Switch
+		if d.Supply.DIBits != nil {
+			inputs["encombi_di_bits"] = *d.Supply.DIBits
+		}
+		putF(inputs, "gen_power_kw", d.Supply.GenPowerKw)
 	}
 
 	clamps := d.Clamps

@@ -81,6 +81,8 @@ type HealthSnapshot struct {
 	Inverters []InverterSnapshot `json:"inverters,omitempty"`
 	Alarms    *HealthAlarms      `json:"alarms,omitempty"`
 	Write     *WriteHealth       `json:"write,omitempty"`
+	// Supply is absent while encombi is off.
+	Supply *SupplyStatus `json:"supply,omitempty"`
 }
 
 // BESS class labels (§7.1).
@@ -302,6 +304,7 @@ func (s *Service) buildHealth(now time.Time) *HealthSnapshot {
 	if s.gate != nil {
 		h.Write = s.writeHealth()
 	}
+	h.Supply = s.supplyView.Load()
 	return h
 }
 
