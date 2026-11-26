@@ -28,6 +28,9 @@ const (
 	// CmdPCSPQ sets the battery PCS to PQ (44365 = 0) before its start;
 	// the edge sends it itself (cutover §12.7).
 	CmdPCSPQ = "pcs_pq"
+	// CmdGenESSStart is «Пуск УЗЕ з генератором» (offgrid §4.4): PQ,
+	// its confirmation, then 40199; the generator control follows.
+	CmdGenESSStart = "gen_ess_start"
 )
 
 const (
@@ -95,7 +98,12 @@ var oneShots = map[string]oneShot{
 	CmdArrayStartESS: {CmdArrayStartESS, 40200, RoleESS, "Пуск масиву (логер УЗЕ)", CmdArrayStopESS, true, "ess"},
 	CmdArrayStopESS:  {CmdArrayStopESS, 40201, RoleESS, "Зупинка масиву (логер УЗЕ)", CmdArrayStartESS, false, "ess"},
 	CmdPCSPQ:         {CmdPCSPQ, regPCSMode, RoleESS, "Режим PCS: PQ", "", false, "pcs"},
+	CmdGenESSStart:   {CmdGenESSStart, 40199, RoleESS, "Пуск УЗЕ з генератором", CmdESSStop, true, "ess"},
 }
+
+// pinCommands are the off-grid buttons: each takes the device PIN, as
+// turning writing on does (offgrid §4.4).
+var pinCommands = map[string]bool{CmdGenESSStart: true}
 
 // oneShotAddr: the start/stop registers an FC06 may go to. 40202/40203
 // (the same start/stop pair with a confusing 0/1) never.
@@ -266,6 +274,8 @@ type writeSession struct {
 	pqSent            bool   // 44365 = 0 went out in this session
 	stopNotes         []string
 	pvCheckDay        string
+	// genStartAfterPQ: «Пуск УЗЕ з генератором» waits for its PQ.
+	genStartAfterPQ string // the presser, "" = none
 }
 
 // essStartedByTest reports that the test started the battery: the
@@ -335,6 +345,9 @@ func (s *Service) onCommandRequest(ctx context.Context, now time.Time, req cmdRe
 	// Cutover §12.7: the battery starts only in PQ, and PQ is set only
 	// on the stopped battery.
 	t := s.lastTick.Load()
+	if cmd.ID == CmdGenESSStart {
+		return s.startWithGenerator(ctx, now, t, req.by)
+	}
 	if cmd.Target == "ess" && cmd.Start && (t == nil || !pcsModePQ(*t)) {
 		return cmdReply{Error: s.pcsStartRefusal(t)}
 	}
@@ -342,6 +355,56 @@ func (s *Service) onCommandRequest(ctx context.Context, now time.Time, req cmdRe
 		return cmdReply{Error: "режим PCS задається лише на зупиненій УЗЕ (40540 ≠ 0)"}
 	}
 	return s.sendOneShot(ctx, now, cmd, req.by, false)
+}
+
+// startWithGenerator is the button's sequence (§4.4): 44365 = 0 if the
+// PCS is not in PQ yet, its confirmation, then 40199. Nothing else
+// starts it.
+func (s *Service) startWithGenerator(ctx context.Context, now time.Time, t *Tick, by string) cmdReply {
+	if t == nil {
+		return cmdReply{Error: "немає телеметрії"}
+	}
+	if g := s.genStartGate(*t); !g.OK {
+		return cmdReply{Error: g.Reason}
+	}
+	if pcsModePQ(*t) {
+		return s.sendOneShot(ctx, now, oneShots[CmdGenESSStart], by, false)
+	}
+	r := s.sendOneShot(ctx, now, oneShots[CmdPCSPQ], by+": «Пуск УЗЕ з генератором»", false)
+	if r.OK {
+		s.sess.genStartAfterPQ = by
+	}
+	return r
+}
+
+// genStartGate is «Пуск УЗЕ з генератором» in this tick: open only with
+// the generator on the bus, the switch in PQ, the battery stopped after
+// the grid's loss, and the owner's switch on.
+func (s *Service) genStartGate(t Tick) Avail {
+	switch st := s.supplyNow; {
+	case !s.cfg.Offgrid.GeneratorEnabled || s.supply == nil:
+		return Avail{Reason: "робота з генератором вимкнена в конфігу пристрою (offgrid.generator_enabled)"}
+	case st.Mode != SupplyGenerator:
+		return Avail{Reason: "лише коли шину живить генератор"}
+	case st.Switch != SwitchPQ:
+		return Avail{Reason: "перемикач на шафі не в PQ"}
+	case s.ctl.State() == WriteGenRun:
+		return Avail{Reason: "УЗЕ вже працює з генератором"}
+	case s.ctl.State() != WriteModeStop:
+		return Avail{Reason: "спершу запис і зупинка УЗЕ після зникнення мережі"}
+	case !essStoppedOn(t):
+		return Avail{Reason: "УЗЕ не зупинена (40540)"}
+	case s.sess.genStartAfterPQ != "":
+		return Avail{Reason: "режим PCS переходить у PQ — пуск після підтвердження"}
+	}
+	return open
+}
+
+// availabilityNow is §4.3 plus this tick's off-grid buttons.
+func (s *Service) availabilityNow(t Tick) *Availability {
+	a := availabilityFor(s.supplyNow)
+	a.Buttons[CmdGenESSStart] = s.genStartGate(t)
+	return a
 }
 
 // pcsStartRefusal says why «Пуск УЗЕ» waits for PQ.
@@ -423,12 +486,16 @@ func (s *Service) sendOneShot(ctx context.Context, now time.Time, cmd oneShot, b
 		Context: map[string]any{"command": cmd.ID, "register": cmd.Addr, "host": dev.Host, "by": by},
 	})
 	// The operator stopping a running battery ends the day's commands
-	// as an operator stop: nothing else is stopped for it.
+	// as an operator stop: nothing else is stopped for it. Without the
+	// grid the session goes on, so the mode's start stays possible.
 	if !cmd.Start && cmd.Target == "ess" && s.ctl.ESSStartedInSession() {
-		if state := s.ctl.State(); state == WriteHold || state == WriteRun {
+		switch state := s.ctl.State(); state {
+		case WriteHold, WriteRun:
 			if ev, ok := s.ctl.Stop(now, "«"+cmd.Label+"» ("+by+")", false); ok {
 				s.writeEventDeduped(ctx, ev)
 			}
+		case WriteGenRun:
+			s.ctl.OperatorStopOffgrid(now, "«"+cmd.Label+"» ("+by+")")
 		}
 	}
 	snap, _ := s.commandStatus(cmd.ID)
@@ -523,6 +590,13 @@ func (s *Service) updateCommands(ctx context.Context, now time.Time, t Tick) {
 	}
 	s.cmdMu.Unlock()
 	for _, d := range finished {
+		if d.cmd.ID == CmdPCSPQ && s.sess.genStartAfterPQ != "" {
+			by := s.sess.genStartAfterPQ
+			s.sess.genStartAfterPQ = ""
+			if d.confirmed && s.genStartGate(t).OK {
+				s.sendOneShot(ctx, now, oneShots[CmdGenESSStart], by+": після PQ", false)
+			}
+		}
 		if !d.confirmed {
 			within := "3 хв"
 			if d.cmd.window() < time.Minute {
@@ -537,6 +611,9 @@ func (s *Service) updateCommands(ctx context.Context, now time.Time, t Tick) {
 			Message: fmt.Sprintf("«%s» підтверджено: %s", d.cmd.Label, fmtLive(d.snap.Live)),
 			Context: map[string]any{"command": d.cmd.ID, "live": d.snap.Live}})
 		switch {
+		case d.cmd.ID == CmdGenESSStart:
+			s.ctl.GenStarted(now)
+			s.sess.essStopConfirmed = false
 		case d.cmd.Target == "ess" && d.cmd.Start:
 			s.ctl.ESSStarted(now)
 			s.sess.essStopConfirmed = false

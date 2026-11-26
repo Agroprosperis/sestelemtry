@@ -255,6 +255,12 @@
         <h3 style="margin:16px 0 6px;font-size:14px">Пуск і зупинка — разові команди, лише з увімкненим записом</h3>
         <table class="data" id="cmd-table"></table>
         <p id="cmd-note" style="font-size:13px;color:var(--red);font-weight:600;margin-top:8px" hidden></p>
+        <div id="offgrid-box" hidden style="margin-top:16px">
+          <h2 style="margin:0 0 8px">Робота без мережі</h2>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 8px">Кожна дія — окрема кнопка з PIN. Система сама нічого не запускає і не перемикає.</p>
+          <input type="password" id="offgrid-pin" placeholder="PIN" autocomplete="off" inputmode="numeric" style="max-width:140px;margin-bottom:8px">
+          <table class="data" id="offgrid-table"></table>
+        </div>
         <p id="write-result" style="font-size:12px;margin-top:10px"></p>
         <p id="write-hint" style="font-size:12px;color:var(--muted);margin-top:6px">Поки запис вимкнено, контролер лише читає: рішення віртуальні (<code>would_write_*</code>). Увімкнення — лише тут, людиною, з кодом об’єкта і PIN; після перезапуску сервісу запис завжди вимкнений. Стоп і вимкнення — без PIN.</p>
       </div>
@@ -692,6 +698,7 @@ const WRITE_STATES = {
   stopped: ['IoT2050 пише · ЗУПИНКА (УЗЕ 0)', 'red'],
   stopping: ['вимикання запису…', 'amber'],
   mode_stop: ['IoT2050 пише · мережа зникла (УЗЕ 0)', 'red'],
+  gen_run: ['IoT2050 пише · УЗЕ з генератором', 'red'],
 };
 
 function renderWrite(w) {
@@ -805,7 +812,51 @@ function renderCommands(w) {
       : startClosed ? 'Пуск зараз недоступний: ' + startClosed + '.' : '');
   $('cmd-note').hidden = !note;
   $('cmd-note').textContent = note;
+  renderOffgrid(w, byId, sp);
 }
+
+// --- Робота без мережі (offgrid §4.4) ---
+const OFFGRID_ROWS = [
+  { id: 'gen_ess_start', label: 'Пуск УЗЕ з генератором', hint: 'PQ (44365 = 0), підтвердження, пуск 40199; далі генератор тримається між 220 і 480 кВт' },
+];
+
+function renderOffgrid(w, byId, sp) {
+  $('offgrid-box').hidden = !sp;
+  if (!sp) return;
+  const acts = sp.actions ? sp.actions.buttons || {} : {};
+  $('offgrid-table').innerHTML = OFFGRID_ROWS.map((r) => {
+    const a = acts[r.id] || { ok: false, reason: 'немає даних' };
+    const last = byId[r.id];
+    const busy = last && last.state === 'waiting';
+    const dis = !w.enabled || busy || !a.ok ? ' disabled' : '';
+    return '<tr><th>' + r.label + '</th><td><div class="btn-row"><button class="btn btn-primary" data-offgrid="' + r.id + '"' + dis + '>' + r.label + '</button></div>' +
+      '<div style="font-size:12px;margin-top:4px;color:var(--muted)">' + esc(r.hint) + '</div>' +
+      (!a.ok ? '<div style="font-size:12px;margin-top:4px;color:var(--red)">Недоступно: ' + esc(a.reason || '') + '</div>' : '') +
+      '<div style="font-size:12px;margin-top:4px">' + cmdFeedback(last) + '</div></td></tr>';
+  }).join('');
+}
+
+$('offgrid-table').onclick = async (e) => {
+  const b = e.target.closest('button[data-offgrid]');
+  if (!b || b.disabled) return;
+  const pin = $('offgrid-pin').value;
+  if (!pin) { cmdError = { text: 'Введіть PIN', until: Date.now() + 10000 }; refreshStatus(); return; }
+  if (!confirm('Надіслати «' + b.textContent + '»?')) return;
+  b.disabled = true;
+  try {
+    const res = await fetch('/api/command', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'fetch' },
+      body: JSON.stringify({ command: b.dataset.offgrid, pin }),
+    });
+    const body = await res.json().catch(() => ({}));
+    cmdError = !res.ok || !body.ok ? { text: 'Команду не надіслано: ' + (body.error || res.statusText), until: Date.now() + 20000 } : null;
+  } catch (err) {
+    cmdError = { text: 'Помилка: ' + err.message, until: Date.now() + 20000 };
+  }
+  $('offgrid-pin').value = '';
+  refreshStatus();
+};
 
 $('cmd-table').onclick = async (e) => {
   const b = e.target.closest('button[data-cmd]');

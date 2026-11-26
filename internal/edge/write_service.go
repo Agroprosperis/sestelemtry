@@ -19,6 +19,7 @@ func (s *Service) stepWrite(ctx context.Context, now time.Time, tick Tick, d *De
 		s.writeCmd.Store(nil)
 		return
 	}
+	before := s.ctl.State()
 	s.updateCommands(ctx, now, tick)
 	if s.ctl.State() == WriteStopping && s.advanceStopping(ctx, now, tick) {
 		return
@@ -30,7 +31,6 @@ func (s *Service) stepWrite(ctx context.Context, now time.Time, tick Tick, d *De
 	}
 	n, faults := s.inverterCounts(now)
 	supply, avail := s.supplyInputs()
-	before := s.ctl.State()
 	cmd, evs := s.ctl.Step(ControlInputs{
 		Now:            now,
 		Tick:           tick,

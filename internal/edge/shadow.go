@@ -45,6 +45,7 @@ type Decision struct {
 
 	ManualCommandID  string
 	ManualType       string
+	ManualTargetPct  float64 // the level of a «target» block
 	WriteState       string
 	WriteReason      string
 	CommandESSKw     *float64 // 40381 after the write-side clamps
@@ -251,6 +252,9 @@ func Decide(t Tick, m *Manifest, cfg *Config) (Decision, []Event) {
 	}
 	if params.manual != nil {
 		d.ManualCommandID, d.ManualType = params.manual.ID, params.manual.Type
+		if params.manual.Type == ManualTarget {
+			d.ManualTargetPct = params.manual.Value
+		}
 	}
 	if v, ok := t.Values["ess_active_power_adjustment_kw"]; ok {
 		d.Readback40381 = f64ptr(v)

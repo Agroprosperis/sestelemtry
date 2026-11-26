@@ -160,3 +160,10 @@ offgrid:
   generator_target_kw: 480
   island_soc_floor_pct: 20
   island_power_max_kw: 576
+  # «Пуск УЗЕ з генератором» and the generator control (§6). Off until
+  # the owner turns it on for the test; needs encombi.
+  generator_enabled: false
+  generator_step_kw: 50          # a charge grows by at most this per second
+  generator_deadband_kw: 20      # band around the target left alone
+  generator_reverse_after: 2s    # generator ≤ 0 kW this long: reverse power
+  generator_charge_hold: 30s     # Encombi data older: the charge too goes to 0

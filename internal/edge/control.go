@@ -19,6 +19,9 @@ const (
 	// started, like a latched stop, but the session goes on. The new
 	// mode's actions are buttons; the grid's return waits for «Пуск УЗЕ».
 	WriteModeStop = "mode_stop"
+	// The battery runs with the generator (offgrid §6), started by
+	// «Пуск УЗЕ з генератором».
+	WriteGenRun = "gen_run"
 )
 
 // EvWriteModeStop journals the stop on the grid's loss.
@@ -98,6 +101,8 @@ type cmdSample struct {
 // It lives in the core loop only (no locks).
 type Controller struct {
 	cfg WriteConfig
+	og  OffgridConfig
+	gen genState
 
 	state      string
 	since      time.Time
@@ -128,6 +133,12 @@ func NewController(cfg WriteConfig) *Controller {
 	return &Controller{cfg: cfg, state: WriteOff}
 }
 
+// WithOffgrid gives the controller the site figures without the grid.
+func (c *Controller) WithOffgrid(og OffgridConfig) *Controller {
+	c.og = og
+	return c
+}
+
 // State and Reason describe the controller for the journal and consoles.
 func (c *Controller) State() string  { return c.state }
 func (c *Controller) Reason() string { return c.reason }
@@ -138,7 +149,7 @@ func (c *Controller) Since() time.Time {
 // Start waits for the battery start after the flag went on: the
 // battery was stopped before the hand-over, so only 0 kW goes out.
 func (c *Controller) Start(now time.Time) {
-	*c = Controller{cfg: c.cfg, lastPVRatedKw: c.lastPVRatedKw}
+	*c = Controller{cfg: c.cfg, og: c.og, lastPVRatedKw: c.lastPVRatedKw}
 	c.state, c.since, c.reason = WriteAwaitStart, now, "запис увімкнено — УЗЕ не запущена, уставка 0"
 }
 
@@ -159,20 +170,25 @@ func (c *Controller) ESSStartedInSession() bool { return c.essStarted }
 // StopAuto reports a stop that also stops what the test started: a
 // latched stop from a check, or the grid's loss.
 func (c *Controller) StopAuto() bool {
-	return (c.state == WriteStopped && c.stopAuto) || c.state == WriteModeStop
+	return (c.state == WriteStopped || c.state == WriteModeStop) && c.stopAuto
 }
 
-// modeStop: the power mode left the grid while the battery was waiting,
-// holding or running.
+// modeStop: the power mode changed under a battery that was waiting,
+// holding or running: the grid went, or the generator left the bus.
 func (c *Controller) modeStop(now time.Time, mode string) Event {
 	label := supplyModeLabels[mode]
+	what := "мережа зникла (" + label + ")"
+	if c.state == WriteGenRun {
+		what = "генератор більше не живить шину (" + label + ")"
+	}
 	c.state, c.since, c.stopAuto = WriteModeStop, now, true
 	c.reason = "живлення: " + label + " — УЗЕ 0, дії режиму лише кнопками"
 	c.essStarted, c.essStartedAt, c.firstConfirmed = false, time.Time{}, false
+	c.gen = genState{}
 	c.resetChecks()
 	return Event{
 		TS: now, Severity: SevAlarm, Code: EvWriteModeStop,
-		Message: "мережа зникла (" + label + "): УЗЕ 0 кВт, зупинка того, що запускав тест; запис лишається, далі — кнопками",
+		Message: what + ": УЗЕ 0 кВт, зупинка того, що запускав тест; запис лишається, далі — кнопками",
 		Context: map[string]any{"mode": mode},
 	}
 }
@@ -193,7 +209,32 @@ func (c *Controller) resetChecks() {
 
 // Off forgets everything once the flag is off.
 func (c *Controller) Off() {
-	*c = Controller{cfg: c.cfg, state: WriteOff, lastPVRatedKw: c.lastPVRatedKw}
+	*c = Controller{cfg: c.cfg, og: c.og, state: WriteOff, lastPVRatedKw: c.lastPVRatedKw}
+}
+
+// GenStarted: «Пуск УЗЕ з генератором» is confirmed; the generator
+// control takes over.
+func (c *Controller) GenStarted(now time.Time) {
+	if c.state != WriteModeStop {
+		return
+	}
+	c.essStarted, c.essStartedAt = true, now
+	c.state, c.since, c.stopAuto = WriteGenRun, now, false
+	c.reason = fmt.Sprintf("УЗЕ з генератором: дозавантаження до %.0f кВт", c.og.GeneratorTargetKw)
+	c.gen = genState{}
+	c.resetChecks()
+}
+
+// OperatorStopOffgrid: the operator stopped the battery that runs
+// without the grid. The session goes on; the mode's start button is
+// open again, nothing else is stopped for it.
+func (c *Controller) OperatorStopOffgrid(now time.Time, reason string) {
+	if c.state != WriteGenRun {
+		return
+	}
+	c.state, c.since, c.stopAuto, c.reason = WriteModeStop, now, false, reason+" — УЗЕ зупинено, запис лишається"
+	c.essStarted, c.essStartedAt = false, time.Time{}
+	c.resetChecks()
 }
 
 // Stop latches a stop: from now on only safe values go out. auto marks
@@ -253,11 +294,15 @@ func (c *Controller) Step(in ControlInputs) (WriteCommand, []Event) {
 			events = append(events, c.modeStop(in.Now, m))
 		case m == SupplyGrid && c.state == WriteModeStop:
 			c.gridBack(in.Now)
+		case c.state == WriteGenRun && (m == SupplyGrid || m == SupplyBlackout || m == SupplyIsland):
+			// §6: the generator's breaker opened or the bus went dead.
+			events = append(events, c.modeStop(in.Now, m))
 		}
 	}
 	settling := in.Supply != nil && in.Supply.Settling
-	if (c.state == WriteAwaitStart || c.state == WriteHold || c.state == WriteRun) && !settling {
-		if reason := c.checkStops(in); reason != "" {
+	gridStates := c.state == WriteAwaitStart || c.state == WriteHold || c.state == WriteRun
+	if (gridStates || c.state == WriteGenRun) && !settling {
+		if reason := c.checkStops(in, gridStates); reason != "" {
 			if ev, ok := c.Stop(in.Now, reason, true); ok {
 				events = append(events, ev)
 			}
@@ -272,6 +317,12 @@ func (c *Controller) Step(in ControlInputs) (WriteCommand, []Event) {
 		cmd.Reason = in.Decision.ReasonCode
 	case WriteAwaitStart, WriteHold:
 		cmd.PVLimitKw, cmd.PVKnown = c.pvCeiling(in, &cmd.Clamps)
+	case WriteGenRun:
+		events = append(events, c.genCommand(in, &cmd)...)
+		if settling {
+			cmd.ESSKw, c.gen.last = 0, 0
+			cmd.Clamps = append(cmd.Clamps, "живлення змінюється — УЗЕ 0")
+		}
 	default:
 		// Stopped, turning off or the grid gone: battery 0, PV on its
 		// rating (§12.4).
@@ -293,7 +344,10 @@ func (c *Controller) Step(in ControlInputs) (WriteCommand, []Event) {
 			}
 		}
 	}
-	cmd.ESSKw, cmd.PVLimitKw = c.exportCeiling(in, cmd.ESSKw, cmd.PVLimitKw, cmd.PVKnown, &cmd.Clamps)
+	if c.state != WriteGenRun {
+		// No PCC on the generator: the ceiling of export does not apply.
+		cmd.ESSKw, cmd.PVLimitKw = c.exportCeiling(in, cmd.ESSKw, cmd.PVLimitKw, cmd.PVKnown, &cmd.Clamps)
+	}
 	cmd.ESSKw = round1(cmd.ESSKw)
 	cmd.PVLimitKw = round1(cmd.PVLimitKw)
 
@@ -421,8 +475,11 @@ func (c *Controller) exportCeiling(in ControlInputs, ess, pvLimit float64, pvKno
 	return ess, pvLimit
 }
 
-// checkStops returns why writing must stop now, or "".
-func (c *Controller) checkStops(in ControlInputs) string {
+// checkStops returns why writing must stop now, or "". grid adds the
+// checks of the grid (cutover §9): its voltages, the PCC meter, import
+// and export. With the generator the PCC meter drops out of the logger
+// and the grid thresholds do not apply (offgrid §6 п. 3).
+func (c *Controller) checkStops(in ControlInputs, grid bool) string {
 	t, now := in.Tick, in.Now
 	if words, ok := t.SLAlarmWords(); ok {
 		for _, w := range words {
@@ -459,7 +516,7 @@ func (c *Controller) checkStops(in ControlInputs) string {
 	} else {
 		c.pollLossSince = time.Time{}
 	}
-	if low := lowVoltages(&t); len(low) > 0 {
+	if low := lowVoltages(&t); grid && len(low) > 0 {
 		if c.lowVoltSince.IsZero() {
 			c.lowVoltSince = now
 		}
@@ -471,7 +528,9 @@ func (c *Controller) checkStops(in ControlInputs) string {
 	}
 	// Without 40505 neither the import limit nor the export ceiling is
 	// watched; without 40392, the battery's following.
-	if t.GridPowerKw == nil {
+	if !grid {
+		c.pccLossSince, c.importSince, c.exportSince = time.Time{}, time.Time{}, time.Time{}
+	} else if t.GridPowerKw == nil {
 		c.importSince, c.exportSince = time.Time{}, time.Time{}
 		if c.pccLossSince.IsZero() {
 			c.pccLossSince = now
@@ -492,7 +551,7 @@ func (c *Controller) checkStops(in ControlInputs) string {
 	} else {
 		c.essLossSince = time.Time{}
 	}
-	if t.GridPowerKw != nil {
+	if t.GridPowerKw != nil && grid {
 		grid := *t.GridPowerKw
 		if limit := in.ImportLimitKw; limit > 0 && grid >= importStopShare*limit {
 			if c.importSince.IsZero() {

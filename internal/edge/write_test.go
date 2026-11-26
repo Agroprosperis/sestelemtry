@@ -126,7 +126,7 @@ func writeService(t *testing.T, cfg *Config) *Service {
 	}
 	t.Cleanup(func() { _ = bb.Close() })
 	s := &Service{
-		cfg: cfg, log: slog.Default(), bb: bb, gate: gate, ctl: NewController(cfg.Control.Write),
+		cfg: cfg, log: slog.Default(), bb: bb, gate: gate, ctl: NewController(cfg.Control.Write).WithOffgrid(cfg.Offgrid),
 		pin:         &pinGate{path: cfg.Control.Write.PinPath},
 		writeFaults: make(chan writeFault, 8), writeRequests: make(chan writeRequest), events: make(chan Event, 8),
 		eventLastWritten: map[string]time.Time{},

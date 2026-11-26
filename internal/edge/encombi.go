@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/nesh/sestelemetry/internal/modbusclient"
@@ -167,7 +168,11 @@ func (s *Service) observeSupply(ctx context.Context, now time.Time, tick *Tick) 
 	in := supplyInputsOf(*tick)
 	changed, swChanged, prevMode, prevSw := s.supply.observe(now, classifySupply(in, s.cfg.Encombi.BusLiveMinV), switchPosition(in))
 	s.supplyNow = s.supply.state(in)
-	s.avail = availabilityFor(s.supplyNow)
+	s.supplyNow.DataAge = time.Duration(math.MaxInt64)
+	if r := s.lastEncombi.Load(); r != nil {
+		s.supplyNow.DataAge = now.Sub(r.At)
+	}
+	s.avail = s.availabilityNow(*tick)
 	if changed {
 		s.writeEventDeduped(ctx, supplyEvent(now, prevMode, s.supplyNow.Mode, s.supplyNow))
 	}
