@@ -135,6 +135,7 @@ export function CommandFields({
   onReserve,
   direction,
   onDirection,
+  closed = {},
 }: {
   site: SiteInfo
   exportCapKw: number | null
@@ -146,19 +147,28 @@ export function CommandFields({
   onReserve: (value: string) => void
   direction: 'charge' | 'discharge'
   onDirection: (d: 'charge' | 'discharge') => void
+  /** Commands the IoT2050 would not carry out now, with why. */
+  closed?: Record<string, string>
 }) {
+  const closedNow = scenario !== 'none' ? closed[scenario] : undefined
   return (
     <div className="d-fields">
       <label className="d-field">
         Що потрібно зробити
         <select value={scenario} onChange={(e) => onScenario(e.target.value as DeskScenario)}>
           {scenarioOptions.map((o) => (
-            <option key={o.value} value={o.value}>
+            <option key={o.value} value={o.value} disabled={o.value !== scenario && closed[o.value] !== undefined}>
               {o.label}
+              {closed[o.value] !== undefined ? ' — недоступно: ' + closed[o.value] : ''}
             </option>
           ))}
         </select>
       </label>
+      {closedNow && (
+        <p className="d-small d-error" role="status">
+          Зараз недоступно: {closedNow}. IoT2050 таку команду не виконає й триматиме УЗЕ на 0.
+        </p>
+      )}
       {scenario !== 'none' && scenario !== 'hold' && scenario !== 'auto' && (
         <label className="d-field">
           <span>{paramLabel(scenario)}</span>

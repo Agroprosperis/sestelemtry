@@ -266,7 +266,7 @@ describe('DispatchDesk', () => {
     expect(screen.getByText(/^запис вимкнено/)).toBeInTheDocument()
 
     rerender(<DispatchDesk site="ze" status={status({ state: 'pending' })} />)
-    expect(screen.getByText('очікує контролера · опубліковано 19:04')).toHaveClass('warn')
+    expect(screen.getByText('в дорозі до контролера · опубліковано 19:04')).toHaveClass('warn')
 
     rerender(<DispatchDesk site="ze" status={status({ note: 'dispatch v0' })} />)
     expect(screen.getByText('на контролері ще версія 0: нову не опубліковано')).toHaveClass('err')
