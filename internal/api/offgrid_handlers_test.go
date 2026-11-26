@@ -41,6 +41,23 @@ func TestOffgridFloors(t *testing.T) {
 	}
 }
 
+// §7: after the grid comes back, can it fill the battery to the next
+// outage's target in time?
+func TestGridInTime(t *testing.T) {
+	start := time.Date(2026, 11, 27, 8, 0, 0, 0, time.UTC)
+	env := &dispatchEnv{start: start, site: dispatch.Site{CapacityKwh: 1720, ChargeKw: 864}}
+	next := []offgrid.Reserve{{Start: start.Add(6 * time.Hour), TargetPct: 90}}
+	if !gridInTime(env, next, start.Add(4*time.Hour), 30) {
+		t.Fatal("two hours at 864 kW fill 60 % of 1 720 kWh")
+	}
+	if gridInTime(env, next, start.Add(5*time.Hour), 30) {
+		t.Fatal("one hour does not")
+	}
+	if !gridInTime(env, nil, start, 30) {
+		t.Fatal("no next outage: no hurry")
+	}
+}
+
 func TestOffgridSettingsValidate(t *testing.T) {
 	if err := (&EdgeSiteSettings{}).validate(); err != nil {
 		t.Fatalf("defaults: %v", err)
