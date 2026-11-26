@@ -11,6 +11,8 @@ const api = vi.hoisted(() => ({
 vi.mock('./dispatchClient', () => api)
 vi.mock('./offgridClient', () => ({
   fetchOffgridReserve: vi.fn().mockResolvedValue({ site_id: 'ze', now: '', timezone: 'Europe/Kyiv', settings: {}, reserves: [] }),
+  fetchOffgridAdvice: vi.fn().mockResolvedValue({ site_id: 'ze', now: '', timezone: 'Europe/Kyiv', live: { online: true } }),
+  fetchOffgridOutages: vi.fn(),
 }))
 
 import type { EdgeSiteStatus } from '../control/controlClient'

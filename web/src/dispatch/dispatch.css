@@ -243,6 +243,45 @@
   color: var(--d-err);
 }
 
+.d-offgrid-line {
+  margin: 8px 0 0;
+}
+
+.d-offgrid-card {
+  margin: 8px 0 0;
+  padding: 6px 8px;
+  border: 1px solid var(--d-line);
+  border-radius: 6px;
+}
+
+.d-offgrid-advice {
+  width: 100%;
+  margin-top: 4px;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.d-offgrid-advice th,
+.d-offgrid-advice td {
+  padding: 3px 6px;
+  text-align: left;
+  vertical-align: top;
+  border-top: 1px solid var(--d-line);
+}
+
+.d-offgrid-advice th {
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.d-offgrid-advice tr.rec th {
+  color: var(--ok-text, #15803d);
+}
+
+.d-offgrid-advice tr.off {
+  color: var(--d-muted);
+}
+
 /* The power line (offgrid §4.3): what feeds the site, from the IoT2050. */
 .d-supply {
   display: flex;
