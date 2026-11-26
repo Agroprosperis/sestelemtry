@@ -9,6 +9,9 @@ const api = vi.hoisted(() => ({
   fetchDeskDay: vi.fn(),
 }))
 vi.mock('./dispatchClient', () => api)
+vi.mock('./offgridClient', () => ({
+  fetchOffgridReserve: vi.fn().mockResolvedValue({ site_id: 'ze', now: '', timezone: 'Europe/Kyiv', settings: {}, reserves: [] }),
+}))
 
 import type { EdgeSiteStatus } from '../control/controlClient'
 import { DispatchDesk } from './DispatchDesk'

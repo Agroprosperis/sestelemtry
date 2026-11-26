@@ -21,7 +21,7 @@ type Props = {
   onChanged: () => void
 }
 
-type FieldKey = Exclude<keyof EdgeSiteSettings, 'export_regime'>
+type FieldKey = Exclude<keyof EdgeSiteSettings, 'export_regime' | 'outage_reserve_apply'>
 
 // active_consumer_export_power_cap.md: which paragraph applies is a
 // per-site legal choice; until it is made no export limit exists.
@@ -44,9 +44,25 @@ const FIELDS: { key: FieldKey; label: string; hint: string }[] = [
   { key: 'export_pcc_kw', label: 'Технічний ліміт експорту PCC, кВт', hint: 'межа точки приєднання; порожньо — немає' },
 ]
 
+// Work without the grid (ems_offgrid_advice.md §12); empty = the spec's value.
+const OFFGRID_FIELDS: { key: FieldKey; label: string; hint: string }[] = [
+  { key: 'island_soc_floor_pct', label: 'Нижня межа заряду без мережі, %', hint: 'типово 20' },
+  { key: 'outage_reserve_max_pct', label: 'Верхня межа запасу, %', hint: 'типово 90' },
+  { key: 'outage_error_margin_pct', label: 'Запас на помилку плану, %', hint: 'типово 20' },
+  { key: 'generator_switch_soc_pct', label: 'Заряд для переходу на генератор, %', hint: 'типово 30' },
+  { key: 'generator_min_kw', label: 'Мінімум генератора, кВт', hint: 'типово 220 (30 %)' },
+  { key: 'generator_target_kw', label: 'Ціль генератора, кВт', hint: 'типово 480 (60–70 %)' },
+  { key: 'generator_rated_kw', label: 'Номінал генератора, кВт', hint: 'типово 734' },
+  { key: 'island_power_max_kw', label: 'Потужність УЗЕ в острові, кВт', hint: 'типово 576 (2/3 номіналу)' },
+  { key: 'extra_stop_threshold_uah', label: 'Поріг вигоди зайвої зупинки, грн', hint: 'типово 1 000' },
+]
+
+const ALL_FIELDS = [...FIELDS, ...OFFGRID_FIELDS]
+
 export function SettingsTab({ site, canEdit = true, onChanged }: Props) {
   const [form, setForm] = useState<Record<string, string>>({})
   const [regime, setRegime] = useState<ExportRegime>('')
+  const [apply, setApply] = useState(false)
   const [saved, setSaved] = useState(false)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
@@ -61,12 +77,13 @@ export function SettingsTab({ site, canEdit = true, onChanged }: Props) {
       .then((res) => {
         if (cancelled) return
         const next: Record<string, string> = {}
-        for (const f of FIELDS) {
+        for (const f of ALL_FIELDS) {
           const v = res.settings[f.key]
           next[f.key] = v != null && v !== 0 ? String(v) : ''
         }
         setForm(next)
         setRegime(res.settings.export_regime ?? '')
+        setApply(res.settings.outage_reserve_apply ?? false)
         setSaved(res.saved)
       })
       .catch((e) => !cancelled && setError(String(e)))
@@ -78,7 +95,7 @@ export function SettingsTab({ site, canEdit = true, onChanged }: Props) {
 
   const parse = (): EdgeSiteSettings | null => {
     const out: EdgeSiteSettings = {}
-    for (const f of FIELDS) {
+    for (const f of ALL_FIELDS) {
       const raw = (form[f.key] ?? '').trim()
       if (raw === '') continue
       const v = Number(raw.replace(',', '.'))
@@ -89,6 +106,7 @@ export function SettingsTab({ site, canEdit = true, onChanged }: Props) {
       out[f.key] = v
     }
     if (regime) out.export_regime = regime
+    if (apply) out.outage_reserve_apply = true
     return out
   }
 
@@ -206,6 +224,42 @@ export function SettingsTab({ site, canEdit = true, onChanged }: Props) {
           </div>
         ) : (
           <p className="ctl-card-sub">Змінювати обмеження може інженер-керування або адміністратор обʼєкта.</p>
+        )}
+      </section>
+
+      <section className="ctl-card" aria-label="Без мережі">
+        <h2>Без мережі</h2>
+        <p className="ctl-card-sub">
+          Запас заряду під кожне відключення з графіка: нижня межа плюс планове споживання за години відключення (без плану —
+          середнє за 7 днів) із запасом на помилку, не вище верхньої межі. Пульт показує його завжди; у план він іде лише з
+          позначкою нижче. Порожнє поле — значення зі специфікації.
+        </p>
+        <div className="ctl-settings-grid">
+          {OFFGRID_FIELDS.map((f) => (
+            <label key={f.key} className="ctl-field">
+              <span>{f.label}</span>
+              <input
+                inputMode="decimal"
+                placeholder="типово"
+                value={form[f.key] ?? ''}
+                disabled={loading || busy || !canEdit}
+                onChange={(e) => setForm({ ...form, [f.key]: e.target.value })}
+              />
+              <small>{f.hint}</small>
+            </label>
+          ))}
+        </div>
+        <label className="ctl-field ctl-check">
+          <input type="checkbox" checked={apply} disabled={loading || busy || !canEdit} onChange={(e) => setApply(e.target.checked)} />
+          <span>Враховувати запас під відключення в плані</span>
+          <small>Вимкнено — пульт лише показує ціль заряду. Увімкнено — план заряджає до неї до початку відключення.</small>
+        </label>
+        {canEdit && (
+          <div className="ctl-form-actions">
+            <button type="button" className="ctl-btn" disabled={busy || loading} onClick={() => void save()}>
+              Зберегти
+            </button>
+          </div>
         )}
       </section>
     </div>

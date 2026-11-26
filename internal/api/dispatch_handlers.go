@@ -137,7 +137,7 @@ func (h *Handlers) dispatchState(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
-	res, err := dispatch.Simulate(env.inputs, m)
+	res, err := simulateEnv(env, m)
 	if err != nil {
 		h.edge.Log.Error("dispatch_state_lp", "site_id", siteID, "err", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -235,7 +235,7 @@ func (h *Handlers) dispatchPreview(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, resp)
 		return
 	}
-	res, err := dispatch.Simulate(env.inputs, m)
+	res, err := simulateEnv(env, m)
 	if err != nil {
 		h.edge.Log.Error("dispatch_preview_lp", "site_id", siteID, "err", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -271,7 +271,7 @@ func (h *Handlers) dispatchConfirm(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnprocessableEntity, dispatchConfirmResponse{Invalid: msg})
 		return
 	}
-	res, err := dispatch.Simulate(env.inputs, m)
+	res, err := simulateEnv(env, m)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

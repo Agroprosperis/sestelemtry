@@ -10,6 +10,7 @@ import './dispatch.css'
 import type { EdgeSiteStatus } from '../control/controlClient'
 import { writeMode } from '../control/writeState'
 import { AppliedBar } from './AppliedBar'
+import { OffgridBlock } from './OffgridBlock'
 import { SupplyLine } from './SupplyLine'
 import { closedScenarios } from './supply'
 import { manifestVersion } from './applied'
@@ -681,6 +682,7 @@ export function DispatchDesk({ site, onOpenReport, readOnly = false, status = nu
       </div>
       <SupplyLine status={status} timeZone={state.timezone} />
       <AppliedBar state={state} status={status} clock={clock} />
+      <OffgridBlock site={site} />
 
       <section
         className={'d-workspace' + (reviewOpen ? ' d-reviewing' : '') + (readOnly ? ' d-readonly' : '')}

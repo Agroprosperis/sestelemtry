@@ -208,6 +208,41 @@
   font-weight: 600;
 }
 
+/* «Без мережі» (offgrid advice §10): the charge for each outage. */
+.d-offgrid {
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  background: var(--d-panel);
+  border: 1px solid var(--d-line);
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+.d-offgrid h3 {
+  margin: 0 0 6px;
+  font-size: 13px;
+}
+
+.d-offgrid ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 6px;
+}
+
+.d-offgrid-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+  align-items: baseline;
+}
+
+.d-offgrid-row.warn strong,
+.d-offgrid-warn {
+  color: var(--d-err);
+}
+
 /* The power line (offgrid §4.3): what feeds the site, from the IoT2050. */
 .d-supply {
   display: flex;

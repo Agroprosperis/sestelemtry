@@ -176,7 +176,7 @@ func (h *Handlers) dispatchEffect(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
-	res, err := dispatch.Simulate(env.inputs, m)
+	res, err := simulateEnv(env, m)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

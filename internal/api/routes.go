@@ -208,6 +208,7 @@ func (h *Handlers) routes() []route {
 		{"/api/v1/dispatch/preview", h.dispatchPreview, need(control)},
 		{"/api/v1/dispatch/confirm", h.dispatchConfirm, need(controlAct)},
 		{"/api/v1/dispatch/day", h.dispatchDay, need(control)},
+		{"/api/v1/offgrid/reserve", h.offgridReserve, need(control)},
 		{"/api/v1/dispatch/effect", h.dispatchEffect, need(onOrg(auth.PermEconomicsRead, auth.PermControl))},
 		{"/api/v1/edge/settings", h.edgeSettings,
 			need(control).on(http.MethodPut, onSite(auth.PermTechnicalWrite))},
