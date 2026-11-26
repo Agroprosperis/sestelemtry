@@ -327,3 +327,114 @@ func TestIslandNothingWithoutTheButton(t *testing.T) {
 		t.Fatalf("the button is open but nothing pressed it: %+v, %s", s.avail.Button(ActIslandStart), s.ctl.State())
 	}
 }
+
+// An island the console did not start (ze 26.11: Encombi brought it up
+// 2 min 20 s after the grid went): the battery's setpoints stay
+// unwritten, the sun follows §5.2, and nothing is stopped for it, also
+// when writing is turned off.
+func TestExternalIslandIsLeftAlone(t *testing.T) {
+	s := islandService(t, false)
+	ctx := context.Background()
+	held := map[string]float64{"pcs_shutdown": 0, "pcs_in_operation": 8, "pcs_working_mode": 1, "soc_percent": 60,
+		"active_pv_power_kw": 0, "active_ess_power_kw": 27}
+	at := 12
+	step := func(vals map[string]float64) []oneShotJob {
+		at++
+		s.stepWrite(ctx, sec(at), supplyTick(s, sec(at), bitsIsland, 230, vals), nil)
+		return drainJobs(s)
+	}
+	// 44364 = 2 on the way to VSG (ze 26.11 16:04:30): not latched yet.
+	for i := 0; i < 4; i++ {
+		if j := step(merge(held, map[string]float64{"pcs_working_mode": 2})); len(j) != 0 {
+			t.Fatalf("one-shots: %+v", j)
+		}
+	}
+	if s.supplyNow.Mode != SupplyIsland || s.ctl.ExternalIsland() {
+		t.Fatalf("44364 = 2: mode %s, external %v", s.supplyNow.Mode, s.ctl.ExternalIsland())
+	}
+	for i := 0; i < 3; i++ {
+		if j := step(held); len(j) != 0 {
+			t.Fatalf("one-shots in the island: %+v", j)
+		}
+	}
+	if c := s.writeCmd.Load(); !s.ctl.ExternalIsland() || !c.ESSHold || c.State != WriteModeStop || c.PVLimitKw != 600 {
+		t.Fatalf("external island: %v, %+v", s.ctl.ExternalIsland(), c)
+	}
+	if eventCodes(t, s)[EvIslandExternal] == "" {
+		t.Fatal("no ISLAND_EXTERNAL event")
+	}
+	step(merge(held, map[string]float64{"soc_percent": 89, "active_pv_power_kw": 300, "active_ess_power_kw": -100}))
+	if c := s.writeCmd.Load(); c.PVLimitKw != 200 || !c.ESSHold {
+		t.Fatalf("PV ceiling at 89 %%: %+v", c)
+	}
+
+	if r := s.onWriteRequest(ctx, sec(at), writeRequest{action: "disable", by: "t"}); !r.OK {
+		t.Fatal(r.Error)
+	}
+	for i := 0; i < 20 && s.gate.Enabled(); i++ {
+		s.storeFeedback(WriteFeedback{Register: "40378", At: sec(at + 1), Kw: 600, OK: true})
+		if j := step(held); len(j) != 0 {
+			t.Fatalf("turning off sent %+v", j)
+		}
+		if c := s.writeCmd.Load(); c != nil && !c.ESSHold {
+			t.Fatalf("40381 written while turning off: %+v", c)
+		}
+	}
+	if s.gate.Enabled() || !strings.Contains(s.gate.State().Reason, "зупинку УЗЕ не надсилали") {
+		t.Fatalf("turned off: gate %v, %q", s.gate.Enabled(), s.gate.State().Reason)
+	}
+}
+
+// The bus stays live through the grid's loss, the battery holding it in
+// VSG: the mode stop leaves the battery running.
+func TestGridLossIntoAnExternalIslandStopsNothing(t *testing.T) {
+	s := offgridService(t)
+	enableForTest(t, s)
+	ctx := context.Background()
+	d := func() *Decision { return &Decision{PBessVirtualKw: 300, ReasonCode: "test"} }
+	for i := 0; i < 3; i++ {
+		s.stepWrite(ctx, sec(i), supplyTick(s, sec(i), bitsGridPQ, 228, essStopped()), d())
+	}
+	drainJobs(s)
+	s.onCommandResult(ctx, cmdResult{id: CmdPCSPQ, at: sec(2)})
+	press(t, s, sec(2), CmdESSStart)
+	s.stepWrite(ctx, sec(12), supplyTick(s, sec(12), bitsGridPQ, 228, essRunning()), d())
+	if s.ctl.State() != WriteHold {
+		t.Fatalf("after the start: %s", s.ctl.State())
+	}
+	held := merge(essRunning(), map[string]float64{"pcs_working_mode": 1})
+	var seen []oneShotJob
+	for i := 13; i < 22; i++ {
+		s.stepWrite(ctx, sec(i), supplyTick(s, sec(i), bitsIsland, 230, held), d())
+		seen = append(seen, drainJobs(s)...)
+	}
+	if s.ctl.State() != WriteModeStop || !s.ctl.ExternalIsland() || len(seen) != 0 {
+		t.Fatalf("state %s, external %v, one-shots %+v", s.ctl.State(), s.ctl.ExternalIsland(), seen)
+	}
+}
+
+// The latch outlives stale Encombi data and ends with a dead bus.
+func TestExternalIslandLatch(t *testing.T) {
+	cfg := zeCfg(t)
+	c := NewController(cfg.Control.Write).WithOffgrid(cfg.Offgrid)
+	c.Start(testTS)
+	step := func(at int, mode string, vals map[string]float64) WriteCommand {
+		st := SupplyState{Mode: mode, Switch: SwitchVSG}
+		cmd, _ := c.Step(ControlInputs{Now: sec(at), Tick: tickAt(sec(at), vals), ExportCapKw: 850, ImportLimitKw: 1700,
+			Supply: &st, Avail: availabilityFor(st)})
+		return cmd
+	}
+	vsg := merge(essRunning(), map[string]float64{"pcs_working_mode": 1})
+	if cmd := step(1, SupplyBlackout, essStopped()); cmd.State != WriteModeStop || cmd.ESSHold {
+		t.Fatalf("blackout: %+v", cmd)
+	}
+	if cmd := step(2, SupplyIsland, vsg); !cmd.ESSHold {
+		t.Fatalf("island: %+v", cmd)
+	}
+	if cmd := step(3, SupplyUnknown, vsg); !cmd.ESSHold {
+		t.Fatalf("stale data: %+v", cmd)
+	}
+	if cmd := step(4, SupplyBlackout, essStopped()); cmd.ESSHold || c.ExternalIsland() {
+		t.Fatalf("dead bus: %+v", cmd)
+	}
+}

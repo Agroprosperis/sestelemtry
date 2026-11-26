@@ -36,6 +36,8 @@ const (
 	EvIslandAlarm   = "ISLAND_ALARM"
 	EvIslandExit    = "ISLAND_EXIT"
 	EvIslandDone    = "ISLAND_DONE"
+	// The battery holds the bus in VSG without «Пуск острова».
+	EvIslandExternal = "ISLAND_EXTERNAL"
 )
 
 var islandPhaseLabels = map[string]string{
