@@ -326,6 +326,9 @@ func (s *Service) onCommandRequest(ctx context.Context, now time.Time, req cmdRe
 	if !s.gate.Enabled() {
 		return cmdReply{Error: "запис не ввімкнено: команди пуску й зупинки йдуть лише з увімкненим записом"}
 	}
+	if a := s.avail.Button(req.id); !a.OK {
+		return cmdReply{Error: a.Reason}
+	}
 	if state := s.ctl.State(); cmd.Start && (state == WriteStopped || state == WriteStopping) {
 		return cmdReply{Error: "після зупинки повторний пуск не надсилається — вимкніть запис і почніть заново"}
 	}
