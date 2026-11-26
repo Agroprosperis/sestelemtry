@@ -129,6 +129,42 @@ func TestGuideTargetPrechargesEarlier(t *testing.T) {
 	}
 }
 
+// ems_offgrid_advice.md §5: the charge for a scheduled outage is a goal
+// the plan reaches by itself, cheapest hours first; without it the same
+// flat day charges nothing.
+func TestOutageFloorCharges(t *testing.T) {
+	loads := []float64{100, 100, 100, 100, 100, 100}
+	rdn := []float64{9, 2, 9, 9, 9, 9}
+	run := func(floors map[int]float64) Result {
+		site := zeSite()
+		m := Model{Loads: make([]*float64, 6), Commands: make([]*Command, 6), Cfg: defaultCfg()}
+		in := Inputs{Site: site, StartKwh: site.CapacityKwh * 0.3, PV: make([]float64, 6), Rdn: make([]*float64, 6), OutageFloorPct: floors}
+		for i := range loads {
+			m.Loads[i], in.Rdn[i] = kw(loads[i]), kw(rdn[i])
+		}
+		res, err := Simulate(in, m)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res
+	}
+	res := run(map[int]float64{3: 60})
+	if soc := *res.Hours[3].Soc; soc < 59.95 {
+		t.Fatalf("SOC before the outage = %.2f, want 60", soc)
+	}
+	if p := *res.Hours[1].P; p > -400 {
+		t.Fatalf("the cheap hour charged %.1f kW, want the bulk of the charge there", p)
+	}
+	if len(res.Issues) != 0 {
+		t.Fatalf("issues %+v", res.Issues)
+	}
+	// Out of reach in four hours at 864 kW: an issue, never an error.
+	res = run(map[int]float64{0: 90})
+	if len(res.Issues) == 0 || !strings.Contains(res.Issues[0].Text, "до відключення недосяжний") {
+		t.Fatalf("unreachable goal: %+v", res.Issues)
+	}
+}
+
 // §7: a full export ban keeps PCC export at zero even with PV surplus.
 func TestGuideFullExportBan(t *testing.T) {
 	cfg := defaultCfg()

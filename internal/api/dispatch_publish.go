@@ -44,7 +44,7 @@ func (h *Handlers) publishDispatch(ctx context.Context, siteID string) (EdgePubl
 	if err != nil {
 		return EdgePublishResult{SiteID: siteID}, err
 	}
-	res, err := dispatch.Simulate(env.inputs, m)
+	res, err := simulateEnv(env, m)
 	if err != nil {
 		return EdgePublishResult{SiteID: siteID}, err
 	}

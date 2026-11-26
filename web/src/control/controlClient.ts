@@ -333,6 +333,17 @@ export type EdgeSiteSettings = {
   // grid_import_kw, storage = 100 %; absent = not chosen (export off).
   export_regime?: ExportRegime
   export_pcc_kw?: number
+  // Work without the grid (ems_offgrid_advice.md §12); absent = default.
+  outage_reserve_apply?: boolean
+  island_soc_floor_pct?: number
+  outage_reserve_max_pct?: number
+  outage_error_margin_pct?: number
+  extra_stop_threshold_uah?: number
+  generator_min_kw?: number
+  generator_target_kw?: number
+  generator_rated_kw?: number
+  island_power_max_kw?: number
+  generator_switch_soc_pct?: number
 }
 
 export type ExportRegime = '' | 'self_production' | 'storage'

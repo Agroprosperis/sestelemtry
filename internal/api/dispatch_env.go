@@ -40,6 +40,9 @@ type dispatchEnv struct {
 	rdn           map[time.Time]float64 // UTC hour → RDN, history + future
 	pv            map[time.Time]float64 // forecast
 	weather       map[time.Time]edgeHourWeather
+	// offgrid is loaded only when the site holds the charge for its
+	// outages in the plan.
+	offgrid *offgridData
 }
 
 func (h *Handlers) loadDispatchEnv(ctx context.Context, siteID string) (*dispatchEnv, error) {
@@ -122,6 +125,13 @@ func (h *Handlers) loadDispatchEnv(ctx context.Context, siteID string) (*dispatc
 		if p, ok := env.rdn[ts]; ok {
 			v := p
 			env.inputs.Rdn[i] = &v
+		}
+	}
+	if settings != nil && settings.OutageReserveApply {
+		if env.offgrid, err = h.loadOffgrid(ctx, env, settings); err != nil {
+			// The plan goes on without the outage reserve rather than not at all.
+			h.edge.Log.Warn("dispatch_offgrid", "site_id", siteID, "err", err)
+			env.offgrid = nil
 		}
 	}
 	return env, nil

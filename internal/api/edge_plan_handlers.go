@@ -93,6 +93,60 @@ type EdgeSiteSettings struct {
 	ExportRegime string `json:"export_regime,omitempty"`
 	// ExportPccKw is the site's technical PCC export limit; 0 = none.
 	ExportPccKw float64 `json:"export_pcc_kw,omitempty"`
+
+	// Work without the grid (ems_offgrid_advice.md §12); 0 = the spec's
+	// default. OutageReserveApply puts the charge for each scheduled
+	// outage into the plan; off, the desk only shows it.
+	OutageReserveApply    bool    `json:"outage_reserve_apply,omitempty"`
+	IslandSocFloorPct     float64 `json:"island_soc_floor_pct,omitempty"`
+	OutageReserveMaxPct   float64 `json:"outage_reserve_max_pct,omitempty"`
+	OutageErrorMarginPct  float64 `json:"outage_error_margin_pct,omitempty"`
+	ExtraStopThresholdUah float64 `json:"extra_stop_threshold_uah,omitempty"`
+	GeneratorMinKw        float64 `json:"generator_min_kw,omitempty"`
+	GeneratorTargetKw     float64 `json:"generator_target_kw,omitempty"`
+	GeneratorRatedKw      float64 `json:"generator_rated_kw,omitempty"`
+	IslandPowerMaxKw      float64 `json:"island_power_max_kw,omitempty"`
+	GeneratorSwitchSocPct float64 `json:"generator_switch_soc_pct,omitempty"`
+}
+
+// offgridSettings are the §12 figures with the spec's defaults.
+type offgridSettings struct {
+	Apply                 bool    `json:"apply"`
+	FloorPct              float64 `json:"island_soc_floor_pct"`
+	MaxPct                float64 `json:"outage_reserve_max_pct"`
+	ErrorMarginPct        float64 `json:"outage_error_margin_pct"`
+	ExtraStopThresholdUah float64 `json:"extra_stop_threshold_uah"`
+	GeneratorMinKw        float64 `json:"generator_min_kw"`
+	GeneratorTargetKw     float64 `json:"generator_target_kw"`
+	GeneratorRatedKw      float64 `json:"generator_rated_kw"`
+	IslandPowerMaxKw      float64 `json:"island_power_max_kw"`
+	GeneratorSwitchSocPct float64 `json:"generator_switch_soc_pct"`
+}
+
+func (s *EdgeSiteSettings) offgrid() offgridSettings {
+	o := offgridSettings{
+		FloorPct: 20, MaxPct: 90, ErrorMarginPct: 20, ExtraStopThresholdUah: 1000,
+		GeneratorMinKw: 220, GeneratorTargetKw: 480, GeneratorRatedKw: 734, IslandPowerMaxKw: 576, GeneratorSwitchSocPct: 30,
+	}
+	if s == nil {
+		return o
+	}
+	o.Apply = s.OutageReserveApply
+	set := func(dst *float64, v float64) {
+		if v > 0 {
+			*dst = v
+		}
+	}
+	set(&o.FloorPct, s.IslandSocFloorPct)
+	set(&o.MaxPct, s.OutageReserveMaxPct)
+	set(&o.ErrorMarginPct, s.OutageErrorMarginPct)
+	set(&o.ExtraStopThresholdUah, s.ExtraStopThresholdUah)
+	set(&o.GeneratorMinKw, s.GeneratorMinKw)
+	set(&o.GeneratorTargetKw, s.GeneratorTargetKw)
+	set(&o.GeneratorRatedKw, s.GeneratorRatedKw)
+	set(&o.IslandPowerMaxKw, s.IslandPowerMaxKw)
+	set(&o.GeneratorSwitchSocPct, s.GeneratorSwitchSocPct)
+	return o
 }
 
 const (
@@ -139,10 +193,23 @@ func (s *EdgeSiteSettings) validate() error {
 	for _, v := range []float64{
 		s.AutoChargeMaxKw, s.AutoDischargeMaxKw, s.IslandChargeMaxKw,
 		s.IslandDischargeMaxKw, s.GridImportKw, s.GridTargetKw, s.PvRatedKw,
+		s.ExtraStopThresholdUah, s.GeneratorMinKw, s.GeneratorTargetKw, s.GeneratorRatedKw, s.IslandPowerMaxKw,
 	} {
 		if v < 0 || math.IsNaN(v) || math.IsInf(v, 0) {
 			return fmt.Errorf("потужності й ліміти мають бути невід'ємними числами")
 		}
+	}
+	for _, v := range []float64{s.IslandSocFloorPct, s.OutageReserveMaxPct, s.OutageErrorMarginPct, s.GeneratorSwitchSocPct} {
+		if v < 0 || v > 100 || math.IsNaN(v) {
+			return fmt.Errorf("відсотки роботи без мережі мають бути в межах 0..100")
+		}
+	}
+	o := s.offgrid()
+	if o.FloorPct >= o.MaxPct {
+		return fmt.Errorf("нижня межа заряду без мережі має бути нижчою за верхню межу запасу")
+	}
+	if !(o.GeneratorMinKw < o.GeneratorTargetKw && o.GeneratorTargetKw <= o.GeneratorRatedKw) {
+		return fmt.Errorf("генератор: має бути мінімум < ціль ≤ номінал")
 	}
 	return nil
 }

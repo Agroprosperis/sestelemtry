@@ -100,6 +100,12 @@ type Inputs struct {
 	StartKwh float64    // energy in the battery now
 	PV       []float64  // PV forecast per future hour, kW
 	Rdn      []*float64 // RDN price per future hour, UAH/kWh; nil = not published
+	// OutageFloorPct is the charge, %, to have at the end of hour i: a
+	// scheduled outage starts in hour i+1 (ems_offgrid_advice.md §5).
+	// A goal, not a wall: it comes after the operator's commands, and
+	// how and when to charge is the prices'. Empty unless the site
+	// turns it on.
+	OutageFloorPct map[int]float64
 }
 
 // HourPlan is the LP decision for one hour.
@@ -237,10 +243,11 @@ func Optimize(in Inputs, m Model, count int) ([]HourPlan, error) {
 
 	type hourVars struct{ charge, discharge, buy, sell, curtail int }
 	var (
-		b           lpBuilder
-		hours       []hourVars
-		manualGoals [][]int
-		overflows   []int
+		b            lpBuilder
+		hours        []hourVars
+		manualGoals  [][]int
+		reserveGoals [][]int
+		overflows    []int
 	)
 	aim := func(v int, target float64) {
 		b.upper(v, target)
@@ -284,6 +291,13 @@ func Optimize(in Inputs, m Model, count int) ([]HourPlan, error) {
 		state[discharge] = -1 / eta
 		b.limit(copyTerms(state), ceiling-in.StartKwh)
 		b.limit(negate(state), in.StartKwh-floor)
+		if pct, ok := in.OutageFloorPct[i]; ok {
+			gap := b.variable(0)
+			low := negate(state)
+			low[gap] = -1
+			b.limit(low, in.StartKwh-math.Min(ceiling, site.CapacityKwh*pct/100))
+			reserveGoals = append(reserveGoals, []int{gap})
+		}
 
 		if cmd == nil {
 			continue
@@ -341,6 +355,11 @@ func Optimize(in Inputs, m Model, count int) ([]HourPlan, error) {
 		return nil, err
 	}
 	for _, goal := range manualGoals {
+		if err := b.preserveMinimum(goal); err != nil {
+			return nil, err
+		}
+	}
+	for _, goal := range reserveGoals {
 		if err := b.preserveMinimum(goal); err != nil {
 			return nil, err
 		}
@@ -512,6 +531,9 @@ func Simulate(in Inputs, m Model) (Result, error) {
 		}
 		if s == CmdTarget && isBlockEnd(m, i) && energy < capKwh*cmd.Value/100-.05 {
 			reasons = append(reasons, "ціль SOC "+Fmt(cmd.Value)+"% недосяжна")
+		}
+		if pct, ok := in.OutageFloorPct[i]; ok && energy < capKwh*math.Min(pct, site.SocMaxPct)/100-.05 {
+			reasons = append(reasons, "заряд "+Fmt(pct)+"% до відключення недосяжний")
 		}
 		if importPower > cfg.ImportCapKw+.05 {
 			reasons = append(reasons, "імпорт "+Fmt(importPower)+" кВт перевищує ліміт "+Fmt(cfg.ImportCapKw)+" кВт")
