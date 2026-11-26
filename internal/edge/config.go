@@ -241,6 +241,41 @@ type DiagnosticsConfig struct {
 	Inverters InverterDiagnostics `yaml:"inverters"`
 }
 
+// EncombiConfig is the IoT2050's own read of the Encombi controller
+// (ems_offgrid_island_generator.md §4.1): discrete inputs 20500, the
+// generator meter and the bus voltage, FC04, unit 1. Read only, never
+// written. Off by default: without it the edge knows no power mode and
+// behaves exactly as before.
+type EncombiConfig struct {
+	Enabled        bool          `yaml:"enabled"`
+	Host           string        `yaml:"host"`
+	Port           int           `yaml:"port"`
+	UnitID         int           `yaml:"unit_id"`
+	PollInterval   time.Duration `yaml:"poll_interval"`
+	ConnectTimeout time.Duration `yaml:"connect_timeout"`
+	RequestTimeout time.Duration `yaml:"request_timeout"`
+	// StaleAfter: older data makes the power mode unknown (§4.2: 5 s).
+	StaleAfter time.Duration `yaml:"stale_after"`
+	// Debounce: a new power mode is taken once it holds this long
+	// (§4.2: 2 s).
+	Debounce time.Duration `yaml:"debounce"`
+	// BusLiveMinV is the bus phase voltage from which the bus counts as
+	// live.
+	BusLiveMinV float64 `yaml:"bus_live_min_v"`
+}
+
+// OffgridConfig holds the site figures of work without the grid
+// (ems_offgrid_island_generator.md §3, §6; ems_offgrid_advice.md §12).
+type OffgridConfig struct {
+	GeneratorRatedKw  float64 `yaml:"generator_rated_kw"`
+	GeneratorMinKw    float64 `yaml:"generator_min_kw"`
+	GeneratorTargetKw float64 `yaml:"generator_target_kw"`
+	// IslandSocFloorPct is the lowest charge without the grid.
+	IslandSocFloorPct float64 `yaml:"island_soc_floor_pct"`
+	// IslandPowerMaxKw caps the island load (Huawei: 2/3 of the rating).
+	IslandPowerMaxKw float64 `yaml:"island_power_max_kw"`
+}
+
 // Config is the root of the edge YAML (config.edge.yaml).
 type Config struct {
 	SiteID          string            `yaml:"site_id"`
@@ -255,6 +290,8 @@ type Config struct {
 	Limits          Limits            `yaml:"limits"`
 	LocalUI         LocalUIConfig     `yaml:"local_ui"`
 	Diagnostics     DiagnosticsConfig `yaml:"diagnostics"`
+	Encombi         EncombiConfig     `yaml:"encombi"`
+	Offgrid         OffgridConfig     `yaml:"offgrid"`
 
 	// EssDischargeSign overrides the convention that raw
 	// active_ess_power_kw > 0 means "discharging". Set to -1 only for
@@ -570,6 +607,50 @@ func (c *Config) applyDefaults() {
 	if c.Diagnostics.Inverters.PollInterval <= 0 {
 		c.Diagnostics.Inverters.PollInterval = 30 * time.Second
 	}
+
+	e := &c.Encombi
+	e.Host = os.ExpandEnv(strings.TrimSpace(e.Host))
+	if e.Port == 0 {
+		e.Port = 502
+	}
+	if e.UnitID == 0 {
+		e.UnitID = 1
+	}
+	if e.PollInterval <= 0 {
+		e.PollInterval = time.Second
+	}
+	if e.ConnectTimeout <= 0 {
+		e.ConnectTimeout = 2 * time.Second
+	}
+	if e.RequestTimeout <= 0 {
+		e.RequestTimeout = 2 * time.Second
+	}
+	if e.StaleAfter <= 0 {
+		e.StaleAfter = 5 * time.Second
+	}
+	if e.Debounce <= 0 {
+		e.Debounce = 2 * time.Second
+	}
+	if e.BusLiveMinV <= 0 {
+		e.BusLiveMinV = 180
+	}
+
+	og := &c.Offgrid
+	if og.GeneratorRatedKw <= 0 {
+		og.GeneratorRatedKw = 734
+	}
+	if og.GeneratorMinKw <= 0 {
+		og.GeneratorMinKw = 220
+	}
+	if og.GeneratorTargetKw <= 0 {
+		og.GeneratorTargetKw = 480
+	}
+	if og.IslandSocFloorPct <= 0 {
+		og.IslandSocFloorPct = 20
+	}
+	if og.IslandPowerMaxKw <= 0 {
+		og.IslandPowerMaxKw = 576
+	}
 }
 
 func (c *Config) validate() error {
@@ -679,6 +760,28 @@ func (c *Config) validate() error {
 		if addr < 1 || addr > 247 {
 			return fmt.Errorf("edge config: diagnostics.inverters.device_addresses: %d out of RS-485 range 1..247", addr)
 		}
+	}
+	if e := c.Encombi; e.Enabled {
+		if e.Host == "" {
+			return fmt.Errorf("edge config: encombi.host is required when encombi.enabled")
+		}
+		if e.UnitID < 1 || e.UnitID > 247 {
+			return fmt.Errorf("edge config: encombi.unit_id out of range 1..247: %d", e.UnitID)
+		}
+		if e.PollInterval < 200*time.Millisecond || e.PollInterval > 10*time.Second {
+			return fmt.Errorf("edge config: encombi.poll_interval must be 200ms…10s")
+		}
+		if e.StaleAfter <= e.PollInterval {
+			return fmt.Errorf("edge config: encombi.stale_after must be longer than poll_interval")
+		}
+	}
+	og := c.Offgrid
+	if og.GeneratorMinKw >= og.GeneratorTargetKw || og.GeneratorTargetKw > og.GeneratorRatedKw {
+		return fmt.Errorf("edge config: offgrid generator figures must be min < target ≤ rated, got %g / %g / %g",
+			og.GeneratorMinKw, og.GeneratorTargetKw, og.GeneratorRatedKw)
+	}
+	if og.IslandSocFloorPct >= 100 {
+		return fmt.Errorf("edge config: offgrid.island_soc_floor_pct out of range: %g", og.IslandSocFloorPct)
 	}
 	return nil
 }

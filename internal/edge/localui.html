@@ -117,6 +117,18 @@
     .inv-declabel { color: var(--muted); font-size: 10px; max-width: 130px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     /* Checks §4 */
     #checks-table td.chk-detail { color: var(--muted); font-size: 11px; }
+    /* Рядок стану живлення (offgrid §4.3) */
+    .supply-line { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: baseline; }
+    .supply-line .f .k { font-size: 11px; color: var(--muted); display: block; }
+    .supply-line .f .v { font-size: 15px; font-weight: 700; }
+    .supply-line .f .v.grid { color: var(--green); } .supply-line .f .v.off { color: var(--red); } .supply-line .f .v.warn { color: var(--amber); }
+    .supply-restr { margin: 10px 0 0; font-size: 13px; color: var(--red); font-weight: 600; }
+    .supply-extra { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 12px; font-size: 13px; align-items: center; }
+    .gen-bar { position: relative; width: 220px; height: 12px; border-radius: 6px; background: var(--soft); border: 1px solid var(--line); }
+    .gen-bar .fill { position: absolute; top: 1px; bottom: 1px; left: 1px; border-radius: 5px; background: var(--teal); }
+    .gen-bar .band { position: absolute; top: -1px; bottom: -1px; background: rgba(22, 163, 74, 0.18); border-left: 1px dashed var(--green); border-right: 1px dashed var(--green); }
+    .gen-bar .min { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--red); }
+    .supply-inputs { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 6px; font-size: 11px; }
   </style>
 </head>
 <body>
@@ -155,6 +167,12 @@
     </div>
 
     <section class="panel active" id="panel-status">
+      <div class="card" id="supply-card" hidden>
+        <div class="supply-line" id="supply-line"></div>
+        <p class="supply-restr" id="supply-restr" hidden></p>
+        <div class="supply-extra" id="supply-extra" hidden></div>
+        <div class="supply-inputs" id="supply-inputs"></div>
+      </div>
       <div class="info-box err" id="override-banner" hidden></div>
       <div class="info-box warn" id="expired-banner" hidden>
         <strong>Manifest прострочений.</strong> Діє fallback <code>self_consumption_safe</code>, доки хмара не опублікує новий план.
@@ -438,6 +456,43 @@ function renderStatus(st) {
 
   renderPlanShadowFact(dec, t, !!st.write_enabled);
   renderHealth(st.health);
+  renderSupply(st.health && st.health.supply);
+}
+
+// --- Рядок стану живлення (offgrid §4.3) ---
+const SUPPLY_CLASS = { grid: 'grid', generator: 'warn', island: 'warn', blackout: 'off', transition: 'off', unknown: 'off' };
+const INPUT_LABELS = [['t1', 'Т1'], ['t2', 'Т2'], ['section', 'секційний'], ['ess', 'вимикач УЗЕ'], ['gen', 'вимикач генератора'], ['rn1', 'РН1'], ['rn2', 'РН2'], ['rn3', 'РН3']];
+
+function renderSupply(sp) {
+  $('supply-card').hidden = !sp;
+  if (!sp) return;
+  const field = (k, v, cls) => '<div class="f"><span class="k">' + k + '</span><span class="v' + (cls ? ' ' + cls : '') + '">' + v + '</span></div>';
+  $('supply-line').innerHTML = [
+    field('Живлення', esc(sp.mode_label) + (sp.mode_since ? ' <span style="font-size:11px;color:var(--muted);font-weight:500">з ' + fmtClock(sp.mode_since) + '</span>' : ''), SUPPLY_CLASS[sp.mode]),
+    field('Перемикач на шафі', esc(sp.switch_label), sp.switch === 'unknown' ? 'off' : ''),
+    field('Режим УЗЕ', esc(sp.ess_mode_label), sp.ess_mode === 'vsg' || sp.ess_mode === 'mixed' ? 'warn' : ''),
+    field('Хто керує', esc(sp.controller_label), sp.controller === 'none' ? 'off' : ''),
+  ].join('');
+  $('supply-restr').hidden = !sp.restriction;
+  if (sp.restriction) $('supply-restr').textContent = sp.restriction;
+
+  const off = sp.mode === 'generator' || sp.mode === 'island';
+  const extra = [];
+  if (sp.mode === 'generator' && sp.gen_load_pct != null) {
+    const pct = Math.max(0, Math.min(100, sp.gen_load_pct));
+    extra.push('<span>Генератор ' + fmtKw(sp.gen_power_kw) + ' · ' + Math.round(sp.gen_load_pct) + ' %</span>' +
+      '<span class="gen-bar"><span class="band" style="left:' + sp.gen_best_pct[0] + '%;width:' + (sp.gen_best_pct[1] - sp.gen_best_pct[0]) + '%"></span>' +
+      '<span class="fill" style="width:calc(' + pct + '% - 2px)"></span><span class="min" style="left:' + sp.gen_min_pct + '%"></span></span>' +
+      '<span style="color:var(--muted);font-size:11px">мінімум ' + sp.gen_min_pct + ' % · найдешевше ' + sp.gen_best_pct[0] + '–' + sp.gen_best_pct[1] + ' %</span>');
+  }
+  if (off) {
+    extra.push('<span>Заряд УЗЕ <strong>' + (sp.soc_percent != null ? Math.round(sp.soc_percent) + ' %' : '—') + '</strong></span>');
+    extra.push('<span>До ' + sp.soc_floor_pct + ' %: <strong>' + (sp.autonomy_min != null ? Math.floor(sp.autonomy_min / 60) + ' год ' + (sp.autonomy_min % 60) + ' хв' : '—') + '</strong> при ' + fmtKw(sp.load_kw) + '</span>');
+  }
+  $('supply-extra').hidden = !extra.length;
+  $('supply-extra').innerHTML = extra.join('');
+  const inp = sp.inputs;
+  $('supply-inputs').innerHTML = inp ? INPUT_LABELS.map(([k, l]) => '<span class="badge ' + (inp[k] ? 'green' : 'gray') + '">' + l + (inp[k] ? ' ●' : ' ○') + '</span>').join('') : '';
 }
 
 // --- План · shadow · факт (spec §3.3/§8.1) ---

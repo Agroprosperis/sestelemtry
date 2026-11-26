@@ -139,14 +139,24 @@ func (b *Blackbox) WriteDecision(ctx context.Context, d Decision) error {
 	if err != nil {
 		return err
 	}
+	var di any
+	if s := d.Supply; s != nil && s.DIBits != nil {
+		raw, err := json.Marshal(map[string]any{
+			"di_bits": *s.DIBits, "inputs": s.Inputs, "mode": s.Mode, "switch": s.Switch,
+		})
+		if err != nil {
+			return err
+		}
+		di = string(raw)
+	}
 	_, err = b.db.ExecContext(ctx, `
 		INSERT INTO control_decisions
 			(ts_utc, site_id, preset, mode, state_machine,
-			 p_bess_plan, p_bess_cmd, p_pv_limit, soc_pct, rationale, record_json)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			 p_bess_plan, p_bess_cmd, p_pv_limit, soc_pct, di_state_json, rationale, record_json)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		tsUTC(d.TS), b.siteID, d.Preset, string(d.Mode), d.StateMachine,
 		nullF64(d.PBessPlanKw), d.PBessVirtualKw, d.PPVLimitVirtualKw,
-		nullF64(d.SocPercent), d.Rationale, string(doc))
+		nullF64(d.SocPercent), di, d.Rationale, string(doc))
 	return err
 }
 

@@ -78,6 +78,12 @@ type Service struct {
 	// A battery start the logger took in this write session.
 	essStartSent atomic.Bool
 
+	// Encombi read (ems_offgrid_island_generator.md §4): the poller
+	// stores its last reading, the core loop takes the power mode, the
+	// consoles read the status line.
+	lastEncombi atomic.Pointer[encombiReading]
+	supplyView  atomic.Pointer[SupplyStatus]
+
 	// Core-loop state (no locks: touched only from the core loop).
 	lastManifestID   string
 	manifestExpired  bool
@@ -85,6 +91,8 @@ type Service struct {
 	ctl              *Controller
 	sess             writeSession
 	tz               *time.Location
+	supply           *supplyTracker // nil while encombi is off
+	supplyNow        SupplyState
 }
 
 // writeRequest is a console action on the write flag, served by the
@@ -203,6 +211,11 @@ func Run(ctx context.Context, cfg *Config, log *slog.Logger, version string) err
 	if len(cfg.Diagnostics.Inverters.DeviceAddresses) > 0 {
 		wg.Add(1)
 		go func() { defer wg.Done(); s.runInverterPoller(ctx, events) }()
+	}
+	if cfg.Encombi.Enabled {
+		s.supply = newSupplyTracker(cfg.Encombi.Debounce)
+		wg.Add(1)
+		go func() { defer wg.Done(); s.runEncombiPoller(ctx) }()
 	}
 	if cfg.LocalUI.On() {
 		wg.Add(1)
@@ -337,6 +350,7 @@ func subtractEntries(entries, already []registers.ResolvedEntry) []registers.Res
 // onTick is the 1 s heart of the edge: normalize → black box → shadow.
 func (s *Service) onTick(ctx context.Context, now time.Time) {
 	tick := s.norm.BuildTick(now)
+	s.observeSupply(ctx, now, &tick)
 	s.lastTick.Store(&tick)
 	if err := s.bb.WriteTick(ctx, tick); err != nil {
 		s.log.Error("edge_blackbox_tick", "err", err)
@@ -387,6 +401,7 @@ func (s *Service) onTick(ctx context.Context, now time.Time) {
 		} else {
 			s.stepWrite(ctx, now, tick, nil)
 		}
+		s.publishSupply(tick)
 		return
 	}
 	effective := cur
@@ -406,6 +421,7 @@ func (s *Service) onTick(ctx context.Context, now time.Time) {
 		decision.PlanSource = "override"
 	}
 	s.stepWrite(ctx, now, tick, &decision)
+	decision.Supply = s.publishSupply(tick)
 	s.lastDecision.Store(&decision)
 	if err := s.bb.WriteDecision(ctx, decision); err != nil {
 		s.log.Error("edge_blackbox_decision", "err", err)
