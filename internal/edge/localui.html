@@ -691,6 +691,7 @@ const WRITE_STATES = {
   run: ['IoT2050 пише · робота', 'red'],
   stopped: ['IoT2050 пише · ЗУПИНКА (УЗЕ 0)', 'red'],
   stopping: ['вимикання запису…', 'amber'],
+  mode_stop: ['IoT2050 пише · мережа зникла (УЗЕ 0)', 'red'],
 };
 
 function renderWrite(w) {
@@ -773,12 +774,17 @@ function renderCommands(w) {
   // Cutover §12.7: the battery starts only in PQ (44364 = 0).
   const eq = w.equipment || {};
   const pq = eq.pcs_mode === 'pq';
+  // Offgrid §4.3: a start closed in this power mode stays grey, with why.
+  const sp = lastStatus && lastStatus.health ? lastStatus.health.supply : null;
+  const acts = sp && sp.actions ? sp.actions.buttons || {} : {};
+  const closed = (id) => acts[id] && !acts[id].ok ? acts[id].reason : '';
   $('cmd-table').innerHTML = CMD_ROWS.map((r) => {
     const last = [byId[r.start], byId[r.stop]].filter(Boolean).sort((a, b) => (a.sent_at < b.sent_at ? 1 : -1))[0];
     const busy = last && last.state === 'waiting';
     const dis = !on || busy ? ' disabled' : '';
     const essStart = r.start === 'ess_start' || r.start === 'array_start_ess';
-    const disStart = dis || (latched || (essStart && !pq) ? ' disabled' : '');
+    const why = closed(r.start);
+    const disStart = dis || (latched || (essStart && !pq) || why ? ' disabled' : '') + (why ? ' title="' + esc(why) + '"' : '');
     let mode = '';
     if (r.start === 'ess_start') {
       mode = '<div style="font-size:12px;margin-top:4px">Режим PCS: <strong>' + (PCS_MODES[eq.pcs_mode] || '—') + '</strong>' +
@@ -791,9 +797,12 @@ function renderCommands(w) {
       '<div style="font-size:12px;margin-top:4px">' + cmdFeedback(last) + '</div></td></tr>';
   }).join('');
   const err = cmdError && cmdError.until > Date.now() ? cmdError.text : '';
+  const startClosed = on && !latched ? CMD_ROWS.map((r) => closed(r.start)).find(Boolean) : '';
   const note = err || (latched
     ? '⛔ Запис зупинено' + (w.reason ? ': ' + w.reason : '') + '. Пуск у цій сесії не надсилається: «Вимкнути запис», потім знову «Увімкнути запис» і «Пуск».'
-    : '');
+    : on && w.state === 'mode_stop'
+      ? '⚠ ' + (w.reason || 'Мережа зникла') + '. Запис лишається; система сама нічого не запускає.' + (startClosed ? ' Пуск зараз: ' + startClosed + '.' : '')
+      : startClosed ? 'Пуск зараз недоступний: ' + startClosed + '.' : '');
   $('cmd-note').hidden = !note;
   $('cmd-note').textContent = note;
 }

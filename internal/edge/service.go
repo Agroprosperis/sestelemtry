@@ -93,6 +93,7 @@ type Service struct {
 	tz               *time.Location
 	supply           *supplyTracker // nil while encombi is off
 	supplyNow        SupplyState
+	avail            *Availability // nil while encombi is off
 }
 
 // writeRequest is a console action on the write flag, served by the

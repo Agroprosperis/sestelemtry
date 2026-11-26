@@ -29,6 +29,8 @@ func (s *Service) stepWrite(ctx context.Context, now time.Time, tick Tick, d *De
 		decision = *d
 	}
 	n, faults := s.inverterCounts(now)
+	supply, avail := s.supplyInputs()
+	before := s.ctl.State()
 	cmd, evs := s.ctl.Step(ControlInputs{
 		Now:            now,
 		Tick:           tick,
@@ -37,10 +39,25 @@ func (s *Service) stepWrite(ctx context.Context, now time.Time, tick Tick, d *De
 		ImportLimitKw:  s.effectiveImportLimitKw(now),
 		InverterCount:  n,
 		InverterFaults: faults,
+		Supply:         supply,
+		Avail:          avail,
 	})
 	s.writeCmd.Store(&cmd)
 	for _, ev := range evs {
 		s.writeEventDeduped(ctx, ev)
+	}
+	if before == WriteModeStop && s.ctl.State() != WriteModeStop {
+		// The next loss of the grid stops again what was started since.
+		s.sess.autoStopSent = false
+	}
+	if typ := decision.ManualType; typ != "" && avail != nil {
+		if a := avail.ManualOK(typ); !a.OK {
+			s.writeEventDeduped(ctx, Event{
+				TS: now, Severity: SevWarning, Code: EvManualUnavailable,
+				Message: fmt.Sprintf("ручна команда %s («%s») не виконується: %s", decision.ManualCommandID, typ, a.Reason),
+				Context: map[string]any{"command_id": decision.ManualCommandID, "type": typ, "reason": a.Reason},
+			})
+		}
 	}
 	s.sendAutoStops(ctx, now)
 	s.checkDaytimePV(ctx, now, tick)
@@ -307,6 +324,15 @@ func (s *Service) writePreconditions(now time.Time) []WritePrecondition {
 		add("voltage", false, voltageLabel, "фази лічильника PCC не прочитано: мережу в точці приєднання не підтверджено")
 	default:
 		add("voltage", len(low) == 0 && hasVoltage(t), voltageLabel, voltageActual(t, low))
+	}
+	if s.cfg.Encombi.Enabled {
+		sp := s.supplyView.Load()
+		actual := "немає даних Encombi"
+		if sp != nil {
+			actual = sp.ModeLabel + " · перемикач " + sp.SwitchLabel
+		}
+		add("supply", sp != nil && sp.Mode == SupplyGrid && sp.Switch == SwitchPQ,
+			"живлення від мережі, перемикач на шафі в PQ (Encombi)", actual)
 	}
 	if meter, has := t.Values["meter_active_power_kw"]; has && t.GridPowerKw != nil &&
 		math.Abs(meter) >= pccSignDeadbandKw && math.Abs(*t.GridPowerKw) >= pccSignDeadbandKw {

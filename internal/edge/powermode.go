@@ -168,10 +168,18 @@ type supplyTracker struct {
 	modeSince time.Time
 	cand      string
 	candSince time.Time
+	// pendSince: since when the raw mode differs from the taken one.
+	pendSince time.Time
+	settling  bool
 
 	sw      string
 	swSince time.Time
 }
+
+// supplySettleExtra bounds how long a mode without the grid may stay
+// pending past the debounce before the checks run again: a reading that
+// flickers must not hold them off for good.
+const supplySettleExtra = 3 * time.Second
 
 func newSupplyTracker(debounce time.Duration) *supplyTracker {
 	return &supplyTracker{debounce: debounce, mode: SupplyUnknown, sw: SwitchUnknown}
@@ -190,6 +198,13 @@ func (tr *supplyTracker) observe(now time.Time, raw, sw string) (changed, swChan
 	if tr.modeSince.IsZero() {
 		tr.modeSince = now
 	}
+	switch {
+	case raw == tr.mode:
+		tr.pendSince = time.Time{}
+	case tr.pendSince.IsZero():
+		tr.pendSince = now
+	}
+	tr.settling = offGridMode(raw) && raw != tr.mode && now.Sub(tr.pendSince) < tr.debounce+supplySettleExtra
 	prevSw = tr.sw
 	if sw != tr.sw {
 		tr.sw, tr.swSince, swChanged = sw, now, true
@@ -206,6 +221,10 @@ type SupplyState struct {
 	ModeSince   time.Time
 	Switch      string
 	SwitchSince time.Time
+	// Settling: the readings show a mode without the grid that is not
+	// taken yet. The PCS trips the moment the grid goes, well inside
+	// the debounce.
+	Settling    bool
 	Bits        uint16
 	Fresh       bool
 	GenPowerKw  *float64
@@ -214,7 +233,7 @@ type SupplyState struct {
 
 func (tr *supplyTracker) state(in supplyInputs) SupplyState {
 	return SupplyState{
-		Mode: tr.mode, ModeSince: tr.modeSince, Switch: tr.sw, SwitchSince: tr.swSince,
+		Mode: tr.mode, ModeSince: tr.modeSince, Switch: tr.sw, SwitchSince: tr.swSince, Settling: tr.settling,
 		Bits: in.bits, Fresh: in.fresh, GenPowerKw: in.genPowerKw, BusVoltageV: in.busV,
 	}
 }
@@ -251,6 +270,8 @@ type SupplyStatus struct {
 	LoadKw          *float64        `json:"load_kw,omitempty"`
 	// AutonomyMin: minutes to the floor at the current load less the sun.
 	AutonomyMin *float64 `json:"autonomy_min,omitempty"`
+	// Actions is what the cloud's commands and the buttons may do now.
+	Actions *Availability `json:"actions,omitempty"`
 }
 
 var inputNames = map[int]string{

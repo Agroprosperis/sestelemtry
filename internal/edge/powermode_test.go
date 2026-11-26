@@ -93,6 +93,25 @@ func TestSupplyTrackerDebounce(t *testing.T) {
 	}
 }
 
+// The checks wait for a mode without the grid at most debounce + 3 s,
+// however the readings flicker.
+func TestSupplySettlingIsBounded(t *testing.T) {
+	tr := newSupplyTracker(2 * time.Second)
+	tr.observe(testTS, SupplyGrid, SwitchPQ)
+	tr.observe(testTS.Add(2*time.Second), SupplyGrid, SwitchPQ)
+	raws := []string{SupplyBlackout, SupplyUnknown}
+	for i := 3; i <= 12; i++ {
+		tr.observe(testTS.Add(time.Duration(i)*time.Second), raws[i%2], SwitchPQ)
+		want := raws[i%2] == SupplyBlackout && i < 3+5
+		if got := tr.state(supplyInputs{}).Settling; got != want {
+			t.Fatalf("at %d s (%s): settling %v, want %v", i, raws[i%2], got, want)
+		}
+	}
+	if tr.mode != SupplyGrid {
+		t.Fatalf("a flicker took the mode: %s", tr.mode)
+	}
+}
+
 func TestSupplyStatusOffGrid(t *testing.T) {
 	cfg := zeCfg(t)
 	tk := encombiTick(0x052C, 231, 300)

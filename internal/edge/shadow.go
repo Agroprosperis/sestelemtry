@@ -44,6 +44,7 @@ type Decision struct {
 	MeterPowerKw  *float64
 
 	ManualCommandID  string
+	ManualType       string
 	WriteState       string
 	WriteReason      string
 	CommandESSKw     *float64 // 40381 after the write-side clamps
@@ -249,7 +250,7 @@ func Decide(t Tick, m *Manifest, cfg *Config) (Decision, []Event) {
 		WriteEnabled: false,
 	}
 	if params.manual != nil {
-		d.ManualCommandID = params.manual.ID
+		d.ManualCommandID, d.ManualType = params.manual.ID, params.manual.Type
 	}
 	if v, ok := t.Values["ess_active_power_adjustment_kw"]; ok {
 		d.Readback40381 = f64ptr(v)

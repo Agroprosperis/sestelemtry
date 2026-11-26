@@ -167,6 +167,7 @@ func (s *Service) observeSupply(ctx context.Context, now time.Time, tick *Tick) 
 	in := supplyInputsOf(*tick)
 	changed, swChanged, prevMode, prevSw := s.supply.observe(now, classifySupply(in, s.cfg.Encombi.BusLiveMinV), switchPosition(in))
 	s.supplyNow = s.supply.state(in)
+	s.avail = availabilityFor(s.supplyNow)
 	if changed {
 		s.writeEventDeduped(ctx, supplyEvent(now, prevMode, s.supplyNow.Mode, s.supplyNow))
 	}
@@ -181,8 +182,21 @@ func (s *Service) publishSupply(tick Tick) *SupplyStatus {
 		return nil
 	}
 	st := buildSupplyStatus(s.supplyNow, tick, s.controllerNow(), s.cfg, s.essCapacityKwh(tick))
+	if s.avail != nil {
+		st.Restriction, st.Actions = s.avail.Restriction, s.avail
+	}
 	s.supplyView.Store(st)
 	return st
+}
+
+// supplyInputs are the controller's view of the power mode; nil while
+// encombi is off.
+func (s *Service) supplyInputs() (*SupplyState, *Availability) {
+	if s.supply == nil {
+		return nil, nil
+	}
+	st := s.supplyNow
+	return &st, s.avail
 }
 
 // controllerNow is «Хто керує»: the IoT2050 while its flag is on and no

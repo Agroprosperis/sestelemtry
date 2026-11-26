@@ -15,7 +15,14 @@ const (
 	WriteRun        = "run"         // the engine's commands go out
 	WriteStopped    = "stopped"     // a stop latched: battery 0, PV at its rating
 	WriteStopping   = "stopping"    // turning off: safe values, then the flag drops
+	// The grid went (offgrid §2): battery 0 and a stop of what the test
+	// started, like a latched stop, but the session goes on. The new
+	// mode's actions are buttons; the grid's return waits for «Пуск УЗЕ».
+	WriteModeStop = "mode_stop"
 )
+
+// EvWriteModeStop journals the stop on the grid's loss.
+const EvWriteModeStop = "WRITE_MODE_STOP"
 
 // Thresholds of the stops (ems_sl_write_cutover.md §9, §12.3, §12.4).
 const (
@@ -69,6 +76,16 @@ type ControlInputs struct {
 	// InverterCount/InverterFaults size the PV ceiling (1/N per fault).
 	InverterCount  int
 	InverterFaults int
+	// Supply/Avail are the power mode and what it allows; nil while
+	// encombi is off, and then nothing depends on them.
+	Supply *SupplyState
+	Avail  *Availability
+}
+
+// offGridMode: a power mode in which the grid is not on the bus, taken
+// on fresh data.
+func offGridMode(mode string) bool {
+	return mode == SupplyBlackout || mode == SupplyIsland || mode == SupplyGenerator
 }
 
 type cmdSample struct {
@@ -139,8 +156,40 @@ func (c *Controller) ESSStarted(now time.Time) {
 // went on.
 func (c *Controller) ESSStartedInSession() bool { return c.essStarted }
 
-// StopAuto reports that the latched stop came from a check.
-func (c *Controller) StopAuto() bool { return c.state == WriteStopped && c.stopAuto }
+// StopAuto reports a stop that also stops what the test started: a
+// latched stop from a check, or the grid's loss.
+func (c *Controller) StopAuto() bool {
+	return (c.state == WriteStopped && c.stopAuto) || c.state == WriteModeStop
+}
+
+// modeStop: the power mode left the grid while the battery was waiting,
+// holding or running.
+func (c *Controller) modeStop(now time.Time, mode string) Event {
+	label := supplyModeLabels[mode]
+	c.state, c.since, c.stopAuto = WriteModeStop, now, true
+	c.reason = "живлення: " + label + " — УЗЕ 0, дії режиму лише кнопками"
+	c.essStarted, c.essStartedAt, c.firstConfirmed = false, time.Time{}, false
+	c.resetChecks()
+	return Event{
+		TS: now, Severity: SevAlarm, Code: EvWriteModeStop,
+		Message: "мережа зникла (" + label + "): УЗЕ 0 кВт, зупинка того, що запускав тест; запис лишається, далі — кнопками",
+		Context: map[string]any{"mode": mode},
+	}
+}
+
+// gridBack: the grid is on the bus again; the battery stays at 0 until
+// «Пуск УЗЕ» is pressed and confirmed, then the hold, then the plan.
+func (c *Controller) gridBack(now time.Time) {
+	c.state, c.since, c.stopAuto = WriteAwaitStart, now, false
+	c.reason = "мережа повернулась — УЗЕ 0 до «Пуск УЗЕ»"
+	c.resetChecks()
+}
+
+func (c *Controller) resetChecks() {
+	c.followSince, c.lowVoltSince, c.pollLossSince, c.pccLossSince = time.Time{}, time.Time{}, time.Time{}, time.Time{}
+	c.essLossSince, c.pcsModeSince, c.exportSince, c.importSince = time.Time{}, time.Time{}, time.Time{}, time.Time{}
+	c.deviationSince = time.Time{}
+}
 
 // Off forgets everything once the flag is off.
 func (c *Controller) Off() {
@@ -198,7 +247,16 @@ func (c *Controller) Step(in ControlInputs) (WriteCommand, []Event) {
 	if c.state == WriteHold && in.Now.Sub(c.since) >= c.cfg.InitialHold {
 		c.state, c.since, c.reason = WriteRun, in.Now, "робота"
 	}
-	if c.state == WriteAwaitStart || c.state == WriteHold || c.state == WriteRun {
+	if in.Supply != nil {
+		switch m := in.Supply.Mode; {
+		case offGridMode(m) && (c.state == WriteAwaitStart || c.state == WriteHold || c.state == WriteRun):
+			events = append(events, c.modeStop(in.Now, m))
+		case m == SupplyGrid && c.state == WriteModeStop:
+			c.gridBack(in.Now)
+		}
+	}
+	settling := in.Supply != nil && in.Supply.Settling
+	if (c.state == WriteAwaitStart || c.state == WriteHold || c.state == WriteRun) && !settling {
 		if reason := c.checkStops(in); reason != "" {
 			if ev, ok := c.Stop(in.Now, reason, true); ok {
 				events = append(events, ev)
@@ -215,9 +273,25 @@ func (c *Controller) Step(in ControlInputs) (WriteCommand, []Event) {
 	case WriteAwaitStart, WriteHold:
 		cmd.PVLimitKw, cmd.PVKnown = c.pvCeiling(in, &cmd.Clamps)
 	default:
-		// Stopped or turning off: battery 0, PV on its rating (§12.4).
+		// Stopped, turning off or the grid gone: battery 0, PV on its
+		// rating (§12.4).
 		rated := c.pvRated(t)
 		cmd.PVLimitKw, cmd.PVKnown = rated, rated > 0
+	}
+	if c.state == WriteRun && cmd.ESSKw != 0 && settling {
+		cmd.ESSKw = 0
+		cmd.Clamps = append(cmd.Clamps, "живлення змінюється — УЗЕ 0")
+	}
+	if c.state == WriteRun && cmd.ESSKw != 0 && in.Avail != nil {
+		if a := in.Avail.Power; !a.OK {
+			cmd.ESSKw = 0
+			cmd.Clamps = append(cmd.Clamps, a.Reason+" — УЗЕ 0")
+		} else if typ := in.Decision.ManualType; typ != "" {
+			if a := in.Avail.ManualOK(typ); !a.OK {
+				cmd.ESSKw = 0
+				cmd.Clamps = append(cmd.Clamps, "ручна команда «"+typ+"» недоступна: "+a.Reason+" — УЗЕ 0")
+			}
+		}
 	}
 	cmd.ESSKw, cmd.PVLimitKw = c.exportCeiling(in, cmd.ESSKw, cmd.PVLimitKw, cmd.PVKnown, &cmd.Clamps)
 	cmd.ESSKw = round1(cmd.ESSKw)
