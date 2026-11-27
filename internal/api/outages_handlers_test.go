@@ -93,11 +93,11 @@ func TestOutageAccountKeepsThePasswordOnTheServer(t *testing.T) {
 	}
 
 	// A save without the password keeps it…
-	if rec := outageRequest(t, h, http.MethodPut, target, `{"host":"vn.e-svitlo.com.ua","login":"jm@ukr.net","eic":""}`); rec.Code != http.StatusOK || store.passwords["je"] != "s3cret" {
+	if rec := outageRequest(t, h, http.MethodPut, target, `{"host":"vn.e-svitlo.com.ua","login":"jm@ukr.net","eic":"62Z5841289870313"}`); rec.Code != http.StatusOK || store.passwords["je"] != "s3cret" {
 		t.Fatalf("keep: %d, password %q", rec.Code, store.passwords["je"])
 	}
 	// …but only for the login it was saved with.
-	if rec := outageRequest(t, h, http.MethodPut, target, `{"host":"vn.e-svitlo.com.ua","login":"other@ukr.net"}`); rec.Code != http.StatusBadRequest {
+	if rec := outageRequest(t, h, http.MethodPut, target, `{"host":"vn.e-svitlo.com.ua","login":"other@ukr.net","eic":"62Z5841289870313"}`); rec.Code != http.StatusBadRequest {
 		t.Fatalf("another login with the stored password: %d", rec.Code)
 	}
 	// An empty login takes the station off the read.
@@ -112,6 +112,7 @@ func TestOutageAccountRefusesWhatTheCabinetCannotTake(t *testing.T) {
 	for _, body := range []string{
 		`{"host":"example.com","login":"a@b.c","password":"x"}`,
 		`{"host":"vn.e-svitlo.com.ua","login":"a@b.c","eic":"короткий","password":"x"}`,
+		`{"host":"vn.e-svitlo.com.ua","login":"a@b.c","password":"x"}`,
 		`not json`,
 	} {
 		if rec := outageRequest(t, h, http.MethodPut, "/api/v1/outage-account?organization_id=je", body); rec.Code != http.StatusBadRequest {

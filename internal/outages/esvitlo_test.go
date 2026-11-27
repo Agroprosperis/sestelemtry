@@ -203,8 +203,8 @@ func TestClientReadsALegalAccountByItsID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(p.Accounts) != 1 || p.Accounts[0] != "12345" || len(p.Outages) != 2 {
-		t.Fatalf("probe: %+v", p)
+	if len(p.Accounts) != 1 || p.Accounts[0] != "12345" || len(p.Outages) != 0 {
+		t.Fatalf("probe without an EIC: %+v", p)
 	}
 	one, err := c.Outages(context.Background(), "62Z0000000000002")
 	if err != nil {
@@ -255,9 +255,9 @@ func TestParseUkrainianRefusesNonsense(t *testing.T) {
 	}
 }
 
-// A passport holding the site's EIC, which no item names, still gets the
-// account's outages; one holding a point's EIC gets that point's.
-func TestClientKeepsTheAccountsOutagesForASiteEIC(t *testing.T) {
+// A passport EIC that no item names yields nothing: the station must
+// not inherit another point's schedule. A point's EIC keeps that point.
+func TestClientKeepsOnlyThePointsOutages(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`<input name="password">`))
@@ -275,12 +275,19 @@ func TestClientKeepsTheAccountsOutagesForASiteEIC(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c := NewClient(srv.URL, "a@b.c", "secret", time.UTC, srv.Client())
-	site, err := c.Outages(context.Background(), "62Z0000000000099")
+	unknown, err := c.Outages(context.Background(), "62Z0000000000099")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(site) != 2 {
-		t.Fatalf("site EIC: %+v, want the account's 2 intervals", site)
+	if len(unknown) != 0 {
+		t.Fatalf("unknown EIC: %+v, want none", unknown)
+	}
+	empty, err := c.Outages(context.Background(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(empty) != 0 {
+		t.Fatalf("no EIC: %+v, want none", empty)
 	}
 	point, err := c.Outages(context.Background(), "62Z0000000000011")
 	if err != nil {
@@ -296,16 +303,15 @@ func TestValidateAccount(t *testing.T) {
 	if err := a.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	// The EIC may stay empty: the cabinet's whole account is the station's.
 	a.EIC = ""
-	if err := a.Validate(); err != nil {
-		t.Fatal(err)
+	if err := a.Validate(); err == nil {
+		t.Fatal("want eic required")
 	}
 	a.EIC = "короткий"
 	if err := a.Validate(); err == nil {
 		t.Fatal("want eic error")
 	}
-	a.EIC, a.Login = "", ""
+	a.EIC, a.Login = "62Z1234567890123", ""
 	if err := a.Validate(); err == nil {
 		t.Fatal("want login error")
 	}

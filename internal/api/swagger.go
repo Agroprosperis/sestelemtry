@@ -2177,7 +2177,7 @@ components:
           type: string
         eic:
           type: string
-          description: The station's metering point; empty takes the cabinet's whole account
+          description: The station's metering point; without it no outages are read
         password_configured:
           type: boolean
         saved:
@@ -2208,7 +2208,7 @@ components:
             $ref: "#/components/schemas/OutageInterval"
     OutageAccountRequest:
       type: object
-      required: [host, login]
+      required: [host, login, eic]
       properties:
         host:
           type: string
@@ -2216,6 +2216,7 @@ components:
           type: string
         eic:
           type: string
+          description: Required when login is set; each metering point has its own schedule
         password:
           type: string
           nullable: true

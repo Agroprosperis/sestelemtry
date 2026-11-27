@@ -41,10 +41,10 @@ func OperatorFor(host string) (Operator, bool) {
 }
 
 // Account is a station's cabinet: the operator it is at, the login it
-// signs in with (email or phone) and, for a cabinet that lists more than
-// the station, the EIC of the station's metering point. The password is
-// stored and passed apart, so every read of it is a call a reviewer can
-// grep.
+// signs in with (email or phone) and the EIC of the station's metering
+// point. Without an EIC no outages are read — each point has its own
+// schedule. The password is stored and passed apart, so every read of
+// it is a call a reviewer can grep.
 type Account struct {
 	OrganizationID string `json:"organization_id"`
 	Host           string `json:"host"`
@@ -71,7 +71,10 @@ func (a Account) Validate() error {
 	if a.Login == "" {
 		return errors.New("вкажіть логін кабінету: email або телефон")
 	}
-	if a.EIC != "" && !eicRe.MatchString(a.EIC) {
+	if a.EIC == "" {
+		return errors.New("вкажіть EIC точки обліку з розділу «Площадки комерційного обліку»")
+	}
+	if !eicRe.MatchString(a.EIC) {
 		return errors.New("EIC — 16 латинських літер і цифр, як у договорі, наприклад 62Z…")
 	}
 	return nil

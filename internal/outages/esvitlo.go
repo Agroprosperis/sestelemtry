@@ -194,10 +194,10 @@ func (c *Client) legalAccounts(ctx context.Context) ([]string, error) {
 	return out, nil
 }
 
-// Outages returns the outages the cabinet lists — planned and under way —
-// in time order, overlapping ones of a kind merged. A legal cabinet
-// answers for each of its accounts, and eic, when given, keeps only that
-// point's; a household cabinet is asked by eic.
+// Outages returns the outages the cabinet lists for eic — planned and
+// under way — in time order, overlapping ones of a kind merged. Without
+// an EIC, or when no item names it, the answer is empty: a legal
+// account's other points must not stand in for the station.
 func (c *Client) Outages(ctx context.Context, eic string) ([]Interval, error) {
 	if !c.signedIn {
 		if err := c.SignIn(ctx); err != nil {
@@ -218,10 +218,17 @@ func (c *Client) Outages(ctx context.Context, eic string) ([]Interval, error) {
 }
 
 func (c *Client) readAll(ctx context.Context, eic string) ([]Interval, error) {
-	if len(c.legal) == 0 {
-		if eic == "" {
+	// Without an EIC there is nothing to keep: each metering point has
+	// its own schedule, and the whole account must not stand in for one.
+	if eic == "" {
+		if len(c.legal) == 0 {
 			return nil, ErrNoAccount
 		}
+		return nil, nil
+	}
+	if len(c.legal) == 0 {
+		// A household list is already asked by eic in the URL and often
+		// names no EIC on the items, so the whole answer is that point's.
 		list, err := c.read(ctx, c.householdURL(eic), "")
 		return merge(list), err
 	}
@@ -236,11 +243,10 @@ func (c *Client) readAll(ctx context.Context, eic string) ([]Interval, error) {
 	return merge(all), nil
 }
 
-// read fetches one outages list. eic, when given, keeps the items of
-// that point and those that name none. A legal account names its items
-// by its metering points' own EICs, while a passport may hold the site's
-// («ЕІС-код площадки вимірювання»): when no item names eic at all, the
-// account's outages are the station's.
+// read fetches one outages list. With eic set, only that point's items
+// are kept — a passport EIC that no item names yields nothing, not the
+// rest of the account. With eic empty, every item is kept (a household
+// list already scoped by the URL).
 func (c *Client) read(ctx context.Context, path, eic string) ([]Interval, error) {
 	page, final, err := c.fetch(ctx, http.MethodGet, path, nil)
 	if err != nil {
@@ -254,17 +260,10 @@ func (c *Client) read(ctx context.Context, path, eic string) ([]Interval, error)
 		return list, err
 	}
 	var kept []Interval
-	named := false
 	for _, iv := range list {
 		if iv.EIC == eic {
-			named = true
-		}
-		if iv.EIC == "" || iv.EIC == eic {
 			kept = append(kept, iv)
 		}
-	}
-	if !named {
-		return list, nil
 	}
 	return kept, nil
 }
@@ -297,8 +296,9 @@ type Probe struct {
 	Outages  []Interval `json:"outages"`
 }
 
-// Probe signs in and reads the outages: a legal cabinet's for its
-// accounts, kept to eic when given; a household's for eic.
+// Probe signs in and reads the outages of eic. Without an EIC a legal
+// cabinet still signs in (so the passport can see its accounts), but
+// Outages stays empty.
 func (c *Client) Probe(ctx context.Context, eic string) (Probe, error) {
 	p := Probe{Outages: []Interval{}}
 	if err := c.SignIn(ctx); err != nil {

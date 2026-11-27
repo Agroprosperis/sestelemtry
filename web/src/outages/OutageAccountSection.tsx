@@ -140,7 +140,8 @@ export function OutageAccountSection({ organizationID, canEdit }: Props) {
     }
   }
 
-  const canTest = form.login.trim() !== '' && !eicBad && (account.password_configured || password !== null)
+  const canTest =
+    form.login.trim() !== '' && eic !== '' && !eicBad && (account.password_configured || password !== null)
 
   return (
     <section className="station-section pvplan">
@@ -211,7 +212,7 @@ export function OutageAccountSection({ organizationID, canEdit }: Props) {
               />
             </label>
             <label className="pvplan-field">
-              EIC точки обліку (необовʼязково)
+              EIC точки обліку
               <input
                 value={form.eic}
                 maxLength={EIC_LENGTH}
@@ -222,8 +223,8 @@ export function OutageAccountSection({ organizationID, canEdit }: Props) {
             </label>
           </div>
           <p className="pvplan-hint">
-            EIC потрібен, лише якщо в кабінеті кілька обʼєктів: його видно в кабінеті в розділі «Площадки комерційного
-            обліку». Без нього береться весь рахунок.
+            EIC точки комерційного обліку з розділу «Площадки комерційного обліку» в кабінеті. Без нього відключення не
+            читаються — у кожної точки свій графік.
           </p>
 
           <div className="pvplan-actions">
@@ -238,7 +239,7 @@ export function OutageAccountSection({ organizationID, canEdit }: Props) {
             <button
               type="button"
               className="pvplan-btn primary"
-              disabled={busy || !dirty || eicBad || form.login.trim() === ''}
+              disabled={busy || !dirty || eic === '' || eicBad || form.login.trim() === ''}
               onClick={() => void save(input(), password, 'Збережено. Відключення прочитаються за кілька хвилин.')}
             >
               {busy ? 'Збереження…' : 'Зберегти'}

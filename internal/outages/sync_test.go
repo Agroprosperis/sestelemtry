@@ -70,10 +70,10 @@ func TestSyncReadsEachStationSigningInOncePerCabinet(t *testing.T) {
 	store := &fakeStore{
 		accounts: []AccountRow{
 			{Account: Account{OrganizationID: "je", Host: vn, Login: "ok@x", EIC: "62Z0000000000011"}, PasswordConfigured: true},
-			{Account: Account{OrganizationID: "je2", Host: vn, Login: "ok@x"}, PasswordConfigured: true},
-			{Account: Account{OrganizationID: "bad", Host: vn, Login: "ok@x"}, PasswordConfigured: true},
+			{Account: Account{OrganizationID: "je2", Host: vn, Login: "ok@x", EIC: "62Z0000000000012"}, PasswordConfigured: true},
+			{Account: Account{OrganizationID: "bad", Host: vn, Login: "ok@x", EIC: "62Z0000000000011"}, PasswordConfigured: true},
 			// No password yet: not read at all.
-			{Account: Account{OrganizationID: "draft", Host: vn, Login: "ok@x"}},
+			{Account: Account{OrganizationID: "draft", Host: vn, Login: "ok@x", EIC: "62Z0000000000011"}},
 		},
 		passwords: map[string]string{"je": "pw", "je2": "pw", "bad": "wrong"},
 		replaced:  map[string]replaced{},
