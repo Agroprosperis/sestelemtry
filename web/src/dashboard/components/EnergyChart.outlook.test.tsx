@@ -131,27 +131,29 @@ describe('EnergyChart planned outages', () => {
 
     expect(screen.queryByText('No data available for selected range.')).toBeNull()
     expect(container.querySelectorAll('.outage-marker')).toHaveLength(1)
-    expect(legendHidden('Відключення за графіком')).toBe('false')
-    expect(screen.queryByRole('button', { name: 'Інше відключення' })).toBeNull()
+    expect(legendHidden('Відключення за планом')).toBe('false')
   })
 
-  it('names an outage off the schedule apart', () => {
+  it('keeps every kind of planned outage in the one plan bar', () => {
     render(
       <ThemeProvider>
         <EnergyChart
           summary={summary}
           loading={false}
           powerSeries={measured}
-          outageAreas={[{ x1: '10:00', x2: '12:00', kind: 'other' }]}
+          outageAreas={[
+            { x1: '04:00', x2: '06:00', kind: 'schedule' },
+            { x1: '10:00', x2: '12:00', kind: 'other' },
+          ]}
         />
       </ThemeProvider>,
     )
 
-    expect(legendHidden('Інше відключення')).toBe('false')
-    expect(screen.queryByRole('button', { name: 'Відключення за графіком' })).toBeNull()
+    expect(screen.getAllByRole('button', { name: /Відключення|без мережі/ })).toHaveLength(1)
+    expect(legendHidden('Відключення за планом')).toBe('false')
   })
 
-  it('marks each outage with an icon at the top, gone once hidden in the legend', () => {
+  it('marks each outage with a bar at the top, gone once hidden in the legend', () => {
     const wholeDay: PowerChartRow[] = Array.from({ length: 288 }, (_, i) => ({
       time: `${String(Math.floor(i / 12)).padStart(2, '0')}:${String((i % 12) * 5).padStart(2, '0')}`,
       active_pv_power_kw: 12,
@@ -171,7 +173,7 @@ describe('EnergyChart planned outages', () => {
     )
 
     expect(container.querySelectorAll('.outage-marker')).toHaveLength(2)
-    fireEvent.click(screen.getByRole('button', { name: 'Відключення за графіком' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Відключення за планом' }))
     expect(container.querySelectorAll('.outage-marker')).toHaveLength(0)
   })
 

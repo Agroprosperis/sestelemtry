@@ -33,8 +33,9 @@ const AI_SOC_KEY = 'ai_soc_pct'
 const AI_LOAD_KEY = 'ai_load_kw'
 const AI_REASON_KEY = 'ai_reason_text'
 
-const OUTAGE_TEXT = { schedule: 'За графіком без світла', other: 'Відключення світла' } as const
-const OUTAGE_DOT = { schedule: '#dc2626', other: '#f97316' } as const
+const OUTAGE_TEXT = { schedule: 'За графіком без світла', other: 'За планом без світла' } as const
+// The plan's red, as its bar on the chart.
+const OUTAGE_DOT = { schedule: '#dc2626', other: '#dc2626' } as const
 
 // Anything closer to zero than this is treated as "idle" — both the
 // ESS and the grid meter routinely sit at ±tens of watts even when
