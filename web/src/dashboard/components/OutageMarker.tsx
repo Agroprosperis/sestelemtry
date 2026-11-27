@@ -35,21 +35,46 @@ export function OutageIcon({ color, size = ICON_PX }: { color: string; size?: nu
 
 export type OutageMark = { x1: string; x2: string; color: string }
 
-// OutageMarkers draw inside the day chart: per outage, a thin line along
-// the top of the plot over its hours and the icon above their middle.
-// They take only the x scale and the plot box, so they show on a day
-// with no reading to scale any y axis (tomorrow).
-export function OutageMarkers({ marks }: { marks: OutageMark[] }) {
+// The fact track sits just under the plan's icons.
+const ACTUAL_TOP_PX = 28
+const ACTUAL_HEIGHT_PX = 4
+
+// OutageMarkers draw inside the day chart, along the top of the plot:
+// per planned outage a dashed line over its hours and the icon above
+// their middle; per stretch the site actually ran without the grid a
+// solid bar just under the icons. They take only the x scale and the
+// plot box, so they show on a day with no reading to scale any y axis
+// (tomorrow).
+export function OutageMarkers({ marks, actual = [] }: { marks: OutageMark[]; actual?: OutageMark[] }) {
   const plot = usePlotArea()
   const x = useXAxisScale()
-  if (!plot || !x || marks.length === 0) return null
+  if (!plot || !x || (marks.length === 0 && actual.length === 0)) return null
+  const span = (m: OutageMark) => {
+    const x1 = x(m.x1, { position: 'start' })
+    const x2 = x(m.x2, { position: 'end' })
+    return x1 == null || x2 == null || !(x2 > x1) ? null : { x: x1, width: x2 - x1 }
+  }
   return (
-    <g className="outage-markers">
+    <g className="outage-markers" pointerEvents="none">
+      {actual.map((m, i) => {
+        const s = span(m)
+        if (!s) return null
+        return (
+          <rect
+            key={`actual-${i}`}
+            className="outage-actual"
+            x={s.x}
+            y={plot.y + ACTUAL_TOP_PX}
+            width={s.width}
+            height={ACTUAL_HEIGHT_PX}
+            rx={2}
+            fill={m.color}
+          />
+        )
+      })}
       {marks.map((m, i) => {
-        const x1 = x(m.x1, { position: 'start' })
-        const x2 = x(m.x2, { position: 'end' })
-        if (x1 == null || x2 == null || !(x2 > x1)) return null
-        return <OutageMarker key={i} x={x1} width={x2 - x1} top={plot.y} color={m.color} />
+        const s = span(m)
+        return s ? <OutageMarker key={i} x={s.x} width={s.width} top={plot.y} color={m.color} /> : null
       })}
     </g>
   )
@@ -61,8 +86,17 @@ function OutageMarker({ x, width, top, color }: { x: number; width: number; top:
   const cx = x + width / 2
   const cy = top + 14
   return (
-    <g className="outage-marker" pointerEvents="none">
-      <line x1={x} x2={x + width} y1={top + 1} y2={top + 1} stroke={color} strokeWidth={2} strokeLinecap="round" />
+    <g className="outage-marker">
+      <line
+        x1={x}
+        x2={x + width}
+        y1={top + 1}
+        y2={top + 1}
+        stroke={color}
+        strokeWidth={2}
+        strokeDasharray="4 3"
+        strokeLinecap="round"
+      />
       <circle cx={cx} cy={cy} r={11} stroke={color} strokeOpacity={0.4} style={{ fill: 'var(--bg-elevated)' }} />
       <svg
         x={cx - ICON_PX / 2}

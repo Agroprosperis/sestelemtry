@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { UzePlanResponse } from '../../api'
 import { ThemeProvider } from '../../theme/theme'
 import type { PowerChartRow } from '../transforms/power'
+import type { DaySupplyBucket } from '../transforms/supply'
 import { energySummaryFromTotals } from '../transforms/summary'
 import { EnergyChart } from './EnergyChart'
 
@@ -172,5 +173,44 @@ describe('EnergyChart planned outages', () => {
     expect(container.querySelectorAll('.outage-marker')).toHaveLength(2)
     fireEvent.click(screen.getByRole('button', { name: 'Відключення за графіком' }))
     expect(container.querySelectorAll('.outage-marker')).toHaveLength(0)
+  })
+
+  it('draws the stretches without the grid as a fact track, hidden apart from the plan', () => {
+    const labels = Array.from(
+      { length: 288 },
+      (_, i) => `${String(Math.floor(i / 12)).padStart(2, '0')}:${String((i % 12) * 5).padStart(2, '0')}`,
+    )
+    const wholeDay: PowerChartRow[] = labels.map((time) => ({ time, active_pv_power_kw: 12 }))
+    const supply: DaySupplyBucket[] = labels.map((time, i) => ({
+      t: i,
+      time,
+      mode: (time >= '19:15' && time < '20:30') || (time >= '14:35' && time < '18:05') ? 'island' : 'grid',
+    }))
+    const { container } = render(
+      <ThemeProvider>
+        <EnergyChart
+          summary={summary}
+          loading={false}
+          powerSeries={wholeDay}
+          supplySeries={supply}
+          outageAreas={[{ x1: '14:00', x2: '18:00', kind: 'schedule' }]}
+        />
+      </ThemeProvider>,
+    )
+
+    expect(container.querySelectorAll('.outage-actual')).toHaveLength(2)
+    expect(legendHidden('Фактично без мережі')).toBe('false')
+    fireEvent.click(screen.getByRole('button', { name: 'Фактично без мережі' }))
+    expect(container.querySelectorAll('.outage-actual')).toHaveLength(0)
+    expect(container.querySelectorAll('.outage-marker')).toHaveLength(1)
+  })
+
+  it('has no fact track for a day on the grid', () => {
+    render(
+      <ThemeProvider>
+        <EnergyChart summary={summary} loading={false} powerSeries={measured} supplySeries={null} />
+      </ThemeProvider>,
+    )
+    expect(screen.queryByRole('button', { name: 'Фактично без мережі' })).toBeNull()
   })
 })

@@ -1824,6 +1824,11 @@
   flex: 0 0 auto;
 }
 
+.chart-legend-swatch--bar {
+  width: 14px;
+  height: 4px;
+}
+
 .chart-legend-icon {
   display: inline-flex;
   flex: 0 0 auto;

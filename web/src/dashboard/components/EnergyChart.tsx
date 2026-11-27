@@ -30,7 +30,7 @@ import {
   aiPlanHasLoad,
 } from '../transforms/aiPlan'
 import type { DAMChartRow } from '../transforms/dam'
-import { OUTAGE_ROW_KEY, outageKindAt, type OutageArea } from '../transforms/outages'
+import { offgridAreas, OUTAGE_ROW_KEY, outageKindAt, type OutageArea } from '../transforms/outages'
 import type { PowerChartRow } from '../transforms/power'
 import { pvForecastLabel, type PvForecastHourlyRow } from '../transforms/pvForecast'
 import type { SOCChartRow } from '../transforms/soc'
@@ -83,6 +83,11 @@ const OUTAGE_STYLE: Record<OutageArea['kind'], { key: string; label: string; col
   schedule: { key: 'planned_outage', label: 'Відключення за графіком', color: '#dc2626' },
   other: { key: 'other_outage', label: 'Інше відключення', color: '#f97316' },
 }
+// The stretches the site actually ran without the grid (Encombi
+// breakers), a solid bar under the plan's dashed line in the same red.
+const ACTUAL_OUTAGE_KEY = 'actual_outage'
+const ACTUAL_OUTAGE_LABEL = 'Фактично без мережі'
+const ACTUAL_OUTAGE_COLOR = '#dc2626'
 
 const DAM_PRICE_KEY = 'dam_price_uah_per_mwh'
 const DAM_PRICE_COLOR = '#0ea5e9'
@@ -293,6 +298,15 @@ export function EnergyChart({
   )
 
   const dayLabels = useMemo(() => dayData.map((r) => String(r.time)), [dayData])
+  const offgrid = useMemo(() => offgridAreas(supplySeries, dayLabels), [supplySeries, dayLabels])
+  const hasActualOutages = offgrid.length > 0
+  const actualMarks = useMemo(
+    () =>
+      hiddenSeries.has(ACTUAL_OUTAGE_KEY)
+        ? []
+        : offgrid.map((a) => ({ x1: a.x1, x2: a.x2, color: ACTUAL_OUTAGE_COLOR })),
+    [offgrid, hiddenSeries],
+  )
   const hourlyAreas = useMemo(() => hourlyDamAreas(damSeries, dayLabels), [damSeries, dayLabels])
   const priceDomain = useMemo(() => damPriceDomain(hourlyAreas), [hourlyAreas])
 
@@ -338,8 +352,9 @@ export function EnergyChart({
   // component type and y-axis, which puts SOC at the front and shuffles
   // power lines, so we render the legend ourselves via `Legend.content`.
   const dayLegendItems = useMemo(() => {
-    // outage items wear the chart's outage icon instead of a swatch.
-    type Item = { id: string; label: string; color: string; outage?: boolean }
+    // Planned outage items wear the chart's outage icon instead of a
+    // swatch, the actual one a bar like its track.
+    type Item = { id: string; label: string; color: string; outage?: boolean; bar?: boolean }
     const items: Item[] = DAY_POWER_METRIC_KEYS.map((key) => ({
       id: key,
       label: DAY_POWER_METRIC_LABELS[key] ?? key,
@@ -372,6 +387,9 @@ export function EnergyChart({
       const s = OUTAGE_STYLE.other
       items.push({ id: s.key, label: s.label, color: s.color, outage: true })
     }
+    if (hasActualOutages) {
+      items.push({ id: ACTUAL_OUTAGE_KEY, label: ACTUAL_OUTAGE_LABEL, color: ACTUAL_OUTAGE_COLOR, bar: true })
+    }
     return items
   }, [
     hasSoc,
@@ -382,6 +400,7 @@ export function EnergyChart({
     hasAiLoad,
     hasScheduleOutages,
     hasOtherOutages,
+    hasActualOutages,
     aiEssLabel,
     aiSocLabel,
     chrome.soc,
@@ -407,7 +426,10 @@ export function EnergyChart({
                     <OutageIcon color={item.color} size={12} />
                   </span>
                 ) : (
-                  <span className="chart-legend-swatch" style={{ background: item.color }} />
+                  <span
+                    className={`chart-legend-swatch${item.bar ? ' chart-legend-swatch--bar' : ''}`}
+                    style={{ background: item.color }}
+                  />
                 )}
                 <span className="chart-legend-label">{item.label}</span>
               </button>
@@ -652,9 +674,10 @@ export function EnergyChart({
                   hide={hiddenSeries.has(DAM_PRICE_KEY)}
                   isAnimationActive={false}
                 />
-                {/* Planned grid outages: an icon at the top of the plot over
-                    each, drawn last so the lines pass under it. */}
-                <OutageMarkers marks={outageMarks} />
+                {/* Grid outages at the top of the plot, planned (icon over a
+                    dashed line) and actual (a bar under them), drawn last so
+                    the lines pass under them. */}
+                <OutageMarkers marks={outageMarks} actual={actualMarks} />
               </ComposedChart>
             </ResponsiveContainer>
         )}

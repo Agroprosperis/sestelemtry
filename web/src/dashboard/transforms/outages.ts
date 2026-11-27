@@ -1,4 +1,5 @@
 import type { OutageInterval } from '../../outages/outagesClient'
+import { isOffgrid, type DaySupplyBucket } from './supply'
 
 // OutageArea is one planned outage as a band on the day chart: x1/x2 are
 // timeline labels ("HH:MM", 5-minute buckets).
@@ -76,6 +77,33 @@ export function outageAreas(
     if (x1 >= x2) continue
     out.push({ x1, x2, kind: iv.kind })
   }
+  return out
+}
+
+// offgridAreas are the stretches the site actually ran without the grid —
+// on the generator, as an island or dark — read from its Encombi
+// breakers, as timeline labels: x1 the first bucket without the grid, x2
+// the first with it back, or the day's last label when it never came
+// back. Changeover, unknown and not-yet buckets are not counted.
+export function offgridAreas(
+  supply: DaySupplyBucket[] | null | undefined,
+  timelineLabels: string[],
+): { x1: string; x2: string }[] {
+  if (!supply || supply.length === 0 || timelineLabels.length === 0) return []
+  const last = timelineLabels[timelineLabels.length - 1]
+  const out: { x1: string; x2: string }[] = []
+  let start: string | null = null
+  for (const b of supply) {
+    if (isOffgrid(b.mode)) {
+      start ??= b.time
+      continue
+    }
+    if (start !== null) {
+      out.push({ x1: start, x2: b.time })
+      start = null
+    }
+  }
+  if (start !== null && start < last) out.push({ x1: start, x2: last })
   return out
 }
 

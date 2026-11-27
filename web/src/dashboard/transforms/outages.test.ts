@@ -1,9 +1,42 @@
 import { describe, expect, it } from 'vitest'
-import { outageAreas, outageKindAt } from './outages'
+import { offgridAreas, outageAreas, outageKindAt } from './outages'
+import type { DaySupplyBucket, SupplyMode } from './supply'
 
 const labels = Array.from({ length: 288 }, (_, i) => {
   const m = i * 5
   return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`
+})
+
+// supplyDay is a day of buckets in grid mode, with the given label
+// ranges [from, to) set to another mode.
+function supplyDay(...runs: Array<[string, string, SupplyMode | null]>): DaySupplyBucket[] {
+  return labels.map((time, i) => {
+    const run = runs.find(([from, to]) => time >= from && time < to)
+    return { t: i, time, mode: run ? run[2] : 'grid' }
+  })
+}
+
+describe('offgridAreas', () => {
+  it('joins the buckets without the grid into stretches', () => {
+    const supply = supplyDay(['14:35', '18:05', 'island'], ['19:15', '20:00', 'generator'], ['20:00', '20:30', 'blackout'])
+    expect(offgridAreas(supply, labels)).toEqual([
+      { x1: '14:35', x2: '18:05' },
+      { x1: '19:15', x2: '20:30' },
+    ])
+  })
+
+  it('runs to the day end when the grid never came back', () => {
+    expect(offgridAreas(supplyDay(['21:00', '24:00', 'island']), labels)).toEqual([{ x1: '21:00', x2: '23:55' }])
+  })
+
+  it('leaves out changeovers, unknown and not-yet buckets', () => {
+    const supply = supplyDay(['10:00', '10:10', 'transition'], ['11:00', '12:00', 'unknown'], ['20:00', '24:00', null])
+    expect(offgridAreas(supply, labels)).toEqual([])
+  })
+
+  it('has nothing for a site without an Encombi', () => {
+    expect(offgridAreas(null, labels)).toEqual([])
+  })
 })
 
 describe('outageAreas', () => {
